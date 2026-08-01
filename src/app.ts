@@ -60,7 +60,9 @@ export function createApp(): Hono {
     td:last-child { color: #a09080; }
     .get { color: #6b9; font-weight: bold; }
     .post { color: #e8a; font-weight: bold; }
-    .info { color: #8a7a5a; margin-top: 1.5rem; font-size: 12px; }
+    .info { color: #8a7a5a; margin-top: 0.25rem; font-size: 12px; }
+    .info a { color: #a09080; text-decoration: none; }
+    .info a:hover { color: #c4a86a; }
     .divider { color: #444; margin: 0; font-size: 12px; }
     .other { color: #8a7a5a; margin-top: 1.5rem; font-size: 11px; }
     .other td { padding: 2px 8px; font-size: 11px; }
@@ -99,6 +101,7 @@ export function createApp(): Hono {
 </table>
 
 <div class="info">Bibliograph &mdash; ${host}</div>
+<div class="info"><a href="https://github.com/olamaelcu/bibliograph">github.com/olamaelcu/bibliograph</a></div>
 </body>
 </html>`);
   });
