@@ -1,0 +1,41 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.getBooks",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uris"],
+        "properties": {
+          "uris": {
+            "type": "array",
+            "items": { "type": "string", "format": "at-uri" },
+            "maxLength": 25
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["books"],
+          "properties": {
+            "books": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["uri", "record"],
+                "properties": {
+                  "uri": { "type": "string", "format": "at-uri" },
+                  "record": { "type": "object" },
+                  "cid": { "type": "string", "format": "cid" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.getBook",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uri"],
+        "properties": {
+          "uri": { "type": "string", "format": "at-uri" }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "record"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri" },
+            "record": { "type": "object" },
+            "cid": { "type": "string", "format": "cid" }
+          }
+        }
+      }
+    }
+  }
+}

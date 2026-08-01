@@ -1,0 +1,8 @@
+node_modules/
+dist/
+bibliograph.db
+bibliograph.db-wal
+bibliograph.db-shm
+src/lexicons/
+drizzle/
+.env

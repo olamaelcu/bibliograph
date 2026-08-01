@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.createClaim",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["bookUri", "identifier", "identifierType"],
+          "properties": {
+            "bookUri": { "type": "string", "format": "at-uri" },
+            "identifier": { "type": "string" },
+            "identifierType": {
+              "type": "string",
+              "enum": ["isbn", "ean", "issn"]
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri" },
+            "cid": { "type": "string", "format": "cid" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "BookNotFound" },
+        { "name": "ClaimAlreadyExists" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.book",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["title", "author", "createdAt", "updatedAt"],
+        "properties": {
+          "title": { "type": "string" },
+          "author": { "type": "string" },
+          "isbn": { "type": "string" },
+          "publishedDate": { "type": "string", "format": "datetime" },
+          "description": { "type": "string", "maxLength": 4096 },
+          "pageCount": { "type": "integer" },
+          "language": { "type": "string" },
+          "categories": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "coverUrl": { "type": "string", "format": "uri" },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "active", "rejected"]
+          },
+          "createdAt": { "type": "string", "format": "datetime" },
+          "updatedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

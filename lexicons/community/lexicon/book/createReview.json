@@ -1,0 +1,35 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.createReview",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["bookUri", "text"],
+          "properties": {
+            "bookUri": { "type": "string", "format": "at-uri" },
+            "text": { "type": "string", "maxLength": 4096 },
+            "rating": { "type": "integer", "minimum": 1, "maximum": 5 }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri" },
+            "cid": { "type": "string", "format": "cid" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "BookNotFound" }
+      ]
+    }
+  }
+}

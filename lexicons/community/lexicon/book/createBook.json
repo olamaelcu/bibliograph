@@ -1,0 +1,45 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.createBook",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["title", "author"],
+          "properties": {
+            "title": { "type": "string" },
+            "author": { "type": "string" },
+            "isbn": { "type": "string" },
+            "publishedDate": { "type": "string", "format": "datetime" },
+            "description": { "type": "string", "maxLength": 4096 },
+            "pageCount": { "type": "integer" },
+            "language": { "type": "string" },
+            "categories": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "coverUrl": { "type": "string", "format": "uri" }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri" },
+            "cid": { "type": "string", "format": "cid" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "DuplicateBook" },
+        { "name": "InvalidInput" }
+      ]
+    }
+  }
+}
