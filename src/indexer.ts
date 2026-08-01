@@ -128,6 +128,7 @@ async function indexReview(uri: string, did: string, record: Record<string, unkn
 
 async function indexStatus(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
   const bookRef = record.bookRef as Record<string, unknown> | undefined;
+  const idents = (Array.isArray(record.identifiers) ? record.identifiers : []) as Array<{ type: string; value: string }>;
   const data = {
     uri,
     did,
@@ -137,6 +138,7 @@ async function indexStatus(uri: string, did: string, record: Record<string, unkn
     rating: record.rating as number | undefined,
     bookTitle: (bookRef?.title as string) || '',
     bookAuthor: (bookRef?.author as string) || '',
+    identifiers: idents,
     startedAt: record.startedAt as string | undefined,
     finishedAt: record.finishedAt as string | undefined,
     createdAt: (record.createdAt as string) || new Date().toISOString(),

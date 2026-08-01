@@ -17,6 +17,10 @@
           "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
           "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
           "bookRef": { "type": "ref", "ref": "community.lexicon.book.defs#bookRef" },
+          "identifiers": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "community.lexicon.book.defs#identifier" }
+          },
           "startedAt": { "type": "string", "format": "datetime" },
           "finishedAt": { "type": "string", "format": "datetime" },
           "createdAt": { "type": "string", "format": "datetime" }

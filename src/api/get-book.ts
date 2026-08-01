@@ -142,6 +142,7 @@ export async function getUserStatus(c: Context): Promise<Response> {
           title: s.bookTitle,
           author: s.bookAuthor,
         },
+        identifiers: typeof s.identifiers === 'string' ? JSON.parse(s.identifiers) : s.identifiers,
         startedAt: s.startedAt,
         finishedAt: s.finishedAt,
         createdAt: s.createdAt,

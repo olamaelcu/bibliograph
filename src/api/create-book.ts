@@ -125,6 +125,162 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
   return null;
 }
 
+function parseIdentifier(input: string | { type: string; value: string }): { type: string; value: string } | null {
+  const ident = typeof input === 'string' ? { type: 'url', value: input } : input;
+
+  const urlPatterns: Array<{ pattern: RegExp; type: string; extract: (m: RegExpMatchArray) => string }> = [
+    { pattern: /^https?:\/\/openlibrary\.org\/(works|books)\/(OL\d+[A-Z])/, type: 'openlibrary', extract: (m) => `/${m[1]}/${m[2]}` },
+    { pattern: /^https?:\/\/books\.google\.com\/books\?id=([^&]+)/, type: 'googleBooks', extract: (m) => m[1] },
+    { pattern: /^https?:\/\/www\.google\.com\/books\/edition\/[^/]+\/([^?]+)/, type: 'googleBooks', extract: (m) => m[1] },
+  ];
+
+  for (const { pattern, type, extract } of urlPatterns) {
+    const match = ident.value.match(pattern);
+    if (match) return { type, value: extract(match) };
+  }
+
+  const keyedPatterns: Record<string, RegExp> = {
+    openlibrary: /^\/?(works|books)\/(OL\d+[A-Z])$/,
+    googleBooks: /^[\w-]+$/,
+    isbn: /^[\d]{9,13}[\dX]$/,
+  };
+
+  if (ident.type === 'openlibrary') {
+    const m = ident.value.match(keyedPatterns.openlibrary);
+    if (m) return { type: 'openlibrary', value: `/${m[1]}/${m[2]}` };
+    if (ident.value.match(/^OL\d+[A-Z]$/)) return { type: 'openlibrary', value: ident.value };
+  }
+
+  if (ident.type === 'googleBooks') {
+    if (ident.value.match(keyedPatterns.googleBooks)) return { type: 'googleBooks', value: ident.value };
+  }
+
+  if (ident.type === 'isbn') {
+    const bare = ident.value.replace(/[^0-9X]/g, '');
+    if (bare.match(keyedPatterns.isbn)) return { type: 'isbn', value: bare };
+  }
+
+  const normalized = extractIdentifier(ident.value);
+  if (normalized) return normalized;
+
+  return ident;
+}
+
+async function resolveBookFromIdentifiers(
+  did: string,
+  identifiers: Array<{ type: string; value: string }>,
+  log: import('pino').Logger,
+): Promise<string | null> {
+  for (const raw of identifiers) {
+    const ident = parseIdentifier(raw);
+    if (!ident) continue;
+
+    const { type, value } = ident;
+
+    if (type === 'isbn') {
+      const existing = await db.query.books.findFirst({ where: eq(books.isbn, value) });
+      if (existing) return existing.uri;
+
+      log.info({ isbn: value }, 'book not in db, discovering from OpenLibrary via identifiers');
+      const provider = new OpenLibraryProvider();
+      const data = await provider.searchByIsbn(value);
+      if (data) {
+        const uri = await createBookFromProviderData(did, data, log);
+        if (uri) return uri;
+      }
+    }
+
+    if (type === 'openlibrary') {
+      const olid = value.startsWith('/') ? value.split('/').pop()! : value;
+      const existing = await db.query.books.findFirst({ where: or(eq(books.isbn, olid), eq(books.uri, olid)) });
+      if (existing) return existing.uri;
+
+      log.info({ olid: value }, 'book not in db, discovering by OL via identifiers');
+      const provider = new OpenLibraryProvider();
+      const data = await provider.getBookDetails(olid);
+      if (data) {
+        const uri = await createBookFromProviderData(did, data, log);
+        if (uri) return uri;
+      }
+    }
+
+    if (type === 'googleBooks') {
+      log.info({ gbid: value }, 'resolving book via Google Books identifier');
+      const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+      if (apiKey) {
+        const { GoogleBooksProvider } = await import('../providers/googlebooks.js');
+        const provider = new GoogleBooksProvider(apiKey);
+        const data = await provider.getBookDetails(value);
+        if (data) {
+          const uri = await createBookFromProviderData(did, data, log);
+          if (uri) return uri;
+        }
+      }
+    }
+
+    // Generic lookup in identifiers JSON column
+    const allBooks = await db.query.books.findMany({ limit: 500 });
+    for (const book of allBooks) {
+      const bookIdents: Array<{ type: string; value: string }> =
+        typeof book.identifiers === 'string' ? JSON.parse(book.identifiers) : book.identifiers;
+      if (bookIdents.some((i) => i.type === type && i.value === value)) {
+        return book.uri;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function createBookFromProviderData(
+  did: string,
+  data: import('../providers/interface.js').BookData,
+  log: import('pino').Logger,
+): Promise<string | null> {
+  const isbn = data.isbn13 || data.isbn10;
+  const now = new Date().toISOString();
+  const rkey = generateRkey();
+  const uri = `at://${did}/community.lexicon.book.book/${rkey}`;
+
+  try {
+    await db.insert(books).values({
+      uri,
+      did,
+      title: data.title,
+      author: data.author,
+      isbn,
+      publishedDate: data.publishedDate,
+      description: data.description,
+      pageCount: data.pageCount,
+      language: data.language,
+      categories: data.categories || [],
+      identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
+      coverUrl: data.coverUrl,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const claimUri = `at://${did}/community.lexicon.book.claim/${rkey}`;
+    await db.insert(claims).values({
+      uri: claimUri,
+      did,
+      bookUri: uri,
+      identifier: isbn || uri,
+      identifierType: isbn ? 'isbn' : 'asin',
+      claimedBy: did,
+      status: 'pending',
+      createdAt: now,
+    });
+
+    log.info({ uri }, 'book created from provider data');
+    return uri;
+  } catch (err) {
+    log.error({ err, uri }, 'createBookFromProviderData failed');
+    return null;
+  }
+}
+
 export async function createBook(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createBook');
@@ -264,26 +420,40 @@ export async function createStatus(c: Context): Promise<Response> {
   const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createStatus');
   const input = await c.req.json<CreateStatusInput>();
 
-  if (!input.bookUri || !input.status) {
+  if ((!input.bookUri && (!input.identifiers || input.identifiers.length === 0)) || !input.status) {
     const missing: string[] = [];
-    if (!input.bookUri) missing.push('bookUri');
+    if (!input.bookUri && (!input.identifiers || input.identifiers.length === 0)) missing.push('bookUri or identifiers');
     if (!input.status) missing.push('status');
     log.warn({ did, missing }, 'createStatus rejected: missing required fields');
-    return c.json({ error: 'InvalidInput', message: 'Missing required fields', missing }, 400);
+    return c.json({ error: 'InvalidInput', message: 'Missing required fields: bookUri or identifiers, and status', missing }, 400);
   }
 
-  log.info({ did, bookUri: input.bookUri, status: input.status, progress: input.progress, rating: input.rating }, 'handling createStatus');
+  log.info({ did, bookUri: input.bookUri, identifiers: input.identifiers, status: input.status, progress: input.progress, rating: input.rating }, 'handling createStatus');
 
-  let book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
-  if (!book) {
-    const resolvedUri = await resolveBookUri(did, input.bookUri, log);
-    if (resolvedUri) {
-      input.bookUri = resolvedUri;
-      book = await db.query.books.findFirst({ where: eq(books.uri, resolvedUri) });
+  let bookUri = input.bookUri;
+  let resolvedBook: typeof books.$inferSelect | undefined;
+
+  if (bookUri) {
+    resolvedBook = await db.query.books.findFirst({ where: eq(books.uri, bookUri) });
+    if (!resolvedBook) {
+      const resolvedUri = await resolveBookUri(did, bookUri, log);
+      if (resolvedUri) {
+        bookUri = resolvedUri;
+        resolvedBook = await db.query.books.findFirst({ where: eq(books.uri, resolvedUri) });
+      }
     }
   }
-  if (!book) {
-    log.warn({ did, bookUri: input.bookUri }, 'createStatus rejected: book not found');
+
+  if (!resolvedBook && input.identifiers && input.identifiers.length > 0) {
+    const resolvedUri = await resolveBookFromIdentifiers(did, input.identifiers, log);
+    if (resolvedUri) {
+      bookUri = resolvedUri;
+      resolvedBook = await db.query.books.findFirst({ where: eq(books.uri, resolvedUri) });
+    }
+  }
+
+  if (!resolvedBook) {
+    log.warn({ did, bookUri, identifiers: input.identifiers }, 'createStatus rejected: book not found');
     return c.json({ error: 'BookNotFound', message: 'Book not found' }, 404);
   }
 
@@ -291,26 +461,31 @@ export async function createStatus(c: Context): Promise<Response> {
   const rkey = generateRkey();
   const uri = `at://${did}/community.lexicon.book.status/${rkey}`;
 
+  const statusIdentifiers = input.identifiers && input.identifiers.length > 0
+    ? input.identifiers
+    : (typeof resolvedBook.identifiers === 'string' ? JSON.parse(resolvedBook.identifiers) : resolvedBook.identifiers);
+
   try {
     await db.insert(readingStatuses).values({
       uri,
       did,
-      bookUri: input.bookUri,
+      bookUri: bookUri!,
       status: input.status,
       progress: input.progress,
       rating: input.rating,
-      bookTitle: book.title,
-      bookAuthor: book.author,
+      bookTitle: resolvedBook.title,
+      bookAuthor: resolvedBook.author,
+      identifiers: statusIdentifiers,
       startedAt: input.startedAt,
       finishedAt: input.finishedAt,
       createdAt: now,
     });
   } catch (err) {
-    log.error({ err, did, bookUri: input.bookUri, status: input.status, uri }, 'createStatus insert failed');
+    log.error({ err, did, bookUri: bookUri!, status: input.status, uri }, 'createStatus insert failed');
     throw err;
   }
 
-  log.info({ record: { uri, did, bookUri: input.bookUri, status: input.status, bookTitle: book.title } }, 'createStatus complete');
+  log.info({ record: { uri, did, bookUri: bookUri!, status: input.status, bookTitle: resolvedBook.title } }, 'createStatus complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
 }
 

@@ -142,6 +142,7 @@ export const readingStatuses = sqliteTable(
     rating: real(),
     bookTitle: text('book_title').notNull(),
     bookAuthor: text('book_author').notNull(),
+    identifiers: text({ mode: 'json' }).$type<Identifier[]>().default(sql`'[]'`),
     startedAt: text(),
     finishedAt: text(),
     createdAt: text()

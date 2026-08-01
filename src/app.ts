@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { sql } from 'drizzle-orm';
 import { requestTracing } from './middleware.js';
 import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './api/get-book.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
 import { OpenLibraryProvider } from './providers/openlibrary.js';
+import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 
 export function createApp(): Hono {
@@ -67,6 +69,12 @@ export function createApp(): Hono {
     .other { color: #8a7a5a; margin-top: 0.5rem; font-size: 11px; }
     .other td { padding: 2px 8px; font-size: 11px; }
     .auth { color: #8a7a5a; margin-top: 1.5rem; font-size: 10px; line-height: 1.6; width: 600px; }
+    .counts { display: flex; gap: 3rem; margin: 1rem 0; }
+    .count-box { text-align: center; }
+    .count-num { font-size: 28px; color: #c4a86a; font-weight: bold; line-height: 1.2; }
+    .count-label { font-size: 10px; color: #8a7a5a; text-transform: uppercase; letter-spacing: 1px; }
+    .sse-status { font-size: 9px; color: #555; margin-top: 0.5rem; }
+    .sse-status.live { color: #6b9; }
   </style>
 </head>
 <body>
@@ -87,6 +95,46 @@ export function createApp(): Hono {
   |                           |
    \\_________________________/
 </pre>
+
+<div class="counts">
+  <div class="count-box">
+    <div class="count-num" id="book-count">&mdash;</div>
+    <div class="count-label">Books</div>
+  </div>
+  <div class="count-box">
+    <div class="count-num" id="status-count">&mdash;</div>
+    <div class="count-label">Statuses</div>
+  </div>
+</div>
+<div class="sse-status" id="sse-status">connecting&hellip;</div>
+
+<script>
+(function() {
+  const bookEl = document.getElementById('book-count');
+  const statusEl = document.getElementById('status-count');
+  const sseStatus = document.getElementById('sse-status');
+
+  function connect() {
+    sseStatus.className = 'sse-status';
+    sseStatus.textContent = 'connecting\\u2026';
+    const es = new EventSource('/api/live-counts');
+    es.onmessage = function(e) {
+      const data = JSON.parse(e.data);
+      bookEl.textContent = data.books.toLocaleString();
+      statusEl.textContent = data.statuses.toLocaleString();
+      sseStatus.className = 'sse-status live';
+      sseStatus.textContent = 'live';
+    };
+    es.onerror = function() {
+      sseStatus.className = 'sse-status';
+      sseStatus.textContent = 'reconnecting\\u2026';
+      es.close();
+      setTimeout(connect, 3000);
+    };
+  }
+  connect();
+})();
+</script>
 
 <h2>Queries</h2>
 <table>${queryRows}</table>
@@ -152,6 +200,46 @@ export function createApp(): Hono {
     } catch (err) {
       return c.json({ error: 'ProviderError', message: String(err) }, 502);
     }
+  });
+
+  // Live counts SSE endpoint
+  app.get('/api/live-counts', async (c) => {
+    let closed = false;
+    let interval: ReturnType<typeof setInterval> | undefined;
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = async () => {
+          if (closed) return;
+          try {
+            const bookCount = db.select({ count: sql<number>`count(*)` }).from(schema.books).get();
+            const statusCount = db.select({ count: sql<number>`count(*)` }).from(schema.readingStatuses).get();
+            const payload = JSON.stringify({
+              books: bookCount?.count ?? 0,
+              statuses: statusCount?.count ?? 0,
+            });
+            controller.enqueue(new TextEncoder().encode(`data: ${payload}\n\n`));
+          } catch {
+            // silently skip failed queries
+          }
+        };
+
+        await send();
+        interval = setInterval(send, 5000);
+      },
+      cancel() {
+        closed = true;
+        if (interval) clearInterval(interval);
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    });
   });
 
   // Error handler

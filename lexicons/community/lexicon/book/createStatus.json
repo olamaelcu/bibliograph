@@ -8,9 +8,13 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["bookUri", "status"],
+          "required": ["status"],
           "properties": {
             "bookUri": { "type": "string", "format": "at-uri" },
+            "identifiers": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "community.lexicon.book.defs#identifier" }
+            },
             "status": {
               "type": "string",
               "enum": ["reading", "read", "to-read", "abandoned"]

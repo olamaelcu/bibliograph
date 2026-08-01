@@ -1,0 +1,1 @@
+ALTER TABLE `reading_statuses` ADD `identifiers` text DEFAULT '[]';

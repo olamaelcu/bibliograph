@@ -25,6 +25,7 @@ export interface BookRef {
   isbn?: string;
   publishedDate?: string;
   deduplicationHash?: string;
+  identifiers?: Array<{ type: string; value: string }>;
 }
 
 // Claim record
@@ -56,9 +57,10 @@ export interface StatusRecord {
   $type: 'community.lexicon.book.status';
   bookUri: string;
   status: 'reading' | 'read' | 'to-read' | 'abandoned' | 'wishlist';
-  progress?: number; // 0-100
-  rating?: number; // 1-5
+  progress?: number;
+  rating?: number;
   bookRef: BookRef;
+  identifiers?: Array<{ type: string; value: string }>;
   startedAt?: string;
   finishedAt?: string;
   createdAt: string;
@@ -89,7 +91,7 @@ export interface CreateBookOutput { uri: string; cid: string; }
 export interface CreateReviewInput { bookUri: string; text: string; rating?: number; }
 export interface CreateReviewOutput { uri: string; cid: string; }
 
-export interface CreateStatusInput { bookUri: string; status: 'reading' | 'read' | 'to-read' | 'abandoned' | 'wishlist'; progress?: number; rating?: number; startedAt?: string; finishedAt?: string; }
+export interface CreateStatusInput { bookUri?: string; identifiers?: Array<{ type: string; value: string }>; status: 'reading' | 'read' | 'to-read' | 'abandoned' | 'wishlist'; progress?: number; rating?: number; startedAt?: string; finishedAt?: string; }
 export interface CreateStatusOutput { uri: string; cid: string; }
 
 export interface CreateClaimInput { bookUri: string; identifier: string; identifierType: 'isbn' | 'ean' | 'issn'; }

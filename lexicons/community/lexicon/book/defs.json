@@ -11,7 +11,11 @@
         "author": { "type": "string" },
         "isbn": { "type": "string" },
         "publishedDate": { "type": "string", "format": "datetime" },
-        "deduplicationHash": { "type": "string" }
+        "deduplicationHash": { "type": "string" },
+        "identifiers": {
+          "type": "array",
+          "items": { "type": "ref", "ref": "community.lexicon.book.defs#identifier" }
+        }
       }
     },
     "identifier": {
