@@ -3,14 +3,17 @@ import type { RecordEvent, IdentityEvent, TapChannel } from '@atproto/tap';
 import { handleRecordEvent } from './indexer.js';
 import { logger } from './logger.js';
 
-const TAP_URL = process.env.TAP_URL || 'http://localhost:2480';
+const TAP_URL = process.env.TAP_URL;
 const TAP_ADMIN_PASSWORD = process.env.TAP_ADMIN_PASSWORD;
 
 let channel: TapChannel | null = null;
 
-export const tap = new Tap(TAP_URL, {
-  adminPassword: TAP_ADMIN_PASSWORD,
-});
+function getTap(): Tap | null {
+  if (!TAP_URL) return null;
+  return new Tap(TAP_URL, {
+    adminPassword: TAP_ADMIN_PASSWORD,
+  });
+}
 
 function buildIndexer(): SimpleIndexer {
   const indexer = new SimpleIndexer();
@@ -41,6 +44,12 @@ function buildIndexer(): SimpleIndexer {
 }
 
 export async function startTapChannel(): Promise<void> {
+  const tap = getTap();
+  if (!tap) {
+    logger.info('TAP_URL not set, skipping Tap WebSocket connection');
+    return;
+  }
+
   logger.info({ tapUrl: TAP_URL }, 'starting Tap WebSocket client');
   channel = tap.channel(buildIndexer(), {
     heartbeatIntervalMs: 30_000,
@@ -62,6 +71,9 @@ export async function stopTapChannel(): Promise<void> {
 
 export async function trackRepos(dids: string[]): Promise<void> {
   if (dids.length === 0) return;
+  const tap = getTap();
+  if (!tap) return;
+
   logger.info({ count: dids.length }, 'adding repos to Tap');
   await tap.addRepos(dids);
   logger.info({ count: dids.length }, 'repos added to Tap');

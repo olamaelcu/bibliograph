@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createApp } from './app.js';
 import { db } from './db/connection.js';
+import * as tableSchema from './db/schema.js';
 import { setupFts, bootstrapLibrarian } from './db/init.js';
 import { logger } from './logger.js';
 import { startTapChannel, stopTapChannel, trackRepos } from './tap.js';
@@ -27,7 +28,10 @@ async function main(): Promise<void> {
   // Load tracked repos after connection establishes
   setTimeout(async () => {
     try {
-      const rows = db.all('SELECT DISTINCT did FROM books') as { did: string }[];
+      const rows = db.select({ did: tableSchema.books.did })
+        .from(tableSchema.books)
+        .groupBy(tableSchema.books.did)
+        .all();
       const dids = rows.map(r => r.did);
       if (dids.length > 0) await trackRepos(dids);
     } catch (err) {
