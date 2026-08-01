@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims } from './api/get-book.js';
-import { createBook, createReview, createStatus, createClaim } from './api/create-book.js';
+import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './api/get-book.js';
+import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js';
 import { OpenLibraryProvider } from './providers/openlibrary.js';
 
@@ -62,12 +62,16 @@ export function createApp(): Hono {
   app.get('/xrpc/community.lexicon.book.getUserStatus', getUserStatus);
   app.get('/xrpc/community.lexicon.book.searchBooks', searchBooksHandler);
   app.get('/xrpc/community.lexicon.book.getClaims', getClaims);
+  app.get('/xrpc/community.lexicon.book.getLabelerLabels', getLabelerLabels);
 
   // Procedure endpoints (POST /xrpc/...)
   app.post('/xrpc/community.lexicon.book.createBook', createBook);
   app.post('/xrpc/community.lexicon.book.createReview', createReview);
   app.post('/xrpc/community.lexicon.book.createStatus', createStatus);
   app.post('/xrpc/community.lexicon.book.createClaim', createClaim);
+  app.post('/xrpc/community.lexicon.book.verifyClaim', verifyClaim);
+  app.post('/xrpc/community.lexicon.book.appointLibrarian', appointLibrarian);
+  app.post('/xrpc/community.lexicon.book.revokeLibrarian', revokeLibrarian);
 
   // Tap webhook endpoint (for receiving events)
   app.post('/tap/event', async (c) => {

@@ -7,6 +7,7 @@ import {
   check,
   index,
   uniqueIndex,
+  primaryKey,
 } from 'drizzle-orm/sqlite-core';
 
 // ─── Type aliases for JSON columns ───────────────────────────────────────────
@@ -162,3 +163,24 @@ export const readingStatuses = sqliteTable(
 
 export type ReadingStatus = typeof readingStatuses.$inferSelect;
 export type NewReadingStatus = typeof readingStatuses.$inferInsert;
+
+// ─── Labels ─────────────────────────────────────────────────────────────────
+
+export const bookLabels = sqliteTable(
+  'book_labels',
+  {
+    src: text().notNull(),
+    uri: text().notNull(),
+    val: text().notNull(),
+    cts: text().notNull(),
+    neg: integer().notNull().default(0),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.src, table.uri, table.val] }),
+    uriIdx: index('book_labels_uri_idx').on(table.uri),
+    valIdx: index('book_labels_val_idx').on(table.val),
+  }),
+);
+
+export type BookLabel = typeof bookLabels.$inferSelect;
+export type NewBookLabel = typeof bookLabels.$inferInsert;

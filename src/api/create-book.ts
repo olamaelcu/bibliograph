@@ -1,7 +1,8 @@
 import type { Context } from 'hono';
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
-import { requireAuth, canCreateBook } from '../auth.js';
+import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
+import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims } = schema;
@@ -168,6 +169,68 @@ export async function createClaim(c: Context): Promise<Response> {
   });
 
   return c.json({ uri, cid: `bafyrei-${rkey}` });
+}
+
+/**
+ * Reference implementation: label authority is self-contained.
+ * The AppView's own DID is used as the label `src`.
+ */
+const SERVICE_DID = process.env.ATP_SERVICE_DID || 'did:web:localhost';
+
+function requireLibrarian(did: string): void {
+  if (!isLibrarian(did)) {
+    throw { status: 403, error: 'Forbidden', message: 'Librarian privileges required' };
+  }
+}
+
+export async function verifyClaim(c: Context): Promise<Response> {
+  const did = requireAuth(c.req.raw.headers);
+  requireLibrarian(did);
+
+  const { claimUri } = await c.req.json<{ claimUri: string }>();
+  if (!claimUri) return c.json({ error: 'InvalidInput', message: 'claimUri is required' }, 400);
+
+  const claim = await db.query.claims.findFirst({ where: eq(claims.uri, claimUri) });
+  if (!claim) return c.json({ error: 'NotFound', message: 'Claim not found' }, 404);
+  if (claim.status === 'verified') return c.json({ error: 'AlreadyVerified', message: 'Claim is already verified' }, 409);
+
+  const now = new Date().toISOString();
+
+  await db.update(claims)
+    .set({ status: 'verified', verifiedBy: did, verifiedAt: now })
+    .where(eq(claims.uri, claimUri));
+
+  await db.update(schema.books)
+    .set({ status: 'active', updatedAt: now })
+    .where(eq(schema.books.uri, claim.bookUri));
+
+  publishLabel(SERVICE_DID, LABEL_AUTHOR, claim.bookUri);
+
+  return c.json({ ok: true, bookUri: claim.bookUri, claimedBy: claim.claimedBy });
+}
+
+export async function appointLibrarian(c: Context): Promise<Response> {
+  const did = requireAuth(c.req.raw.headers);
+  requireLibrarian(did);
+
+  const { targetDid } = await c.req.json<{ targetDid: string }>();
+  if (!targetDid) return c.json({ error: 'InvalidInput', message: 'targetDid is required' }, 400);
+
+  publishLabel(SERVICE_DID, LABEL_LIBRARIAN, targetDid);
+
+  return c.json({ ok: true, librarian: targetDid });
+}
+
+export async function revokeLibrarian(c: Context): Promise<Response> {
+  const did = requireAuth(c.req.raw.headers);
+  requireLibrarian(did);
+
+  const { targetDid } = await c.req.json<{ targetDid: string }>();
+  if (!targetDid) return c.json({ error: 'InvalidInput', message: 'targetDid is required' }, 400);
+
+  negateLabel(SERVICE_DID, LABEL_LIBRARIAN, targetDid);
+
+  return c.json({ ok: true, librarian: targetDid });
 }
 
 function generateRkey(): string {

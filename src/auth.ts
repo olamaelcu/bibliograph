@@ -1,8 +1,14 @@
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
+import { hasLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from './labeler.js';
 
 const { claims } = schema;
 
+/**
+ * A DID can edit a book if:
+ * 1. They are the verified claim owner
+ * 2. They hold the book:librarian label
+ */
 export async function canEditBook(did: string, bookUri: string): Promise<boolean> {
   const claim = await db.query.claims.findFirst({
     where: and(eq(claims.bookUri, bookUri), eq(claims.status, 'verified')),
@@ -10,7 +16,7 @@ export async function canEditBook(did: string, bookUri: string): Promise<boolean
 
   if (claim && claim.claimedBy === did) return true;
 
-  if (await isLibrarian(did)) return true;
+  if (isLibrarian(did)) return true;
 
   return false;
 }
@@ -35,14 +41,18 @@ export async function canClaimBook(did: string, bookUri: string): Promise<boolea
   return isLibrarian(did);
 }
 
-async function isLibrarian(did: string): Promise<boolean> {
-  // TODO: integrate with labeler service
-  // For now, check if any verified claim exists by this DID for other books
-  const count = await db.$count(claims, and(
-    eq(claims.claimedBy, did),
-    eq(claims.status, 'verified')
-  ));
-  return count > 0;
+/**
+ * Check if a DID holds the book:librarian label.
+ */
+export function isLibrarian(did: string): boolean {
+  return hasLabel(did, LABEL_LIBRARIAN);
+}
+
+/**
+ * Check if a DID is the verified author of a specific book.
+ */
+export function isAuthorOf(did: string, bookUri: string): boolean {
+  return hasLabel(bookUri, LABEL_AUTHOR, did);
 }
 
 export function requireAuth(headers: Headers): string {

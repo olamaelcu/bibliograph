@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import { eq, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
-import { searchBooks } from '../db/init.js';
+import { getLabels } from '../labeler.js';
 import type { GetBookParams, GetBooksParams, GetReviewsParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams } from '../types.js';
 
 const { books, reviews, readingStatuses, claims } = schema;
@@ -189,4 +189,12 @@ function serializeBookRecord(book: typeof books.$inferSelect): Record<string, un
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
   };
+}
+
+export function getLabelerLabels(c: Context): Response {
+  const { uri, val } = c.req.query();
+  if (!uri) return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+
+  const labels = getLabels(uri, val || undefined);
+  return c.json({ labels });
 }

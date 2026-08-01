@@ -57,6 +57,7 @@ export async function runMigrations(): Promise<void> {
   // In production, use drizzle-kit generate + migrate instead
   createTables();
   setupFts();
+  bootstrapLibrarian();
 }
 
 function createTables(): void {
@@ -128,4 +129,34 @@ function createTables(): void {
   db.run(`CREATE INDEX IF NOT EXISTS reading_statuses_book_uri_idx ON reading_statuses(book_uri)`);
   db.run(`CREATE INDEX IF NOT EXISTS reading_statuses_did_idx ON reading_statuses(did)`);
   db.run(`CREATE INDEX IF NOT EXISTS reading_statuses_status_idx ON reading_statuses(status)`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS book_labels (
+    src TEXT NOT NULL,
+    uri TEXT NOT NULL,
+    val TEXT NOT NULL,
+    cts TEXT NOT NULL,
+    neg INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (src, uri, val)
+  )`);
+
+  db.run(`CREATE INDEX IF NOT EXISTS book_labels_uri_idx ON book_labels(uri)`);
+  db.run(`CREATE INDEX IF NOT EXISTS book_labels_val_idx ON book_labels(val)`);
+}
+
+/**
+ * Bootstraps the first librarian from the ATP_LIBRARIAN_DID env var.
+ * This is a reference implementation: label authority is self-contained,
+ * no external labeler service dependency.
+ */
+function bootstrapLibrarian(): void {
+  const did = process.env.ATP_LIBRARIAN_DID;
+  if (!did) return;
+
+  const now = new Date().toISOString();
+  const safeSrc = did.replace(/'/g, "''");
+  const safeUri = did.replace(/'/g, "''");
+  db.run(
+    `INSERT OR IGNORE INTO book_labels (src, uri, val, cts, neg) VALUES ('${safeSrc}', '${safeUri}', 'book:librarian', '${now}', 0)`,
+  );
+  console.log(`Bootstrapped librarian: ${did}`);
 }
