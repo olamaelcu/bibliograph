@@ -4,7 +4,9 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 
-const dbPath = resolve(process.env.DB_PATH || 'data/bibliograph.db');
+const dbPath = process.env.DB_PATH
+  ? resolve(process.env.DB_PATH)
+  : resolve('/tmp/bibliograph.db');
 const dataDir = dirname(dbPath);
 
 if (!existsSync(dataDir)) {
