@@ -5,5 +5,5 @@ data/
 *.db-wal
 *.db-shm
 src/lexicons/
-drizzle/
 .env
+coverage/

@@ -89,6 +89,7 @@ async function indexBook(uri: string, did: string, record: Record<string, unknow
     categories: cats,
     identifiers: idents,
     coverUrl: record.coverUrl as string | undefined,
+    deduplicationHash: record.deduplicationHash as string | undefined,
     status: (record.status as string) || 'pending',
     createdAt: (record.createdAt as string) || now,
     updatedAt: now,
@@ -107,12 +108,15 @@ async function indexBook(uri: string, did: string, record: Record<string, unknow
 }
 
 async function indexReview(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
+  const bookRef = record.bookRef as Record<string, unknown> | undefined;
   const data = {
     uri,
     did,
     bookUri: record.bookUri as string,
     text: record.text as string,
     rating: record.rating as number | undefined,
+    bookTitle: (bookRef?.title as string) || '',
+    bookAuthor: (bookRef?.author as string) || '',
     createdAt: (record.createdAt as string) || new Date().toISOString(),
   };
 
@@ -123,6 +127,7 @@ async function indexReview(uri: string, did: string, record: Record<string, unkn
 }
 
 async function indexStatus(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
+  const bookRef = record.bookRef as Record<string, unknown> | undefined;
   const data = {
     uri,
     did,
@@ -130,6 +135,8 @@ async function indexStatus(uri: string, did: string, record: Record<string, unkn
     status: record.status as string,
     progress: record.progress as number | undefined,
     rating: record.rating as number | undefined,
+    bookTitle: (bookRef?.title as string) || '',
+    bookAuthor: (bookRef?.author as string) || '',
     startedAt: record.startedAt as string | undefined,
     finishedAt: record.finishedAt as string | undefined,
     createdAt: (record.createdAt as string) || new Date().toISOString(),

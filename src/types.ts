@@ -11,9 +11,20 @@ export interface BookRecord {
   categories?: string[];
   identifiers?: Array<{ type: string; value: string }>;
   coverUrl?: string;
+  deduplicationHash?: string;
   status: 'pending' | 'active' | 'rejected';
   createdAt: string;
   updatedAt: string;
+}
+
+// Book reference (copy-over-reference model)
+export interface BookRef {
+  uri: string;
+  title: string;
+  author: string;
+  isbn?: string;
+  publishedDate?: string;
+  deduplicationHash?: string;
 }
 
 // Claim record
@@ -36,6 +47,7 @@ export interface ReviewRecord {
   bookUri: string;
   text: string;
   rating?: number; // 1-5
+  bookRef: BookRef;
   createdAt: string;
 }
 
@@ -46,6 +58,7 @@ export interface StatusRecord {
   status: 'reading' | 'read' | 'to-read' | 'abandoned';
   progress?: number; // 0-100
   rating?: number; // 1-5
+  bookRef: BookRef;
   startedAt?: string;
   finishedAt?: string;
   createdAt: string;

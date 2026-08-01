@@ -31,6 +31,7 @@ export const books = sqliteTable(
     categories: text({ mode: 'json' }).$type<string[]>().default(sql`'[]'`),
     identifiers: text({ mode: 'json' }).$type<Identifier[]>().default(sql`'[]'`),
     coverUrl: text(),
+    deduplicationHash: text('deduplication_hash'),
     status: text().notNull().default('pending'),
     createdAt: text()
       .notNull()
@@ -44,6 +45,7 @@ export const books = sqliteTable(
     titleIdx: index('books_title_idx').on(table.title),
     authorIdx: index('books_author_idx').on(table.author),
     statusIdx: index('books_status_idx').on(table.status),
+    deduplicationHashIdx: index('books_deduplication_hash_idx').on(table.deduplicationHash),
     statusCheck: check('books_status_check', sql`${table.status} IN ('pending', 'active', 'rejected')`),
   }),
 );
@@ -106,6 +108,8 @@ export const reviews = sqliteTable(
       .references(() => books.uri, { onDelete: 'cascade' }),
     text: text().notNull(),
     rating: real(),
+    bookTitle: text('book_title').notNull(),
+    bookAuthor: text('book_author').notNull(),
     createdAt: text()
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
@@ -136,6 +140,8 @@ export const readingStatuses = sqliteTable(
     status: text().notNull().default('to-read'),
     progress: real(),
     rating: real(),
+    bookTitle: text('book_title').notNull(),
+    bookAuthor: text('book_author').notNull(),
     startedAt: text(),
     finishedAt: text(),
     createdAt: text()

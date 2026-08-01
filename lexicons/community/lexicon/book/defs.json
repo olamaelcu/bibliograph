@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.defs",
+  "defs": {
+    "bookRef": {
+      "type": "object",
+      "required": ["uri", "title", "author"],
+      "properties": {
+        "uri": { "type": "string", "format": "at-uri" },
+        "title": { "type": "string" },
+        "author": { "type": "string" },
+        "isbn": { "type": "string" },
+        "publishedDate": { "type": "string", "format": "datetime" },
+        "deduplicationHash": { "type": "string" }
+      }
+    },
+    "identifier": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {
+        "type": { "type": "string" },
+        "value": { "type": "string" }
+      }
+    }
+  }
+}

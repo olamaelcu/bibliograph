@@ -21,6 +21,7 @@
             "items": { "type": "string" }
           },
           "coverUrl": { "type": "string", "format": "uri" },
+          "deduplicationHash": { "type": "string" },
           "status": {
             "type": "string",
             "enum": ["pending", "active", "rejected"]

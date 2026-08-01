@@ -7,7 +7,7 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["bookUri", "status", "createdAt"],
+        "required": ["bookUri", "status", "createdAt", "bookRef"],
         "properties": {
           "bookUri": { "type": "string", "format": "at-uri" },
           "status": {
@@ -16,6 +16,7 @@
           },
           "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
           "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "bookRef": { "type": "ref", "ref": "community.lexicon.book.defs#bookRef" },
           "startedAt": { "type": "string", "format": "datetime" },
           "finishedAt": { "type": "string", "format": "datetime" },
           "createdAt": { "type": "string", "format": "datetime" }

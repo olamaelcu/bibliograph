@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { requestTracing } from './middleware.js';
 import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './api/get-book.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian } from './api/create-book.js';
-import { handleRecordEvent } from './indexer.js';
+import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
 import { OpenLibraryProvider } from './providers/openlibrary.js';
 import { logger } from './logger.js';
 
@@ -126,30 +126,6 @@ export function createApp(): Hono {
   app.post('/xrpc/community.lexicon.book.verifyClaim', verifyClaim);
   app.post('/xrpc/community.lexicon.book.appointLibrarian', appointLibrarian);
   app.post('/xrpc/community.lexicon.book.revokeLibrarian', revokeLibrarian);
-
-  // Tap webhook endpoint (for receiving events)
-  app.post('/tap/event', async (c) => {
-    const log = c.get('log') as import('pino').Logger;
-    const body = await c.req.json<{ record?: { action: string; did: string; rev: string; collection: string; rkey: string; record?: Record<string, unknown>; cid?: string; live: boolean } }>();
-
-    if (body.record) {
-      const rec = body.record;
-      log.info({ action: rec.action, collection: rec.collection, did: rec.did }, 'tap webhook event');
-      await handleRecordEvent({
-        type: 'record',
-        action: rec.action as 'create' | 'update' | 'delete',
-        did: rec.did,
-        rev: rec.rev,
-        collection: rec.collection,
-        rkey: rec.rkey,
-        record: rec.record,
-        cid: rec.cid,
-        live: rec.live,
-      });
-    }
-
-    return c.json({ ok: true });
-  });
 
   // Provider lookup endpoint
   app.get('/api/lookup/book', async (c) => {

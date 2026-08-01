@@ -1,0 +1,23 @@
+{
+  "healthchecks": {
+    "web": [
+      {
+        "type": "startup",
+        "name": "web http health check",
+        "path": "/health",
+        "port": 3000,
+        "initialDelay": 3,
+        "timeout": 5,
+        "attempts": 5,
+        "wait": 3,
+        "content": "ok"
+      }
+    ]
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "max_parallel": 1
+    }
+  }
+}

@@ -9,7 +9,10 @@ const { books, reviews, readingStatuses, claims } = schema;
 export async function getBook(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const params = c.req.query() as unknown as GetBookParams;
-  if (!params.uri) return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+  if (!params.uri) {
+    log.warn('getBook rejected: missing uri');
+    return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+  }
 
   log.info({ uri: params.uri }, 'handling getBook');
 
@@ -30,7 +33,10 @@ export async function getBook(c: Context): Promise<Response> {
 export async function getBooks(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const uris = c.req.queries('uris');
-  if (!uris?.length) return c.json({ error: 'InvalidRequest', message: 'uris is required' }, 400);
+  if (!uris?.length) {
+    log.warn('getBooks rejected: missing uris');
+    return c.json({ error: 'InvalidRequest', message: 'uris is required' }, 400);
+  }
 
   log.info({ count: uris.length }, 'handling getBooks');
 
@@ -52,7 +58,10 @@ export async function getBooks(c: Context): Promise<Response> {
 export async function getReviews(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const { bookUri, cursor, limit = '50' } = c.req.query();
-  if (!bookUri) return c.json({ error: 'InvalidRequest', message: 'bookUri is required' }, 400);
+  if (!bookUri) {
+    log.warn('getReviews rejected: missing bookUri');
+    return c.json({ error: 'InvalidRequest', message: 'bookUri is required' }, 400);
+  }
 
   const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
   const offset = cursor ? parseInt(cursor as string) : 0;
@@ -78,6 +87,11 @@ export async function getReviews(c: Context): Promise<Response> {
         bookUri: r.bookUri,
         text: r.text,
         rating: r.rating,
+        bookRef: {
+          uri: r.bookUri,
+          title: r.bookTitle,
+          author: r.bookAuthor,
+        },
         createdAt: r.createdAt,
       },
     })),
@@ -88,7 +102,10 @@ export async function getReviews(c: Context): Promise<Response> {
 export async function getUserStatus(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const { did, bookUri, status, cursor, limit = '50' } = c.req.query();
-  if (!did) return c.json({ error: 'InvalidRequest', message: 'did is required' }, 400);
+  if (!did) {
+    log.warn('getUserStatus rejected: missing did');
+    return c.json({ error: 'InvalidRequest', message: 'did is required' }, 400);
+  }
 
   const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
   const offset = cursor ? parseInt(cursor as string) : 0;
@@ -120,6 +137,11 @@ export async function getUserStatus(c: Context): Promise<Response> {
         status: s.status,
         progress: s.progress,
         rating: s.rating,
+        bookRef: {
+          uri: s.bookUri,
+          title: s.bookTitle,
+          author: s.bookAuthor,
+        },
         startedAt: s.startedAt,
         finishedAt: s.finishedAt,
         createdAt: s.createdAt,
@@ -132,7 +154,10 @@ export async function getUserStatus(c: Context): Promise<Response> {
 export async function searchBooksHandler(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const { q, limit = '20', cursor } = c.req.query();
-  if (!q) return c.json({ error: 'InvalidRequest', message: 'q is required' }, 400);
+  if (!q) {
+    log.warn('searchBooks rejected: missing q');
+    return c.json({ error: 'InvalidRequest', message: 'q is required' }, 400);
+  }
 
   const lim = Math.min(Math.max(1, parseInt(limit as string) || 20), 100);
   const offset = cursor ? parseInt(cursor as string) : 0;
@@ -170,7 +195,10 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
 export async function getClaims(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const { bookUri } = c.req.query();
-  if (!bookUri) return c.json({ error: 'InvalidRequest', message: 'bookUri is required' }, 400);
+  if (!bookUri) {
+    log.warn('getClaims rejected: missing bookUri');
+    return c.json({ error: 'InvalidRequest', message: 'bookUri is required' }, 400);
+  }
 
   log.info({ bookUri }, 'handling getClaims');
 
@@ -212,6 +240,7 @@ function serializeBookRecord(book: typeof books.$inferSelect): Record<string, un
     categories: typeof book.categories === 'string' ? JSON.parse(book.categories) : book.categories,
     identifiers: typeof book.identifiers === 'string' ? JSON.parse(book.identifiers) : book.identifiers,
     coverUrl: book.coverUrl,
+    deduplicationHash: book.deduplicationHash,
     status: book.status,
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
@@ -221,7 +250,10 @@ function serializeBookRecord(book: typeof books.$inferSelect): Record<string, un
 export function getLabelerLabels(c: Context): Response {
   const log = c.get('log') as import('pino').Logger;
   const { uri, val } = c.req.query();
-  if (!uri) return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+  if (!uri) {
+    log.warn('getLabelerLabels rejected: missing uri');
+    return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+  }
 
   log.info({ uri, val }, 'handling getLabelerLabels');
 
