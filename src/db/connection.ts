@@ -4,17 +4,11 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 
-const dbPath = process.env.DB_PATH
-  ? resolve(process.env.DB_PATH)
-  : resolve('/tmp/bibliograph.db');
+const dbPath = resolve(process.env.DB_PATH || 'data/bibliograph.db');
 const dataDir = dirname(dbPath);
 
 if (!existsSync(dataDir)) {
-  try {
-    mkdirSync(dataDir, { recursive: true });
-  } catch {
-    console.warn(`Could not create ${dataDir}, falling back to cwd`);
-  }
+  mkdirSync(dataDir, { recursive: true });
 }
 
 const sqlite = new Database(dbPath);
