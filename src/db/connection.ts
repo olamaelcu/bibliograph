@@ -1,11 +1,19 @@
-import { mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema.js';
 
-const dbPath = process.env.DB_PATH || 'data/bibliograph.db';
-mkdirSync(dirname(dbPath), { recursive: true });
+const dbPath = resolve(process.env.DB_PATH || 'data/bibliograph.db');
+const dataDir = dirname(dbPath);
+
+if (!existsSync(dataDir)) {
+  try {
+    mkdirSync(dataDir, { recursive: true });
+  } catch {
+    console.warn(`Could not create ${dataDir}, falling back to cwd`);
+  }
+}
 
 const sqlite = new Database(dbPath);
 sqlite.pragma('journal_mode = WAL');
