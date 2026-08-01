@@ -19,7 +19,12 @@ export async function requestTracing(c: Context, next: Next): Promise<void> {
 
   const start = Date.now();
 
-  await next();
+  try {
+    await next();
+  } catch (err) {
+    child.error({ err, method: c.req.method, path: c.req.path }, 'middleware error');
+    throw err;
+  }
 
   const duration = Date.now() - start;
   const status = c.res.status;

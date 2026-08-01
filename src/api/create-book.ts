@@ -3,6 +3,7 @@ import { eq, and } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
+import { HttpError } from '../errors.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims } = schema;
@@ -95,8 +96,11 @@ export async function createReview(c: Context): Promise<Response> {
   const input = await c.req.json<CreateReviewInput>();
 
   if (!input.bookUri || !input.text) {
-    log.warn({ did, bookUri: input.bookUri, hasText: !!input.text }, 'createReview rejected: missing required fields');
-    return c.json({ error: 'InvalidInput', message: 'bookUri and text are required' }, 400);
+    const missing: string[] = [];
+    if (!input.bookUri) missing.push('bookUri');
+    if (!input.text) missing.push('text');
+    log.warn({ did, missing }, 'createReview rejected: missing required fields');
+    return c.json({ error: 'InvalidInput', message: 'Missing required fields', missing }, 400);
   }
 
   log.info({ did, bookUri: input.bookUri }, 'handling createReview');
@@ -137,8 +141,11 @@ export async function createStatus(c: Context): Promise<Response> {
   const input = await c.req.json<CreateStatusInput>();
 
   if (!input.bookUri || !input.status) {
-    log.warn({ did, bookUri: input.bookUri, status: input.status }, 'createStatus rejected: missing required fields');
-    return c.json({ error: 'InvalidInput', message: 'bookUri and status are required' }, 400);
+    const missing: string[] = [];
+    if (!input.bookUri) missing.push('bookUri');
+    if (!input.status) missing.push('status');
+    log.warn({ did, missing }, 'createStatus rejected: missing required fields');
+    return c.json({ error: 'InvalidInput', message: 'Missing required fields', missing }, 400);
   }
 
   log.info({ did, bookUri: input.bookUri, status: input.status, progress: input.progress, rating: input.rating }, 'handling createStatus');
@@ -153,19 +160,24 @@ export async function createStatus(c: Context): Promise<Response> {
   const rkey = generateRkey();
   const uri = `at://${did}/community.lexicon.book.status/${rkey}`;
 
-  await db.insert(readingStatuses).values({
-    uri,
-    did,
-    bookUri: input.bookUri,
-    status: input.status,
-    progress: input.progress,
-    rating: input.rating,
-    bookTitle: book.title,
-    bookAuthor: book.author,
-    startedAt: input.startedAt,
-    finishedAt: input.finishedAt,
-    createdAt: now,
-  });
+  try {
+    await db.insert(readingStatuses).values({
+      uri,
+      did,
+      bookUri: input.bookUri,
+      status: input.status,
+      progress: input.progress,
+      rating: input.rating,
+      bookTitle: book.title,
+      bookAuthor: book.author,
+      startedAt: input.startedAt,
+      finishedAt: input.finishedAt,
+      createdAt: now,
+    });
+  } catch (err) {
+    log.error({ err, did, bookUri: input.bookUri, status: input.status, uri }, 'createStatus insert failed');
+    throw err;
+  }
 
   log.info({ uri }, 'createStatus complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
@@ -177,8 +189,12 @@ export async function createClaim(c: Context): Promise<Response> {
   const input = await c.req.json<CreateClaimInput>();
 
   if (!input.bookUri || !input.identifier || !input.identifierType) {
-    log.warn({ did, bookUri: input.bookUri, identifierType: input.identifierType }, 'createClaim rejected: missing required fields');
-    return c.json({ error: 'InvalidInput', message: 'bookUri, identifier, and identifierType are required' }, 400);
+    const missing: string[] = [];
+    if (!input.bookUri) missing.push('bookUri');
+    if (!input.identifier) missing.push('identifier');
+    if (!input.identifierType) missing.push('identifierType');
+    log.warn({ did, missing }, 'createClaim rejected: missing required fields');
+    return c.json({ error: 'InvalidInput', message: 'Missing required fields', missing }, 400);
   }
 
   log.info({ did, bookUri: input.bookUri, identifierType: input.identifierType }, 'handling createClaim');
@@ -230,7 +246,7 @@ const SERVICE_DID = process.env.ATP_SERVICE_DID || 'did:web:localhost';
 
 function requireLibrarian(did: string): void {
   if (!isLibrarian(did)) {
-    throw { status: 403, error: 'Forbidden', message: 'Librarian privileges required' };
+    throw new HttpError(403, 'Forbidden', 'Librarian privileges required');
   }
 }
 

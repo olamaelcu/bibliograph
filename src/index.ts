@@ -17,8 +17,27 @@ async function main(): Promise<void> {
   logger.info('migrations complete');
 
   const app = createApp();
-  serve({ fetch: app.fetch, port: PORT });
+
+  const safeFetch: typeof app.fetch = async (req: Request, ...args) => {
+    try {
+      return await app.fetch(req, ...args);
+    } catch (err) {
+      logger.fatal({ err }, 'uncaught error in app.fetch');
+      return new Response(JSON.stringify({ error: 'InternalServerError', message: 'An unexpected error occurred' }), { status: 500, headers: { 'content-type': 'application/json' } });
+    }
+  };
+
+  serve({ fetch: safeFetch, port: PORT });
   logger.info({ port: PORT }, 'HTTP server running');
+
+  process.on('unhandledRejection', (reason) => {
+    logger.fatal({ reason }, 'unhandledRejection');
+  });
+
+  process.on('uncaughtException', (err) => {
+    logger.fatal({ err }, 'uncaughtException');
+    process.exit(1);
+  });
 
   // Start Tap in background
   startTapChannel().catch((err) => {

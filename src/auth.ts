@@ -1,5 +1,6 @@
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
+import { HttpError } from './errors.js';
 import { hasLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from './labeler.js';
 import { logger } from './logger.js';
 import {
@@ -13,45 +14,83 @@ import {
 
 const { claims } = schema;
 
-const SERVICE_DID = process.env.ATP_SERVICE_DID ?? 'did:web:localhost';
-
-let _verifier: ServiceJwtVerifier | null = null;
-
-function getVerifier(): ServiceJwtVerifier {
-  if (!_verifier) {
-    _verifier = new ServiceJwtVerifier({
-      acceptAudiences: [SERVICE_DID as never, `${SERVICE_DID}#atproto_pds` as never],
-      resolver: new CompositeDidDocumentResolver({
-        methods: {
-          plc: new PlcDidDocumentResolver(),
-          web: new WebDidDocumentResolver(),
-        },
-      }),
-    });
-  }
-  return _verifier;
+function decodeJwt(token: string) {
+  const parts = token.split('.');
+  return {
+    parts: parts.length,
+    header: tryDecodePart(parts[0]),
+    payload: tryDecodePart(parts[1]),
+  };
 }
 
-/**
- * Verify ATProto service JWT and return the issuer DID.
- * Throws { status: 401, error: 'AuthenticationRequired' } on failure.
- * Constructs a synthetic Request from the provided headers for the verifier.
- */
+function tryDecodePart(encoded: string | undefined) {
+  if (!encoded) return undefined;
+  try {
+    return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  } catch {
+    return encoded.slice(0, 50);
+  }
+}
+
+const SERVICE_DID = process.env.ATP_SERVICE_DID ?? 'did:web:localhost';
+
+let _resolver: any = null;
+
+function getResolver() {
+  if (!_resolver) {
+    _resolver = new CompositeDidDocumentResolver({
+      methods: {
+        plc: new PlcDidDocumentResolver(),
+        web: new WebDidDocumentResolver(),
+      },
+    });
+  }
+  return _resolver;
+}
+
+function audiencesFromHeaders(headers: Headers): string[] {
+  const hosts = new Set<string>();
+  if (SERVICE_DID) hosts.add(SERVICE_DID);
+  const host = headers.get('host');
+  if (host) {
+    hosts.add(`did:web:${host}`);
+    hosts.add(`did:web:${encodeURIComponent(host)}`);
+    hosts.add(`did:web:${decodeURIComponent(host)}`);
+  }
+  return [...hosts];
+}
+
 export async function requireAuth(headers: Headers, lxm: string): Promise<string> {
   const auth = headers.get('authorization');
-  if (!auth?.startsWith('Bearer ')) {
-    throw { status: 401, error: 'AuthenticationRequired', message: 'Missing or invalid authorization' };
+  logger.debug({ auth, lxm }, 'requireAuth called');
+  if (!auth) {
+    logger.warn('authorization header missing');
+    throw new HttpError(401, 'AuthenticationRequired', 'Missing authorization header');
+  }
+  if (!auth.startsWith('Bearer ')) {
+    logger.warn({ scheme: auth.split(' ')[0] || auth }, 'authorization header present but not Bearer');
+    throw new HttpError(401, 'AuthenticationRequired', 'Authorization header must use Bearer scheme');
+  }
+
+  const token = auth.slice(7);
+  if (!token) {
+    logger.warn('bearer token is empty');
+    throw new HttpError(401, 'AuthenticationRequired', 'Empty bearer token');
   }
 
   try {
-    // verifyRequest expects a Request object so it can parse the header and
-    // forward request.signal for DID resolution cancellation.
+    const audiences = audiencesFromHeaders(headers);
+    const verifier = new ServiceJwtVerifier({
+      acceptAudiences: audiences as never,
+      resolver: getResolver(),
+    });
     const req = new Request('http://localhost', { headers });
-    const result = await getVerifier().verifyRequest(req, { lxm: lxm as never });
+    const result = await verifier.verifyRequest(req, { lxm: lxm as never });
+    logger.info({ did: result.issuer, lxm, audiences }, 'JWT verified');
     return result.issuer;
   } catch (err) {
-    logger.warn({ err }, 'JWT verification failed');
-    throw { status: 401, error: 'AuthenticationRequired', message: 'Invalid token' };
+    logger.warn({ err, token: decodeJwt(token) }, 'JWT verification failed');
+    throw new HttpError(401, 'AuthenticationRequired', 'Invalid token');
   }
 }
 
