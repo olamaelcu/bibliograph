@@ -13,6 +13,33 @@ export function createApp(): Hono {
   // Root route
   app.get('/', (c) => {
     const host = new URL(c.req.url).host;
+    const queries = [
+      'getBook',
+      'getBooks',
+      'getReviews',
+      'getUserStatus',
+      'searchBooks',
+      'getClaims',
+      'getLabelerLabels',
+    ];
+    const procedures = [
+      'createBook',
+      'createReview',
+      'createStatus',
+      'createClaim',
+      'verifyClaim',
+      'appointLibrarian',
+      'revokeLibrarian',
+    ];
+    const prefix = 'community.lexicon.book';
+
+    const queryRows = queries
+      .map((q) => `<tr><td class="get">GET</td><td>/xrpc/${prefix}.${q}</td></tr>`)
+      .join('\n');
+    const procRows = procedures
+      .map((p) => `<tr><td class="post">POST</td><td>/xrpc/${prefix}.${p}</td></tr>`)
+      .join('\n');
+
     return c.html(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -20,11 +47,20 @@ export function createApp(): Hono {
   <title>Bibliograph</title>
   <style>
     body { font-family: monospace; background: #0a0a0a; color: #f0e6d3;
-           display: flex; justify-content: center; align-items: center;
-          flex-direction: column;
-           min-height: 100vh; margin: 0; }
-    pre { font-size: 14px; line-height: 1.2; text-align: center; display: block; }
-    .info { color: #8a7a5a; margin-top: 1rem; font-size: 12px; }
+           display: flex; flex-direction: column; align-items: center;
+           min-height: 100vh; margin: 0; padding: 2rem 0; }
+    pre { font-size: 14px; line-height: 1.2; text-align: center; }
+    h2 { color: #c4a86a; margin: 1.5rem 0 0.5rem; font-size: 13px; text-transform: uppercase; letter-spacing: 2px; }
+    table { border-collapse: collapse; width: 600px; }
+    td { padding: 3px 8px; font-size: 12px; }
+    td:first-child { text-align: right; width: 40px; }
+    td:last-child { color: #a09080; }
+    .get { color: #6b9; font-weight: bold; }
+    .post { color: #e8a; font-weight: bold; }
+    .info { color: #8a7a5a; margin-top: 1.5rem; font-size: 12px; }
+    .divider { color: #444; margin: 0; font-size: 12px; }
+    .other { color: #8a7a5a; margin-top: 1.5rem; font-size: 11px; }
+    .other td { padding: 2px 8px; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -38,7 +74,6 @@ export function createApp(): Hono {
   |    └─────────────────┘    |
   |                           |
   |   .-------------------.   |
-  |   |                   |   |
   |   |    ~ book ~       |   |
   |   |    ~ review ~     |   |
   |   |    ~ claim ~      |   |
@@ -46,7 +81,20 @@ export function createApp(): Hono {
   |                           |
    \\_________________________/
 </pre>
-<br />
+
+<h2>Queries</h2>
+<table>${queryRows}</table>
+
+<h2>Procedures</h2>
+<table>${procRows}</table>
+
+<p class="divider">──────────────────────</p>
+<table class="other">
+<tr><td class="post">POST</td><td>/tap/event</td></tr>
+<tr><td class="get">GET</td><td>/api/lookup/book</td></tr>
+<tr><td class="get">GET</td><td>/health</td></tr>
+</table>
+
 <div class="info">Bibliograph &mdash; ${host}</div>
 </body>
 </html>`);
