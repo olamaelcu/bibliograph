@@ -1,4 +1,5 @@
 import { db } from './connection.js';
+import { logger } from '../logger.js';
 
 /**
  * Creates a full-text search virtual table on books and keeps it
@@ -158,5 +159,5 @@ function bootstrapLibrarian(): void {
   db.run(
     `INSERT OR IGNORE INTO book_labels (src, uri, val, cts, neg) VALUES ('${safeSrc}', '${safeUri}', 'book:librarian', '${now}', 0)`,
   );
-  console.log(`Bootstrapped librarian: ${did}`);
+  logger.info({ did }, 'bootstrapped librarian');
 }

@@ -1,6 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
 import { hasLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from './labeler.js';
+import { logger } from './logger.js';
 
 const { claims } = schema;
 

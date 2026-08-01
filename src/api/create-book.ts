@@ -8,6 +8,7 @@ import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaim
 const { books, reviews, readingStatuses, claims } = schema;
 
 export async function createBook(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
   const did = requireAuth(c.req.raw.headers);
   const input = await c.req.json<CreateBookInput>();
 
@@ -18,6 +19,8 @@ export async function createBook(c: Context): Promise<Response> {
   if (!input.isbn) {
     return c.json({ error: 'InvalidInput', message: 'isbn (or EAN/other identifier) is required for deduplication' }, 400);
   }
+
+  log.info({ did, title: input.title, isbn: input.isbn }, 'handling createBook');
 
   const canCreate = await canCreateBook(did, input.isbn);
   if (!canCreate) {
@@ -68,16 +71,20 @@ export async function createBook(c: Context): Promise<Response> {
     createdAt: now,
   });
 
+  log.info({ uri: bookUri }, 'createBook complete');
   return c.json({ uri: bookUri, cid: `bafyrei-${rkey}` });
 }
 
 export async function createReview(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
   const did = requireAuth(c.req.raw.headers);
   const input = await c.req.json<CreateReviewInput>();
 
   if (!input.bookUri || !input.text) {
     return c.json({ error: 'InvalidInput', message: 'bookUri and text are required' }, 400);
   }
+
+  log.info({ did, bookUri: input.bookUri }, 'handling createReview');
 
   const book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
   if (!book) {
@@ -97,16 +104,20 @@ export async function createReview(c: Context): Promise<Response> {
     createdAt: now,
   });
 
+  log.info({ uri }, 'createReview complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
 }
 
 export async function createStatus(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
   const did = requireAuth(c.req.raw.headers);
   const input = await c.req.json<CreateStatusInput>();
 
   if (!input.bookUri || !input.status) {
     return c.json({ error: 'InvalidInput', message: 'bookUri and status are required' }, 400);
   }
+
+  log.info({ did, bookUri: input.bookUri, status: input.status }, 'handling createStatus');
 
   const book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
   if (!book) {
@@ -129,16 +140,20 @@ export async function createStatus(c: Context): Promise<Response> {
     createdAt: now,
   });
 
+  log.info({ uri }, 'createStatus complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
 }
 
 export async function createClaim(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
   const did = requireAuth(c.req.raw.headers);
   const input = await c.req.json<CreateClaimInput>();
 
   if (!input.bookUri || !input.identifier || !input.identifierType) {
     return c.json({ error: 'InvalidInput', message: 'bookUri, identifier, and identifierType are required' }, 400);
   }
+
+  log.info({ did, bookUri: input.bookUri, identifierType: input.identifierType }, 'handling createClaim');
 
   const book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
   if (!book) {
@@ -168,6 +183,7 @@ export async function createClaim(c: Context): Promise<Response> {
     createdAt: now,
   });
 
+  log.info({ uri }, 'createClaim complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
 }
 
@@ -184,11 +200,14 @@ function requireLibrarian(did: string): void {
 }
 
 export async function verifyClaim(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
   const did = requireAuth(c.req.raw.headers);
   requireLibrarian(did);
 
   const { claimUri } = await c.req.json<{ claimUri: string }>();
   if (!claimUri) return c.json({ error: 'InvalidInput', message: 'claimUri is required' }, 400);
+
+  log.info({ did, claimUri }, 'handling verifyClaim');
 
   const claim = await db.query.claims.findFirst({ where: eq(claims.uri, claimUri) });
   if (!claim) return c.json({ error: 'NotFound', message: 'Claim not found' }, 404);
@@ -206,30 +225,39 @@ export async function verifyClaim(c: Context): Promise<Response> {
 
   publishLabel(SERVICE_DID, LABEL_AUTHOR, claim.bookUri);
 
+  log.info({ bookUri: claim.bookUri }, 'verifyClaim complete');
   return c.json({ ok: true, bookUri: claim.bookUri, claimedBy: claim.claimedBy });
 }
 
 export async function appointLibrarian(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
   const did = requireAuth(c.req.raw.headers);
   requireLibrarian(did);
 
   const { targetDid } = await c.req.json<{ targetDid: string }>();
   if (!targetDid) return c.json({ error: 'InvalidInput', message: 'targetDid is required' }, 400);
 
+  log.info({ did, targetDid }, 'handling appointLibrarian');
+
   publishLabel(SERVICE_DID, LABEL_LIBRARIAN, targetDid);
 
+  log.info({ targetDid }, 'appointLibrarian complete');
   return c.json({ ok: true, librarian: targetDid });
 }
 
 export async function revokeLibrarian(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
   const did = requireAuth(c.req.raw.headers);
   requireLibrarian(did);
 
   const { targetDid } = await c.req.json<{ targetDid: string }>();
   if (!targetDid) return c.json({ error: 'InvalidInput', message: 'targetDid is required' }, 400);
 
+  log.info({ did, targetDid }, 'handling revokeLibrarian');
+
   negateLabel(SERVICE_DID, LABEL_LIBRARIAN, targetDid);
 
+  log.info({ targetDid }, 'revokeLibrarian complete');
   return c.json({ ok: true, librarian: targetDid });
 }
 

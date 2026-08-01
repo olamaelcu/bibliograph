@@ -1,5 +1,6 @@
 import { and, eq, count } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
+import { logger } from './logger.js';
 
 const { bookLabels } = schema;
 
@@ -21,6 +22,7 @@ export function publishLabel(
       set: { neg: 0, cts: now },
     })
     .run();
+  logger.info({ src, val, uri }, 'label published');
 }
 
 /**
@@ -42,6 +44,7 @@ export function negateLabel(
       ),
     )
     .run();
+  logger.info({ src, val, uri }, 'label negated');
 }
 
 /**

@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
+import { logger } from './logger.js';
 
 const { books, reviews, readingStatuses, claims } = schema;
 
@@ -27,6 +28,7 @@ export type TapEvent = TapRecordEvent | TapIdentityEvent;
 
 export async function handleRecordEvent(evt: TapRecordEvent): Promise<void> {
   const uri = `at://${evt.did}/${evt.collection}/${evt.rkey}`;
+  logger.info({ action: evt.action, collection: evt.collection, uri }, 'tap event');
 
   if (evt.action === 'delete') {
     await handleDelete(evt.collection, uri);

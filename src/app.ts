@@ -1,14 +1,17 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { requestTracing } from './middleware.js';
 import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './api/get-book.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js';
 import { OpenLibraryProvider } from './providers/openlibrary.js';
+import { logger } from './logger.js';
 
 export function createApp(): Hono {
   const app = new Hono();
 
   app.use('*', cors());
+  app.use('*', requestTracing);
 
   // Root route
   app.get('/', (c) => {
@@ -123,10 +126,12 @@ export function createApp(): Hono {
 
   // Tap webhook endpoint (for receiving events)
   app.post('/tap/event', async (c) => {
+    const log = c.get('log') as import('pino').Logger;
     const body = await c.req.json<{ record?: { action: string; did: string; rev: string; collection: string; rkey: string; record?: Record<string, unknown>; cid?: string; live: boolean } }>();
 
     if (body.record) {
       const rec = body.record;
+      log.info({ action: rec.action, collection: rec.collection, did: rec.did }, 'tap webhook event');
       await handleRecordEvent({
         type: 'record',
         action: rec.action as 'create' | 'update' | 'delete',
@@ -167,11 +172,11 @@ export function createApp(): Hono {
 
   // Error handler
   app.onError((err, c) => {
+    logger.error({ err }, 'unhandled error');
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as unknown as { status: number; error: string; message: string };
       return c.json({ error: e.error || 'UnexpectedError', message: e.message || 'An error occurred' }, e.status as never);
     }
-    console.error('Unhandled error:', err);
     return c.json({ error: 'InternalServerError', message: 'An unexpected error occurred' }, 500);
   });
 
