@@ -1,7 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
 
-const { books, claims } = schema;
+const { claims } = schema;
 
 export async function canEditBook(did: string, bookUri: string): Promise<boolean> {
   const claim = await db.query.claims.findFirst({

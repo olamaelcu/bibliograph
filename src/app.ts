@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { setupFts, runMigrations } from './db/init.js';
 import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims } from './api/get-book.js';
 import { createBook, createReview, createStatus, createClaim } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js';
@@ -22,8 +21,9 @@ export function createApp(): Hono {
   <style>
     body { font-family: monospace; background: #0a0a0a; color: #f0e6d3;
            display: flex; justify-content: center; align-items: center;
+          flex-direction: column;
            min-height: 100vh; margin: 0; }
-    pre { font-size: 14px; line-height: 1.2; text-align: center; }
+    pre { font-size: 14px; line-height: 1.2; text-align: center; display: block; }
     .info { color: #8a7a5a; margin-top: 1rem; font-size: 12px; }
   </style>
 </head>
@@ -46,6 +46,7 @@ export function createApp(): Hono {
   |                           |
    \\_________________________/
 </pre>
+<br />
 <div class="info">Bibliograph &mdash; ${host}</div>
 </body>
 </html>`);
@@ -71,7 +72,7 @@ export function createApp(): Hono {
   // Tap webhook endpoint (for receiving events)
   app.post('/tap/event', async (c) => {
     const body = await c.req.json<{ record?: { action: string; did: string; rev: string; collection: string; rkey: string; record?: Record<string, unknown>; cid?: string; live: boolean } }>();
-    
+
     if (body.record) {
       const rec = body.record;
       await handleRecordEvent({
