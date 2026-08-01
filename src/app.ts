@@ -137,10 +137,14 @@ export function createApp(): Hono {
 </script>
 
 <h2>Queries</h2>
-<table>${queryRows}</table>
+<details>
+  <table>${queryRows}</table>
+</details>
 
 <h2>Procedures</h2>
-<table>${procRows}</table>
+<details>
+  <table>${procRows}</table>
+</details>
 
 <p class="divider">──────────────────────</p>
 <table class="other">
