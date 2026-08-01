@@ -125,7 +125,7 @@ export async function getUserStatus(c: Context): Promise<Response> {
 
   const nextCursor = results.length === lim ? String(offset + lim) : undefined;
 
-  log.info({ found: results.length }, 'getUserStatus complete');
+  log.info({ uris: results.map(s => s.uri), found: results.length }, 'getUserStatus complete');
   return c.json({
     statuses: results.map(s => ({
       uri: s.uri,

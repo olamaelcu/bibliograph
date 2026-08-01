@@ -310,7 +310,7 @@ export async function createStatus(c: Context): Promise<Response> {
     throw err;
   }
 
-  log.info({ uri }, 'createStatus complete');
+  log.info({ record: { uri, did, bookUri: input.bookUri, status: input.status, bookTitle: book.title } }, 'createStatus complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
 }
 
