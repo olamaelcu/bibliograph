@@ -64,8 +64,9 @@ export function createApp(): Hono {
     .info a { color: #a09080; text-decoration: none; }
     .info a:hover { color: #c4a86a; }
     .divider { color: #444; margin: 0; font-size: 12px; }
-    .other { color: #8a7a5a; margin-top: 1.5rem; font-size: 11px; }
+    .other { color: #8a7a5a; margin-top: 0.5rem; font-size: 11px; }
     .other td { padding: 2px 8px; font-size: 11px; }
+    .auth { color: #8a7a5a; margin-top: 1.5rem; font-size: 10px; line-height: 1.6; width: 600px; }
   </style>
 </head>
 <body>
@@ -95,10 +96,14 @@ export function createApp(): Hono {
 
 <p class="divider">──────────────────────</p>
 <table class="other">
-<tr><td class="post">POST</td><td>/tap/event</td></tr>
+<tr><td class="post">POST</td><td>/tap/event <span style="color:#666">— webhook fallback</span></td></tr>
 <tr><td class="get">GET</td><td>/api/lookup/book</td></tr>
 <tr><td class="get">GET</td><td>/health</td></tr>
 </table>
+
+<p class="auth">Authenticate with ATProto service JWTs:<br>
+<span style="color:#666">Authorization: Bearer &lt;jwt&gt;</span><br>
+<span style="color:#555">iss: your DID &middot; aud: did:web:biblio.livtet.olamaelcu.net#atproto_pds &middot; lxm: &lt;endpoint-nsid&gt;</span></p>
 
 <div class="info">Bibliograph &mdash; ${host}</div>
 <div class="info"><a href="https://github.com/olamaelcu/bibliograph">github.com/olamaelcu/bibliograph</a></div>
