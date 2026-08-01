@@ -2,6 +2,8 @@
 
 ATProto AppView for `community.lexicon.book` — a shared book lexicon that indexes book records, reviews, reading statuses, and author/publisher claims from the Atmosphere network.
 
+A public reference instance is available at **[biblio.livtet.olamaelcu.net](https://biblio.livtet.olamaelcu.net/)**.
+
 ## Quick start
 
 ```bash
