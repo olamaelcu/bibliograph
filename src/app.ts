@@ -11,6 +11,46 @@ export function createApp(): Hono {
 
   app.use('*', cors());
 
+  // Root route
+  app.get('/', (c) => {
+    const host = new URL(c.req.url).host;
+    return c.html(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bibliograph</title>
+  <style>
+    body { font-family: monospace; background: #0a0a0a; color: #f0e6d3;
+           display: flex; justify-content: center; align-items: center;
+           min-height: 100vh; margin: 0; }
+    pre { font-size: 14px; line-height: 1.2; text-align: center; }
+    .info { color: #8a7a5a; margin-top: 1rem; font-size: 12px; }
+  </style>
+</head>
+<body>
+<pre>
+    _________________________
+   /                         \\
+  |    ┌─────────────────┐    |
+  |    │  BIBLIOGRAPH    │    |
+  |    │  community.lexi │    |
+  |    │  con.book       │    |
+  |    └─────────────────┘    |
+  |                           |
+  |   .-------------------.   |
+  |   |                   |   |
+  |   |    ~ book ~       |   |
+  |   |    ~ review ~     |   |
+  |   |    ~ claim ~      |   |
+  |   '-------------------'   |
+  |                           |
+   \\_________________________/
+</pre>
+<div class="info">Bibliograph &mdash; ${host}</div>
+</body>
+</html>`);
+  });
+
   // Health check
   app.get('/health', (c) => c.json({ status: 'ok', version: '0.0.1' }));
 
