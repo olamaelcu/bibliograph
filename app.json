@@ -5,7 +5,7 @@
         "type": "startup",
         "name": "web http health check",
         "path": "/health",
-        "port": 3000,
+        "port": 5000,
         "initialDelay": 3,
         "timeout": 5,
         "attempts": 5,
