@@ -154,7 +154,7 @@ export const readingStatuses = sqliteTable(
     statusIdx: index('reading_statuses_status_idx').on(table.status),
     statusCheck: check(
       'reading_statuses_status_check',
-      sql`${table.status} IN ('reading', 'read', 'to-read', 'abandoned')`,
+      sql`${table.status} IN ('reading', 'read', 'to-read', 'abandoned', 'wishlist')`,
     ),
     progressCheck: check(
       'reading_statuses_progress_check',

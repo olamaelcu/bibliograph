@@ -55,7 +55,7 @@ export interface ReviewRecord {
 export interface StatusRecord {
   $type: 'community.lexicon.book.status';
   bookUri: string;
-  status: 'reading' | 'read' | 'to-read' | 'abandoned';
+  status: 'reading' | 'read' | 'to-read' | 'abandoned' | 'wishlist';
   progress?: number; // 0-100
   rating?: number; // 1-5
   bookRef: BookRef;
@@ -89,7 +89,7 @@ export interface CreateBookOutput { uri: string; cid: string; }
 export interface CreateReviewInput { bookUri: string; text: string; rating?: number; }
 export interface CreateReviewOutput { uri: string; cid: string; }
 
-export interface CreateStatusInput { bookUri: string; status: 'reading' | 'read' | 'to-read' | 'abandoned'; progress?: number; rating?: number; startedAt?: string; finishedAt?: string; }
+export interface CreateStatusInput { bookUri: string; status: 'reading' | 'read' | 'to-read' | 'abandoned' | 'wishlist'; progress?: number; rating?: number; startedAt?: string; finishedAt?: string; }
 export interface CreateStatusOutput { uri: string; cid: string; }
 
 export interface CreateClaimInput { bookUri: string; identifier: string; identifierType: 'isbn' | 'ean' | 'issn'; }

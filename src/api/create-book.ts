@@ -1,12 +1,129 @@
 import type { Context } from 'hono';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
 import { HttpError } from '../errors.js';
+import { OpenLibraryProvider } from '../providers/openlibrary.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims } = schema;
+
+function extractIdentifier(bookUri: string): { type: 'isbn'; value: string } | { type: 'olid'; value: string } | null {
+  const urnMatch = bookUri.match(/^urn:isbn:(.+)$/);
+  if (urnMatch) return { type: 'isbn', value: urnMatch[1] };
+
+  const olidMatch = bookUri.match(/^(OL\d+[A-Z])$/);
+  if (olidMatch) return { type: 'olid', value: olidMatch[1] };
+
+  const bareIsbn = bookUri.match(/^[\d]{9,13}[\dX]$/);
+  if (bareIsbn) return { type: 'isbn', value: bookUri };
+
+  const dashedIsbn = bookUri.match(/^[\d-]{10,17}$/);
+  if (dashedIsbn) return { type: 'isbn', value: bookUri };
+
+  return null;
+}
+
+async function resolveBookUri(did: string, bookUri: string, log: import('pino').Logger): Promise<string | null> {
+  if (bookUri.startsWith('at://')) {
+    const book = await db.query.books.findFirst({ where: eq(books.uri, bookUri) });
+    return book ? book.uri : null;
+  }
+
+  const ident = extractIdentifier(bookUri);
+  if (!ident) return null;
+
+  if (ident.type === 'isbn') {
+    const existing = await db.query.books.findFirst({ where: eq(books.isbn, ident.value) });
+    if (existing) return existing.uri;
+
+    log.info({ isbn: ident.value }, 'book not in db, discovering from OpenLibrary');
+    const provider = new OpenLibraryProvider();
+    const data = await provider.searchByIsbn(ident.value);
+    if (!data) return null;
+
+    const isbn = data.isbn13 || data.isbn10 || ident.value;
+    const now = new Date().toISOString();
+    const rkey = generateRkey();
+    const uri = `at://${did}/community.lexicon.book.book/${rkey}`;
+
+    await db.insert(books).values({
+      uri,
+      did,
+      title: data.title,
+      author: data.author,
+      isbn,
+      publishedDate: data.publishedDate,
+      description: data.description,
+      pageCount: data.pageCount,
+      language: data.language,
+      categories: data.categories || [],
+      identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
+      coverUrl: data.coverUrl,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const claimUri = `at://${did}/community.lexicon.book.claim/${rkey}`;
+    await db.insert(claims).values({
+      uri: claimUri,
+      did,
+      bookUri: uri,
+      identifier: isbn,
+      identifierType: 'isbn',
+      claimedBy: did,
+      status: 'pending',
+      createdAt: now,
+    });
+
+    log.info({ isbn, uri }, 'book discovered and created');
+    return uri;
+  }
+
+  if (ident.type === 'olid') {
+    const existing = await db.query.books.findFirst({
+      where: or(
+        eq(books.isbn, ident.value),
+        eq(books.uri, ident.value),
+      ),
+    });
+    if (existing) return existing.uri;
+
+    log.info({ olid: ident.value }, 'book not in db, discovering by OLID');
+    const provider = new OpenLibraryProvider();
+    const data = await provider.getBookDetails(ident.value);
+    if (!data) return null;
+
+    const now = new Date().toISOString();
+    const rkey = generateRkey();
+    const uri = `at://${did}/community.lexicon.book.book/${rkey}`;
+
+    await db.insert(books).values({
+      uri,
+      did,
+      title: data.title,
+      author: data.author,
+      isbn: data.isbn13 || data.isbn10 || undefined,
+      publishedDate: data.publishedDate,
+      description: data.description,
+      pageCount: data.pageCount,
+      language: data.language,
+      categories: data.categories || [],
+      identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
+      coverUrl: data.coverUrl,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    log.info({ olid: ident.value, uri }, 'book discovered and created');
+    return uri;
+  }
+
+  return null;
+}
 
 export async function createBook(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
@@ -105,7 +222,14 @@ export async function createReview(c: Context): Promise<Response> {
 
   log.info({ did, bookUri: input.bookUri }, 'handling createReview');
 
-  const book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
+  let book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
+  if (!book) {
+    const resolvedUri = await resolveBookUri(did, input.bookUri, log);
+    if (resolvedUri) {
+      input.bookUri = resolvedUri;
+      book = await db.query.books.findFirst({ where: eq(books.uri, resolvedUri) });
+    }
+  }
   if (!book) {
     log.warn({ did, bookUri: input.bookUri }, 'createReview rejected: book not found');
     return c.json({ error: 'BookNotFound', message: 'Book not found' }, 404);
@@ -150,7 +274,14 @@ export async function createStatus(c: Context): Promise<Response> {
 
   log.info({ did, bookUri: input.bookUri, status: input.status, progress: input.progress, rating: input.rating }, 'handling createStatus');
 
-  const book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
+  let book = await db.query.books.findFirst({ where: eq(books.uri, input.bookUri) });
+  if (!book) {
+    const resolvedUri = await resolveBookUri(did, input.bookUri, log);
+    if (resolvedUri) {
+      input.bookUri = resolvedUri;
+      book = await db.query.books.findFirst({ where: eq(books.uri, resolvedUri) });
+    }
+  }
   if (!book) {
     log.warn({ did, bookUri: input.bookUri }, 'createStatus rejected: book not found');
     return c.json({ error: 'BookNotFound', message: 'Book not found' }, 404);

@@ -1,0 +1,633 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "2194b4e7-aa8f-4131-8446-85de7487ef54",
+  "prevId": "f7a3c2b1-e98d-4567-89ab-cdef01234567",
+  "tables": {
+    "book_labels": {
+      "name": "book_labels",
+      "columns": {
+        "src": {
+          "name": "src",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "val": {
+          "name": "val",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cts": {
+          "name": "cts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "neg": {
+          "name": "neg",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "book_labels_uri_idx": {
+          "name": "book_labels_uri_idx",
+          "columns": [
+            "uri"
+          ],
+          "isUnique": false
+        },
+        "book_labels_val_idx": {
+          "name": "book_labels_val_idx",
+          "columns": [
+            "val"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "book_labels_src_uri_val_pk": {
+          "columns": [
+            "src",
+            "uri",
+            "val"
+          ],
+          "name": "book_labels_src_uri_val_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "books": {
+      "name": "books",
+      "columns": {
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "did": {
+          "name": "did",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "author": {
+          "name": "author",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "isbn": {
+          "name": "isbn",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "publishedDate": {
+          "name": "publishedDate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pageCount": {
+          "name": "pageCount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "language": {
+          "name": "language",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'en'"
+        },
+        "categories": {
+          "name": "categories",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "identifiers": {
+          "name": "identifiers",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "coverUrl": {
+          "name": "coverUrl",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "deduplication_hash": {
+          "name": "deduplication_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updatedAt": {
+          "name": "updatedAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "books_isbn_unique": {
+          "name": "books_isbn_unique",
+          "columns": [
+            "isbn"
+          ],
+          "isUnique": true
+        },
+        "books_title_idx": {
+          "name": "books_title_idx",
+          "columns": [
+            "title"
+          ],
+          "isUnique": false
+        },
+        "books_author_idx": {
+          "name": "books_author_idx",
+          "columns": [
+            "author"
+          ],
+          "isUnique": false
+        },
+        "books_status_idx": {
+          "name": "books_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "books_deduplication_hash_idx": {
+          "name": "books_deduplication_hash_idx",
+          "columns": [
+            "deduplication_hash"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "books_status_check": {
+          "name": "books_status_check",
+          "value": "\"books\".\"status\" IN ('pending', 'active', 'rejected')"
+        }
+      }
+    },
+    "claims": {
+      "name": "claims",
+      "columns": {
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "did": {
+          "name": "did",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bookUri": {
+          "name": "bookUri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "identifierType": {
+          "name": "identifierType",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claimedBy": {
+          "name": "claimedBy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "verifiedBy": {
+          "name": "verifiedBy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verifiedAt": {
+          "name": "verifiedAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "claims_book_uri_idx": {
+          "name": "claims_book_uri_idx",
+          "columns": [
+            "bookUri"
+          ],
+          "isUnique": false
+        },
+        "claims_status_idx": {
+          "name": "claims_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "claims_claimed_by_idx": {
+          "name": "claims_claimed_by_idx",
+          "columns": [
+            "claimedBy"
+          ],
+          "isUnique": false
+        },
+        "claims_identifier_idx": {
+          "name": "claims_identifier_idx",
+          "columns": [
+            "identifier"
+          ],
+          "isUnique": false
+        },
+        "claims_book_claimed_by_unique": {
+          "name": "claims_book_claimed_by_unique",
+          "columns": [
+            "bookUri",
+            "claimedBy"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "claims_bookUri_books_uri_fk": {
+          "name": "claims_bookUri_books_uri_fk",
+          "tableFrom": "claims",
+          "tableTo": "books",
+          "columnsFrom": [
+            "bookUri"
+          ],
+          "columnsTo": [
+            "uri"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "claims_status_check": {
+          "name": "claims_status_check",
+          "value": "\"claims\".\"status\" IN ('pending', 'verified', 'rejected')"
+        },
+        "claims_identifier_type_check": {
+          "name": "claims_identifier_type_check",
+          "value": "\"claims\".\"identifierType\" IN ('isbn', 'ean', 'issn', 'asin', 'oclc')"
+        }
+      }
+    },
+    "reading_statuses": {
+      "name": "reading_statuses",
+      "columns": {
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "did": {
+          "name": "did",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bookUri": {
+          "name": "bookUri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'to-read'"
+        },
+        "progress": {
+          "name": "progress",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "book_title": {
+          "name": "book_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "book_author": {
+          "name": "book_author",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "startedAt": {
+          "name": "startedAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "finishedAt": {
+          "name": "finishedAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "reading_statuses_book_uri_idx": {
+          "name": "reading_statuses_book_uri_idx",
+          "columns": [
+            "bookUri"
+          ],
+          "isUnique": false
+        },
+        "reading_statuses_did_idx": {
+          "name": "reading_statuses_did_idx",
+          "columns": [
+            "did"
+          ],
+          "isUnique": false
+        },
+        "reading_statuses_status_idx": {
+          "name": "reading_statuses_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "reading_statuses_bookUri_books_uri_fk": {
+          "name": "reading_statuses_bookUri_books_uri_fk",
+          "tableFrom": "reading_statuses",
+          "tableTo": "books",
+          "columnsFrom": [
+            "bookUri"
+          ],
+          "columnsTo": [
+            "uri"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "reading_statuses_status_check": {
+          "name": "reading_statuses_status_check",
+          "value": "\"reading_statuses\".\"status\" IN ('reading', 'read', 'to-read', 'abandoned', 'wishlist')"
+        },
+        "reading_statuses_progress_check": {
+          "name": "reading_statuses_progress_check",
+          "value": "\"reading_statuses\".\"progress\" IS NULL OR (\"reading_statuses\".\"progress\" >= 0 AND \"reading_statuses\".\"progress\" <= 100)"
+        },
+        "reading_statuses_rating_check": {
+          "name": "reading_statuses_rating_check",
+          "value": "\"reading_statuses\".\"rating\" IS NULL OR (\"reading_statuses\".\"rating\" >= 1 AND \"reading_statuses\".\"rating\" <= 5)"
+        }
+      }
+    },
+    "reviews": {
+      "name": "reviews",
+      "columns": {
+        "uri": {
+          "name": "uri",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "did": {
+          "name": "did",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bookUri": {
+          "name": "bookUri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "book_title": {
+          "name": "book_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "book_author": {
+          "name": "book_author",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "reviews_book_uri_idx": {
+          "name": "reviews_book_uri_idx",
+          "columns": [
+            "bookUri"
+          ],
+          "isUnique": false
+        },
+        "reviews_did_idx": {
+          "name": "reviews_did_idx",
+          "columns": [
+            "did"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "reviews_bookUri_books_uri_fk": {
+          "name": "reviews_bookUri_books_uri_fk",
+          "tableFrom": "reviews",
+          "tableTo": "books",
+          "columnsFrom": [
+            "bookUri"
+          ],
+          "columnsTo": [
+            "uri"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "reviews_rating_check": {
+          "name": "reviews_rating_check",
+          "value": "\"reviews\".\"rating\" IS NULL OR (\"reviews\".\"rating\" >= 1 AND \"reviews\".\"rating\" <= 5)"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}
