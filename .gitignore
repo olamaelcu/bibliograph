@@ -1,8 +1,9 @@
 node_modules/
 dist/
-bibliograph.db
-bibliograph.db-wal
-bibliograph.db-shm
+data/
+*.db
+*.db-wal
+*.db-shm
 src/lexicons/
 drizzle/
 .env
