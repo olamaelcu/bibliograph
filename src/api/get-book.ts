@@ -154,19 +154,68 @@ export async function getUserStatus(c: Context): Promise<Response> {
 
 export async function searchBooksHandler(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const { q, limit = '20', cursor } = c.req.query();
-  if (!q) {
-    log.warn('searchBooks rejected: missing q');
-    return c.json({ error: 'InvalidRequest', message: 'q is required' }, 400);
+  const { q, limit = '20', cursor, identifier, includeUnverified } = c.req.query();
+  if (!q && !identifier) {
+    log.warn('searchBooks rejected: missing q and identifier');
+    return c.json({ error: 'InvalidRequest', message: 'q or identifier is required' }, 400);
   }
 
   const lim = Math.min(Math.max(1, parseInt(limit as string) || 20), 100);
   const offset = cursor ? parseInt(cursor as string) : 0;
 
-  log.info({ q, limit: lim }, 'handling searchBooksHandler');
+  log.info({ q, identifier, limit: lim }, 'handling searchBooksHandler');
+
+  if (identifier) {
+    const sanitized = (q as string || '').replace(/['"]/g, '').trim();
+    const identifierTypes = (identifier as string).split(',').map(t => t.trim()).filter(Boolean);
+
+    let whereConditions = ['1=1'];
+
+    if (sanitized) {
+      whereConditions.push(`identifier_value LIKE '%${sanitized.replace(/'/g, "''")}%'`);
+    }
+
+    if (identifierTypes.length > 0) {
+      const typesList = identifierTypes.map(t => `'${t.replace(/'/g, "''")}'`).join(',');
+      whereConditions.push(`identifier_type IN (${typesList})`);
+    }
+
+    if (includeUnverified !== 'true') {
+      whereConditions.push(`claim_status IN ('json', 'verified')`);
+    }
+
+    const whereClause = whereConditions.join(' AND ');
+
+    const rows = db.all(
+      `SELECT DISTINCT uri, title, author, isbn, identifier_type, identifier_value, claim_status
+       FROM books_identifiers
+       WHERE ${whereClause}
+       ORDER BY title
+       LIMIT ${lim} OFFSET ${offset}`,
+    ) as Array<{ uri: string; title: string; author: string; isbn: string | null; identifier_type: string; identifier_value: string; claim_status: string }>;
+
+    log.info({ found: rows.length }, 'searchBooksHandler complete');
+    return c.json({
+      books: rows.map(row => ({
+        uri: row.uri,
+        record: {
+          $type: 'community.lexicon.book.book',
+          title: row.title,
+          author: row.author,
+          isbn: row.isbn,
+        },
+        matchedIdentifier: {
+          type: row.identifier_type,
+          value: row.identifier_value,
+          status: row.claim_status,
+        },
+      })),
+      cursor: rows.length === lim ? String(offset + lim) : undefined,
+    });
+  }
 
   const sanitized = (q as string).replace(/['"]/g, '').trim();
-  
+
   let results;
   if (sanitized.match(/^[0-9-]+$/)) {
     results = await db.query.books.findMany({

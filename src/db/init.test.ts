@@ -19,10 +19,10 @@ import { db, schema } from './connection.js';
 const _s = schema;
 const _d = db as any;
 
-import { setupFts, searchBooks } from './init.js';
+import { setupFts, setupIdentifiersView, searchBooks } from './init.js';
 
 function getSqlite() {
-  return _d.$sqlite as import('better-sqlite3').default;
+  return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
 }
 
 describe('db/init', () => {
@@ -37,7 +37,9 @@ describe('db/init', () => {
     sqlite.prepare('DROP TRIGGER IF EXISTS books_ai').run();
     sqlite.prepare('DROP TRIGGER IF EXISTS books_ad').run();
     sqlite.prepare('DROP TRIGGER IF EXISTS books_au').run();
+    sqlite.prepare('DROP VIEW IF EXISTS books_identifiers').run();
     setupFts();
+    setupIdentifiersView();
   });
 
   describe('setupFts', () => {
@@ -136,6 +138,74 @@ describe('db/init', () => {
     it('returns empty array when no match', () => {
       const results = searchBooks('NonexistentBookXYZ');
       expect(results).toEqual([]);
+    });
+  });
+
+  describe('setupIdentifiersView', () => {
+    it('creates the books_identifiers view', () => {
+      const result = getSqlite().prepare(
+        "SELECT name FROM sqlite_master WHERE type='view' AND name='books_identifiers'",
+      ).all();
+      expect(result).toHaveLength(1);
+    });
+
+    it('exposes JSON identifiers in the view', () => {
+      getSqlite().prepare(
+        `INSERT INTO books (uri, did, title, author, identifiers, status, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).run(
+        'at://did:plc:a/book/view-test',
+        'did:plc:a',
+        'View Test Book',
+        'View Author',
+        JSON.stringify([
+          { type: 'oclc', value: '987654321' },
+          { type: 'asin', value: 'B00VIEWTEST' },
+        ]),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+
+      const rows = getSqlite().prepare(
+        `SELECT * FROM books_identifiers WHERE uri = ? AND claim_status = 'json'`,
+      ).all('at://did:plc:a/book/view-test');
+
+      expect(rows).toHaveLength(2);
+      expect((rows as any)[0].identifier_type).toBe('oclc');
+      expect((rows as any)[0].identifier_value).toBe('987654321');
+      expect((rows as any)[1].identifier_type).toBe('asin');
+      expect((rows as any)[1].identifier_value).toBe('B00VIEWTEST');
+    });
+
+    it('exposes verified claims in the view', () => {
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/claimed-view',
+        did: 'did:plc:a',
+        title: 'Claimed View Book',
+        author: 'View Author',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      db.insert(_s.claims).values({
+        uri: 'at://did:plc:a/claim/view-1',
+        did: 'did:plc:a',
+        bookUri: 'at://did:plc:a/book/claimed-view',
+        identifier: '9780123456789',
+        identifierType: 'isbn',
+        claimedBy: 'did:plc:a',
+        status: 'verified',
+        createdAt: new Date().toISOString(),
+      }).run();
+
+      const rows = getSqlite().prepare(
+        `SELECT * FROM books_identifiers WHERE uri = ? AND claim_status = 'verified'`,
+      ).all('at://did:plc:a/book/claimed-view');
+
+      expect(rows).toHaveLength(1);
+      expect((rows as any)[0].identifier_type).toBe('isbn');
+      expect((rows as any)[0].identifier_value).toBe('9780123456789');
     });
   });
 });

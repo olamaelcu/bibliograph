@@ -6,9 +6,18 @@
       "type": "query",
       "parameters": {
         "type": "params",
-        "required": ["q"],
+        "required": [],
         "properties": {
           "q": { "type": "string" },
+          "identifier": {
+            "type": "string",
+            "description": "Comma-separated list of identifier types to search (e.g., 'isbn,oclc,asin')"
+          },
+          "includeUnverified": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include unverified claims in identifier search"
+          },
           "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
           "cursor": { "type": "string" }
         }

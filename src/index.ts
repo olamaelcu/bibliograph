@@ -3,7 +3,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createApp } from './app.js';
 import { db } from './db/connection.js';
 import * as tableSchema from './db/schema.js';
-import { setupFts, bootstrapLibrarian } from './db/init.js';
+import { setupFts, setupIdentifiersView, bootstrapLibrarian } from './db/init.js';
 import { logger } from './logger.js';
 import { startTapChannel, stopTapChannel, trackRepos } from './tap.js';
 
@@ -13,6 +13,7 @@ async function main(): Promise<void> {
   logger.info('running database migrations');
   migrate(db, { migrationsFolder: './drizzle' });
   setupFts();
+  setupIdentifiersView();
   bootstrapLibrarian();
   logger.info('migrations complete');
 

@@ -22,7 +22,7 @@ const _d = db as any;
 import { canCreateBook, canClaimBook, isLibrarian, isAuthorOf } from './auth.js';
 
 function getSqlite() {
-  return _d.$sqlite as import('better-sqlite3').default;
+  return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
 }
 
 function clearTables() {

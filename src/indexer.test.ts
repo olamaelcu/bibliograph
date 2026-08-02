@@ -23,7 +23,7 @@ import { handleRecordEvent } from './indexer.js';
 import type { TapRecordEvent } from './indexer.js';
 
 function getSqlite() {
-  return _d.$sqlite as import('better-sqlite3').default;
+  return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
 }
 
 function clearTables() {

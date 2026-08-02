@@ -22,7 +22,7 @@ const _d = db as any;
 import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './get-book.js';
 
 function getSqlite() {
-  return _d.$sqlite as import('better-sqlite3').default;
+  return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
 }
 
 function clearTables() {
@@ -213,7 +213,7 @@ describe('api/get-book', () => {
   });
 
   describe('searchBooksHandler', () => {
-    it('returns 400 when q is missing', async () => {
+    it('returns 400 when neither q nor identifier is provided', async () => {
       const c = mockContext();
       const res = await searchBooksHandler(c);
       expect(res.status).toBe(400);
@@ -247,6 +247,152 @@ describe('api/get-book', () => {
       expect(res.status).toBe(200);
       const body = await readJson(res);
       expect(body.books).toHaveLength(1);
+    });
+
+    it('searches by identifier type and value', async () => {
+      const bookUri = 'at://did:plc:a/book/with-identifiers';
+      getSqlite().prepare(
+        `INSERT INTO books (uri, did, title, author, identifiers, status, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).run(
+        bookUri,
+        'did:plc:a',
+        'Identifier Book',
+        'Author X',
+        JSON.stringify([{ type: 'oclc', value: '12345678' }, { type: 'asin', value: 'B00EXAMPLE' }]),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { q: '12345678', identifier: 'oclc' } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toHaveLength(1);
+      expect(body.books[0].uri).toBe(bookUri);
+      expect(body.books[0].matchedIdentifier.type).toBe('oclc');
+      expect(body.books[0].matchedIdentifier.value).toBe('12345678');
+      expect(body.books[0].matchedIdentifier.status).toBe('json');
+    });
+
+    it('searches across all identifier types when no filter specified', async () => {
+      const bookUri = 'at://did:plc:a/book/multi-id';
+      getSqlite().prepare(
+        `INSERT INTO books (uri, did, title, author, identifiers, status, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).run(
+        bookUri,
+        'did:plc:a',
+        'Multi ID Book',
+        'Author Z',
+        JSON.stringify([{ type: 'asin', value: 'B00XYZ123' }]),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { q: 'B00XYZ', identifier: 'asin' } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toHaveLength(1);
+    });
+
+    it('searches by verified claim identifiers', async () => {
+      seedBook({ uri: 'at://did:plc:a/book/claimed', title: 'Claimed Book', author: 'Author C' });
+
+      getSqlite().prepare(
+        `INSERT INTO claims (uri, did, bookUri, identifier, identifierType, claimedBy, status, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        'at://did:plc:a/claim/1',
+        'did:plc:a',
+        'at://did:plc:a/book/claimed',
+        '9789876543210',
+        'isbn',
+        'did:plc:a',
+        'verified',
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { q: '978987', identifier: 'isbn' } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toHaveLength(1);
+      expect(body.books[0].uri).toBe('at://did:plc:a/book/claimed');
+      expect(body.books[0].matchedIdentifier.status).toBe('verified');
+    });
+
+    it('excludes unverified claims by default', async () => {
+      seedBook({ uri: 'at://did:plc:a/book/pending', title: 'Pending Book', author: 'Author P' });
+
+      getSqlite().prepare(
+        `INSERT INTO claims (uri, did, bookUri, identifier, identifierType, claimedBy, status, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        'at://did:plc:a/claim/2',
+        'did:plc:a',
+        'at://did:plc:a/book/pending',
+        '9781111111110',
+        'isbn',
+        'did:plc:a',
+        'pending',
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { q: '978111', identifier: 'isbn' } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toEqual([]);
+    });
+
+    it('includes unverified claims when includeUnverified is true', async () => {
+      seedBook({ uri: 'at://did:plc:a/book/pending2', title: 'Pending Book 2', author: 'Author P2' });
+
+      getSqlite().prepare(
+        `INSERT INTO claims (uri, did, bookUri, identifier, identifierType, claimedBy, status, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        'at://did:plc:a/claim/3',
+        'did:plc:a',
+        'at://did:plc:a/book/pending2',
+        '9782222222220',
+        'isbn',
+        'did:plc:a',
+        'pending',
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { q: '978222', identifier: 'isbn', includeUnverified: 'true' } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toHaveLength(1);
+      expect(body.books[0].matchedIdentifier.status).toBe('pending');
+    });
+
+    it('searches identifiers without q value', async () => {
+      const bookUri = 'at://did:plc:a/book/no-q';
+      getSqlite().prepare(
+        `INSERT INTO books (uri, did, title, author, identifiers, status, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).run(
+        bookUri,
+        'did:plc:a',
+        'No Q Book',
+        'Author NQ',
+        JSON.stringify([{ type: 'ean', value: '5901234123457' }]),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { identifier: 'ean' } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toHaveLength(1);
+      expect(body.books[0].matchedIdentifier.type).toBe('ean');
     });
   });
 
