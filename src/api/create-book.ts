@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, like } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
@@ -16,6 +16,9 @@ function extractIdentifier(bookUri: string): { type: 'isbn'; value: string } | {
 
   const olidMatch = bookUri.match(/^(OL\d+[A-Z])$/);
   if (olidMatch) return { type: 'olid', value: olidMatch[1] };
+
+  const pathOlidMatch = bookUri.match(/^\/?(works|books)\/(OL\d+[A-Z])$/);
+  if (pathOlidMatch) return { type: 'olid', value: pathOlidMatch[2] };
 
   const bareIsbn = bookUri.match(/^[\d]{9,13}[\dX]$/);
   if (bareIsbn) return { type: 'isbn', value: bookUri };
@@ -88,6 +91,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
       where: or(
         eq(books.isbn, ident.value),
         eq(books.uri, ident.value),
+        like(books.identifiers, `%${ident.value}%`),
       ),
     });
     if (existing) return existing.uri;

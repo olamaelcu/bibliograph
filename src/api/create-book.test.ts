@@ -89,10 +89,15 @@ async function readJson(res: Response) {
   return JSON.parse(await res.text());
 }
 
+function parseIdentifiers(book: { identifiers: unknown }): Array<{ type: string; value: string }> {
+  return typeof book.identifiers === 'string' ? JSON.parse(book.identifiers) : book.identifiers as Array<{ type: string; value: string }>;
+}
+
 describe('api/create-book', () => {
   beforeEach(() => {
     clearTables();
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
     (requireAuth as any).mockResolvedValue('did:plc:test');
     (canCreateBook as any).mockResolvedValue(true);
   });
@@ -299,6 +304,89 @@ describe('api/create-book', () => {
 
       const statuses = db.select().from(_s.readingStatuses).all();
       expect(statuses).toHaveLength(1);
+    });
+
+    it('imports a book from an OpenLibrary works path and creates the status', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          key: '/works/OL50561W',
+          title: 'Dune',
+          author_name: ['Frank Herbert'],
+          isbn_13: ['9780441172719'],
+          first_publish_year: 1965,
+        }),
+      } as Response)));
+
+      const c = mockContext({ jsonBody: { bookUri: '/works/OL50561W', status: 'to-read' } });
+      const res = await createStatus(c);
+      expect(res.status).toBe(200);
+
+      const books = db.select().from(_s.books).all();
+      expect(books).toHaveLength(1);
+      expect(books[0].title).toBe('Dune');
+      const idents = parseIdentifiers(books[0]);
+      expect(idents).toContainEqual({ type: 'openlibrary', value: '/works/OL50561W' });
+
+      const statuses = db.select().from(_s.readingStatuses).all();
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0].bookUri).toBe(books[0].uri);
+      expect(statuses[0].status).toBe('to-read');
+    });
+
+    it('imports a book from an OpenLibrary books (edition) path', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          key: '/books/OL50561M',
+          title: 'Dune Edition',
+          author_name: ['Frank Herbert'],
+          isbn_10: ['0441172719'],
+        }),
+      } as Response)));
+
+      const c = mockContext({ jsonBody: { bookUri: '/books/OL50561M', status: 'reading' } });
+      const res = await createStatus(c);
+      expect(res.status).toBe(200);
+
+      const books = db.select().from(_s.books).all();
+      expect(books).toHaveLength(1);
+      expect(books[0].isbn).toBe('0441172719');
+      const idents = parseIdentifiers(books[0]);
+      expect(idents).toContainEqual({ type: 'openlibrary', value: '/books/OL50561M' });
+    });
+
+    it('reuses an existing book when the same OLID is imported again', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          key: '/works/OL50561W',
+          title: 'Dune',
+          author_name: ['Frank Herbert'],
+          isbn_13: ['9780441172719'],
+        }),
+      } as Response)));
+
+      const first = mockContext({ jsonBody: { bookUri: '/works/OL50561W', status: 'to-read' } });
+      const res1 = await createStatus(first);
+      expect(res1.status).toBe(200);
+      expect(db.select().from(_s.books).all()).toHaveLength(1);
+
+      (requireAuth as any).mockResolvedValue('did:plc:test2');
+      const second = mockContext({ jsonBody: { bookUri: '/works/OL50561W', status: 'reading' } });
+      const res2 = await createStatus(second);
+      expect(res2.status).toBe(200);
+
+      const books = db.select().from(_s.books).all();
+      expect(books).toHaveLength(1);
+      expect(db.select().from(_s.readingStatuses).all()).toHaveLength(2);
+    });
+
+    it('returns 404 when OpenLibrary has no record for the path', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 404 } as Response)));
+      const c = mockContext({ jsonBody: { bookUri: '/works/OL99999W', status: 'to-read' } });
+      const res = await createStatus(c);
+      expect(res.status).toBe(404);
     });
   });
 
