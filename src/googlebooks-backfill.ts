@@ -50,7 +50,7 @@ export async function backfillGoogleBooksFromIsbns(
 export async function backfillGoogleBooksAuthor(
   db: BetterSQLite3Database<typeof schema>,
   authorName: string,
-  opts: { maxResults?: number } = {},
+  opts: { maxResults?: number; maxPages?: number } = {},
 ): Promise<BackfillSummary> {
   if (!authorName.trim()) {
     throw new Error('author name is required');
@@ -61,22 +61,24 @@ export async function backfillGoogleBooksAuthor(
   const seen = new Set<string>();
   const seenTitles = new Set<string>();
   const maxResults = opts.maxResults ?? 40;
+  const maxPages = opts.maxPages ?? 200;
   let startIndex = 0;
-  let totalItems = Infinity;
+  let pageSize = maxResults;
+  let pages = 0;
 
-  while (startIndex < totalItems) {
+  while (pages < maxPages) {
+    pages += 1;
     let result;
     try {
       result = await provider.searchByAuthorName(authorName, startIndex, maxResults);
     } catch (err) {
       logger.error({ err, authorName }, 'googlebooks: author search failed');
-      result = null;
+      break;
     }
     if (!result || result.items.length === 0) {
       if (startIndex === 0) summary.notFound = 1;
       break;
     }
-    totalItems = result.totalItems;
 
     for (const item of result.items) {
       const titleKey = `${item.title}|${item.author}`.toLowerCase();
@@ -96,7 +98,16 @@ export async function backfillGoogleBooksAuthor(
         summary.failed += 1;
       }
     }
+
     startIndex += result.items.length;
+    // Google's reported total can be capped/inaccurate, so keep paging until
+    // the server returns a page smaller than the last full page (or empty).
+    if (pages > 1 && result.items.length < pageSize) break;
+    pageSize = result.items.length;
+  }
+
+  if (pages >= maxPages) {
+    logger.warn({ authorName, maxPages }, 'googlebooks: author pagination hit page cap');
   }
 
   logger.info({ authorName, ...summary }, 'googlebooks author backfill complete');

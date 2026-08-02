@@ -16,6 +16,10 @@ function volume(id: string, title: string, isbn13?: string) {
   };
 }
 
+function volumes(n: number, prefix: string) {
+  return Array.from({ length: n }, (_, i) => volume(`vid-${prefix}-${i}`, `Book ${prefix} ${i}`));
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.GOOGLE_BOOKS_API_KEY;
@@ -92,16 +96,57 @@ describe('backfillGoogleBooksAuthor', () => {
     process.env.GOOGLE_BOOKS_API_KEY = 'test-key';
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 2, items: [volume('v1', 'Dune', '9780441172719')] }) } as Response)
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 2, items: [volume('v2', 'Dune Messiah', '9780441172726')] }) } as Response);
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 2, items: [volume('v2', 'Dune Messiah', '9780441172726')] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 2, items: [] }) } as Response);
     vi.stubGlobal('fetch', fetchMock);
 
     const summary = await backfillGoogleBooksAuthor(db, 'Frank Herbert', { maxResults: 1 });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const secondUrl = fetchMock.mock.calls[1][0] as string;
-    expect(secondUrl).toContain('startIndex=1');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[1][0] as string).toContain('startIndex=1');
+    expect(fetchMock.mock.calls[2][0] as string).toContain('startIndex=2');
     expect(summary.imported).toBe(2);
     expect(db.select().from(_s.books).all()).toHaveLength(2);
+  });
+
+  it('pages through all results even when the API caps each page below maxResults', async () => {
+    process.env.GOOGLE_BOOKS_API_KEY = 'test-key';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 20, items: volumes(20, 'a') }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 20, items: volumes(20, 'b') }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 20, items: [] }) } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const summary = await backfillGoogleBooksAuthor(db, 'Frank Herbert');
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(summary.imported).toBe(40);
+    expect(db.select().from(_s.books).all()).toHaveLength(40);
+  });
+
+  it('stops paging once a page returns fewer results than the page size', async () => {
+    process.env.GOOGLE_BOOKS_API_KEY = 'test-key';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 3, items: [volume('v1', 'Dune', '9780441172719'), volume('v2', 'Dune Messiah', '9780441172726')] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ totalItems: 3, items: [volume('v3', 'Children of Dune', '9780441104024')] }) } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const summary = await backfillGoogleBooksAuthor(db, 'Frank Herbert', { maxResults: 2 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(summary.imported).toBe(3);
+  });
+
+  it('stops paginating once the page cap is reached', async () => {
+    process.env.GOOGLE_BOOKS_API_KEY = 'test-key';
+    const page = { ok: true, json: async () => ({ totalItems: 999, items: [volume('v1', 'Dune', '9780441172719')] }) } as Response;
+    const fetchMock = vi.fn().mockResolvedValue(page);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const summary = await backfillGoogleBooksAuthor(db, 'Frank Herbert', { maxResults: 1, maxPages: 3 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(summary.imported).toBe(1);
   });
 
   it('deduplicates the same title across pages', async () => {
