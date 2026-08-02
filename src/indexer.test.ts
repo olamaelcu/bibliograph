@@ -262,4 +262,123 @@ describe('indexer', () => {
       expect(rows).toHaveLength(0);
     });
   });
+
+  describe('shelf indexing', () => {
+    it('indexes a shelf', async () => {
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:user', rev: 'r1',
+        collection: 'community.lexicon.book.shelf', rkey: 'shf001',
+        record: {
+          $type: 'community.lexicon.book.shelf',
+          name: 'Sci-Fi Favorites',
+          description: 'Top sci-fi picks',
+          metadata: { theme: 'scifi' },
+          coverUrl: 'https://example.com/cover.jpg',
+          createdAt: new Date().toISOString(),
+        },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.shelves).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe('Sci-Fi Favorites');
+      expect(rows[0].description).toBe('Top sci-fi picks');
+      expect(rows[0].metadata).toEqual({ theme: 'scifi' });
+      expect(rows[0].coverUrl).toBe('https://example.com/cover.jpg');
+    });
+
+    it('updates a shelf on update event', async () => {
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:user', rev: 'r1',
+        collection: 'community.lexicon.book.shelf', rkey: 'shf001',
+        record: { $type: 'community.lexicon.book.shelf', name: 'Old Name', createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      await handleRecordEvent({
+        type: 'record', action: 'update', did: 'did:plc:user', rev: 'r2',
+        collection: 'community.lexicon.book.shelf', rkey: 'shf001',
+        record: { $type: 'community.lexicon.book.shelf', name: 'New Name', createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.shelves).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe('New Name');
+    });
+
+    it('deletes a shelf', async () => {
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:user', rev: 'r1',
+        collection: 'community.lexicon.book.shelf', rkey: 'shf001',
+        record: { $type: 'community.lexicon.book.shelf', name: 'Temp', createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      await handleRecordEvent({
+        type: 'record', action: 'delete', did: 'did:plc:user', rev: 'r2',
+        collection: 'community.lexicon.book.shelf', rkey: 'shf001',
+        record: undefined, live: false,
+      });
+
+      const rows = db.select().from(_s.shelves).all();
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe('shelf item indexing', () => {
+    async function seedShelf() {
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:user', rev: 'rshelf',
+        collection: 'community.lexicon.book.shelf', rkey: 'shf001',
+        record: { $type: 'community.lexicon.book.shelf', name: 'Shelf', createdAt: new Date().toISOString() },
+        live: false,
+      });
+    }
+
+    it('indexes a shelf item', async () => {
+      await seedShelf();
+      await handleRecordEvent(makeEvent());
+
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:user', rev: 'r1',
+        collection: 'community.lexicon.book.shelfItem', rkey: 'sii001',
+        record: {
+          $type: 'community.lexicon.book.shelfItem',
+          shelfUri: 'at://did:plc:user/community.lexicon.book.shelf/shf001',
+          bookUri: 'at://did:plc:test/community.lexicon.book.book/book001',
+          bookRef: { title: 'Test Book', author: 'Test Author' },
+          note: 'favorite',
+          createdAt: new Date().toISOString(),
+        },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.shelfItems).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].bookTitle).toBe('Test Book');
+      expect(rows[0].bookAuthor).toBe('Test Author');
+      expect(rows[0].note).toBe('favorite');
+    });
+
+    it('deletes a shelf item', async () => {
+      await seedShelf();
+      await handleRecordEvent(makeEvent());
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:user', rev: 'r1',
+        collection: 'community.lexicon.book.shelfItem', rkey: 'sii001',
+        record: { $type: 'community.lexicon.book.shelfItem', shelfUri: 'at://did:plc:user/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:test/community.lexicon.book.book/book001', bookRef: { title: 'T', author: 'A' }, createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      await handleRecordEvent({
+        type: 'record', action: 'delete', did: 'did:plc:user', rev: 'r2',
+        collection: 'community.lexicon.book.shelfItem', rkey: 'sii001',
+        record: undefined, live: false,
+      });
+
+      const rows = db.select().from(_s.shelfItems).all();
+      expect(rows).toHaveLength(0);
+    });
+  });
 });

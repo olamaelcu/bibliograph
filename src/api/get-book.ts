@@ -2,9 +2,9 @@ import type { Context } from 'hono';
 import { eq, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
-import type { GetBookParams, GetBooksParams, GetReviewsParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams } from '../types.js';
+import type { GetBookParams, GetBooksParams, GetReviewsParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams, GetShelvesParams, GetShelfParams, GetShelfItemsParams } from '../types.js';
 
-const { books, reviews, readingStatuses, claims } = schema;
+const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
 
 export async function getBook(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
@@ -294,6 +294,118 @@ function serializeBookRecord(book: typeof books.$inferSelect): Record<string, un
     status: book.status,
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
+  };
+}
+
+export async function getShelves(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const { did, cursor, limit = '50' } = c.req.query();
+  if (!did) {
+    log.warn('getShelves rejected: missing did');
+    return c.json({ error: 'InvalidRequest', message: 'did is required' }, 400);
+  }
+
+  const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
+  const offset = cursor ? parseInt(cursor as string) : 0;
+
+  log.info({ did, limit: lim }, 'handling getShelves');
+
+  const results = await db.query.shelves.findMany({
+    where: eq(shelves.did, did),
+    orderBy: (shelves, { desc }) => [desc(shelves.createdAt)],
+    limit: lim,
+    offset,
+  });
+
+  const nextCursor = results.length === lim ? String(offset + lim) : undefined;
+
+  log.info({ found: results.length, hasCursor: !!nextCursor }, 'getShelves complete');
+  return c.json({
+    shelves: results.map(s => ({
+      uri: s.uri,
+      did: s.did,
+      record: serializeShelfRecord(s),
+    })),
+    cursor: nextCursor,
+  });
+}
+
+export async function getShelf(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const { uri } = c.req.query();
+  if (!uri) {
+    log.warn('getShelf rejected: missing uri');
+    return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+  }
+
+  log.info({ uri }, 'handling getShelf');
+
+  const shelf = await db.query.shelves.findFirst({ where: eq(shelves.uri, uri) });
+  if (!shelf) {
+    log.info({ found: false }, 'getShelf complete');
+    return c.json({ error: 'NotFound', message: 'Shelf not found' }, 404);
+  }
+
+  log.info({ found: true }, 'getShelf complete');
+  return c.json({
+    uri: shelf.uri,
+    did: shelf.did,
+    record: serializeShelfRecord(shelf),
+  });
+}
+
+export async function getShelfItems(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const { shelfUri, cursor, limit = '50' } = c.req.query();
+  if (!shelfUri) {
+    log.warn('getShelfItems rejected: missing shelfUri');
+    return c.json({ error: 'InvalidRequest', message: 'shelfUri is required' }, 400);
+  }
+
+  const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
+  const offset = cursor ? parseInt(cursor as string) : 0;
+
+  log.info({ shelfUri, limit: lim }, 'handling getShelfItems');
+
+  const results = await db.query.shelfItems.findMany({
+    where: eq(shelfItems.shelfUri, shelfUri),
+    orderBy: (shelfItems, { desc }) => [desc(shelfItems.createdAt)],
+    limit: lim,
+    offset,
+  });
+
+  const nextCursor = results.length === lim ? String(offset + lim) : undefined;
+
+  log.info({ found: results.length, hasCursor: !!nextCursor }, 'getShelfItems complete');
+  return c.json({
+    items: results.map(i => ({
+      uri: i.uri,
+      did: i.did,
+      record: {
+        $type: 'community.lexicon.book.shelfItem',
+        shelfUri: i.shelfUri,
+        bookUri: i.bookUri,
+        bookRef: {
+          uri: i.bookUri,
+          title: i.bookTitle,
+          author: i.bookAuthor,
+        },
+        note: i.note,
+        createdAt: i.createdAt,
+      },
+    })),
+    cursor: nextCursor,
+  });
+}
+
+function serializeShelfRecord(shelf: typeof shelves.$inferSelect): Record<string, unknown> {
+  return {
+    $type: 'community.lexicon.book.shelf',
+    name: shelf.name,
+    description: shelf.description,
+    metadata: typeof shelf.metadata === 'string' ? JSON.parse(shelf.metadata) : shelf.metadata,
+    coverUrl: shelf.coverUrl,
+    createdAt: shelf.createdAt,
   };
 }
 

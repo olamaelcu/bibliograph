@@ -171,6 +171,68 @@ export const readingStatuses = sqliteTable(
 export type ReadingStatus = typeof readingStatuses.$inferSelect;
 export type NewReadingStatus = typeof readingStatuses.$inferInsert;
 
+// ─── Shelves ────────────────────────────────────────────────────────────────
+
+export const shelves = sqliteTable(
+  'shelves',
+  {
+    uri: text().primaryKey(),
+    did: text().notNull(),
+    name: text().notNull(),
+    description: text(),
+    metadata: text({ mode: 'json' }).$type<Record<string, unknown>>().default(sql`'{}'`),
+    coverUrl: text(),
+    createdAt: text()
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+    updatedAt: text()
+      .notNull()
+      .$defaultFn(() => new Date().toISOString())
+      .$onUpdateFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    didIdx: index('shelves_did_idx').on(table.did),
+    nameIdx: index('shelves_name_idx').on(table.name),
+  }),
+);
+
+export type Shelf = typeof shelves.$inferSelect;
+export type NewShelf = typeof shelves.$inferInsert;
+
+// ─── Shelf Items ────────────────────────────────────────────────────────────
+
+export const shelfItems = sqliteTable(
+  'shelf_items',
+  {
+    uri: text().primaryKey(),
+    did: text().notNull(),
+    shelfUri: text()
+      .notNull()
+      .references(() => shelves.uri, { onDelete: 'cascade' }),
+    bookUri: text()
+      .notNull()
+      .references(() => books.uri, { onDelete: 'cascade' }),
+    bookTitle: text('book_title').notNull(),
+    bookAuthor: text('book_author').notNull(),
+    note: text(),
+    createdAt: text()
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    shelfUriIdx: index('shelf_items_shelf_uri_idx').on(table.shelfUri),
+    bookUriIdx: index('shelf_items_book_uri_idx').on(table.bookUri),
+    didIdx: index('shelf_items_did_idx').on(table.did),
+    shelfBookUnique: uniqueIndex('shelf_items_shelf_book_unique').on(
+      table.shelfUri,
+      table.bookUri,
+    ),
+  }),
+);
+
+export type ShelfItem = typeof shelfItems.$inferSelect;
+export type NewShelfItem = typeof shelfItems.$inferInsert;
+
 // ─── Labels ─────────────────────────────────────────────────────────────────
 
 export const bookLabels = sqliteTable(

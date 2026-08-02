@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { sql } from 'drizzle-orm';
 import { requestTracing } from './middleware.js';
-import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './api/get-book.js';
-import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian } from './api/create-book.js';
+import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './api/get-book.js';
+import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian, createShelf, addToShelf, removeFromShelf } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
 import { OpenLibraryProvider } from './providers/openlibrary.js';
@@ -27,6 +27,9 @@ export function createApp(): Hono {
       'searchBooks',
       'getClaims',
       'getLabelerLabels',
+      'getShelves',
+      'getShelf',
+      'getShelfItems',
     ];
     const procedures = [
       'createBook',
@@ -36,6 +39,9 @@ export function createApp(): Hono {
       'verifyClaim',
       'appointLibrarian',
       'revokeLibrarian',
+      'createShelf',
+      'addToShelf',
+      'removeFromShelf',
     ];
     const prefix = 'community.lexicon.book';
 
@@ -179,6 +185,9 @@ export function createApp(): Hono {
   app.get('/xrpc/community.lexicon.book.searchBooks', searchBooksHandler);
   app.get('/xrpc/community.lexicon.book.getClaims', getClaims);
   app.get('/xrpc/community.lexicon.book.getLabelerLabels', getLabelerLabels);
+  app.get('/xrpc/community.lexicon.book.getShelves', getShelves);
+  app.get('/xrpc/community.lexicon.book.getShelf', getShelf);
+  app.get('/xrpc/community.lexicon.book.getShelfItems', getShelfItems);
 
   // Procedure endpoints (POST /xrpc/...)
   app.post('/xrpc/community.lexicon.book.createBook', createBook);
@@ -188,6 +197,9 @@ export function createApp(): Hono {
   app.post('/xrpc/community.lexicon.book.verifyClaim', verifyClaim);
   app.post('/xrpc/community.lexicon.book.appointLibrarian', appointLibrarian);
   app.post('/xrpc/community.lexicon.book.revokeLibrarian', revokeLibrarian);
+  app.post('/xrpc/community.lexicon.book.createShelf', createShelf);
+  app.post('/xrpc/community.lexicon.book.addToShelf', addToShelf);
+  app.post('/xrpc/community.lexicon.book.removeFromShelf', removeFromShelf);
 
   // Provider lookup endpoint
   app.get('/api/lookup/book', async (c) => {

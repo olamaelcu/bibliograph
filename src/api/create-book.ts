@@ -5,9 +5,9 @@ import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
 import { HttpError } from '../errors.js';
 import { OpenLibraryProvider } from '../providers/openlibrary.js';
-import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput } from '../types.js';
+import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput, CreateShelfInput, AddToShelfInput, RemoveFromShelfInput } from '../types.js';
 
-const { books, reviews, readingStatuses, claims } = schema;
+const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
 
 function extractIdentifier(bookUri: string): { type: 'isbn'; value: string } | { type: 'olid'; value: string } | null {
   const urnMatch = bookUri.match(/^urn:isbn:(.+)$/);
@@ -542,6 +542,162 @@ export async function createClaim(c: Context): Promise<Response> {
 
   log.info({ uri }, 'createClaim complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
+}
+
+export async function createShelf(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createShelf');
+  const input = await c.req.json<CreateShelfInput>();
+
+  if (!input.name || !input.name.trim()) {
+    log.warn({ did }, 'createShelf rejected: missing name');
+    return c.json({ error: 'InvalidInput', message: 'name is required' }, 400);
+  }
+
+  if (input.name.length > 100) {
+    log.warn({ did }, 'createShelf rejected: name too long');
+    return c.json({ error: 'InvalidInput', message: 'name must be 100 characters or fewer' }, 400);
+  }
+
+  log.info({ did, name: input.name }, 'handling createShelf');
+
+  const now = new Date().toISOString();
+  const rkey = generateRkey();
+  const uri = `at://${did}/community.lexicon.book.shelf/${rkey}`;
+
+  try {
+    await db.insert(shelves).values({
+      uri,
+      did,
+      name: input.name.trim(),
+      description: input.description,
+      metadata: (input.metadata as Record<string, unknown>) || {},
+      coverUrl: input.coverUrl,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (err) {
+    log.error({ err, did, name: input.name, uri }, 'createShelf insert failed');
+    throw err;
+  }
+
+  log.info({ uri }, 'createShelf complete');
+  return c.json({ uri, cid: `bafyrei-${rkey}` });
+}
+
+export async function addToShelf(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.addToShelf');
+  const input = await c.req.json<AddToShelfInput>();
+
+  if (!input.shelfUri || !input.bookUri) {
+    const missing: string[] = [];
+    if (!input.shelfUri) missing.push('shelfUri');
+    if (!input.bookUri) missing.push('bookUri');
+    log.warn({ did, missing }, 'addToShelf rejected: missing required fields');
+    return c.json({ error: 'InvalidInput', message: 'Missing required fields', missing }, 400);
+  }
+
+  log.info({ did, shelfUri: input.shelfUri, bookUri: input.bookUri }, 'handling addToShelf');
+
+  const shelf = await db.query.shelves.findFirst({ where: eq(shelves.uri, input.shelfUri) });
+  if (!shelf) {
+    log.warn({ did, shelfUri: input.shelfUri }, 'addToShelf rejected: shelf not found');
+    return c.json({ error: 'ShelfNotFound', message: 'Shelf not found' }, 404);
+  }
+  if (shelf.did !== did) {
+    log.warn({ did, shelfUri: input.shelfUri, owner: shelf.did }, 'addToShelf rejected: not shelf owner');
+    return c.json({ error: 'Forbidden', message: 'Only the shelf owner can add books' }, 403);
+  }
+
+  let bookUri = input.bookUri;
+  let resolvedBook = await db.query.books.findFirst({ where: eq(books.uri, bookUri) });
+  if (!resolvedBook) {
+    const resolvedUri = await resolveBookUri(did, bookUri, log);
+    if (resolvedUri) {
+      bookUri = resolvedUri;
+      resolvedBook = await db.query.books.findFirst({ where: eq(books.uri, resolvedUri) });
+    }
+  }
+  if (!resolvedBook) {
+    log.warn({ did, bookUri: input.bookUri }, 'addToShelf rejected: book not found');
+    return c.json({ error: 'BookNotFound', message: 'Book not found' }, 404);
+  }
+
+  const existing = await db.query.shelfItems.findFirst({
+    where: and(eq(shelfItems.shelfUri, input.shelfUri), eq(shelfItems.bookUri, bookUri)),
+  });
+  if (existing) {
+    log.warn({ did, shelfUri: input.shelfUri, bookUri }, 'addToShelf rejected: book already on shelf');
+    return c.json({ error: 'DuplicateShelfItem', message: 'Book is already on this shelf' }, 409);
+  }
+
+  const now = new Date().toISOString();
+  const rkey = generateRkey();
+  const uri = `at://${did}/community.lexicon.book.shelfItem/${rkey}`;
+
+  try {
+    await db.insert(shelfItems).values({
+      uri,
+      did,
+      shelfUri: input.shelfUri,
+      bookUri,
+      bookTitle: resolvedBook.title,
+      bookAuthor: resolvedBook.author,
+      note: input.note,
+      createdAt: now,
+    });
+  } catch (err) {
+    log.error({ err, did, shelfUri: input.shelfUri, bookUri, uri }, 'addToShelf insert failed');
+    throw err;
+  }
+
+  log.info({ uri }, 'addToShelf complete');
+  return c.json({ uri, cid: `bafyrei-${rkey}` });
+}
+
+export async function removeFromShelf(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.removeFromShelf');
+  const input = await c.req.json<RemoveFromShelfInput>();
+
+  if (!input.shelfUri || !input.bookUri) {
+    const missing: string[] = [];
+    if (!input.shelfUri) missing.push('shelfUri');
+    if (!input.bookUri) missing.push('bookUri');
+    log.warn({ did, missing }, 'removeFromShelf rejected: missing required fields');
+    return c.json({ error: 'InvalidInput', message: 'Missing required fields', missing }, 400);
+  }
+
+  log.info({ did, shelfUri: input.shelfUri, bookUri: input.bookUri }, 'handling removeFromShelf');
+
+  const shelf = await db.query.shelves.findFirst({ where: eq(shelves.uri, input.shelfUri) });
+  if (!shelf) {
+    log.warn({ did, shelfUri: input.shelfUri }, 'removeFromShelf rejected: shelf not found');
+    return c.json({ error: 'ShelfNotFound', message: 'Shelf not found' }, 404);
+  }
+  if (shelf.did !== did) {
+    log.warn({ did, shelfUri: input.shelfUri, owner: shelf.did }, 'removeFromShelf rejected: not shelf owner');
+    return c.json({ error: 'Forbidden', message: 'Only the shelf owner can remove books' }, 403);
+  }
+
+  const existing = await db.query.shelfItems.findFirst({
+    where: and(eq(shelfItems.shelfUri, input.shelfUri), eq(shelfItems.bookUri, input.bookUri)),
+  });
+  if (!existing) {
+    log.warn({ did, shelfUri: input.shelfUri, bookUri: input.bookUri }, 'removeFromShelf rejected: item not found');
+    return c.json({ error: 'NotFound', message: 'Book is not on this shelf' }, 404);
+  }
+
+  try {
+    await db.delete(shelfItems).where(eq(shelfItems.uri, existing.uri));
+  } catch (err) {
+    log.error({ err, did, shelfUri: input.shelfUri, bookUri: input.bookUri }, 'removeFromShelf delete failed');
+    throw err;
+  }
+
+  log.info({ uri: existing.uri }, 'removeFromShelf complete');
+  return c.json({ ok: true });
 }
 
 /**

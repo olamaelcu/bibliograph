@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 
-const { books, reviews, readingStatuses, claims } = schema;
+const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
 
 export interface TapRecordEvent {
   type: 'record';
@@ -52,6 +52,12 @@ export async function handleRecordEvent(evt: TapRecordEvent): Promise<void> {
     case 'community.lexicon.book.claim':
       await indexClaim(uri, evt.did, record);
       break;
+    case 'community.lexicon.book.shelf':
+      await indexShelf(uri, evt.did, record);
+      break;
+    case 'community.lexicon.book.shelfItem':
+      await indexShelfItem(uri, evt.did, record);
+      break;
   }
 }
 
@@ -68,6 +74,12 @@ async function handleDelete(collection: string, uri: string): Promise<void> {
       break;
     case 'community.lexicon.book.claim':
       await db.delete(claims).where(eq(claims.uri, uri));
+      break;
+    case 'community.lexicon.book.shelf':
+      await db.delete(shelves).where(eq(shelves.uri, uri));
+      break;
+    case 'community.lexicon.book.shelfItem':
+      await db.delete(shelfItems).where(eq(shelfItems.uri, uri));
       break;
   }
 }
@@ -166,6 +178,44 @@ async function indexClaim(uri: string, did: string, record: Record<string, unkno
 
   await db.insert(claims).values(data).onConflictDoUpdate({
     target: claims.uri,
+    set: data,
+  });
+}
+
+async function indexShelf(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
+  const now = new Date().toISOString();
+  const data = {
+    uri,
+    did,
+    name: record.name as string,
+    description: record.description as string | undefined,
+    metadata: record.metadata as Record<string, unknown> | undefined,
+    coverUrl: record.coverUrl as string | undefined,
+    createdAt: (record.createdAt as string) || now,
+    updatedAt: now,
+  };
+
+  await db.insert(shelves).values(data).onConflictDoUpdate({
+    target: shelves.uri,
+    set: data,
+  });
+}
+
+async function indexShelfItem(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
+  const bookRef = record.bookRef as Record<string, unknown> | undefined;
+  const data = {
+    uri,
+    did,
+    shelfUri: record.shelfUri as string,
+    bookUri: record.bookUri as string,
+    bookTitle: (bookRef?.title as string) || '',
+    bookAuthor: (bookRef?.author as string) || '',
+    note: record.note as string | undefined,
+    createdAt: (record.createdAt as string) || new Date().toISOString(),
+  };
+
+  await db.insert(shelfItems).values(data).onConflictDoUpdate({
+    target: shelfItems.uri,
     set: data,
   });
 }

@@ -66,6 +66,26 @@ export interface StatusRecord {
   createdAt: string;
 }
 
+// Shelf record
+export interface ShelfRecord {
+  $type: 'community.lexicon.book.shelf';
+  name: string;
+  description?: string;
+  metadata?: unknown;
+  coverUrl?: string;
+  createdAt: string;
+}
+
+// Shelf item record (membership)
+export interface ShelfItemRecord {
+  $type: 'community.lexicon.book.shelfItem';
+  shelfUri: string;
+  bookUri: string;
+  bookRef: BookRef;
+  note?: string;
+  createdAt: string;
+}
+
 // XRPC input/output types
 export interface GetBookParams { uri: string; }
 export interface GetBookOutput { uri: string; record: unknown; cid?: string; }
@@ -96,3 +116,21 @@ export interface CreateStatusOutput { uri: string; cid: string; }
 
 export interface CreateClaimInput { bookUri: string; identifier: string; identifierType: 'isbn' | 'ean' | 'issn'; }
 export interface CreateClaimOutput { uri: string; cid: string; }
+
+export interface GetShelvesParams { did: string; cursor?: string; limit?: number; }
+export interface GetShelvesOutput { shelves: Array<{ uri: string; did: string; record: unknown }>; cursor?: string; }
+
+export interface GetShelfParams { uri: string; }
+export interface GetShelfOutput { uri: string; did: string; record: unknown; }
+
+export interface GetShelfItemsParams { shelfUri: string; cursor?: string; limit?: number; }
+export interface GetShelfItemsOutput { items: Array<{ uri: string; did: string; record: unknown }>; cursor?: string; }
+
+export interface CreateShelfInput { name: string; description?: string; metadata?: unknown; coverUrl?: string; }
+export interface CreateShelfOutput { uri: string; cid: string; }
+
+export interface AddToShelfInput { shelfUri: string; bookUri: string; note?: string; }
+export interface AddToShelfOutput { uri: string; cid: string; }
+
+export interface RemoveFromShelfInput { shelfUri: string; bookUri: string; }
+export interface RemoveFromShelfOutput { ok: boolean; }

@@ -43,6 +43,7 @@ import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import {
   createBook, createReview, createStatus, createClaim,
   verifyClaim, appointLibrarian, revokeLibrarian,
+  createShelf, addToShelf, removeFromShelf,
 } from './create-book.js';
 
 function getSqlite() {
@@ -430,6 +431,221 @@ describe('api/create-book', () => {
       expect(res.status).toBe(200);
       const body = await readJson(res);
       expect(body.librarian).toBe('did:plc:oldlib');
+    });
+  });
+
+  describe('createShelf', () => {
+    it('returns 400 when name is missing', async () => {
+      const c = mockContext({ jsonBody: {} });
+      const res = await createShelf(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('creates a shelf with metadata', async () => {
+      const c = mockContext({
+        jsonBody: {
+          name: 'Sci-Fi Favorites',
+          description: 'Top picks',
+          metadata: { theme: 'scifi' },
+          coverUrl: 'https://example.com/cover.jpg',
+        },
+      });
+      const res = await createShelf(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.uri).toMatch(/^at:\/\/did:plc:test\/community\.lexicon\.book\.shelf\//);
+
+      const rows = db.select().from(_s.shelves).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].name).toBe('Sci-Fi Favorites');
+      expect(rows[0].metadata).toEqual({ theme: 'scifi' });
+      expect(rows[0].coverUrl).toBe('https://example.com/cover.jpg');
+    });
+  });
+
+  describe('addToShelf', () => {
+    function seedShelfOwner(uri = 'at://did:plc:test/community.lexicon.book.shelf/shf001', did = 'did:plc:test') {
+      db.insert(_s.shelves).values({
+        uri,
+        did,
+        name: 'Shelf',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+    }
+
+    it('returns 400 when shelfUri or bookUri missing', async () => {
+      const c = mockContext({ jsonBody: { shelfUri: 'at://x/shelf/1' } });
+      const res = await addToShelf(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 when shelf not found', async () => {
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:unknown/shelf/1', bookUri: 'at://did:plc:a/book/1' },
+      });
+      const res = await addToShelf(c);
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 403 when not the shelf owner', async () => {
+      seedShelfOwner('at://did:plc:other/community.lexicon.book.shelf/shf001', 'did:plc:other');
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:other/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:a/book/1' },
+      });
+      const res = await addToShelf(c);
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 404 when book not found', async () => {
+      seedShelfOwner();
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:test/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:unknown/book/99' },
+      });
+      const res = await addToShelf(c);
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 409 when book already on shelf', async () => {
+      seedShelfOwner();
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/1',
+        did: 'did:plc:a',
+        title: 'Book',
+        author: 'Author',
+        isbn: '9780000000001',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+      db.insert(_s.shelfItems).values({
+        uri: 'at://did:plc:test/community.lexicon.book.shelfItem/sii001',
+        did: 'did:plc:test',
+        shelfUri: 'at://did:plc:test/community.lexicon.book.shelf/shf001',
+        bookUri: 'at://did:plc:a/book/1',
+        bookTitle: 'Book',
+        bookAuthor: 'Author',
+        createdAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:test/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:a/book/1' },
+      });
+      const res = await addToShelf(c);
+      expect(res.status).toBe(409);
+    });
+
+    it('adds a book to a shelf', async () => {
+      seedShelfOwner();
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/1',
+        did: 'did:plc:a',
+        title: 'Book',
+        author: 'Author',
+        isbn: '9780000000001',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:test/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:a/book/1', note: 'favorite' },
+      });
+      const res = await addToShelf(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.uri).toMatch(/^at:\/\/did:plc:test\/community\.lexicon\.book\.shelfItem\//);
+
+      const rows = db.select().from(_s.shelfItems).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].bookTitle).toBe('Book');
+      expect(rows[0].note).toBe('favorite');
+    });
+  });
+
+  describe('removeFromShelf', () => {
+    it('returns 400 when shelfUri or bookUri missing', async () => {
+      const c = mockContext({ jsonBody: {} });
+      const res = await removeFromShelf(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 when shelf not found', async () => {
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:unknown/shelf/1', bookUri: 'at://did:plc:a/book/1' },
+      });
+      const res = await removeFromShelf(c);
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 403 when not the shelf owner', async () => {
+      db.insert(_s.shelves).values({
+        uri: 'at://did:plc:other/community.lexicon.book.shelf/shf001',
+        did: 'did:plc:other',
+        name: 'Shelf',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:other/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:a/book/1' },
+      });
+      const res = await removeFromShelf(c);
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 404 when item not on shelf', async () => {
+      db.insert(_s.shelves).values({
+        uri: 'at://did:plc:test/community.lexicon.book.shelf/shf001',
+        did: 'did:plc:test',
+        name: 'Shelf',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:test/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:a/book/1' },
+      });
+      const res = await removeFromShelf(c);
+      expect(res.status).toBe(404);
+    });
+
+    it('removes a book from a shelf', async () => {
+      db.insert(_s.shelves).values({
+        uri: 'at://did:plc:test/community.lexicon.book.shelf/shf001',
+        did: 'did:plc:test',
+        name: 'Shelf',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/1',
+        did: 'did:plc:a',
+        title: 'Book',
+        author: 'Author',
+        isbn: '9780000000001',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+      db.insert(_s.shelfItems).values({
+        uri: 'at://did:plc:test/community.lexicon.book.shelfItem/sii001',
+        did: 'did:plc:test',
+        shelfUri: 'at://did:plc:test/community.lexicon.book.shelf/shf001',
+        bookUri: 'at://did:plc:a/book/1',
+        bookTitle: 'Book',
+        bookAuthor: 'Author',
+        createdAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({
+        jsonBody: { shelfUri: 'at://did:plc:test/community.lexicon.book.shelf/shf001', bookUri: 'at://did:plc:a/book/1' },
+      });
+      const res = await removeFromShelf(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.ok).toBe(true);
+
+      const rows = db.select().from(_s.shelfItems).all();
+      expect(rows).toHaveLength(0);
     });
   });
 });

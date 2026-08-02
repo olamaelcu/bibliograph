@@ -19,7 +19,7 @@ import { db, schema } from '../db/connection.js';
 const _s = schema;
 const _d = db as any;
 
-import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './get-book.js';
+import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './get-book.js';
 
 function getSqlite() {
   return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
@@ -454,6 +454,118 @@ describe('api/get-book', () => {
       expect(res.status).toBe(200);
       const body = await readJson(res);
       expect(body.labels).toHaveLength(1);
+    });
+  });
+
+  describe('getShelves', () => {
+    it('returns 400 when did is missing', async () => {
+      const c = mockContext();
+      const res = await getShelves(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns shelves for a user', async () => {
+      db.insert(_s.shelves).values({
+        uri: 'at://did:plc:user/community.lexicon.book.shelf/shf001',
+        did: 'did:plc:user',
+        name: 'Sci-Fi Favorites',
+        description: 'Top picks',
+        metadata: { theme: 'scifi' },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({ query: { did: 'did:plc:user' } });
+      const res = await getShelves(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.shelves).toHaveLength(1);
+      expect(body.shelves[0].record.name).toBe('Sci-Fi Favorites');
+      expect(body.shelves[0].record.metadata).toEqual({ theme: 'scifi' });
+    });
+
+    it('does not return shelves for other users', async () => {
+      db.insert(_s.shelves).values({
+        uri: 'at://did:plc:other/community.lexicon.book.shelf/shf001',
+        did: 'did:plc:other',
+        name: 'Other Shelf',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({ query: { did: 'did:plc:user' } });
+      const res = await getShelves(c);
+      const body = await readJson(res);
+      expect(body.shelves).toEqual([]);
+    });
+  });
+
+  describe('getShelf', () => {
+    it('returns 400 when uri is missing', async () => {
+      const c = mockContext();
+      const res = await getShelf(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 when shelf not found', async () => {
+      const c = mockContext({ query: { uri: 'at://did:plc:unknown/shelf/missing' } });
+      const res = await getShelf(c);
+      expect(res.status).toBe(404);
+    });
+
+    it('returns shelf when found', async () => {
+      db.insert(_s.shelves).values({
+        uri: 'at://did:plc:user/community.lexicon.book.shelf/shf001',
+        did: 'did:plc:user',
+        name: 'Reading List',
+        coverUrl: 'https://example.com/cover.jpg',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({ query: { uri: 'at://did:plc:user/community.lexicon.book.shelf/shf001' } });
+      const res = await getShelf(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.record.name).toBe('Reading List');
+      expect(body.record.coverUrl).toBe('https://example.com/cover.jpg');
+    });
+  });
+
+  describe('getShelfItems', () => {
+    it('returns 400 when shelfUri is missing', async () => {
+      const c = mockContext();
+      const res = await getShelfItems(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns items for a shelf', async () => {
+      seedBook();
+      db.insert(_s.shelves).values({
+        uri: 'at://did:plc:user/community.lexicon.book.shelf/shf001',
+        did: 'did:plc:user',
+        name: 'Shelf',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+      db.insert(_s.shelfItems).values({
+        uri: 'at://did:plc:user/community.lexicon.book.shelfItem/sii001',
+        did: 'did:plc:user',
+        shelfUri: 'at://did:plc:user/community.lexicon.book.shelf/shf001',
+        bookUri: 'at://did:plc:author/book/test001',
+        bookTitle: 'Test Book',
+        bookAuthor: 'Test Author',
+        note: 'favorite',
+        createdAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({ query: { shelfUri: 'at://did:plc:user/community.lexicon.book.shelf/shf001' } });
+      const res = await getShelfItems(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.items).toHaveLength(1);
+      expect(body.items[0].record.bookRef.title).toBe('Test Book');
+      expect(body.items[0].record.note).toBe('favorite');
     });
   });
 });
