@@ -208,4 +208,76 @@ describe('db/init', () => {
       expect((rows as any)[0].identifier_value).toBe('9780123456789');
     });
   });
+
+  describe('reading status uniqueness', () => {
+    it('enforces one reading status per user and book', () => {
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/unique',
+        did: 'did:plc:a',
+        title: 'Unique Book',
+        author: 'Unique Author',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const now = new Date().toISOString();
+      db.insert(_s.readingStatuses).values({
+        uri: 'at://did:plc:a/status/1',
+        did: 'did:plc:a',
+        bookUri: 'at://did:plc:a/book/unique',
+        status: 'reading',
+        bookTitle: 'Unique Book',
+        bookAuthor: 'Unique Author',
+        createdAt: now,
+      }).run();
+
+      expect(() => {
+        db.insert(_s.readingStatuses).values({
+          uri: 'at://did:plc:a/status/2',
+          did: 'did:plc:a',
+          bookUri: 'at://did:plc:a/book/unique',
+          status: 'read',
+          bookTitle: 'Unique Book',
+          bookAuthor: 'Unique Author',
+          createdAt: now,
+        }).run();
+      }).toThrow();
+    });
+
+    it('allows a different user to status the same book', () => {
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/shared',
+        did: 'did:plc:a',
+        title: 'Shared Book',
+        author: 'Shared Author',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const now = new Date().toISOString();
+      db.insert(_s.readingStatuses).values({
+        uri: 'at://did:plc:a/status/1',
+        did: 'did:plc:a',
+        bookUri: 'at://did:plc:a/book/shared',
+        status: 'reading',
+        bookTitle: 'Shared Book',
+        bookAuthor: 'Shared Author',
+        createdAt: now,
+      }).run();
+      db.insert(_s.readingStatuses).values({
+        uri: 'at://did:plc:b/status/1',
+        did: 'did:plc:b',
+        bookUri: 'at://did:plc:a/book/shared',
+        status: 'read',
+        bookTitle: 'Shared Book',
+        bookAuthor: 'Shared Author',
+        createdAt: now,
+      }).run();
+
+      const rows = db.select().from(_s.readingStatuses).all();
+      expect(rows).toHaveLength(2);
+    });
+  });
 });

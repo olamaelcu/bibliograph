@@ -458,6 +458,14 @@ export async function createStatus(c: Context): Promise<Response> {
     return c.json({ error: 'BookNotFound', message: 'Book not found' }, 404);
   }
 
+  const existingStatus = await db.query.readingStatuses.findFirst({
+    where: and(eq(readingStatuses.did, did), eq(readingStatuses.bookUri, bookUri!)),
+  });
+  if (existingStatus) {
+    log.warn({ did, bookUri: bookUri!, existingUri: existingStatus.uri, status: input.status }, 'createStatus rejected: status already exists for this book');
+    return c.json({ error: 'StatusAlreadyExists', message: 'A reading status already exists for this book' }, 409);
+  }
+
   const now = new Date().toISOString();
   const rkey = generateRkey();
   const uri = `at://${did}/community.lexicon.book.status/${rkey}`;

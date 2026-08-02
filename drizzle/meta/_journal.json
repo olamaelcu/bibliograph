@@ -50,6 +50,13 @@
       "when": 1785680082701,
       "tag": "0006_serious_puppet_master",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785702091049,
+      "tag": "0007_shiny_fat_cobra",
+      "breakpoints": true
     }
   ]
 }

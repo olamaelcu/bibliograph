@@ -38,7 +38,8 @@
         }
       },
       "errors": [
-        { "name": "BookNotFound" }
+        { "name": "BookNotFound" },
+        { "name": "StatusAlreadyExists" }
       ]
     }
   }

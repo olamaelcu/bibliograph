@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 
@@ -156,10 +156,21 @@ async function indexStatus(uri: string, did: string, record: Record<string, unkn
     createdAt: (record.createdAt as string) || new Date().toISOString(),
   };
 
-  await db.insert(readingStatuses).values(data).onConflictDoUpdate({
-    target: readingStatuses.uri,
-    set: data,
+  const existing = await db.query.readingStatuses.findFirst({
+    where: and(eq(readingStatuses.did, did), eq(readingStatuses.bookUri, data.bookUri)),
   });
+
+  if (existing) {
+    if (existing.uri === uri) {
+      await db.update(readingStatuses).set(data).where(eq(readingStatuses.uri, uri));
+    } else {
+      logger.warn({ uri, existingUri: existing.uri, bookUri: data.bookUri, did }, 'status index: new record supersedes existing');
+      await db.update(readingStatuses).set(data).where(eq(readingStatuses.uri, existing.uri));
+    }
+    return;
+  }
+
+  await db.insert(readingStatuses).values(data);
 }
 
 async function indexClaim(uri: string, did: string, record: Record<string, unknown>): Promise<void> {

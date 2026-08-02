@@ -153,6 +153,10 @@ export const readingStatuses = sqliteTable(
     bookUriIdx: index('reading_statuses_book_uri_idx').on(table.bookUri),
     didIdx: index('reading_statuses_did_idx').on(table.did),
     statusIdx: index('reading_statuses_status_idx').on(table.status),
+    didBookUriUnique: uniqueIndex('reading_statuses_did_book_uri_unique').on(
+      table.did,
+      table.bookUri,
+    ),
     statusCheck: check(
       'reading_statuses_status_check',
       sql`${table.status} IN ('reading', 'read', 'to-read', 'abandoned', 'wishlist')`,

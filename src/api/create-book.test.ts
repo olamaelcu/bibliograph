@@ -247,6 +247,59 @@ describe('api/create-book', () => {
       expect(statuses).toHaveLength(1);
       expect(statuses[0].status).toBe('reading');
     });
+
+    it('returns 409 when a status already exists for the same user and book', async () => {
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/1',
+        did: 'did:plc:a',
+        title: 'Target Book',
+        author: 'Target Author',
+        isbn: '9780000000001',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const first = mockContext({ jsonBody: { bookUri: 'at://did:plc:a/book/1', status: 'reading' } });
+      const res1 = await createStatus(first);
+      expect(res1.status).toBe(200);
+
+      const second = mockContext({ jsonBody: { bookUri: 'at://did:plc:a/book/1', status: 'read' } });
+      const res2 = await createStatus(second);
+      expect(res2.status).toBe(409);
+
+      const statuses = db.select().from(_s.readingStatuses).all();
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0].status).toBe('reading');
+    });
+
+    it('returns 409 when the book is resolved via identifiers', async () => {
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/1',
+        did: 'did:plc:a',
+        title: 'Target Book',
+        author: 'Target Author',
+        isbn: '9780000000001',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const first = mockContext({
+        jsonBody: { identifiers: [{ type: 'isbn', value: '9780000000001' }], status: 'to-read' },
+      });
+      const res1 = await createStatus(first);
+      expect(res1.status).toBe(200);
+
+      const second = mockContext({
+        jsonBody: { identifiers: [{ type: 'isbn', value: '9780000000001' }], status: 'read' },
+      });
+      const res2 = await createStatus(second);
+      expect(res2.status).toBe(409);
+
+      const statuses = db.select().from(_s.readingStatuses).all();
+      expect(statuses).toHaveLength(1);
+    });
   });
 
   describe('createClaim', () => {

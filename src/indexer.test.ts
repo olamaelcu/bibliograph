@@ -216,6 +216,51 @@ describe('indexer', () => {
       const rows = db.select().from(_s.readingStatuses).all();
       expect(rows).toHaveLength(0);
     });
+
+    it('replaces an existing status when a new record arrives for the same user and book', async () => {
+      await handleRecordEvent(makeEvent());
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:reader', rev: 'r1',
+        collection: 'community.lexicon.book.status', rkey: 'stat001',
+        record: { $type: 'community.lexicon.book.status', bookUri: 'at://did:plc:test/community.lexicon.book.book/book001', status: 'reading', progress: 50, bookRef: { title: 'T', author: 'A' }, createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:reader', rev: 'r2',
+        collection: 'community.lexicon.book.status', rkey: 'stat002',
+        record: { $type: 'community.lexicon.book.status', bookUri: 'at://did:plc:test/community.lexicon.book.book/book001', status: 'read', bookRef: { title: 'T', author: 'A' }, createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.readingStatuses).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('read');
+      expect(rows[0].uri).toBe('at://did:plc:reader/community.lexicon.book.status/stat002');
+    });
+
+    it('updates the row in place when the same record uri is re-indexed', async () => {
+      await handleRecordEvent(makeEvent());
+      const statusEvent = {
+        type: 'record' as const, action: 'create' as const, did: 'did:plc:reader', rev: 'r1',
+        collection: 'community.lexicon.book.status', rkey: 'stat001',
+        record: { $type: 'community.lexicon.book.status', bookUri: 'at://did:plc:test/community.lexicon.book.book/book001', status: 'reading', progress: 20, bookRef: { title: 'T', author: 'A' }, createdAt: new Date().toISOString() },
+        live: false,
+      };
+
+      await handleRecordEvent(statusEvent);
+      await handleRecordEvent({
+        ...statusEvent,
+        action: 'update',
+        record: { ...statusEvent.record, status: 'read', progress: 100 },
+      });
+
+      const rows = db.select().from(_s.readingStatuses).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('read');
+      expect(rows[0].progress).toBe(100);
+      expect(rows[0].uri).toBe('at://did:plc:reader/community.lexicon.book.status/stat001');
+    });
   });
 
   describe('claim indexing', () => {
