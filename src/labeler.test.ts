@@ -20,6 +20,7 @@ const _s = schema;
 const _d = db as any;
 
 import { publishLabel, negateLabel, hasLabel, getLabels, LABEL_AUTHOR, LABEL_LIBRARIAN } from './labeler.js';
+import { getLabelEvents, getActiveLabels } from './labeler.js';
 
 function getSqlite() {
   return (_d.$sqlite) as InstanceType<typeof import('better-sqlite3')>;
@@ -150,6 +151,62 @@ describe('labeler', () => {
       const labels = getLabels('at://did:plc:test/community.lexicon.book.book/test001');
       expect(typeof labels[0].neg).toBe('boolean');
       expect(labels[0].neg).toBe(false);
+    });
+  });
+
+  describe('event log', () => {
+    it('appends a neg=0 event on publishLabel', () => {
+      publishLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+
+      const events = getLabelEvents();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        src: 'did:web:localhost',
+        uri: 'at://did:plc:test/community.lexicon.book.book/test001',
+        val: LABEL_AUTHOR,
+        neg: false,
+      });
+    });
+
+    it('appends a neg=1 event on negateLabel', () => {
+      publishLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+      negateLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+
+      const events = getLabelEvents();
+      expect(events).toHaveLength(2);
+      expect(events[1].neg).toBe(true);
+    });
+
+    it('assigns monotonically increasing ids as seq', () => {
+      publishLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+      publishLabel('did:web:localhost', LABEL_LIBRARIAN, 'at://did:plc:test/community.lexicon.book.book/test001');
+
+      const events = getLabelEvents();
+      expect(events[0].id).toBeLessThan(events[1].id);
+    });
+
+    it('returns events after a cursor', () => {
+      publishLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+      publishLabel('did:web:localhost', LABEL_LIBRARIAN, 'at://did:plc:test/community.lexicon.book.book/test001');
+
+      const all = getLabelEvents();
+      const events = getLabelEvents(all[0].id);
+      expect(events).toHaveLength(1);
+      expect(events[0].val).toBe(LABEL_LIBRARIAN);
+    });
+  });
+
+  describe('getActiveLabels', () => {
+    it('returns all non-negated labels across URIs', () => {
+      publishLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+      publishLabel('did:web:localhost', LABEL_LIBRARIAN, 'did:web:librarian');
+      publishLabel('did:web:localhost', LABEL_LIBRARIAN, 'did:web:other');
+      negateLabel('did:web:localhost', LABEL_LIBRARIAN, 'did:web:other');
+
+      const labels = getActiveLabels();
+      expect(labels).toHaveLength(2);
+      expect(labels.some((l) => l.val === LABEL_AUTHOR)).toBe(true);
+      expect(labels.some((l) => l.uri === 'did:web:librarian')).toBe(true);
     });
   });
 });

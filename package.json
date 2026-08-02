@@ -22,6 +22,7 @@
     "@atcute/lex-cli": "^3.2.1",
     "@atcute/lexicons": "^2.0.3",
     "@atcute/xrpc-server": "^2.0.2",
+    "@atcute/xrpc-server-node": "^2.1.1",
     "@atproto/tap": "^0.3.12",
     "@hono/node-server": "^2.0.12",
     "better-sqlite3": "^13.0.2",

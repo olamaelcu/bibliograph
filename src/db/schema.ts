@@ -253,3 +253,23 @@ export const bookLabels = sqliteTable(
 
 export type BookLabel = typeof bookLabels.$inferSelect;
 export type NewBookLabel = typeof bookLabels.$inferInsert;
+
+// Append-only event log for label changes. `id` doubles as the atproto
+// subscription `seq`. Published when a label is created or negated.
+export const labelEvents = sqliteTable(
+  'label_events',
+  {
+    id: integer().primaryKey({ autoIncrement: true }),
+    src: text().notNull(),
+    uri: text().notNull(),
+    val: text().notNull(),
+    neg: integer().notNull().default(0),
+    cts: text().notNull(),
+  },
+  (table) => ({
+    uriIdx: index('label_events_uri_idx').on(table.uri),
+  }),
+);
+
+export type LabelEvent = typeof labelEvents.$inferSelect;
+export type NewLabelEvent = typeof labelEvents.$inferInsert;
