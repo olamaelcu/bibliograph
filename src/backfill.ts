@@ -57,7 +57,7 @@ function readIsbns(path: string | undefined): string[] {
 async function main(): Promise<void> {
   const [cmd] = process.argv.slice(2);
   if (!cmd) {
-    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-]');
+    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey>');
     process.exit(1);
   }
   if (cmd === 'tap') {
@@ -67,6 +67,14 @@ async function main(): Promise<void> {
   } else if (cmd === 'openlibrary') {
     const { backfillOpenLibraryFromIsbns } = await import('./openlibrary-backfill.js');
     await backfillOpenLibraryFromIsbns(db, readIsbns(process.argv[3]));
+  } else if (cmd === 'openlibrary:author') {
+    const authorKey = process.argv[3];
+    if (!authorKey) {
+      console.error('usage: backfill openlibrary:author <authorKey>');
+      process.exit(1);
+    }
+    const { backfillOpenLibraryAuthor } = await import('./openlibrary-backfill.js');
+    await backfillOpenLibraryAuthor(db, authorKey);
   } else {
     console.error(`unknown command: ${cmd}`);
     process.exit(1);

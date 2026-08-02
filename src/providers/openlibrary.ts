@@ -3,6 +3,13 @@ import type { BookData, BookProvider } from "./interface.js";
 const BASE_URL = "https://openlibrary.org";
 const USER_AGENT = "bibliograph-app/0.1 (contact@example.org)";
 
+export interface AuthorSearchResult {
+  docs: BookData[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 // biome-ignore lint/complexity/noStaticOnlyClass: implements BookProvider interface
 export class OpenLibraryProvider implements BookProvider {
   getName(): string {
@@ -50,6 +57,36 @@ export class OpenLibraryProvider implements BookProvider {
       );
     } catch {
       return [];
+    }
+  }
+
+  async searchByAuthorKey(
+    authorKey: string,
+    page = 1,
+    limit = 100,
+  ): Promise<AuthorSearchResult | null> {
+    try {
+      const url = `${BASE_URL}/search.json?author_key=${encodeURIComponent(authorKey)}&page=${page}&limit=${limit}`;
+      const response = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT },
+      });
+
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as { numFound?: number; docs?: unknown[] };
+      const docs = data.docs;
+      if (!docs) return null;
+
+      return {
+        docs: docs.map((doc) =>
+          this.mapDocToBookData(doc as Record<string, unknown>),
+        ),
+        total: data.numFound ?? 0,
+        page,
+        limit,
+      };
+    } catch {
+      return null;
     }
   }
 

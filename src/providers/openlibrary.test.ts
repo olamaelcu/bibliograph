@@ -317,4 +317,51 @@ describe('OpenLibraryProvider', () => {
       expect(result!.publishedDate).toBe('2020');
     });
   });
+
+  describe('searchByAuthorKey', () => {
+    it('returns mapped docs and total from the search response', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          numFound: 2,
+          docs: [
+            { title: 'Dune', author_name: ['Frank Herbert'], key: '/works/OL1W', first_publish_year: 1965 },
+            { title: 'Dune Messiah', author_name: ['Frank Herbert'], key: '/works/OL2W', first_publish_year: 1969 },
+          ],
+        }),
+      });
+
+      const result = await provider.searchByAuthorKey('OL23919A');
+
+      expect(result).not.toBeNull();
+      expect(result!.total).toBe(2);
+      expect(result!.docs).toHaveLength(2);
+      expect(result!.docs[0].title).toBe('Dune');
+      expect(result!.docs[0].identifiers['openlibrary']).toBe('/works/OL1W');
+    });
+
+    it('builds the query with page and limit', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ numFound: 0, docs: [] }),
+      });
+
+      await provider.searchByAuthorKey('OL23919A', 3, 50);
+
+      const calledUrl = fetchMock.mock.calls[0][0] as string;
+      expect(calledUrl).toContain('author_key=OL23919A');
+      expect(calledUrl).toContain('page=3');
+      expect(calledUrl).toContain('limit=50');
+    });
+
+    it('returns null when response is not ok', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 404 });
+      expect(await provider.searchByAuthorKey('OLnone')).toBeNull();
+    });
+
+    it('returns null on network error', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('fail'));
+      expect(await provider.searchByAuthorKey('OL1')).toBeNull();
+    });
+  });
 });

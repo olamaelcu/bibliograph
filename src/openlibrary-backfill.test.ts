@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { backfillOpenLibraryFromIsbns } from './openlibrary-backfill.js';
+import { backfillOpenLibraryFromIsbns, backfillOpenLibraryAuthor } from './openlibrary-backfill.js';
 import { createTestDb } from './test-utils/db.js';
 import * as _s from './db/schema.js';
 
@@ -54,5 +54,57 @@ describe('backfillOpenLibraryFromIsbns', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ docs: [] }) } as Response)));
     const summary = await backfillOpenLibraryFromIsbns(db, ['9780000000000']);
     expect(summary.notFound).toBe(1);
+  });
+});
+
+describe('backfillOpenLibraryAuthor', () => {
+  it('rejects an invalid author key', async () => {
+    await expect(backfillOpenLibraryAuthor(db, 'not-a-key')).rejects.toThrow(/invalid OpenLibrary author key/);
+  });
+
+  it('reports notFound when the author has no books', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ numFound: 0, docs: [] }) } as Response)));
+    const summary = await backfillOpenLibraryAuthor(db, 'OL23919A');
+    expect(summary.notFound).toBe(1);
+  });
+
+  it('paginates through all of an author works', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ numFound: 2, docs: [{ title: 'Dune', author_name: ['Frank Herbert'], key: '/works/OL1W', isbn_13: ['9780441172719'] }] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ numFound: 2, docs: [{ title: 'Dune Messiah', author_name: ['Frank Herbert'], key: '/works/OL2W', isbn_13: ['9780441172726'] }] }) } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const summary = await backfillOpenLibraryAuthor(db, 'OL23919A', { limit: 1 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(summary.imported).toBe(2);
+    const books = db.select().from(_s.books).all();
+    expect(books).toHaveLength(2);
+    expect(books.every(b => b.status === 'active')).toBe(true);
+  });
+
+  it('deduplicates the same work across pages', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ numFound: 2, docs: [{ title: 'Dune', author_name: ['Frank Herbert'], key: '/works/OL1W', isbn_13: ['9780441172719'] }] }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ numFound: 2, docs: [{ title: 'Dune', author_name: ['Frank Herbert'], key: '/works/OL1W', isbn_13: ['9780441172719'] }] }) } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const summary = await backfillOpenLibraryAuthor(db, 'OL23919A', { limit: 1 });
+
+    expect(summary.imported).toBe(1);
+    expect(summary.skipped).toBe(1);
+    expect(db.select().from(_s.books).all()).toHaveLength(1);
+  });
+
+  it('skips a work already in the database by ISBN', async () => {
+    const now = new Date().toISOString();
+    db.insert(_s.books).values({ uri: 'at://did:web:localhost/community.lexicon.book.book/existing', did: 'did:web:localhost', title: 'Old', author: 'A', isbn: '9780441172719', status: 'active', createdAt: now, updatedAt: now }).run();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ numFound: 1, docs: [{ title: 'Dune', author_name: ['Frank Herbert'], key: '/works/OL1W', isbn_13: ['9780441172719'] }] }) } as Response)));
+
+    const summary = await backfillOpenLibraryAuthor(db, 'OL23919A');
+
+    expect(summary.imported).toBe(0);
+    expect(summary.skipped).toBe(1);
+    expect(db.select().from(_s.books).all()).toHaveLength(1);
   });
 });
