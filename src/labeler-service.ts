@@ -1,7 +1,7 @@
 import { ComAtprotoLabelSubscribeLabels, ComAtprotoLabelDefs } from '@atcute/atproto';
-import { XRPCRouter, type SubscriptionHandler, type SubscriptionContext } from '@atcute/xrpc-server';
-import { createNodeWebSocket } from '@atcute/xrpc-server-node';
-import { createServer } from 'node:http';
+import { encode } from '@atcute/cbor';
+import { concat } from '@atcute/uint8array';
+import type { SubscriptionHandler, SubscriptionContext } from '@atcute/xrpc-server';
 import { getLabelEvents, getActiveLabels, type LabelEventEntry, type LabelEntry } from './labeler.js';
 import { logger } from './logger.js';
 
@@ -15,6 +15,7 @@ export interface LabelerServiceOptions {
 
 type Labels = ComAtprotoLabelSubscribeLabels.Labels & { $type: 'com.atproto.label.subscribeLabels#labels' };
 type Info = ComAtprotoLabelSubscribeLabels.Info & { $type: 'com.atproto.label.subscribeLabels#info' };
+type Message = Labels | Info;
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -60,7 +61,7 @@ function snapshotLabels(labels: LabelEntry[]): Label[] {
  * - Without a cursor: emits an initial snapshot of all active labels, then live events.
  * - With a cursor: backfills events with `id > cursor`, then live events.
  *
- * The handler is an async generator; the router encodes each yielded message as a
+ * The handler is an async generator; the caller encodes each yielded message as a
  * CBOR frame. The generator terminates when the client disconnects (`signal`).
  */
 export function createSubscribeLabelsHandler(
@@ -132,63 +133,57 @@ export function createSubscribeLabelsHandler(
   };
 }
 
-const PORT = parseInt(process.env.LABELER_PORT || process.env.PORT || '3001', 10);
-
-function buildRouter(nodeWs: ReturnType<typeof createNodeWebSocket>): XRPCRouter {
-  const router = new XRPCRouter({ websocket: nodeWs.adapter });
-  router.addSubscription(ComAtprotoLabelSubscribeLabels, {
-    handler: createSubscribeLabelsHandler(),
-  });
-  return router;
+/**
+ * Encode a subscription message as a CBOR frame: a header `{op: 1, t: <type>}`
+ * followed by the message body with the `$type` field omitted. This matches the
+ * `com.atproto.*.subscribe*` framing expected by atproto clients.
+ */
+export function encodeSubscriptionFrame(message: Message): Uint8Array<ArrayBuffer> {
+  const { $type, ...body } = message;
+  const type = `#${$type.split('#')[1]}`;
+  return concat([encode({ op: 1, t: type }), encode(body)]);
 }
 
-export function createLabelerServer() {
-  const nodeWs = createNodeWebSocket();
-  const router = buildRouter(nodeWs);
-  const server = createServer((req, res) => {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-    const headers = new Headers();
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (value === undefined) continue;
-      if (Array.isArray(value)) {
-        for (const v of value) headers.append(key, v);
-      } else {
-        headers.set(key, value);
-      }
-    }
-    const request = new Request(url, { method: req.method, headers });
-    router.fetch(request).then(
-      (response) => {
-        res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-        res.end(response.body ? response.body : null);
+/**
+ * Hono WebSocket events factory for `com.atproto.label.subscribeLabels`.
+ * Each connected client gets its own async generator; messages are encoded to
+ * CBOR frames and pushed to the socket. Disconnect aborts the generator.
+ */
+export function createSubscribeLabelsEvents(
+  options: LabelerServiceOptions = {},
+): (ctx: { params: Record<string, unknown> }) => {
+  onOpen: (evt: Event, ws: { send(data: Uint8Array<ArrayBuffer>): void; close(code?: number, reason?: string): void }) => void;
+  onClose: () => void;
+  onError: () => void;
+} {
+  return (ctx) => {
+    const controller = new AbortController();
+    const cursor = ctx.params.cursor;
+    const generator = createSubscribeLabelsHandler(options)({
+      params: cursor !== undefined ? { cursor: Number(cursor) } : {},
+      signal: controller.signal,
+      request: new Request('http://localhost'),
+    });
+    const iterator = generator[Symbol.asyncIterator]();
+
+    return {
+      onOpen(_evt, ws) {
+        (async () => {
+          for (;;) {
+            const { value, done } = await iterator.next();
+            if (done || controller.signal.aborted) break;
+            ws.send(encodeSubscriptionFrame(value as Message));
+          }
+        })().catch((err) => {
+          logger.error({ err }, 'subscribeLabels stream error');
+        });
       },
-      (err) => {
-        logger.error({ err }, 'router.fetch failed');
-        res.writeHead(500);
-        res.end('Internal Server Error');
+      onClose() {
+        controller.abort();
       },
-    );
-  });
-  nodeWs.injectWebSocket(server, router);
-  return server;
-}
-
-function isMain(): boolean {
-  if (!process.argv[1]) return false;
-  const entry = process.argv[1].replace(/\\/g, '/');
-  return entry.endsWith('/labeler-service.ts') || entry.endsWith('/labeler-service.js');
-}
-
-if (isMain()) {
-  const server = createLabelerServer();
-  server.listen(PORT, () => {
-    logger.info({ port: PORT }, 'labeler service listening');
-  });
-
-  const shutdown = () => {
-    logger.info('shutting down labeler service...');
-    server.close(() => process.exit(0));
+      onError() {
+        controller.abort();
+      },
+    };
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
 }

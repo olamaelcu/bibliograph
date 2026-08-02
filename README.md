@@ -111,6 +111,28 @@ tap run \
   --admin-password=secret
 ```
 
+## Deploying to Dokku
+
+The `Procfile` declares the AppView processes:
+
+```text
+release: tsx src/release.ts   # runs migrations before deploy
+web:     tsx src/index.ts     # AppView XRPC API + labeler subscription stream
+```
+
+The `com.atproto.label.subscribeLabels` endpoint is served in-process by the
+same `web` process (Dokku proxies the `web` process by default, so no custom
+proxy config is needed). Clients connect to the same host as the AppView:
+
+```text
+wss://biblio.livtet.olamaelcu.net/xrpc/com.atproto.label.subscribeLabels
+```
+
+Labels written by the AppView appear in the stream via the shared `label_events`
+log (same process, same SQLite database). The labeler DID document must declare
+an `atproto_labeler` service entry pointing at this endpoint for clients to
+discover it.
+
 ## Project structure
 
 ```

@@ -18,10 +18,6 @@
     "web": {
       "quantity": 1,
       "max_parallel": 1
-    },
-    "labeler": {
-      "quantity": 1,
-      "max_parallel": 1
     }
   }
 }

@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { WebSocketServer } from 'ws';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createApp } from './app.js';
 import { db } from './db/connection.js';
@@ -28,7 +29,11 @@ async function main(): Promise<void> {
     }
   };
 
-  serve({ fetch: safeFetch, port: PORT });
+  serve({
+    fetch: safeFetch,
+    port: PORT,
+    websocket: { server: new WebSocketServer({ noServer: true }) },
+  });
   logger.info({ port: PORT, serviceDid: process.env.ATP_SERVICE_DID || 'did:web:localhost' }, 'HTTP server running');
 
   process.on('unhandledRejection', (reason) => {

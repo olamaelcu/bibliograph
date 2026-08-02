@@ -19,11 +19,12 @@
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.3",
+    "@atcute/cbor": "^2.3.6",
     "@atcute/client": "^5.1.1",
     "@atcute/lex-cli": "^3.2.1",
     "@atcute/lexicons": "^2.0.3",
+    "@atcute/uint8array": "^1.1.5",
     "@atcute/xrpc-server": "^2.0.2",
-    "@atcute/xrpc-server-node": "^2.1.1",
     "@atproto/tap": "^0.3.12",
     "@hono/node-server": "^2.0.12",
     "better-sqlite3": "^13.0.2",
@@ -31,12 +32,14 @@
     "hono": "^4.12.33",
     "pino": "^10.3.1",
     "tsx": "^4.23.1",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.1",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.1.2",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.10",
     "@vitest/ui": "^4.1.10",
     "drizzle-kit": "^0.31.10",

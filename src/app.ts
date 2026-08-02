@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { sql } from 'drizzle-orm';
 import { requestTracing } from './middleware.js';
+import { upgradeWebSocket } from '@hono/node-server';
+import { createSubscribeLabelsEvents } from './labeler-service.js';
 import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './api/get-book.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian, createShelf, addToShelf, removeFromShelf } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
@@ -185,6 +187,13 @@ export function createApp(): Hono {
   app.get('/xrpc/community.lexicon.book.searchBooks', searchBooksHandler);
   app.get('/xrpc/community.lexicon.book.getClaims', getClaims);
   app.get('/xrpc/community.lexicon.book.getLabelerLabels', getLabelerLabels);
+  app.get(
+    '/xrpc/com.atproto.label.subscribeLabels',
+    upgradeWebSocket((c) => {
+      const cursor = c.req.query('cursor');
+      return createSubscribeLabelsEvents()({ params: cursor !== undefined ? { cursor } : {} });
+    }),
+  );
   app.get('/xrpc/community.lexicon.book.getShelves', getShelves);
   app.get('/xrpc/community.lexicon.book.getShelf', getShelf);
   app.get('/xrpc/community.lexicon.book.getShelfItems', getShelfItems);

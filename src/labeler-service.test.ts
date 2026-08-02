@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { decode, decodeFirst } from '@atcute/cbor';
 
 vi.mock('./db/connection.js', async () => {
   const { default: Database } = await import('better-sqlite3');
@@ -20,7 +21,7 @@ const _s = schema;
 const _d = db as any;
 
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from './labeler.js';
-import { createSubscribeLabelsHandler } from './labeler-service.js';
+import { createSubscribeLabelsHandler, encodeSubscriptionFrame, createSubscribeLabelsEvents } from './labeler-service.js';
 
 function getSqlite() {
   return (_d.$sqlite) as InstanceType<typeof import('better-sqlite3')>;
@@ -145,3 +146,79 @@ describe('labeler-service', () => {
     expect(result.done).toBe(true);
   });
 });
+
+describe('encodeSubscriptionFrame', () => {
+  it('encodes a labels message as a CBOR frame with op:1 header', () => {
+    const message = {
+      $type: 'com.atproto.label.subscribeLabels#labels' as const,
+      seq: 3,
+      labels: [{
+        src: 'did:web:localhost',
+        uri: URI,
+        val: LABEL_AUTHOR,
+        cts: '2026-01-01T00:00:00Z',
+        neg: false,
+      }],
+    };
+
+    const frame = encodeSubscriptionFrame(message as Parameters<typeof encodeSubscriptionFrame>[0]);
+
+    const [header, rest] = decodeFirst(frame);
+    expect(header).toEqual({ op: 1, t: '#labels' });
+    const body = decode(rest);
+    expect(body).toEqual({
+      seq: 3,
+      labels: [{ src: 'did:web:localhost', uri: URI, val: LABEL_AUTHOR, cts: '2026-01-01T00:00:00Z', neg: false }],
+    });
+  });
+
+  it('encodes an info message with #info type and drops the $type field', () => {
+    const message = { $type: 'com.atproto.label.subscribeLabels#info' as const, name: 'OutdatedCursor' };
+
+    const frame = encodeSubscriptionFrame(message as Parameters<typeof encodeSubscriptionFrame>[0]);
+
+    const [header, rest] = decodeFirst(frame);
+    expect(header).toEqual({ op: 1, t: '#info' });
+    expect(decode(rest)).toEqual({ name: 'OutdatedCursor' });
+  });
+});
+
+describe('createSubscribeLabelsEvents', () => {
+  it('streams encoded frames to a connected websocket', async () => {
+    publishLabel('did:web:localhost', LABEL_AUTHOR, URI);
+
+    const sent: Uint8Array[] = [];
+    const fakeWs = {
+      send: (data: Uint8Array) => { sent.push(data); },
+      close: () => {},
+    };
+    const ctx = { params: {} };
+
+    const events = createSubscribeLabelsEvents({ pollIntervalMs: 10 });
+    const onOpen = events(ctx).onOpen!;
+    onOpen(new Event('open'), fakeWs as never);
+
+    await waitFor(() => sent.length > 0);
+
+    const [header, rest] = decodeFirst(sent[0]);
+    expect(header).toEqual({ op: 1, t: '#labels' });
+    const body = decode(rest);
+    expect(body.labels).toHaveLength(1);
+    expect(body.labels[0].val).toBe(LABEL_AUTHOR);
+  });
+});
+
+function waitFor(fn: () => boolean, timeoutMs = 2000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (fn()) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        clearInterval(timer);
+        reject(new Error('timed out waiting for condition'));
+      }
+    }, 5);
+  });
+}
