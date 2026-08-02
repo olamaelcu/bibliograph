@@ -205,4 +205,65 @@ describe('GoogleBooksProvider', () => {
       expect(result!.coverUrl).toBe('http://small.example.com');
     });
   });
+
+  describe('searchByAuthorName', () => {
+    it('returns mapped items and totalItems', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          totalItems: 2,
+          items: [
+            { id: 'v1', volumeInfo: { title: 'Dune', authors: ['Frank Herbert'], publishedDate: '1965' } },
+            { id: 'v2', volumeInfo: { title: 'Dune Messiah', authors: ['Frank Herbert'], publishedDate: '1969' } },
+          ],
+        }),
+      });
+
+      const result = await provider.searchByAuthorName('Frank Herbert');
+
+      expect(result).not.toBeNull();
+      expect(result!.totalItems).toBe(2);
+      expect(result!.items).toHaveLength(2);
+      expect(result!.items[0].title).toBe('Dune');
+      expect(result!.items[0].identifiers['googleBooks']).toBe('v1');
+    });
+
+    it('builds query with inauthor, startIndex, maxResults, and key', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ totalItems: 0, items: [] }),
+      });
+
+      await provider.searchByAuthorName('Frank Herbert', 40, 40);
+
+      const calledUrl = fetchMock.mock.calls[0][0] as string;
+      expect(calledUrl).toContain('inauthor:Frank%20Herbert');
+      expect(calledUrl).toContain('startIndex=40');
+      expect(calledUrl).toContain('maxResults=40');
+      expect(calledUrl).toContain('key=test-api-key');
+    });
+
+    it('returns empty result when no items', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ totalItems: 0 }),
+      });
+
+      const result = await provider.searchByAuthorName('Nobody');
+
+      expect(result).not.toBeNull();
+      expect(result!.items).toEqual([]);
+      expect(result!.totalItems).toBe(0);
+    });
+
+    it('returns null on error', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('fail'));
+      expect(await provider.searchByAuthorName('X')).toBeNull();
+    });
+
+    it('returns null when response not ok', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 403 });
+      expect(await provider.searchByAuthorName('X')).toBeNull();
+    });
+  });
 });

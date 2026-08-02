@@ -57,7 +57,7 @@ function readIsbns(path: string | undefined): string[] {
 async function main(): Promise<void> {
   const [cmd] = process.argv.slice(2);
   if (!cmd) {
-    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey>');
+    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | googlebooks [isbns.txt|-] | googlebooks:author <authorName>');
     process.exit(1);
   }
   if (cmd === 'tap') {
@@ -75,6 +75,17 @@ async function main(): Promise<void> {
     }
     const { backfillOpenLibraryAuthor } = await import('./openlibrary-backfill.js');
     await backfillOpenLibraryAuthor(db, authorKey);
+  } else if (cmd === 'googlebooks') {
+    const { backfillGoogleBooksFromIsbns } = await import('./googlebooks-backfill.js');
+    await backfillGoogleBooksFromIsbns(db, readIsbns(process.argv[3]));
+  } else if (cmd === 'googlebooks:author') {
+    const authorName = process.argv[3];
+    if (!authorName) {
+      console.error('usage: backfill googlebooks:author <authorName>');
+      process.exit(1);
+    }
+    const { backfillGoogleBooksAuthor } = await import('./googlebooks-backfill.js');
+    await backfillGoogleBooksAuthor(db, authorName);
   } else {
     console.error(`unknown command: ${cmd}`);
     process.exit(1);

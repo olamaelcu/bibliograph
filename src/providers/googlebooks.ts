@@ -27,7 +27,13 @@ interface GoogleVolumeItem {
 }
 
 interface GoogleSearchResponse {
+  totalItems?: number;
   items?: GoogleVolumeItem[];
+}
+
+export interface GoogleAuthorSearchResult {
+  items: BookData[];
+  totalItems: number;
 }
 
 // biome-ignore lint/complexity/noStaticOnlyClass: implements BookProvider interface
@@ -90,6 +96,29 @@ export class GoogleBooksProvider implements BookProvider {
 
       const item = (await response.json()) as GoogleVolumeItem;
       return this.mapItemToBookData(item);
+    } catch {
+      return null;
+    }
+  }
+
+  async searchByAuthorName(
+    name: string,
+    startIndex = 0,
+    maxResults = 40,
+  ): Promise<GoogleAuthorSearchResult | null> {
+    try {
+      const url = `${BASE_URL}?q=inauthor:${encodeURIComponent(name)}&startIndex=${startIndex}&maxResults=${maxResults}&key=${this.#apiKey}`;
+      const response = await fetch(url);
+
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as GoogleSearchResponse;
+      const items = data.items ?? [];
+
+      return {
+        items: items.map((item) => this.mapItemToBookData(item)),
+        totalItems: data.totalItems ?? 0,
+      };
     } catch {
       return null;
     }

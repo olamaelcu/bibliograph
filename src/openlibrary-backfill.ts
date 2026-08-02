@@ -1,66 +1,10 @@
-import { eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './db/schema.js';
-import { generateRkey } from './rkey.js';
 import { OpenLibraryProvider, type AuthorSearchResult } from './providers/openlibrary.js';
-import type { BookData } from './providers/interface.js';
+import { importBookData, type BackfillSummary } from './backfill-import.js';
 import { logger } from './logger.js';
 
-const SERVICE_DID = process.env.ATP_SERVICE_DID || 'did:web:localhost';
-
-export interface BackfillSummary {
-  imported: number;
-  skipped: number;
-  notFound: number;
-  failed: number;
-}
-
-type InsertOutcome = 'imported' | 'skipped' | 'failed';
-
-async function importBookData(
-  db: BetterSQLite3Database<typeof schema>,
-  data: BookData,
-  seen: Set<string>,
-): Promise<InsertOutcome> {
-  const canonical = data.isbn13 || data.isbn10;
-  const workKey = data.identifiers['openlibrary'];
-  const dedupKey = workKey || canonical;
-  if (dedupKey) {
-    if (seen.has(dedupKey)) return 'skipped';
-    seen.add(dedupKey);
-  }
-
-  if (canonical) {
-    const existing = await db.query.books.findFirst({ where: eq(schema.books.isbn, canonical) });
-    if (existing) return 'skipped';
-  }
-
-  const now = new Date().toISOString();
-  const uri = `at://${SERVICE_DID}/community.lexicon.book.book/${generateRkey()}`;
-  try {
-    await db.insert(schema.books).values({
-      uri,
-      did: SERVICE_DID,
-      title: data.title,
-      author: data.author,
-      isbn: canonical,
-      publishedDate: data.publishedDate,
-      description: data.description,
-      pageCount: data.pageCount,
-      language: data.language,
-      categories: data.categories || [],
-      identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
-      coverUrl: data.coverUrl,
-      status: 'active',
-      createdAt: now,
-      updatedAt: now,
-    }).run();
-    return 'imported';
-  } catch (err) {
-    logger.error({ err, uri }, 'openlibrary: import failed');
-    return 'failed';
-  }
-}
+export type { BackfillSummary };
 
 export async function backfillOpenLibraryFromIsbns(
   db: BetterSQLite3Database<typeof schema>,
@@ -81,7 +25,7 @@ export async function backfillOpenLibraryFromIsbns(
       continue;
     }
 
-    const outcome = await importBookData(db, data, seen);
+    const outcome = await importBookData(db, data, seen, 'openlibrary');
     if (outcome === 'imported') {
       summary.imported += 1;
       logger.info({ isbn }, 'openlibrary: imported');
@@ -128,7 +72,7 @@ export async function backfillOpenLibraryAuthor(
     total = result.total;
 
     for (const doc of result.docs) {
-      const outcome = await importBookData(db, doc, seen);
+      const outcome = await importBookData(db, doc, seen, 'openlibrary');
       if (outcome === 'imported') {
         summary.imported += 1;
         logger.info({ authorKey, title: doc.title }, 'openlibrary: author book imported');
