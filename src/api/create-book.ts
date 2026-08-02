@@ -5,6 +5,7 @@ import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
 import { HttpError } from '../errors.js';
 import { OpenLibraryProvider } from '../providers/openlibrary.js';
+import { generateRkey } from '../rkey.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput, CreateShelfInput, AddToShelfInput, RemoveFromShelfInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
@@ -807,13 +808,4 @@ export async function revokeLibrarian(c: Context): Promise<Response> {
 
   log.info({ targetDid }, 'revokeLibrarian complete');
   return c.json({ ok: true, librarian: targetDid });
-}
-
-function generateRkey(): string {
-  const chars = '234567abcdefghijklmnopqrstuvwxyz';
-  let result = '';
-  for (let i = 0; i < 13; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return result;
 }
