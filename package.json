@@ -13,7 +13,8 @@
     "lex:generate": "lex-cli generate",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "release": "tsx src/release.ts"
+    "release": "tsx src/release.ts",
+    "backfill": "tsx src/backfill.ts"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.3",
