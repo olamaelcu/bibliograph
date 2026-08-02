@@ -5,6 +5,7 @@ import { requestTracing } from './middleware.js';
 import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels } from './api/get-book.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
+import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
 import { OpenLibraryProvider } from './providers/openlibrary.js';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
@@ -165,6 +166,10 @@ export function createApp(): Hono {
 
   // Health check
   app.get('/health', (c) => c.json({ status: 'ok', version: '0.0.1' }));
+
+  // Lexicon serving endpoints for remote validation
+  app.get('/lexicon/:nsid', serveLexicon);
+  app.get('/lexicon-hashes.json', serveLexiconHashes);
 
   // Query endpoints (GET /xrpc/...)
   app.get('/xrpc/community.lexicon.book.getBook', getBook);

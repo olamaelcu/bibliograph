@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   };
 
   serve({ fetch: safeFetch, port: PORT });
-  logger.info({ port: PORT }, 'HTTP server running');
+  logger.info({ port: PORT, serviceDid: process.env.ATP_SERVICE_DID || 'did:web:localhost' }, 'HTTP server running');
 
   process.on('unhandledRejection', (reason) => {
     logger.fatal({ reason }, 'unhandledRejection');
