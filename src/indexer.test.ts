@@ -1,0 +1,265 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('./db/connection.js', async () => {
+  const { default: Database } = await import('better-sqlite3');
+  const { drizzle } = await import('drizzle-orm/better-sqlite3');
+  const schema = await import('./db/schema.js');
+  const { migrate } = await import('drizzle-orm/better-sqlite3/migrator');
+
+  const sqlite = new Database(':memory:');
+  sqlite.pragma('foreign_keys = ON');
+  const db = drizzle(sqlite, { schema });
+  migrate(db, { migrationsFolder: './drizzle' });
+
+  (db as any).$sqlite = sqlite;
+  return { db, schema };
+});
+
+import { db, schema } from './db/connection.js';
+const _s = schema;
+const _d = db as any;
+
+import { handleRecordEvent } from './indexer.js';
+import type { TapRecordEvent } from './indexer.js';
+
+function getSqlite() {
+  return _d.$sqlite as import('better-sqlite3').default;
+}
+
+function clearTables() {
+  const sqlite = getSqlite();
+  const tables = (sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
+    .filter(t => !t.name.startsWith('sqlite_') && !t.name.startsWith('__drizzle'));
+  for (const t of tables) {
+    try { sqlite.prepare(`DELETE FROM "${t.name}"`).run(); } catch {}
+  }
+}
+
+function makeEvent(
+  overrides: Partial<TapRecordEvent> = {},
+): TapRecordEvent {
+  return {
+    type: 'record',
+    action: 'create',
+    did: 'did:plc:test',
+    rev: 'rev1',
+    collection: 'community.lexicon.book.book',
+    rkey: 'book001',
+    record: {
+      $type: 'community.lexicon.book.book',
+      title: 'Test Book',
+      author: 'Test Author',
+      isbn: '9781234567890',
+      status: 'active',
+      createdAt: new Date().toISOString(),
+    },
+    cid: 'cid123',
+    live: false,
+    ...overrides,
+  };
+}
+
+describe('indexer', () => {
+  beforeEach(() => {
+    clearTables();
+  });
+
+  describe('book indexing', () => {
+    it('creates a book record on create event', async () => {
+      await handleRecordEvent(makeEvent());
+
+      const rows = db.select().from(_s.books).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].uri).toBe('at://did:plc:test/community.lexicon.book.book/book001');
+      expect(rows[0].title).toBe('Test Book');
+      expect(rows[0].status).toBe('active');
+    });
+
+    it('updates a book record on update event', async () => {
+      await handleRecordEvent(makeEvent());
+
+      await handleRecordEvent(makeEvent({
+        action: 'update',
+        record: {
+          $type: 'community.lexicon.book.book',
+          title: 'Updated Title',
+          author: 'Updated Author',
+          isbn: '9781234567890',
+          status: 'active',
+          createdAt: new Date().toISOString(),
+        },
+      }));
+
+      const rows = db.select().from(_s.books).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].title).toBe('Updated Title');
+    });
+
+    it('deletes a book record on delete event', async () => {
+      await handleRecordEvent(makeEvent());
+
+      await handleRecordEvent(makeEvent({
+        action: 'delete',
+        record: undefined,
+      }));
+
+      const rows = db.select().from(_s.books).all();
+      expect(rows).toHaveLength(0);
+    });
+
+    it('defaults status to "pending" when not provided', async () => {
+      await handleRecordEvent(makeEvent({
+        record: {
+          $type: 'community.lexicon.book.book',
+          title: 'No Status Book',
+          author: 'Author',
+          createdAt: new Date().toISOString(),
+        },
+      }));
+
+      const rows = db.select().from(_s.books).all();
+      expect(rows[0].status).toBe('pending');
+    });
+
+    it('skips indexing when record is missing', async () => {
+      await handleRecordEvent(makeEvent({ record: undefined }));
+
+      const rows = db.select().from(_s.books).all();
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe('review indexing', () => {
+    it('indexes a review', async () => {
+      await handleRecordEvent(makeEvent());
+
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:reviewer', rev: 'rev2',
+        collection: 'community.lexicon.book.review', rkey: 'rev001',
+        record: {
+          $type: 'community.lexicon.book.review',
+          bookUri: 'at://did:plc:test/community.lexicon.book.book/book001',
+          text: 'Great book!',
+          rating: 5,
+          bookRef: { title: 'Test Book', author: 'Test Author' },
+          createdAt: new Date().toISOString(),
+        },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.reviews).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].text).toBe('Great book!');
+      expect(rows[0].bookTitle).toBe('Test Book');
+      expect(rows[0].bookAuthor).toBe('Test Author');
+    });
+
+    it('deletes a review', async () => {
+      await handleRecordEvent(makeEvent());
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:r', rev: 'r1',
+        collection: 'community.lexicon.book.review', rkey: 'rev001',
+        record: { $type: 'community.lexicon.book.review', bookUri: 'at://did:plc:test/community.lexicon.book.book/book001', text: 'Nice', bookRef: { title: 'T', author: 'A' }, createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      await handleRecordEvent({
+        type: 'record', action: 'delete', did: 'did:plc:r', rev: 'r2',
+        collection: 'community.lexicon.book.review', rkey: 'rev001',
+        record: undefined, live: false,
+      });
+
+      const rows = db.select().from(_s.reviews).all();
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe('status indexing', () => {
+    it('indexes a reading status', async () => {
+      await handleRecordEvent(makeEvent());
+
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:reader', rev: 'r1',
+        collection: 'community.lexicon.book.status', rkey: 'stat001',
+        record: {
+          $type: 'community.lexicon.book.status',
+          bookUri: 'at://did:plc:test/community.lexicon.book.book/book001',
+          status: 'reading',
+          progress: 50,
+          bookRef: { title: 'Test Book', author: 'Test Author' },
+          createdAt: new Date().toISOString(),
+        },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.readingStatuses).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('reading');
+      expect(rows[0].progress).toBe(50);
+    });
+
+    it('deletes a reading status', async () => {
+      await handleRecordEvent(makeEvent());
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:reader', rev: 'r1',
+        collection: 'community.lexicon.book.status', rkey: 'stat001',
+        record: { $type: 'community.lexicon.book.status', bookUri: 'at://did:plc:test/community.lexicon.book.book/book001', status: 'to-read', bookRef: { title: 'T', author: 'A' }, createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      await handleRecordEvent({
+        type: 'record', action: 'delete', did: 'did:plc:reader', rev: 'r2',
+        collection: 'community.lexicon.book.status', rkey: 'stat001',
+        record: undefined, live: false,
+      });
+
+      const rows = db.select().from(_s.readingStatuses).all();
+      expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe('claim indexing', () => {
+    it('indexes a claim', async () => {
+      await handleRecordEvent(makeEvent());
+
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:author', rev: 'r1',
+        collection: 'community.lexicon.book.claim', rkey: 'clm001',
+        record: {
+          $type: 'community.lexicon.book.claim',
+          bookUri: 'at://did:plc:test/community.lexicon.book.book/book001',
+          identifier: '9781234567890',
+          identifierType: 'isbn',
+          claimedBy: 'did:plc:author',
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.claims).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].identifierType).toBe('isbn');
+      expect(rows[0].status).toBe('pending');
+    });
+
+    it('deletes a claim', async () => {
+      await handleRecordEvent(makeEvent());
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:a', rev: 'r1',
+        collection: 'community.lexicon.book.claim', rkey: 'clm001',
+        record: { $type: 'community.lexicon.book.claim', bookUri: 'at://did:plc:test/community.lexicon.book.book/book001', identifier: 'x', identifierType: 'isbn', claimedBy: 'did:plc:a', status: 'pending', createdAt: new Date().toISOString() },
+        live: false,
+      });
+
+      await handleRecordEvent({
+        type: 'record', action: 'delete', did: 'did:plc:a', rev: 'r2',
+        collection: 'community.lexicon.book.claim', rkey: 'clm001',
+        record: undefined, live: false,
+      });
+
+      const rows = db.select().from(_s.claims).all();
+      expect(rows).toHaveLength(0);
+    });
+  });
+});
