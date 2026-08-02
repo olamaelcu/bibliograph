@@ -72,7 +72,9 @@ export function hasLabel(
     .all();
 
   const n = rows[0]?.n ?? 0;
-  return Number(n) > 0;
+  const exists = Number(n) > 0;
+  logger.debug({ uri, val, exists }, 'label checked');
+  return exists;
 }
 
 export interface LabelEntry {
@@ -98,6 +100,8 @@ export function getLabels(
     .from(bookLabels)
     .where(and(...conditions))
     .all();
+
+  logger.debug({ uri, count: rows.length }, 'labels fetched');
 
   return rows.map((r) => ({
     src: r.src,
@@ -135,6 +139,8 @@ export function getLabelEvents(afterId?: number): LabelEventEntry[] {
     .orderBy(labelEvents.id)
     .all();
 
+  logger.debug({ afterId, count: rows.length }, 'label events fetched');
+
   return rows.map((r) => ({
     id: r.id,
     src: r.src,
@@ -155,6 +161,8 @@ export function getActiveLabels(): LabelEntry[] {
     .from(bookLabels)
     .where(eq(bookLabels.neg, 0))
     .all();
+
+  logger.debug({ count: rows.length }, 'active labels fetched');
 
   return rows.map((r) => ({
     src: r.src,

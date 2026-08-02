@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { decode, decodeFirst } from '@atcute/cbor';
 
+vi.mock('./logger.js', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
 vi.mock('./db/connection.js', async () => {
   const { default: Database } = await import('better-sqlite3');
   const { drizzle } = await import('drizzle-orm/better-sqlite3');
@@ -22,6 +32,7 @@ const _d = db as any;
 
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from './labeler.js';
 import { createSubscribeLabelsHandler, encodeSubscriptionFrame, createSubscribeLabelsEvents } from './labeler-service.js';
+import { logger } from './logger.js';
 
 function getSqlite() {
   return (_d.$sqlite) as InstanceType<typeof import('better-sqlite3')>;
@@ -205,6 +216,31 @@ describe('createSubscribeLabelsEvents', () => {
     const body = decode(rest);
     expect(body.labels).toHaveLength(1);
     expect(body.labels[0].val).toBe(LABEL_AUTHOR);
+  });
+
+  it('logs when a websocket connects with a cursor', () => {
+    const fakeWs = { send: () => {}, close: () => {} };
+    const ctx = { params: { cursor: '42' } };
+
+    const events = createSubscribeLabelsEvents({ pollIntervalMs: 10 });
+    events(ctx).onOpen!(new Event('open'), fakeWs as never);
+
+    expect(logger.info).toHaveBeenCalledWith({ cursor: 42 }, 'subscribeLabels client connected');
+  });
+
+  it('logs when a websocket disconnects', () => {
+    const events = createSubscribeLabelsEvents({ pollIntervalMs: 10 });
+    events({ params: {} }).onClose!(new CloseEvent('close') as never);
+
+    expect(logger.info).toHaveBeenCalledWith({}, 'subscribeLabels client closed');
+  });
+
+  it('logs an error when a websocket errors', () => {
+    const events = createSubscribeLabelsEvents({ pollIntervalMs: 10 });
+    const evt = new ErrorEvent('error', { error: new Error('boom') });
+    events({ params: {} }).onError!(evt as never);
+
+    expect(logger.error).toHaveBeenCalledWith({ err: evt }, 'subscribeLabels client error');
   });
 });
 

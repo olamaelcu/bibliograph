@@ -153,8 +153,8 @@ export function createSubscribeLabelsEvents(
   options: LabelerServiceOptions = {},
 ): (ctx: { params: Record<string, unknown> }) => {
   onOpen: (evt: Event, ws: { send(data: Uint8Array<ArrayBuffer>): void; close(code?: number, reason?: string): void }) => void;
-  onClose: () => void;
-  onError: () => void;
+  onClose: (evt: CloseEvent) => void;
+  onError: (evt: Event) => void;
 } {
   return (ctx) => {
     const controller = new AbortController();
@@ -168,6 +168,7 @@ export function createSubscribeLabelsEvents(
 
     return {
       onOpen(_evt, ws) {
+        logger.info({ cursor: cursor !== undefined ? Number(cursor) : undefined }, 'subscribeLabels client connected');
         (async () => {
           for (;;) {
             const { value, done } = await iterator.next();
@@ -178,10 +179,12 @@ export function createSubscribeLabelsEvents(
           logger.error({ err }, 'subscribeLabels stream error');
         });
       },
-      onClose() {
+      onClose(_evt) {
+        logger.info({}, 'subscribeLabels client closed');
         controller.abort();
       },
-      onError() {
+      onError(evt) {
+        logger.error({ err: evt }, 'subscribeLabels client error');
         controller.abort();
       },
     };

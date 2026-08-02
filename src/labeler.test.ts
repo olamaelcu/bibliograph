@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+vi.mock('./logger.js', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    fatal: vi.fn(),
+  },
+}));
+
 vi.mock('./db/connection.js', async () => {
   const { default: Database } = await import('better-sqlite3');
   const { drizzle } = await import('drizzle-orm/better-sqlite3');
@@ -21,6 +31,7 @@ const _d = db as any;
 
 import { publishLabel, negateLabel, hasLabel, getLabels, LABEL_AUTHOR, LABEL_LIBRARIAN } from './labeler.js';
 import { getLabelEvents, getActiveLabels } from './labeler.js';
+import { logger } from './logger.js';
 
 function getSqlite() {
   return (_d.$sqlite) as InstanceType<typeof import('better-sqlite3')>;
@@ -207,6 +218,60 @@ describe('labeler', () => {
       expect(labels).toHaveLength(2);
       expect(labels.some((l) => l.val === LABEL_AUTHOR)).toBe(true);
       expect(labels.some((l) => l.uri === 'did:web:librarian')).toBe(true);
+    });
+  });
+
+  describe('logging', () => {
+    beforeEach(() => {
+      vi.mocked(logger.debug).mockClear();
+      vi.mocked(logger.info).mockClear();
+    });
+
+    it('logs at info when a label is published', () => {
+      publishLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+      expect(logger.info).toHaveBeenCalledWith(
+        { src: 'did:web:localhost', val: LABEL_AUTHOR, uri: 'at://did:plc:test/community.lexicon.book.book/test001' },
+        'label published',
+      );
+    });
+
+    it('logs at info when a label is negated', () => {
+      publishLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+      vi.mocked(logger.info).mockClear();
+      negateLabel('did:web:localhost', LABEL_AUTHOR, 'at://did:plc:test/community.lexicon.book.book/test001');
+      expect(logger.info).toHaveBeenCalledWith(
+        { src: 'did:web:localhost', val: LABEL_AUTHOR, uri: 'at://did:plc:test/community.lexicon.book.book/test001' },
+        'label negated',
+      );
+    });
+
+    it('logs at debug when checking for a label', () => {
+      hasLabel('at://did:plc:test/community.lexicon.book.book/test001', LABEL_AUTHOR);
+      expect(logger.debug).toHaveBeenCalledWith(
+        { uri: 'at://did:plc:test/community.lexicon.book.book/test001', val: LABEL_AUTHOR, exists: false },
+        'label checked',
+      );
+    });
+
+    it('logs at debug when fetching labels for a URI', () => {
+      getLabels('at://did:plc:test/community.lexicon.book.book/test001');
+      expect(logger.debug).toHaveBeenCalledWith(
+        { uri: 'at://did:plc:test/community.lexicon.book.book/test001', count: 0 },
+        'labels fetched',
+      );
+    });
+
+    it('logs at debug when fetching label events', () => {
+      getLabelEvents();
+      expect(logger.debug).toHaveBeenCalledWith(
+        { afterId: undefined, count: 0 },
+        'label events fetched',
+      );
+    });
+
+    it('logs at debug when fetching active labels', () => {
+      getActiveLabels();
+      expect(logger.debug).toHaveBeenCalledWith({ count: 0 }, 'active labels fetched');
     });
   });
 });
