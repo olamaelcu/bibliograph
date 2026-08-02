@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "release": "tsx src/release.ts",
-    "backfill": "tsx src/backfill.ts"
+    "backfill": "tsx src/backfill.ts",
+    "labeler": "tsx src/labeler-service.ts"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.3",
