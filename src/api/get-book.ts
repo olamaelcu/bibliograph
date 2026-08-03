@@ -3,7 +3,7 @@ import { and, eq, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
 import { parsePagination, nextCursor } from '../pagination.js';
-import type { GetBookParams, GetBooksParams, GetReviewsParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams, GetShelvesParams, GetShelfParams, GetShelfItemsParams } from '../types.js';
+import type { GetBookParams, GetBooksParams, GetReviewsParams, GetReviewParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams, GetShelvesParams, GetShelfParams, GetShelfItemsParams } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
 
@@ -96,6 +96,48 @@ export async function getReviews(c: Context): Promise<Response> {
       },
     })),
     cursor: cursorOut,
+  });
+}
+
+export async function getReview(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const { uri, did, bookUri } = c.req.query();
+
+  let where;
+  if (uri) {
+    where = eq(reviews.uri, uri);
+  } else if (did && bookUri) {
+    where = and(eq(reviews.did, did), eq(reviews.bookUri, bookUri));
+  } else {
+    log.warn('getReview rejected: uri or did+bookUri required');
+    return c.json({ error: 'InvalidRequest', message: 'uri or did+bookUri is required' }, 400);
+  }
+
+  log.info({ uri, did, bookUri }, 'handling getReview');
+
+  const review = await db.query.reviews.findFirst({ where });
+  if (!review) {
+    log.info({ found: false }, 'getReview complete');
+    return c.json({ error: 'NotFound', message: 'Review not found' }, 404);
+  }
+
+  log.info({ found: true }, 'getReview complete');
+  return c.json({
+    uri: review.uri,
+    did: review.did,
+    record: {
+      $type: 'community.lexicon.book.review',
+      bookUri: review.bookUri,
+      text: review.text,
+      rating: review.rating,
+      bookRef: {
+        uri: review.bookUri,
+        title: review.bookTitle,
+        author: review.bookAuthor,
+      },
+      createdAt: review.createdAt,
+    },
+    cid: review.cid ?? undefined,
   });
 }
 

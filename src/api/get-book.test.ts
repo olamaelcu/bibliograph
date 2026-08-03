@@ -20,7 +20,7 @@ import { clearSqliteTables } from '../test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
-import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './get-book.js';
+import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './get-book.js';
 
 function getSqlite() {
   return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
@@ -158,6 +158,102 @@ describe('api/get-book', () => {
       const body = await readJson(res);
       expect(body.reviews).toHaveLength(1);
       expect(body.reviews[0].record.text).toBe('Great book!');
+    });
+  });
+
+  describe('getReview', () => {
+    function seedReview(overrides: Partial<typeof _s.reviews.$inferInsert> = {}) {
+      db.insert(_s.reviews).values({
+        uri: 'at://did:plc:r/review/1',
+        did: 'did:plc:r',
+        bookUri: 'at://did:plc:author/book/test001',
+        text: 'Great book!',
+        rating: 5,
+        cid: 'bafyreicid111',
+        bookTitle: 'Test Book',
+        bookAuthor: 'Test Author',
+        createdAt: new Date().toISOString(),
+        ...overrides,
+      }).run();
+    }
+
+    it('returns 400 when neither uri nor did+bookUri is provided', async () => {
+      const c = mockContext();
+      const res = await getReview(c);
+      expect(res.status).toBe(400);
+      const body = await readJson(res);
+      expect(body.error).toBe('InvalidRequest');
+    });
+
+    it('returns 400 when only did is provided', async () => {
+      const c = mockContext({ query: { did: 'did:plc:r' } });
+      const res = await getReview(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 400 when only bookUri is provided', async () => {
+      const c = mockContext({ query: { bookUri: 'at://did:plc:author/book/test001' } });
+      const res = await getReview(c);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 when review is not found', async () => {
+      seedBook();
+      const c = mockContext({ query: { uri: 'at://did:plc:r/review/nope' } });
+      const res = await getReview(c);
+      expect(res.status).toBe(404);
+    });
+
+    it('returns a review by uri', async () => {
+      seedBook();
+      seedReview();
+      const c = mockContext({ query: { uri: 'at://did:plc:r/review/1' } });
+      const res = await getReview(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.uri).toBe('at://did:plc:r/review/1');
+      expect(body.did).toBe('did:plc:r');
+      expect(body.cid).toBe('bafyreicid111');
+      expect(body.record.text).toBe('Great book!');
+      expect(body.record.bookRef).toEqual({
+        uri: 'at://did:plc:author/book/test001',
+        title: 'Test Book',
+        author: 'Test Author',
+      });
+    });
+
+    it('returns a review by did+bookUri', async () => {
+      seedBook();
+      seedReview();
+      const c = mockContext({
+        query: {
+          did: 'did:plc:r',
+          bookUri: 'at://did:plc:author/book/test001',
+        },
+      });
+      const res = await getReview(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.uri).toBe('at://did:plc:r/review/1');
+      expect(body.record.text).toBe('Great book!');
+    });
+
+    it('gives uri precedence when both uri and did+bookUri are provided', async () => {
+      seedBook();
+      seedReview();
+      seedReview({ uri: 'at://did:plc:r/review/2', did: 'did:plc:r', cid: 'bafyreicid222' });
+      const c = mockContext({
+        query: {
+          uri: 'at://did:plc:r/review/2',
+          did: 'did:plc:r',
+          bookUri: 'at://did:plc:author/book/test001',
+        },
+      });
+      const res = await getReview(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.uri).toBe('at://did:plc:r/review/2');
+      expect(body.cid).toBe('bafyreicid222');
     });
   });
 
