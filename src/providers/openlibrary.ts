@@ -1,4 +1,5 @@
 import type { BookData, BookProvider } from "./interface.js";
+import { BaseBookProvider } from "./base-provider.js";
 
 const BASE_URL = "https://openlibrary.org";
 const USER_AGENT = "bibliograph-app/0.1 (contact@example.org)";
@@ -11,53 +12,37 @@ export interface AuthorSearchResult {
 }
 
 // biome-ignore lint/complexity/noStaticOnlyClass: implements BookProvider interface
-export class OpenLibraryProvider implements BookProvider {
+export class OpenLibraryProvider extends BaseBookProvider implements BookProvider {
   getName(): string {
     return "Open Library";
   }
 
   async searchByIsbn(isbn: string): Promise<BookData | null> {
-    try {
-      const response = await fetch(
-        `${BASE_URL}/search.json?q=isbn:${encodeURIComponent(isbn)}&limit=1`,
-        { headers: { "User-Agent": USER_AGENT } },
-      );
+    const data = await this.fetchJson<{ docs?: unknown[] }>(
+      `${BASE_URL}/search.json?q=isbn:${encodeURIComponent(isbn)}&limit=1`,
+      { headers: { "User-Agent": USER_AGENT } },
+    );
+    const docs = data?.docs;
+    if (!docs || docs.length === 0) return null;
 
-      if (!response.ok) return null;
-
-      const data = (await response.json()) as { docs?: unknown[] };
-      const docs = data.docs;
-      if (!docs || docs.length === 0) return null;
-
-      return this.mapDocToBookData(docs[0] as Record<string, unknown>);
-    } catch {
-      return null;
-    }
+    return this.mapDocToBookData(docs[0] as Record<string, unknown>);
   }
 
   async searchByTitle(title: string, author?: string): Promise<BookData[]> {
-    try {
-      let url = `${BASE_URL}/search.json?title=${encodeURIComponent(title)}&limit=10`;
-      if (author) {
-        url += `&author=${encodeURIComponent(author)}`;
-      }
-
-      const response = await fetch(url, {
-        headers: { "User-Agent": USER_AGENT },
-      });
-
-      if (!response.ok) return [];
-
-      const data = (await response.json()) as { docs?: unknown[] };
-      const docs = data.docs;
-      if (!docs || docs.length === 0) return [];
-
-      return docs.map((doc) =>
-        this.mapDocToBookData(doc as Record<string, unknown>),
-      );
-    } catch {
-      return [];
+    let url = `${BASE_URL}/search.json?title=${encodeURIComponent(title)}&limit=10`;
+    if (author) {
+      url += `&author=${encodeURIComponent(author)}`;
     }
+
+    const data = await this.fetchJson<{ docs?: unknown[] }>(url, {
+      headers: { "User-Agent": USER_AGENT },
+    });
+    const docs = data?.docs;
+    if (!docs || docs.length === 0) return [];
+
+    return docs.map((doc) =>
+      this.mapDocToBookData(doc as Record<string, unknown>),
+    );
   }
 
   async searchByAuthorKey(
@@ -65,54 +50,40 @@ export class OpenLibraryProvider implements BookProvider {
     page = 1,
     limit = 100,
   ): Promise<AuthorSearchResult | null> {
-    try {
-      const url = `${BASE_URL}/search.json?author_key=${encodeURIComponent(authorKey)}&page=${page}&limit=${limit}`;
-      const response = await fetch(url, {
-        headers: { "User-Agent": USER_AGENT },
-      });
+    const url = `${BASE_URL}/search.json?author_key=${encodeURIComponent(authorKey)}&page=${page}&limit=${limit}`;
+    const data = await this.fetchJson<{ numFound?: number; docs?: unknown[] }>(url, {
+      headers: { "User-Agent": USER_AGENT },
+    });
+    const docs = data?.docs;
+    if (!docs) return null;
 
-      if (!response.ok) return null;
-
-      const data = (await response.json()) as { numFound?: number; docs?: unknown[] };
-      const docs = data.docs;
-      if (!docs) return null;
-
-      return {
-        docs: docs.map((doc) =>
-          this.mapDocToBookData(doc as Record<string, unknown>),
-        ),
-        total: data.numFound ?? 0,
-        page,
-        limit,
-      };
-    } catch {
-      return null;
-    }
+    return {
+      docs: docs.map((doc) =>
+        this.mapDocToBookData(doc as Record<string, unknown>),
+      ),
+      total: data.numFound ?? 0,
+      page,
+      limit,
+    };
   }
 
   async getBookDetails(id: string): Promise<BookData | null> {
-    try {
-      let url: string;
-      if (id.startsWith("OL") && id.endsWith("W")) {
-        url = `${BASE_URL}/works/${encodeURIComponent(id)}.json`;
-      } else if (id.startsWith("OL") && id.endsWith("M")) {
-        url = `${BASE_URL}/books/${encodeURIComponent(id)}.json`;
-      } else {
-        // Default to works endpoint
-        url = `${BASE_URL}/works/${encodeURIComponent(id)}.json`;
-      }
-
-      const response = await fetch(url, {
-        headers: { "User-Agent": USER_AGENT },
-      });
-
-      if (!response.ok) return null;
-
-      const doc = (await response.json()) as Record<string, unknown>;
-      return this.mapDocToBookData(doc);
-    } catch {
-      return null;
+    let url: string;
+    if (id.startsWith("OL") && id.endsWith("W")) {
+      url = `${BASE_URL}/works/${encodeURIComponent(id)}.json`;
+    } else if (id.startsWith("OL") && id.endsWith("M")) {
+      url = `${BASE_URL}/books/${encodeURIComponent(id)}.json`;
+    } else {
+      // Default to works endpoint
+      url = `${BASE_URL}/works/${encodeURIComponent(id)}.json`;
     }
+
+    const doc = await this.fetchJson<Record<string, unknown>>(url, {
+      headers: { "User-Agent": USER_AGENT },
+    });
+    if (!doc) return null;
+
+    return this.mapDocToBookData(doc);
   }
 
   private mapDocToBookData(doc: Record<string, unknown>): BookData {

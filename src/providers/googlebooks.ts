@@ -1,4 +1,5 @@
 import type { BookData, BookProvider } from "./interface.js";
+import { BaseBookProvider } from "./base-provider.js";
 
 const BASE_URL = "https://www.googleapis.com/books/v1/volumes";
 
@@ -37,10 +38,11 @@ export interface GoogleAuthorSearchResult {
 }
 
 // biome-ignore lint/complexity/noStaticOnlyClass: implements BookProvider interface
-export class GoogleBooksProvider implements BookProvider {
+export class GoogleBooksProvider extends BaseBookProvider implements BookProvider {
   #apiKey: string;
 
   constructor(apiKey: string) {
+    super();
     this.#apiKey = apiKey;
   }
 
@@ -49,56 +51,34 @@ export class GoogleBooksProvider implements BookProvider {
   }
 
   async searchByIsbn(isbn: string): Promise<BookData | null> {
-    try {
-      const url = `${BASE_URL}?q=isbn:${encodeURIComponent(isbn)}&key=${this.#apiKey}&maxResults=1`;
-      const response = await fetch(url);
+    const url = `${BASE_URL}?q=isbn:${encodeURIComponent(isbn)}&key=${this.#apiKey}&maxResults=1`;
+    const data = await this.fetchJson<GoogleSearchResponse>(url);
+    const items = data?.items;
+    if (!items || items.length === 0) return null;
 
-      if (!response.ok) return null;
-
-      const data = (await response.json()) as GoogleSearchResponse;
-      const items = data.items;
-      if (!items || items.length === 0) return null;
-
-      return this.mapItemToBookData(items[0]);
-    } catch {
-      return null;
-    }
+    return this.mapItemToBookData(items[0]);
   }
 
   async searchByTitle(title: string, author?: string): Promise<BookData[]> {
-    try {
-      let query = `intitle:${encodeURIComponent(title)}`;
-      if (author) {
-        query += `+inauthor:${encodeURIComponent(author)}`;
-      }
-
-      const url = `${BASE_URL}?q=${query}&key=${this.#apiKey}&maxResults=10`;
-      const response = await fetch(url);
-
-      if (!response.ok) return [];
-
-      const data = (await response.json()) as GoogleSearchResponse;
-      const items = data.items;
-      if (!items || items.length === 0) return [];
-
-      return items.map((item) => this.mapItemToBookData(item));
-    } catch {
-      return [];
+    let query = `intitle:${encodeURIComponent(title)}`;
+    if (author) {
+      query += `+inauthor:${encodeURIComponent(author)}`;
     }
+
+    const url = `${BASE_URL}?q=${query}&key=${this.#apiKey}&maxResults=10`;
+    const data = await this.fetchJson<GoogleSearchResponse>(url);
+    const items = data?.items;
+    if (!items || items.length === 0) return [];
+
+    return items.map((item) => this.mapItemToBookData(item));
   }
 
   async getBookDetails(id: string): Promise<BookData | null> {
-    try {
-      const url = `${BASE_URL}/${encodeURIComponent(id)}?key=${this.#apiKey}`;
-      const response = await fetch(url);
+    const url = `${BASE_URL}/${encodeURIComponent(id)}?key=${this.#apiKey}`;
+    const item = await this.fetchJson<GoogleVolumeItem>(url);
+    if (!item) return null;
 
-      if (!response.ok) return null;
-
-      const item = (await response.json()) as GoogleVolumeItem;
-      return this.mapItemToBookData(item);
-    } catch {
-      return null;
-    }
+    return this.mapItemToBookData(item);
   }
 
   async searchByAuthorName(
@@ -106,22 +86,15 @@ export class GoogleBooksProvider implements BookProvider {
     startIndex = 0,
     maxResults = 40,
   ): Promise<GoogleAuthorSearchResult | null> {
-    try {
-      const url = `${BASE_URL}?q=inauthor:${encodeURIComponent(name)}&startIndex=${startIndex}&maxResults=${maxResults}&key=${this.#apiKey}`;
-      const response = await fetch(url);
+    const url = `${BASE_URL}?q=inauthor:${encodeURIComponent(name)}&startIndex=${startIndex}&maxResults=${maxResults}&key=${this.#apiKey}`;
+    const data = await this.fetchJson<GoogleSearchResponse>(url);
+    if (!data) return null;
+    const items = data.items ?? [];
 
-      if (!response.ok) return null;
-
-      const data = (await response.json()) as GoogleSearchResponse;
-      const items = data.items ?? [];
-
-      return {
-        items: items.map((item) => this.mapItemToBookData(item)),
-        totalItems: data.totalItems ?? 0,
-      };
-    } catch {
-      return null;
-    }
+    return {
+      items: items.map((item) => this.mapItemToBookData(item)),
+      totalItems: data.totalItems ?? 0,
+    };
   }
 
   private mapItemToBookData(item: GoogleVolumeItem): BookData {

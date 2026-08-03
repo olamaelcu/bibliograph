@@ -16,6 +16,7 @@ vi.mock('../db/connection.js', async () => {
 });
 
 import { db, schema } from '../db/connection.js';
+import { clearSqliteTables } from '../test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
@@ -26,12 +27,7 @@ function getSqlite() {
 }
 
 function clearTables() {
-  const sqlite = getSqlite();
-  const tables = (sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
-    .filter(t => !t.name.startsWith('sqlite_') && !t.name.startsWith('__drizzle'));
-  for (const t of tables) {
-    try { sqlite.prepare(`DELETE FROM "${t.name}"`).run(); } catch {}
-  }
+  clearSqliteTables(getSqlite());
 }
 
 function seedLabel(src: string, uri: string, val: string) {

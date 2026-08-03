@@ -16,6 +16,7 @@ vi.mock('./connection.js', async () => {
 });
 
 import { db, schema } from './connection.js';
+import { clearSqliteTables } from '../test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
@@ -28,11 +29,7 @@ function getSqlite() {
 describe('db/init', () => {
   beforeEach(() => {
     const sqlite = getSqlite();
-    const tables = (sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
-      .filter(t => !t.name.startsWith('sqlite_') && !t.name.startsWith('__drizzle'));
-    for (const t of tables) {
-      try { sqlite.prepare(`DELETE FROM "${t.name}"`).run(); } catch {}
-    }
+    clearSqliteTables(sqlite);
     sqlite.prepare('DROP TABLE IF EXISTS books_fts').run();
     sqlite.prepare('DROP TRIGGER IF EXISTS books_ai').run();
     sqlite.prepare('DROP TRIGGER IF EXISTS books_ad').run();

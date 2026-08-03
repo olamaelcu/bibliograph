@@ -1,7 +1,8 @@
 import type { Context } from 'hono';
-import { eq, like, or, sql } from 'drizzle-orm';
+import { eq, like, or } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
+import { parsePagination, nextCursor } from '../pagination.js';
 import type { GetBookParams, GetBooksParams, GetReviewsParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams, GetShelvesParams, GetShelfParams, GetShelfItemsParams } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
@@ -63,8 +64,7 @@ export async function getReviews(c: Context): Promise<Response> {
     return c.json({ error: 'InvalidRequest', message: 'bookUri is required' }, 400);
   }
 
-  const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
-  const offset = cursor ? parseInt(cursor as string) : 0;
+  const { limit: lim, offset } = parsePagination(limit, cursor, 50, 100);
 
   log.info({ bookUri, limit: lim }, 'handling getReviews');
 
@@ -75,9 +75,9 @@ export async function getReviews(c: Context): Promise<Response> {
     offset,
   });
 
-  const nextCursor = results.length === lim ? String(offset + lim) : undefined;
+  const cursorOut = nextCursor(results.length, offset, lim);
 
-  log.info({ found: results.length, hasCursor: !!nextCursor }, 'getReviews complete');
+  log.info({ found: results.length, hasCursor: !!cursorOut }, 'getReviews complete');
   return c.json({
     reviews: results.map(r => ({
       uri: r.uri,
@@ -95,7 +95,7 @@ export async function getReviews(c: Context): Promise<Response> {
         createdAt: r.createdAt,
       },
     })),
-    cursor: nextCursor,
+    cursor: cursorOut,
   });
 }
 
@@ -107,8 +107,7 @@ export async function getUserStatus(c: Context): Promise<Response> {
     return c.json({ error: 'InvalidRequest', message: 'did is required' }, 400);
   }
 
-  const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
-  const offset = cursor ? parseInt(cursor as string) : 0;
+  const { limit: lim, offset } = parsePagination(limit, cursor, 50, 100);
 
   log.info({ did, bookUri, status, limit: lim }, 'handling getUserStatus');
 
@@ -123,7 +122,7 @@ export async function getUserStatus(c: Context): Promise<Response> {
     offset,
   });
 
-  const nextCursor = results.length === lim ? String(offset + lim) : undefined;
+  const cursorOut = nextCursor(results.length, offset, lim);
 
   log.info({ uris: results.map(s => s.uri), found: results.length }, 'getUserStatus complete');
   return c.json({
@@ -148,7 +147,7 @@ export async function getUserStatus(c: Context): Promise<Response> {
         createdAt: s.createdAt,
       },
     })),
-    cursor: nextCursor,
+    cursor: cursorOut,
   });
 }
 
@@ -160,8 +159,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
     return c.json({ error: 'InvalidRequest', message: 'q or identifier is required' }, 400);
   }
 
-  const lim = Math.min(Math.max(1, parseInt(limit as string) || 20), 100);
-  const offset = cursor ? parseInt(cursor as string) : 0;
+  const { limit: lim, offset } = parsePagination(limit, cursor, 20, 100);
 
   log.info({ q, identifier, limit: lim }, 'handling searchBooksHandler');
 
@@ -210,7 +208,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
           status: row.claim_status,
         },
       })),
-      cursor: rows.length === lim ? String(offset + lim) : undefined,
+      cursor: nextCursor(rows.length, offset, lim),
     });
   }
 
@@ -237,7 +235,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
       uri: book.uri,
       record: serializeBookRecord(book),
     })),
-    cursor: results.length === lim ? String(offset + lim) : undefined,
+    cursor: nextCursor(results.length, offset, lim),
     total: results.length,
   });
 }
@@ -305,8 +303,7 @@ export async function getShelves(c: Context): Promise<Response> {
     return c.json({ error: 'InvalidRequest', message: 'did is required' }, 400);
   }
 
-  const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
-  const offset = cursor ? parseInt(cursor as string) : 0;
+  const { limit: lim, offset } = parsePagination(limit, cursor, 50, 100);
 
   log.info({ did, limit: lim }, 'handling getShelves');
 
@@ -317,16 +314,16 @@ export async function getShelves(c: Context): Promise<Response> {
     offset,
   });
 
-  const nextCursor = results.length === lim ? String(offset + lim) : undefined;
+  const cursorOut = nextCursor(results.length, offset, lim);
 
-  log.info({ found: results.length, hasCursor: !!nextCursor }, 'getShelves complete');
+  log.info({ found: results.length, hasCursor: !!cursorOut }, 'getShelves complete');
   return c.json({
     shelves: results.map(s => ({
       uri: s.uri,
       did: s.did,
       record: serializeShelfRecord(s),
     })),
-    cursor: nextCursor,
+    cursor: cursorOut,
   });
 }
 
@@ -362,8 +359,7 @@ export async function getShelfItems(c: Context): Promise<Response> {
     return c.json({ error: 'InvalidRequest', message: 'shelfUri is required' }, 400);
   }
 
-  const lim = Math.min(Math.max(1, parseInt(limit as string) || 50), 100);
-  const offset = cursor ? parseInt(cursor as string) : 0;
+  const { limit: lim, offset } = parsePagination(limit, cursor, 50, 100);
 
   log.info({ shelfUri, limit: lim }, 'handling getShelfItems');
 
@@ -374,9 +370,9 @@ export async function getShelfItems(c: Context): Promise<Response> {
     offset,
   });
 
-  const nextCursor = results.length === lim ? String(offset + lim) : undefined;
+  const cursorOut = nextCursor(results.length, offset, lim);
 
-  log.info({ found: results.length, hasCursor: !!nextCursor }, 'getShelfItems complete');
+  log.info({ found: results.length, hasCursor: !!cursorOut }, 'getShelfItems complete');
   return c.json({
     items: results.map(i => ({
       uri: i.uri,
@@ -394,7 +390,7 @@ export async function getShelfItems(c: Context): Promise<Response> {
         createdAt: i.createdAt,
       },
     })),
-    cursor: nextCursor,
+    cursor: cursorOut,
   });
 }
 

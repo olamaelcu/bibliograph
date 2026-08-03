@@ -8,6 +8,29 @@ export type TestDb = {
   schema: typeof schema;
 };
 
+const ALL_TABLES = [
+  schema.books,
+  schema.claims,
+  schema.reviews,
+  schema.readingStatuses,
+  schema.shelves,
+  schema.shelfItems,
+] as const;
+
+export function clearAllTables(db: BetterSQLite3Database<typeof schema>): void {
+  for (const t of ALL_TABLES) {
+    db.delete(t).run();
+  }
+}
+
+export function clearSqliteTables(sqlite: InstanceType<typeof import('better-sqlite3')>): void {
+  const tables = (sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
+    .filter(t => !t.name.startsWith('sqlite_') && !t.name.startsWith('__drizzle'));
+  for (const t of tables) {
+    try { sqlite.prepare(`DELETE FROM "${t.name}"`).run(); } catch {}
+  }
+}
+
 export function createTestDb(): TestDb {
   const sqlite = new Database(':memory:');
   sqlite.pragma('foreign_keys = ON');

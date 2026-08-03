@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { backfillGoogleBooksFromIsbns, backfillGoogleBooksAuthor } from './googlebooks-backfill.js';
-import { createTestDb } from './test-utils/db.js';
+import { createTestDb, clearAllTables } from './test-utils/db.js';
 import * as _s from './db/schema.js';
 
 const { db } = createTestDb();
@@ -23,9 +23,7 @@ function volumes(n: number, prefix: string) {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.GOOGLE_BOOKS_API_KEY;
-  for (const t of [_s.books, _s.claims, _s.reviews, _s.readingStatuses, _s.shelves, _s.shelfItems]) {
-    db.delete(t).run();
-  }
+  clearAllTables(db);
 });
 
 describe('backfillGoogleBooksFromIsbns', () => {

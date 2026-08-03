@@ -26,6 +26,7 @@ vi.mock('./db/connection.js', async () => {
 });
 
 import { db, schema } from './db/connection.js';
+import { clearSqliteTables } from './test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
@@ -39,13 +40,7 @@ function getSqlite() {
 
 describe('labeler', () => {
   beforeEach(() => {
-    const sqlite = getSqlite();
-    const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
-    for (const t of tables) {
-      if (t.name !== 'sqlite_sequence' && !t.name.startsWith('sqlite_')) {
-        sqlite.prepare(`DELETE FROM "${t.name}"`).run();
-      }
-    }
+    clearSqliteTables(getSqlite());
 
     db.insert(_s.books).values({
       uri: 'at://did:plc:test/community.lexicon.book.book/test001',

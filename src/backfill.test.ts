@@ -21,14 +21,11 @@ import { db } from './db/connection.js';
 import { trackRepos } from './tap.js';
 import { collectKnownDids, backfillDid } from './backfill.js';
 import * as _s from './db/schema.js';
-
-const tables = [_s.books, _s.reviews, _s.readingStatuses, _s.claims, _s.shelves, _s.shelfItems];
+import { clearAllTables } from './test-utils/db.js';
 
 describe('collectKnownDids', () => {
   beforeEach(() => {
-    for (const t of tables) {
-      db.delete(t).run();
-    }
+    clearAllTables(db);
   });
 
   it('returns distinct DIDs across all tables', () => {

@@ -5,7 +5,7 @@ import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
 import { HttpError } from '../errors.js';
 import { OpenLibraryProvider } from '../providers/openlibrary.js';
-import { generateRkey } from '../rkey.js';
+import { insertBook, insertClaim, makeRecordUri, makeId, findBookByIsbn, COLLECTIONS } from '../records.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput, CreateShelfInput, AddToShelfInput, RemoveFromShelfInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
@@ -29,6 +29,10 @@ function extractIdentifier(bookUri: string): { type: 'isbn'; value: string } | {
   return null;
 }
 
+function bookIdentifiers(data: import('../providers/interface.js').BookData): Array<{ type: string; value: string }> {
+  return Object.entries(data.identifiers).map(([type, value]) => ({ type, value }));
+}
+
 async function resolveBookUri(did: string, bookUri: string, log: import('pino').Logger): Promise<string | null> {
   if (bookUri.startsWith('at://')) {
     const book = await db.query.books.findFirst({ where: eq(books.uri, bookUri) });
@@ -39,7 +43,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
   if (!ident) return null;
 
   if (ident.type === 'isbn') {
-    const existing = await db.query.books.findFirst({ where: eq(books.isbn, ident.value) });
+    const existing = await findBookByIsbn(db, ident.value);
     if (existing) return existing.uri;
 
     log.info({ isbn: ident.value }, 'book not in db, discovering from OpenLibrary');
@@ -48,12 +52,10 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
     if (!data) return null;
 
     const isbn = data.isbn13 || data.isbn10 || ident.value;
-    const now = new Date().toISOString();
-    const rkey = generateRkey();
-    const uri = `at://${did}/community.lexicon.book.book/${rkey}`;
+    const { rkey, now } = makeId();
+    const uri = makeRecordUri(did, COLLECTIONS.book, rkey);
 
-    await db.insert(books).values({
-      uri,
+    await insertBook(db, {
       did,
       title: data.title,
       author: data.author,
@@ -63,24 +65,17 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
       pageCount: data.pageCount,
       language: data.language,
       categories: data.categories || [],
-      identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
+      identifiers: bookIdentifiers(data),
       coverUrl: data.coverUrl,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    });
+    }, { rkey, createdAt: now });
 
-    const claimUri = `at://${did}/community.lexicon.book.claim/${rkey}`;
-    await db.insert(claims).values({
-      uri: claimUri,
+    await insertClaim(db, {
       did,
       bookUri: uri,
       identifier: isbn,
       identifierType: 'isbn',
       claimedBy: did,
-      status: 'pending',
-      createdAt: now,
-    });
+    }, { rkey, createdAt: now });
 
     log.info({ isbn, uri }, 'book discovered and created');
     return uri;
@@ -101,12 +96,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
     const data = await provider.getBookDetails(ident.value);
     if (!data) return null;
 
-    const now = new Date().toISOString();
-    const rkey = generateRkey();
-    const uri = `at://${did}/community.lexicon.book.book/${rkey}`;
-
-    await db.insert(books).values({
-      uri,
+    const { uri } = await insertBook(db, {
       did,
       title: data.title,
       author: data.author,
@@ -116,11 +106,8 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
       pageCount: data.pageCount,
       language: data.language,
       categories: data.categories || [],
-      identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
+      identifiers: bookIdentifiers(data),
       coverUrl: data.coverUrl,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
     });
 
     log.info({ olid: ident.value, uri }, 'book discovered and created');
@@ -183,7 +170,7 @@ async function resolveBookFromIdentifiers(
     const { type, value } = ident;
 
     if (type === 'isbn') {
-      const existing = await db.query.books.findFirst({ where: eq(books.isbn, value) });
+      const existing = await findBookByIsbn(db, value);
       if (existing) return existing.uri;
 
       log.info({ isbn: value }, 'book not in db, discovering from OpenLibrary via identifiers');
@@ -243,13 +230,11 @@ async function createBookFromProviderData(
   log: import('pino').Logger,
 ): Promise<string | null> {
   const isbn = data.isbn13 || data.isbn10;
-  const now = new Date().toISOString();
-  const rkey = generateRkey();
-  const uri = `at://${did}/community.lexicon.book.book/${rkey}`;
+  const { rkey, now } = makeId();
+  const uri = makeRecordUri(did, COLLECTIONS.book, rkey);
 
   try {
-    await db.insert(books).values({
-      uri,
+    await insertBook(db, {
       did,
       title: data.title,
       author: data.author,
@@ -259,24 +244,17 @@ async function createBookFromProviderData(
       pageCount: data.pageCount,
       language: data.language,
       categories: data.categories || [],
-      identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
+      identifiers: bookIdentifiers(data),
       coverUrl: data.coverUrl,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    });
+    }, { rkey, createdAt: now });
 
-    const claimUri = `at://${did}/community.lexicon.book.claim/${rkey}`;
-    await db.insert(claims).values({
-      uri: claimUri,
+    await insertClaim(db, {
       did,
       bookUri: uri,
       identifier: isbn || uri,
       identifierType: isbn ? 'isbn' : 'asin',
       claimedBy: did,
-      status: 'pending',
-      createdAt: now,
-    });
+    }, { rkey, createdAt: now });
 
     log.info({ uri }, 'book created from provider data');
     return uri;
@@ -309,60 +287,43 @@ export async function createBook(c: Context): Promise<Response> {
     return c.json({ error: 'Forbidden', message: 'Book already claimed by another author' }, 403);
   }
 
-  const existingBook = await db.query.books.findFirst({
-    where: eq(books.isbn, input.isbn),
-  });
+  const existingBook = await findBookByIsbn(db, input.isbn);
 
   if (existingBook) {
     log.warn({ did, isbn: input.isbn, existingUri: existingBook.uri }, 'createBook rejected: duplicate isbn');
     return c.json({ error: 'DuplicateBook', message: 'A book with this ISBN already exists' }, 409);
   }
 
-  const now = new Date().toISOString();
-  const rkey = generateRkey();
+  const { rkey, now } = makeId();
+  const bookUri = makeRecordUri(did, COLLECTIONS.book, rkey);
 
-  const bookUri = `at://${did}/community.lexicon.book.book/${rkey}`;
-
-  try {
-    await db.insert(books).values({
-      uri: bookUri,
-      did,
-      title: input.title,
-      author: input.author,
-      isbn: input.isbn,
-      publishedDate: input.publishedDate,
-      description: input.description,
-      pageCount: input.pageCount,
-      language: input.language,
-      categories: input.categories || [],
-      identifiers: [],
-      coverUrl: input.coverUrl,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    });
-  } catch (err) {
+  await insertBook(db, {
+    did,
+    title: input.title,
+    author: input.author,
+    isbn: input.isbn,
+    publishedDate: input.publishedDate,
+    description: input.description,
+    pageCount: input.pageCount,
+    language: input.language,
+    categories: input.categories || [],
+    identifiers: [],
+    coverUrl: input.coverUrl,
+  }, { rkey, createdAt: now }).catch((err) => {
     log.error({ err, did, uri: bookUri, title: input.title, isbn: input.isbn }, 'createBook insert failed');
     throw err;
-  }
+  });
 
-  const claimUri = `at://${did}/community.lexicon.book.claim/${rkey}`;
-
-  try {
-    await db.insert(claims).values({
-      uri: claimUri,
-      did,
-      bookUri,
-      identifier: input.isbn,
-      identifierType: 'isbn',
-      claimedBy: did,
-      status: 'pending',
-      createdAt: now,
-    });
-  } catch (err) {
-    log.error({ err, did, claimUri, bookUri }, 'createBook claim insert failed');
+  await insertClaim(db, {
+    did,
+    bookUri,
+    identifier: input.isbn,
+    identifierType: 'isbn',
+    claimedBy: did,
+  }, { rkey, createdAt: now }).catch((err) => {
+    log.error({ err, did, claimUri: `at://${did}/${COLLECTIONS.claim}/${rkey}`, bookUri }, 'createBook claim insert failed');
     throw err;
-  }
+  });
 
   log.info({ uri: bookUri }, 'createBook complete');
   return c.json({ uri: bookUri, cid: `bafyrei-${rkey}` });
@@ -396,9 +357,8 @@ export async function createReview(c: Context): Promise<Response> {
     return c.json({ error: 'BookNotFound', message: 'Book not found' }, 404);
   }
 
-  const now = new Date().toISOString();
-  const rkey = generateRkey();
-  const uri = `at://${did}/community.lexicon.book.review/${rkey}`;
+  const { rkey, now } = makeId();
+  const uri = makeRecordUri(did, COLLECTIONS.review, rkey);
 
   try {
     await db.insert(reviews).values({
@@ -470,9 +430,8 @@ export async function createStatus(c: Context): Promise<Response> {
     return c.json({ error: 'StatusAlreadyExists', message: 'A reading status already exists for this book' }, 409);
   }
 
-  const now = new Date().toISOString();
-  const rkey = generateRkey();
-  const uri = `at://${did}/community.lexicon.book.status/${rkey}`;
+  const { rkey, now } = makeId();
+  const uri = makeRecordUri(did, COLLECTIONS.status, rkey);
 
   const statusIdentifiers = input.identifiers && input.identifiers.length > 0
     ? input.identifiers
@@ -533,25 +492,19 @@ export async function createClaim(c: Context): Promise<Response> {
     return c.json({ error: 'ClaimAlreadyExists', message: 'This book is already claimed by another author' }, 409);
   }
 
-  const now = new Date().toISOString();
-  const rkey = generateRkey();
-  const uri = `at://${did}/community.lexicon.book.claim/${rkey}`;
+  const { rkey, now } = makeId();
+  const uri = makeRecordUri(did, COLLECTIONS.claim, rkey);
 
-  try {
-    await db.insert(claims).values({
-      uri,
-      did,
-      bookUri: input.bookUri,
-      identifier: input.identifier,
-      identifierType: input.identifierType,
-      claimedBy: did,
-      status: 'pending',
-      createdAt: now,
-    });
-  } catch (err) {
+  await insertClaim(db, {
+    did,
+    bookUri: input.bookUri,
+    identifier: input.identifier,
+    identifierType: input.identifierType,
+    claimedBy: did,
+  }, { rkey, createdAt: now }).catch((err) => {
     log.error({ err, did, bookUri: input.bookUri, identifierType: input.identifierType, uri }, 'createClaim insert failed');
     throw err;
-  }
+  });
 
   log.info({ uri }, 'createClaim complete');
   return c.json({ uri, cid: `bafyrei-${rkey}` });
@@ -574,9 +527,8 @@ export async function createShelf(c: Context): Promise<Response> {
 
   log.info({ did, name: input.name }, 'handling createShelf');
 
-  const now = new Date().toISOString();
-  const rkey = generateRkey();
-  const uri = `at://${did}/community.lexicon.book.shelf/${rkey}`;
+  const { rkey, now } = makeId();
+  const uri = makeRecordUri(did, COLLECTIONS.shelf, rkey);
 
   try {
     await db.insert(shelves).values({
@@ -645,9 +597,8 @@ export async function addToShelf(c: Context): Promise<Response> {
     return c.json({ error: 'DuplicateShelfItem', message: 'Book is already on this shelf' }, 409);
   }
 
-  const now = new Date().toISOString();
-  const rkey = generateRkey();
-  const uri = `at://${did}/community.lexicon.book.shelfItem/${rkey}`;
+  const { rkey, now } = makeId();
+  const uri = makeRecordUri(did, COLLECTIONS.shelfItem, rkey);
 
   try {
     await db.insert(shelfItems).values({

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { backfillOpenLibraryFromIsbns, backfillOpenLibraryAuthor } from './openlibrary-backfill.js';
-import { createTestDb } from './test-utils/db.js';
+import { createTestDb, clearAllTables } from './test-utils/db.js';
 import * as _s from './db/schema.js';
 
 const { db } = createTestDb();
@@ -14,9 +14,7 @@ function mockOpenLibrary(doc: Record<string, unknown>) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  for (const t of [_s.books, _s.claims, _s.reviews, _s.readingStatuses, _s.shelves, _s.shelfItems]) {
-    db.delete(t).run();
-  }
+  clearAllTables(db);
 });
 
 describe('backfillOpenLibraryFromIsbns', () => {

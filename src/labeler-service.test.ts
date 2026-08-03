@@ -27,6 +27,7 @@ vi.mock('./db/connection.js', async () => {
 });
 
 import { db, schema } from './db/connection.js';
+import { clearSqliteTables } from './test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
@@ -56,12 +57,7 @@ const URI = 'at://did:plc:test/community.lexicon.book.book/test001';
 describe('labeler-service', () => {
   beforeEach(() => {
     const sqlite = getSqlite();
-    const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
-    for (const t of tables) {
-      if (t.name !== 'sqlite_sequence' && !t.name.startsWith('sqlite_')) {
-        sqlite.prepare(`DELETE FROM "${t.name}"`).run();
-      }
-    }
+    clearSqliteTables(sqlite);
     sqlite.prepare("DELETE FROM sqlite_sequence WHERE name = 'label_events'").run();
   });
 
