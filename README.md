@@ -39,6 +39,7 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | `getUserStatus` | Reading statuses for a user |
 | `searchBooks` | Full-text search on title, author, ISBN |
 | `getClaims` | Claims attached to a book |
+| `getFeed` | Home feed: recent status updates, newest books, trending, following, cross-user |
 
 **Procedures** (POST `/xrpc/nsid`):
 

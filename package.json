@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.3",
+    "@atcute/bluesky": "^4.0.17",
     "@atcute/cbor": "^2.3.6",
     "@atcute/client": "^5.1.1",
     "@atcute/lex-cli": "^3.2.1",

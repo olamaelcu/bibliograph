@@ -94,6 +94,12 @@ export async function requireAuth(headers: Headers, lxm: string): Promise<string
   }
 }
 
+export async function optionalAuth(headers: Headers, lxm: string): Promise<string | undefined> {
+  const auth = headers.get('authorization');
+  if (!auth) return undefined;
+  return requireAuth(headers, lxm);
+}
+
 export async function canEditBook(did: string, bookUri: string): Promise<boolean> {
   const claim = await db.query.claims.findFirst({
     where: and(eq(claims.bookUri, bookUri), eq(claims.status, 'verified')),
