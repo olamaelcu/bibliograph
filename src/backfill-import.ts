@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './db/schema.js';
 import { generateRkey } from './rkey.js';
+import { computeDeduplicationHash } from './dedup.js';
 import type { BookData } from './providers/interface.js';
 import { logger } from './logger.js';
 
@@ -30,6 +31,15 @@ export async function importBookData(
     seen.add(dedupKey);
   }
 
+  const dhash = computeDeduplicationHash(data.title, data.author, data.publishedDate);
+
+  if (dhash) {
+    const hashMatch = await db.query.books.findFirst({
+      where: eq(schema.books.deduplicationHash, dhash),
+    });
+    if (hashMatch) return 'skipped';
+  }
+
   if (canonical) {
     const existing = await db.query.books.findFirst({ where: eq(schema.books.isbn, canonical) });
     if (existing) return 'skipped';
@@ -51,6 +61,7 @@ export async function importBookData(
       categories: data.categories || [],
       identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
       coverUrl: data.coverUrl,
+      deduplicationHash: dhash,
       status: 'active',
       createdAt: now,
       updatedAt: now,

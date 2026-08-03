@@ -2,6 +2,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { eq } from 'drizzle-orm';
 import * as schema from './db/schema.js';
 import { generateRkey } from './rkey.js';
+import { computeDeduplicationHash } from './dedup.js';
 
 export const COLLECTIONS = {
   book: 'community.lexicon.book.book',
@@ -43,6 +44,8 @@ export async function insertBook(
   const now = opts.createdAt ?? new Date().toISOString();
   const uri = makeRecordUri(input.did, COLLECTIONS.book, rkey);
 
+  const dedupHash = computeDeduplicationHash(input.title, input.author, input.publishedDate);
+
   await db.insert(schema.books).values({
     uri,
     did: input.did,
@@ -56,6 +59,7 @@ export async function insertBook(
     categories: input.categories ?? [],
     identifiers: input.identifiers,
     coverUrl: input.coverUrl,
+    deduplicationHash: dedupHash,
     status: opts.status ?? 'pending',
     createdAt: now,
     updatedAt: now,
