@@ -108,6 +108,7 @@ export const reviews = sqliteTable(
       .references(() => books.uri, { onDelete: 'cascade' }),
     text: text().notNull(),
     rating: real(),
+    cid: text(),
     bookTitle: text('book_title').notNull(),
     bookAuthor: text('book_author').notNull(),
     createdAt: text()
