@@ -1,9 +1,17 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createTestDb, clearAllTables } from './test-utils/db.js';
 import { computeDeduplicationHash } from './dedup.js';
 import { populateAllHashes, analyzeDuplicates, updateBookHash, getStats } from './dedup-detection.js';
 import { mergeDuplicates } from './dedup-merge.js';
+import { runFullDedup } from './dedup-job.js';
+import { db as connDb, schema as connSchema } from './db/connection.js';
+
+vi.mock('./db/connection.js', async () => {
+  const { createTestDb } = await import('./test-utils/db.js');
+  const { db, schema } = createTestDb();
+  return { db, schema };
+});
 
 describe('computeDeduplicationHash', () => {
   it('produces consistent hashes for same inputs', () => {
@@ -340,6 +348,38 @@ describe('dedup-merge', () => {
         { type: 'openlibrary', value: '/works/OL1' },
         { type: 'isbn', value: '978123' },
       ]);
+    });
+  });
+});
+
+describe('dedup-job watch mode', () => {
+  beforeEach(() => {
+    clearAllTables(connDb);
+  });
+
+  describe('runFullDedup', () => {
+    it('does not call process.exit when no duplicates are found', async () => {
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+        throw new Error('process.exit should not be called');
+      });
+
+      try {
+        connDb.insert(connSchema.books)
+          .values({
+            uri: `at://did:plc:test/community.lexicon.book.book/abc123`,
+            did: 'did:plc:test',
+            title: 'Book A',
+            author: 'Author 1',
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          } as typeof connSchema.books.$inferInsert)
+          .run();
+        await runFullDedup([]);
+        expect(exitSpy).not.toHaveBeenCalled();
+      } finally {
+        exitSpy.mockRestore();
+      }
     });
   });
 });

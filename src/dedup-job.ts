@@ -101,7 +101,7 @@ async function runMerge(args: string[]): Promise<void> {
   }
 }
 
-async function runFullDedup(args: string[]): Promise<void> {
+export async function runFullDedup(args: string[]): Promise<void> {
   const dryRun = args.includes('--dry-run');
   if (dryRun) logger.info('DRY RUN - no changes will be made');
 
@@ -121,7 +121,7 @@ async function runFullDedup(args: string[]): Promise<void> {
 
   if (analysis.duplicateGroups === 0) {
     logger.info('no duplicates found, skipping merge');
-    process.exit(0);
+    return;
   }
 
   logger.info('step 3: merging duplicates');
