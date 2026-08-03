@@ -35,6 +35,7 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | `getBook` | Fetch a single book by AT-URI |
 | `getBooks` | Batch fetch books by URIs |
 | `getReviews` | Paginated reviews for a book |
+| `getReview` | Fetch a single review by AT-URI or user+book |
 | `getUserStatus` | Reading statuses for a user |
 | `searchBooks` | Full-text search on title, author, ISBN |
 | `getClaims` | Claims attached to a book |

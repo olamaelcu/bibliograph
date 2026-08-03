@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 import { requestTracing } from './middleware.js';
 import { upgradeWebSocket } from '@hono/node-server';
 import { createSubscribeLabelsEvents } from './labeler-service.js';
-import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './api/get-book.js';
+import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './api/get-book.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian, createShelf, addToShelf, removeFromShelf } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
@@ -26,6 +26,7 @@ export function createApp(): Hono {
       'getBook',
       'getBooks',
       'getReviews',
+      'getReview',
       'getUserStatus',
       'searchBooks',
       'getClaims',
@@ -192,6 +193,7 @@ export function createApp(): Hono {
   app.get('/xrpc/community.lexicon.book.getBook', getBook);
   app.get('/xrpc/community.lexicon.book.getBooks', getBooks);
   app.get('/xrpc/community.lexicon.book.getReviews', getReviews);
+  app.get('/xrpc/community.lexicon.book.getReview', getReview);
   app.get('/xrpc/community.lexicon.book.getUserStatus', getUserStatus);
   app.get('/xrpc/community.lexicon.book.searchBooks', searchBooksHandler);
   app.get('/xrpc/community.lexicon.book.getClaims', getClaims);
