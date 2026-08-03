@@ -7,3 +7,4 @@ data/
 src/lexicons/
 .env
 coverage/
+docs/superpowers/
