@@ -371,6 +371,7 @@ export async function createReview(c: Context): Promise<Response> {
 
   const { rkey, now } = makeId();
   const uri = makeRecordUri(did, COLLECTIONS.review, rkey);
+  const cid = `bafyrei-${rkey}`;
 
   try {
     await db.insert(reviews).values({
@@ -379,6 +380,7 @@ export async function createReview(c: Context): Promise<Response> {
       bookUri: input.bookUri,
       text: input.text,
       rating: input.rating,
+      cid,
       bookTitle: book.title,
       bookAuthor: book.author,
       createdAt: now,
@@ -389,7 +391,7 @@ export async function createReview(c: Context): Promise<Response> {
   }
 
   log.info({ uri }, 'createReview complete');
-  return c.json({ uri, cid: `bafyrei-${rkey}` });
+  return c.json({ uri, cid });
 }
 
 export async function createStatus(c: Context): Promise<Response> {

@@ -211,6 +211,30 @@ describe('api/create-book', () => {
       expect(reviews).toHaveLength(1);
       expect(reviews[0].text).toBe('Amazing book!');
     });
+
+    it('persists the returned cid on the review row', async () => {
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/1',
+        did: 'did:plc:a',
+        title: 'Target Book',
+        author: 'Target Author',
+        isbn: '9780000000001',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      const c = mockContext({
+        jsonBody: { bookUri: 'at://did:plc:a/book/1', text: 'Amazing book!', rating: 5 },
+      });
+      const res = await createReview(c);
+      expect(res.status).toBe(200);
+
+      const body = await readJson(res);
+      const reviews = db.select().from(_s.reviews).all();
+      expect(reviews).toHaveLength(1);
+      expect(reviews[0].cid).toBe(body.cid);
+    });
   });
 
   describe('createStatus', () => {
