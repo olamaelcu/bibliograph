@@ -8,6 +8,7 @@ import { getBook, getBooks, getReviews, getUserStatus, searchBooksHandler, getCl
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian, createShelf, addToShelf, removeFromShelf } from './api/create-book.js';
 import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
+import { getServiceDid, buildDidDocument } from './did.js';
 import { OpenLibraryProvider } from './providers/openlibrary.js';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
@@ -174,6 +175,14 @@ export function createApp(): Hono {
 
   // Health check
   app.get('/health', (c) => c.json({ status: 'ok', version: '0.0.1' }));
+
+  // DID document for did:web resolution of this labeler service
+  app.get('/.well-known/did.json', (c) => {
+    const did = getServiceDid();
+    const host = c.req.header('x-forwarded-host') || c.req.header('host') || did.replace(/^did:web:/, '');
+    const proto = c.req.header('x-forwarded-proto') ?? (c.req.url.startsWith('https') ? 'https' : 'http');
+    return c.json(buildDidDocument(did, `${proto}://${host}`));
+  });
 
   // Lexicon serving endpoints for remote validation
   app.get('/lexicon/:nsid', serveLexicon);

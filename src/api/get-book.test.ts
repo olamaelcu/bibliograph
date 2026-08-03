@@ -390,6 +390,50 @@ describe('api/get-book', () => {
       expect(body.books).toHaveLength(1);
       expect(body.books[0].matchedIdentifier.type).toBe('ean');
     });
+
+    it('blocks SQL injection via identifier type (comment payload)', async () => {
+      const bookUri = 'at://did:plc:a/book/inject-type';
+      getSqlite().prepare(
+        `INSERT INTO books (uri, did, title, author, identifiers, status, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).run(
+        bookUri,
+        'did:plc:a',
+        'Injection Book',
+        'Author I',
+        JSON.stringify([{ type: 'isbn', value: '9781234567890' }]),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { identifier: "isbn') OR 1=1 --" } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toEqual([]);
+    });
+
+    it('does not return all books for a SQL injection payload in q', async () => {
+      const bookUri = 'at://did:plc:a/book/inject-q';
+      getSqlite().prepare(
+        `INSERT INTO books (uri, did, title, author, identifiers, status, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
+      ).run(
+        bookUri,
+        'did:plc:a',
+        'Injection Q Book',
+        'Author IQ',
+        JSON.stringify([{ type: 'isbn', value: '9781111111111' }]),
+        new Date().toISOString(),
+        new Date().toISOString(),
+      );
+
+      const c = mockContext({ query: { q: "' OR '1'='1", identifier: 'isbn' } });
+      const res = await searchBooksHandler(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.books).toEqual([]);
+    });
   });
 
   describe('getClaims', () => {

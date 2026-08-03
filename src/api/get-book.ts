@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { eq, like, or } from 'drizzle-orm';
+import { and, eq, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
 import { parsePagination, nextCursor } from '../pagination.js';
@@ -167,29 +167,30 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
     const sanitized = (q as string || '').replace(/['"]/g, '').trim();
     const identifierTypes = (identifier as string).split(',').map(t => t.trim()).filter(Boolean);
 
-    let whereConditions = ['1=1'];
+    const conditions: ReturnType<typeof sql>[] = [sql`1 = 1`];
 
     if (sanitized) {
-      whereConditions.push(`identifier_value LIKE '%${sanitized.replace(/'/g, "''")}%'`);
+      conditions.push(sql`identifier_value LIKE ${`%${sanitized}%`}`);
     }
 
     if (identifierTypes.length > 0) {
-      const typesList = identifierTypes.map(t => `'${t.replace(/'/g, "''")}'`).join(',');
-      whereConditions.push(`identifier_type IN (${typesList})`);
+      conditions.push(
+        sql`identifier_type IN (${sql.join(identifierTypes.map(t => sql`${t}`), sql`, `)})`,
+      );
     }
 
     if (includeUnverified !== 'true') {
-      whereConditions.push(`claim_status IN ('json', 'verified')`);
+      conditions.push(sql`claim_status IN ('json', 'verified')`);
     }
 
-    const whereClause = whereConditions.join(' AND ');
-
     const rows = db.all(
-      `SELECT DISTINCT uri, title, author, isbn, identifier_type, identifier_value, claim_status
-       FROM books_identifiers
-       WHERE ${whereClause}
-       ORDER BY title
-       LIMIT ${lim} OFFSET ${offset}`,
+      sql`
+        SELECT DISTINCT uri, title, author, isbn, identifier_type, identifier_value, claim_status
+        FROM books_identifiers
+        WHERE ${and(...conditions)}
+        ORDER BY title
+        LIMIT ${lim} OFFSET ${offset}
+      `,
     ) as Array<{ uri: string; title: string; author: string; isbn: string | null; identifier_type: string; identifier_value: string; claim_status: string }>;
 
     log.info({ found: rows.length }, 'searchBooksHandler complete');
