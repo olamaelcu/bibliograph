@@ -147,12 +147,12 @@ export function createApp(): Hono {
 })();
 </script>
 
-<h2>Queries</h2>
+<h2>${queries.length} Queries</h2>
 <details>
   <table>${queryRows}</table>
 </details>
 
-<h2>Procedures</h2>
+<h2>${procedures.length} Procedures</h2>
 <details>
   <table>${procRows}</table>
 </details>
