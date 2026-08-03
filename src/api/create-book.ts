@@ -43,8 +43,20 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
   if (!ident) return null;
 
   if (ident.type === 'isbn') {
-    const existing = await findBookByIsbn(db, ident.value);
+    const existing = await db.query.books.findFirst({ where: eq(books.isbn, ident.value) });
     if (existing) return existing.uri;
+
+    const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
+    if (apiKey) {
+      log.info({ isbn: ident.value }, 'book not in db, trying Google Books by ISBN');
+      const { GoogleBooksProvider } = await import('../providers/googlebooks.js');
+      const gbProvider = new GoogleBooksProvider(apiKey);
+      const gbData = await gbProvider.searchByIsbn(ident.value);
+      if (gbData) {
+        const uri = await createBookFromProviderData(did, gbData, log);
+        if (uri) return uri;
+      }
+    }
 
     log.info({ isbn: ident.value }, 'book not in db, discovering from OpenLibrary');
     const provider = new OpenLibraryProvider();

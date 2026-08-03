@@ -384,6 +384,48 @@ describe('api/create-book', () => {
       const res = await createStatus(c);
       expect(res.status).toBe(404);
     });
+
+    it('imports a book from Google Books by ISBN before falling back to OpenLibrary', async () => {
+      process.env.GOOGLE_BOOKS_API_KEY = 'test-key';
+      vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes('googleapis.com')) {
+          return {
+            ok: true,
+            json: async () => ({
+              totalItems: 1,
+              items: [{
+                id: 'gb-test-1',
+                volumeInfo: {
+                  title: 'Dune (Google Books)',
+                  authors: ['Frank Herbert'],
+                  industryIdentifiers: [
+                    { type: 'ISBN_13', identifier: '9781472281036' },
+                  ],
+                },
+              }],
+            }),
+          } as Response;
+        }
+        throw new Error(`unexpected fetch to ${url}`);
+      }));
+
+      const c = mockContext({ jsonBody: { bookUri: 'urn:isbn:9781472281036', status: 'to-read' } });
+      const res = await createStatus(c);
+      expect(res.status).toBe(200);
+
+      const books = db.select().from(_s.books).all();
+      expect(books).toHaveLength(1);
+      expect(books[0].title).toBe('Dune (Google Books)');
+      expect(books[0].isbn).toBe('9781472281036');
+      const idents = parseIdentifiers(books[0]);
+      expect(idents).toContainEqual({ type: 'googleBooks', value: 'gb-test-1' });
+
+      const statuses = db.select().from(_s.readingStatuses).all();
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0].status).toBe('to-read');
+      delete process.env.GOOGLE_BOOKS_API_KEY;
+    });
   });
 
   describe('createClaim', () => {
