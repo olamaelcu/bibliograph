@@ -15,12 +15,23 @@ vi.mock('./db/connection.js', async () => {
   return { db, schema };
 });
 
+vi.mock('@atcute/xrpc-server/auth', () => {
+  class FakeVerifier {
+    async verifyRequest() {
+      const ok = process.env.FAKE_JWT_OK === '1';
+      if (!ok) throw new Error('bad token');
+      return { issuer: 'did:plc:viewer' };
+    }
+  }
+  return { ServiceJwtVerifier: FakeVerifier };
+});
+
 import { db, schema } from './db/connection.js';
 import { clearSqliteTables } from './test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
-import { canCreateBook, canClaimBook, isLibrarian, isAuthorOf } from './auth.js';
+import { canCreateBook, canClaimBook, isLibrarian, isAuthorOf, optionalAuth } from './auth.js';
 
 function getSqlite() {
   return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
@@ -53,6 +64,34 @@ describe('auth', () => {
   beforeEach(() => {
     clearTables();
   });
+
+  afterEach(() => {
+    delete process.env.FAKE_JWT_OK;
+  });
+
+  describe('optionalAuth', () => {
+    it('returns undefined when no authorization header is present', async () => {
+      const headers = new Headers();
+      const did = await optionalAuth(headers, 'community.lexicon.book.getFeed');
+      expect(did).toBeUndefined();
+    });
+
+    it('returns the viewer DID for a valid bearer token', async () => {
+      process.env.FAKE_JWT_OK = '1';
+      const headers = new Headers({ authorization: 'Bearer fake.jwt.token' });
+      const did = await optionalAuth(headers, 'community.lexicon.book.getFeed');
+      expect(did).toBe('did:plc:viewer');
+    });
+
+    it('throws 401 for an invalid bearer token', async () => {
+      const headers = new Headers({ authorization: 'Bearer fake.jwt.token' });
+      await expect(optionalAuth(headers, 'community.lexicon.book.getFeed')).rejects.toMatchObject({
+        status: 401,
+        error: 'AuthenticationRequired',
+      });
+    });
+  });
+
 
   describe('canCreateBook', () => {
     it('returns true when no verified claim exists for the ISBN', async () => {

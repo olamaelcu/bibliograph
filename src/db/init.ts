@@ -80,3 +80,11 @@ export function bootstrapLibrarian(): void {
   );
   logger.info({ did }, 'bootstrapped librarian');
 }
+
+export function bootstrapFeatures(): void {
+  const enabled = process.env.ATP_FEATURE_FEED_GENERATOR === '1' ? 1 : 0;
+  db.run(
+    `INSERT OR IGNORE INTO features (name, enabled) VALUES ('feedGenerator', ${enabled})`,
+  );
+  logger.info({ enabled }, 'bootstrapped feature feedGenerator');
+}

@@ -46,6 +46,7 @@ export const books = sqliteTable(
     authorIdx: index('books_author_idx').on(table.author),
     statusIdx: index('books_status_idx').on(table.status),
     deduplicationHashIdx: index('books_deduplication_hash_idx').on(table.deduplicationHash),
+    createdAtIdx: index('books_created_at_idx').on(table.createdAt),
     statusCheck: check('books_status_check', sql`${table.status} IN ('pending', 'active', 'rejected')`),
   }),
 );
@@ -117,6 +118,9 @@ export const reviews = sqliteTable(
   (table) => ({
     bookUriIdx: index('reviews_book_uri_idx').on(table.bookUri),
     didIdx: index('reviews_did_idx').on(table.did),
+    createdAtIdx: index('reviews_created_at_idx').on(table.createdAt),
+    didCreatedAtIdx: index('reviews_did_created_at_idx').on(table.did, table.createdAt),
+    bookUriCreatedAtIdx: index('reviews_book_uri_created_at_idx').on(table.bookUri, table.createdAt),
     ratingCheck: check(
       'reviews_rating_check',
       sql`${table.rating} IS NULL OR (${table.rating} >= 1 AND ${table.rating} <= 5)`,
@@ -153,6 +157,9 @@ export const readingStatuses = sqliteTable(
     bookUriIdx: index('reading_statuses_book_uri_idx').on(table.bookUri),
     didIdx: index('reading_statuses_did_idx').on(table.did),
     statusIdx: index('reading_statuses_status_idx').on(table.status),
+    createdAtIdx: index('reading_statuses_created_at_idx').on(table.createdAt),
+    didCreatedAtIdx: index('reading_statuses_did_created_at_idx').on(table.did, table.createdAt),
+    bookUriCreatedAtIdx: index('reading_statuses_book_uri_created_at_idx').on(table.bookUri, table.createdAt),
     didBookUriUnique: uniqueIndex('reading_statuses_did_book_uri_unique').on(
       table.did,
       table.bookUri,
@@ -277,3 +284,13 @@ export const labelEvents = sqliteTable(
 
 export type LabelEvent = typeof labelEvents.$inferSelect;
 export type NewLabelEvent = typeof labelEvents.$inferInsert;
+
+// ─── Features (feature flags) ───────────────────────────────────────────────
+
+export const features = sqliteTable('features', {
+  name: text().primaryKey(),
+  enabled: integer().notNull().default(0),
+});
+
+export type Feature = typeof features.$inferSelect;
+export type NewFeature = typeof features.$inferInsert;

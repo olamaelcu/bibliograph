@@ -15,6 +15,7 @@ const ALL_TABLES = [
   schema.readingStatuses,
   schema.shelves,
   schema.shelfItems,
+  schema.features,
 ] as const;
 
 export function clearAllTables(db: BetterSQLite3Database<typeof schema>): void {

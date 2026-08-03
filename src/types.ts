@@ -134,3 +134,26 @@ export interface AddToShelfOutput { uri: string; cid: string; }
 
 export interface RemoveFromShelfInput { shelfUri: string; bookUri: string; }
 export interface RemoveFromShelfOutput { ok: boolean; }
+
+// Feed generator
+export type FeedWindow = 'day' | 'week' | 'month';
+export type FeedRecentType = 'review' | 'status';
+
+export interface FeedRecentItem {
+  type: FeedRecentType;
+  did: string;
+  uri: string;
+  book: BookRef;
+  createdAt: string;
+}
+
+export interface GetFeedParams { limit?: number; cursor?: string; }
+export interface GetFeedOutput {
+  recent: FeedRecentItem[];
+  newestBooks: BookRef[];
+  trending: Record<FeedWindow, BookRef[]>;
+  following?: BookRef[];
+  crossUser?: Record<FeedWindow, BookRef[]>;
+  degraded?: boolean;
+  cursor?: string;
+}
