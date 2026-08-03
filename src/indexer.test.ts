@@ -150,6 +150,29 @@ describe('indexer', () => {
       expect(rows[0].bookAuthor).toBe('Test Author');
     });
 
+    it('stores the event cid on a review', async () => {
+      await handleRecordEvent(makeEvent());
+
+      await handleRecordEvent({
+        type: 'record', action: 'create', did: 'did:plc:reviewer', rev: 'rev2',
+        collection: 'community.lexicon.book.review', rkey: 'rev001',
+        cid: 'bafyreicid123',
+        record: {
+          $type: 'community.lexicon.book.review',
+          bookUri: 'at://did:plc:test/community.lexicon.book.book/book001',
+          text: 'Great book!',
+          rating: 5,
+          bookRef: { title: 'Test Book', author: 'Test Author' },
+          createdAt: new Date().toISOString(),
+        },
+        live: false,
+      });
+
+      const rows = db.select().from(_s.reviews).all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].cid).toBe('bafyreicid123');
+    });
+
     it('deletes a review', async () => {
       await handleRecordEvent(makeEvent());
       await handleRecordEvent({

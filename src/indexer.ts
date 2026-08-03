@@ -44,7 +44,7 @@ export async function handleRecordEvent(evt: TapRecordEvent): Promise<void> {
       await indexBook(uri, evt.did, record, evt.action);
       break;
     case 'community.lexicon.book.review':
-      await indexReview(uri, evt.did, record);
+      await indexReview(uri, evt.did, record, evt.cid);
       break;
     case 'community.lexicon.book.status':
       await indexStatus(uri, evt.did, record);
@@ -119,7 +119,7 @@ async function indexBook(uri: string, did: string, record: Record<string, unknow
   }
 }
 
-async function indexReview(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
+async function indexReview(uri: string, did: string, record: Record<string, unknown>, cid?: string): Promise<void> {
   const bookRef = record.bookRef as Record<string, unknown> | undefined;
   const data = {
     uri,
@@ -127,6 +127,7 @@ async function indexReview(uri: string, did: string, record: Record<string, unkn
     bookUri: record.bookUri as string,
     text: record.text as string,
     rating: record.rating as number | undefined,
+    cid,
     bookTitle: (bookRef?.title as string) || '',
     bookAuthor: (bookRef?.author as string) || '',
     createdAt: (record.createdAt as string) || new Date().toISOString(),
