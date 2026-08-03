@@ -96,6 +96,9 @@ export interface GetBooksOutput { books: Array<{ uri: string; record: unknown; c
 export interface GetReviewsParams { bookUri: string; cursor?: string; limit?: number; }
 export interface GetReviewsOutput { reviews: Array<{ uri: string; did: string; record: unknown }>; cursor?: string; }
 
+export interface GetReviewParams { uri?: string; did?: string; bookUri?: string; }
+export interface GetReviewOutput { uri: string; did: string; record: unknown; cid?: string; }
+
 export interface GetUserStatusParams { did: string; bookUri?: string; status?: string; cursor?: string; limit?: number; }
 export interface GetUserStatusOutput { statuses: Array<{ uri: string; did: string; bookUri: string; record: unknown }>; cursor?: string; }
 
