@@ -222,14 +222,6 @@ export function createApp(): Hono {
 </head>
 <body>
 <div class="wrap">
-<pre>
-    __     _ _                       _
-   / _|   | | |                     | |
-  | |_ ___| | |__  _ __ ___  _ __ __| |
-  |  _/ _ \\ | '_ \\| '__/ _ \\| '__/ _\` |
-  | ||  __/ | |_) | | | (_) | | | (_| |
-   \\__\\___|_|_.__/|_|  \\___/|_|  \\__,_|
-</pre>
   <h1>Feeds</h1>
   <div class="sse-status" id="feed-status">connecting&hellip;</div>
 
