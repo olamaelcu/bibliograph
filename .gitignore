@@ -10,3 +10,4 @@ src/lexicons/
 coverage/
 docs/superpowers/
 db.sqlite*
+static/
