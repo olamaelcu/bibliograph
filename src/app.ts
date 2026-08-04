@@ -7,7 +7,6 @@ import { createSubscribeLabelsEvents } from './labeler-service.js';
 import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './api/get-book.js';
 import { getFeed } from './api/get-feed.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian, createShelf, addToShelf, removeFromShelf } from './api/create-book.js';
-import { handleRecordEvent } from './indexer.js'; // kept for potential reuse
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
 import { getServiceDid, buildDidDocument } from './did.js';
 import { OpenLibraryProvider } from './providers/openlibrary.js';
