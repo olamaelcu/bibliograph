@@ -2,7 +2,7 @@ import { html } from 'hono/html';
 import { Layout } from './layout.js';
 
 export function FeedsPage(props: { host: string }) {
-  const content = html`<wa-page>
+  const content = html`<wa-page  style="max-width: 60rem; margin: 0 auto;">
   <div slot="header">
     <div class="wa-cluster wa-gap-l" style="justify-content: space-between; align-items: center; flex-wrap: wrap">
       <div class="wa-cluster wa-gap-m" style="align-items: center">

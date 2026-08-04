@@ -71,7 +71,7 @@ function otherRow(method: 'GET' | 'POST', path: string, desc: string, extra?: Ht
 }
 
 export function HomePage(props: { host: string; queries: string[]; procedures: string[] }) {
-  const content = html`<wa-page>
+  const content = html`<wa-page style="max-width: 60rem; margin: 0 auto;">
   <div slot="header">
     <div class="wa-cluster wa-gap-l" style="justify-content: space-between; align-items: center; flex-wrap: wrap">
       <div class="wa-cluster wa-gap-m" style="align-items: center">
