@@ -13,11 +13,13 @@ export function FeedsPage(props: { host: string }) {
     </div>
   </div>
 
-  <div slot="main">
-    <wa-badge id="feed-status" variant="neutral">connecting&hellip;</wa-badge>
+  <div>
 
     <wa-card>
-      <h2 slot="header">Recent updates</h2>
+      <h2 slot="header">
+          <wa-badge id="feed-status" variant="neutral">connecting&hellip;</wa-badge>
+          Recent updates
+        </h2>
       <div class="wa-stack" id="recent">
         <wa-skeleton></wa-skeleton><wa-skeleton></wa-skeleton><wa-skeleton></wa-skeleton>
       </div>
