@@ -20,7 +20,8 @@
     "dump:openlibrary": "tsx src/dump/cli.ts",
     "release": "tsx src/release.ts",
     "backfill": "tsx src/backfill.ts",
-    "dedup": "tsx src/dedup-job.ts"
+    "dedup": "tsx src/dedup-job.ts",
+    "dedup:watch": "tsx src/dedup-job.ts watch 3600"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.3",

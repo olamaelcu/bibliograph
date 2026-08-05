@@ -1,3 +1,3 @@
-release: tsx src/release.ts
+release: npm run release
 web: npm start
-worker: tsx src/dedup-job.ts watch 3600
+worker: npm run dedup:watch
