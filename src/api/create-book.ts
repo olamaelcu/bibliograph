@@ -5,12 +5,13 @@ import { requireAuth, canCreateBook, isLibrarian } from '../auth.js';
 import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../labeler.js';
 import { HttpError } from '../errors.js';
 import { OpenLibraryProvider } from '../providers/openlibrary.js';
+import { GoodreadsProvider } from '../providers/goodreads.js';
 import { insertBook, insertClaim, makeRecordUri, makeId, findBookByIsbn, COLLECTIONS } from '../records.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput, CreateShelfInput, AddToShelfInput, RemoveFromShelfInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
 
-function extractIdentifier(bookUri: string): { type: 'isbn'; value: string } | { type: 'olid'; value: string } | null {
+function extractIdentifier(bookUri: string): { type: 'isbn'; value: string } | { type: 'olid'; value: string } | { type: 'goodreads'; value: string } | null {
   const urnMatch = bookUri.match(/^urn:isbn:(.+)$/);
   if (urnMatch) return { type: 'isbn', value: urnMatch[1] };
 
@@ -19,6 +20,9 @@ function extractIdentifier(bookUri: string): { type: 'isbn'; value: string } | {
 
   const pathOlidMatch = bookUri.match(/^\/?(works|books)\/(OL\d+[A-Z])$/);
   if (pathOlidMatch) return { type: 'olid', value: pathOlidMatch[2] };
+
+  const goodreadsUrnMatch = bookUri.match(/^urn:goodreads:(\d+)$/);
+  if (goodreadsUrnMatch) return { type: 'goodreads', value: goodreadsUrnMatch[1] };
 
   const bareIsbn = bookUri.match(/^[\d]{9,13}[\dX]$/);
   if (bareIsbn) return { type: 'isbn', value: bookUri };
@@ -123,6 +127,35 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
     });
 
     log.info({ olid: ident.value, uri }, 'book discovered and created');
+    return uri;
+  }
+
+  if (ident.type === 'goodreads') {
+    const existing = await db.query.books.findFirst({
+      where: like(books.identifiers, `%"goodreads":"${ident.value}"%`),
+    });
+    if (existing) return existing.uri;
+
+    log.info({ goodreadsId: ident.value }, 'book not in db, discovering by Goodreads id');
+    const provider = new GoodreadsProvider();
+    const data = await provider.getBookDetails(ident.value);
+    if (!data) return null;
+
+    const { uri } = await insertBook(db, {
+      did,
+      title: data.title,
+      author: data.author,
+      isbn: data.isbn13 || data.isbn10 || undefined,
+      publishedDate: data.publishedDate,
+      description: data.description,
+      pageCount: data.pageCount,
+      language: data.language,
+      categories: data.categories || [],
+      identifiers: bookIdentifiers(data),
+      coverUrl: data.coverUrl,
+    });
+
+    log.info({ goodreadsId: ident.value, uri }, 'book discovered and created');
     return uri;
   }
 
