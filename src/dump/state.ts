@@ -1,5 +1,5 @@
-import { eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema.js';
 
 export interface DumpStateFields {
