@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { db } from '../db/connection.js';
 import { logger } from '../logger.js';
 import { DumpState } from './state.js';
 import { HttpDownloader } from './downloader.js';
-import { runEditionsDumpImport } from './index.js';
+import { runEditionsDumpImport, prepareRun } from './index.js';
 
 interface ParsedCli {
   noDownload: boolean;
@@ -57,35 +57,13 @@ async function main(): Promise<void> {
     userAgent: process.env.OL_DUMP_USER_AGENT,
   });
 
-  if (!cli.noDownload) {
-    logger.info({ url: OL_DUMP_URL_DEFAULT, dest: gzPath }, 'dump:openlibrary downloading');
-    const meta = await downloader.headMetadata();
-    const matchesPrior = state.get()?.lastModified === meta.lastModified;
-    const priorOffset = state.get()?.lastByteOffset ?? 0;
-    const priorSize = state.get()?.fileSize ?? 0;
-    const fileSizeOnDisk = existsSync(gzPath) ? statSync(gzPath).size : 0;
-    const isUpToDate = fileSizeOnDisk > 0 &&
-      fileSizeOnDisk === priorSize &&
-      matchesPrior &&
-      priorOffset >= priorSize;
-
-    if (!isUpToDate) {
-      await downloader.downloadWithRetry(gzPath);
-      state.set({
-        url: OL_DUMP_URL_DEFAULT,
-        filePath: gzPath,
-        lastModified: meta.lastModified,
-        fileSize: statSync(gzPath).size,
-        lastByteOffset: 0,
-        lastKeyCursor: null,
-        startedAt: new Date().toISOString(),
-        totalProcessed: 0,
-        complete: false,
-      });
-    } else {
-      logger.info({ gzPath, offset: priorOffset }, 'dump:openlibrary local file up to date; resuming');
-    }
-  }
+  const { lastModified, fileSize } = await prepareRun({
+    downloader,
+    state,
+    gzPath,
+    url: OL_DUMP_URL_DEFAULT,
+    noDownload: cli.noDownload,
+  });
 
   if (cli.dryRun) {
     logger.info({ gzPath }, 'dump:openlibrary dry-run; not importing');
@@ -106,7 +84,6 @@ async function main(): Promise<void> {
   process.on('SIGTERM', onSignal);
   process.on('SIGINT', onSignal);
 
-  const existing = state.get();
   const summary = await runEditionsDumpImport({
     db,
     state,
@@ -114,8 +91,8 @@ async function main(): Promise<void> {
     gzPath,
     stateName: STATE_NAME,
     url: OL_DUMP_URL_DEFAULT,
-    lastModified: existing?.lastModified ?? null,
-    fileSize: existing?.fileSize ?? null,
+    lastModified,
+    fileSize,
     batchSize: cli.batchSize ?? OL_DUMP_BATCH_SIZE_DEFAULT,
     signal: controller.signal,
   });

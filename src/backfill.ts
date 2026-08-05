@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { db, schema } from './db/connection.js';
 import { trackRepos } from './tap.js';
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     const { backfillOpenLibraryAuthor } = await import('./openlibrary-backfill.js');
     await backfillOpenLibraryAuthor(db, authorKey);
   } else if (cmd === 'openlibrary:dump') {
-    const { runEditionsDumpImport } = await import('./dump/index.js');
+    const { runEditionsDumpImport, prepareRun } = await import('./dump/index.js');
     const { DumpState } = await import('./dump/state.js');
     const { HttpDownloader } = await import('./dump/downloader.js');
 
@@ -94,31 +94,22 @@ async function main(): Promise<void> {
       process.env.OL_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz',
     );
 
-    if (!process.argv.includes('--no-download')) {
-      const meta = await downloader.headMetadata();
-      await downloader.downloadWithRetry(gzPath);
-      state.set({
-        url: process.env.OL_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz',
-        filePath: gzPath,
-        lastModified: meta.lastModified,
-        fileSize: statSync(gzPath).size,
-        lastByteOffset: 0,
-        lastKeyCursor: null,
-        startedAt: new Date().toISOString(),
-        totalProcessed: 0,
-        complete: false,
-      });
-    }
+    const { lastModified, fileSize } = await prepareRun({
+      downloader,
+      state,
+      gzPath,
+      url: process.env.OL_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz',
+      noDownload: process.argv.includes('--no-download'),
+    });
 
-    const existing = state.get();
     const summary = await runEditionsDumpImport({
       db,
       state,
       downloader,
       gzPath,
       stateName,
-      lastModified: existing?.lastModified ?? null,
-      fileSize: existing?.fileSize ?? null,
+      lastModified,
+      fileSize,
     });
     logger.info({ summary }, 'openlibrary:dump finished');
   } else if (cmd === 'googlebooks') {

@@ -1,3 +1,4 @@
+import { existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import { statfs } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
@@ -217,4 +218,61 @@ async function assertDiskSpace(path: string, minFreeBytes: number): Promise<void
       `insufficient disk space at ${dirname(path)}: ${stats.bavail * stats.bsize} available, need ${minFreeBytes}`,
     );
   }
+}
+
+export async function prepareRun(opts: {
+  downloader: HttpDownloader;
+  state: DumpState;
+  gzPath: string;
+  url: string;
+  noDownload: boolean;
+}): Promise<{ lastModified: string | null; fileSize: number | null }> {
+  if (opts.noDownload) {
+    const onDiskSize = existsSync(opts.gzPath) ? statSync(opts.gzPath).size : 0;
+    const prior = opts.state.get();
+    return {
+      lastModified: prior?.lastModified ?? null,
+      fileSize: onDiskSize > 0 ? onDiskSize : (prior?.fileSize ?? null),
+    };
+  }
+
+  const meta = await opts.downloader.headMetadata();
+  const prior = opts.state.get();
+  const onDisk = existsSync(opts.gzPath) ? statSync(opts.gzPath).size : 0;
+  const localIsCurrent = prior?.lastModified === meta.lastModified
+    && prior?.url === opts.url
+    && onDisk > 0
+    && onDisk === (prior?.fileSize ?? 0)
+    && (prior?.lastByteOffset ?? 0) >= onDisk;
+
+  if (!localIsCurrent) {
+    const tmpPath = `${opts.gzPath}.part`;
+    await opts.downloader.downloadWithRetry(tmpPath);
+    const freshSize = statSync(tmpPath).size;
+    if (meta.contentLength !== null && freshSize !== meta.contentLength) {
+      rmSync(tmpPath);
+      throw new Error(
+        `download size mismatch for ${opts.url}: expected ${meta.contentLength}, got ${freshSize}`,
+      );
+    }
+    renameSync(tmpPath, opts.gzPath);
+  }
+
+  opts.state.set({
+    url: opts.url,
+    filePath: opts.gzPath,
+    lastModified: meta.lastModified,
+    fileSize: statSync(opts.gzPath).size,
+    lastByteOffset: 0,
+    lastKeyCursor: null,
+    lastNumericCursor: null,
+    startedAt: opts.state.get()?.startedAt ?? new Date().toISOString(),
+    totalProcessed: 0,
+    complete: false,
+  });
+
+  return {
+    lastModified: meta.lastModified,
+    fileSize: statSync(opts.gzPath).size,
+  };
 }
