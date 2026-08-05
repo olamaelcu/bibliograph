@@ -101,6 +101,35 @@ curl "http://localhost:3000/api/lookup/book?title=Dune&author=Frank+Herbert"
 
 Google Books support is available via `GoogleBooksProvider` but requires an API key passed to the constructor.
 
+## Bulk backfill (editions dump)
+
+For seeding the index with millions of records, the importer consumes the
+monthly OpenLibrary editions TSV dump. The run is idempotent and resumable:
+
+```bash
+# one-off: download + import
+npm run dump:openlibrary
+
+# cron-friendly: skip the network download when local file is already current
+npm run dump:openlibrary -- --no-download
+
+# clear the checkpoint and re-process from byte 0
+npm run dump:openlibrary -- --reset
+
+# override the local dump directory
+OL_DUMP_PATH=/var/lib/bibliograph/dumps npm run dump:openlibrary
+```
+
+The same importer is reachable through the existing dispatcher:
+
+```bash
+npx tsx src/backfill.ts openlibrary:dump [--no-download] [--reset]
+```
+
+State — including byte offset and last-processed edition key — is persisted in
+`backfill_state`. An interrupted run resumes from the last checkpoint, not
+from line 1.
+
 ## Connecting Tap
 
 Run Tap with the book lexicon signal collection:
