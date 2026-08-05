@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writeSync } from 'node:fs';
 import { db } from '../db/connection.js';
 import { logger } from '../logger.js';
 import { DumpState } from './state.js';
@@ -54,6 +54,54 @@ export function OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS(raw: string | undefined): n
 const OL_DUMP_BATCH_SIZE_DEFAULT = OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS(process.env.OL_DUMP_BATCH_SIZE);
 const STATE_NAME = 'openlibrary_editions';
 
+const STALE_LOCK_AGE_MS = 24 * 60 * 60 * 1000;
+
+export function acquireLock(lockPath: string, force: boolean): boolean {
+  if (!existsSync(lockPath)) {
+    let fd: number;
+    try {
+      fd = openSync(lockPath, 'wx');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw err;
+    }
+    try {
+      writeSync(fd, `${process.pid}\n${new Date().toISOString()}\n`);
+    } finally {
+      closeSync(fd);
+    }
+    return true;
+  }
+  if (!force) {
+    logger.warn({ lockPath }, 'dump lockfile present; another run is in progress');
+    return false;
+  }
+  if (!isStaleLock(lockPath)) {
+    logger.warn({ lockPath }, 'dump lockfile held by a live process; --force refused');
+    return false;
+  }
+  try { unlinkSync(lockPath); } catch {}
+  return acquireLock(lockPath, false);
+}
+
+export function isStaleLock(lockPath: string): boolean {
+  try {
+    const raw = readFileSync(lockPath, 'utf8');
+    const [pidStr, isoStr] = raw.split('\n', 2);
+    const pid = Number(pidStr);
+    const ageMs = Date.now() - new Date(isoStr).getTime();
+    let alive = false;
+    try { process.kill(pid, 0); alive = true; } catch {}
+    return !alive && ageMs > STALE_LOCK_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
+export function releaseLock(lockPath: string): void {
+  try { unlinkSync(lockPath); } catch { /* already gone */ }
+}
+
 async function main(): Promise<void> {
   const cli = parseArgs(process.argv.slice(2));
   const dumpDir = resolve(cli.dumpPath ?? OL_DUMP_PATH_DEFAULT);
@@ -61,6 +109,12 @@ async function main(): Promise<void> {
   const gzPath = resolve(dumpDir, filename);
 
   if (!existsSync(dumpDir)) mkdirSync(dumpDir, { recursive: true });
+
+  const lockPath = resolve(dumpDir, '.import.lock');
+  if (!acquireLock(lockPath, cli.force)) {
+    process.exit(0);
+  }
+  process.on('exit', () => releaseLock(lockPath));
 
   const state = new DumpState(db, STATE_NAME);
 
