@@ -87,5 +87,6 @@ describe('runEditionsDumpImport (end-to-end)', () => {
     expect(second.imported).toBe(0);
     expect(db.select().from(_s.books).all()).toHaveLength(50);
     expect(state.get()!.lastByteOffset).toBe(statSync(gzPath).size);
+    expect(state.get()!.totalProcessed).toBe(50);
   });
 });

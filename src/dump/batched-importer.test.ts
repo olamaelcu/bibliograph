@@ -6,7 +6,7 @@ import * as _s from '../db/schema.js';
 import type { BookData } from '../providers/interface.js';
 
 const { db } = createTestDb();
-const importer = new BatchedImporter(db, { batchSize: 5 });
+let importer: BatchedImporter;
 
 function makeBook(i: number): BookData {
   return {
@@ -19,7 +19,10 @@ function makeBook(i: number): BookData {
   };
 }
 
-beforeEach(() => clearAllTables(db));
+beforeEach(() => {
+  clearAllTables(db);
+  importer = new BatchedImporter(db, { batchSize: 5 });
+});
 
 describe('BatchedImporter', () => {
   it('inserts rows in chunks of batchSize', async () => {
@@ -36,6 +39,17 @@ describe('BatchedImporter', () => {
     expect(summary.imported).toBe(0);
     expect(summary.skipped).toBe(1);
     expect(db.select().from(_s.books).all()).toHaveLength(1);
+  });
+
+  it('shares dedup keys across runAll invocations when constructed with shared seen', async () => {
+    const seen = new Set<string>();
+    const a = new BatchedImporter(db, { batchSize: 5, seen });
+    await a.runAll([makeBook(0)]);
+    expect(seen).toContain('/books/OL0M');
+    const b = new BatchedImporter(db, { batchSize: 5, seen });
+    const summary = await b.runAll([makeBook(0), makeBook(1)]);
+    expect(summary.imported).toBe(1);
+    expect(summary.skipped).toBe(1);
   });
 
   it('continues past per-row failures and counts them', async () => {

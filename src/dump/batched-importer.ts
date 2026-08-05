@@ -12,6 +12,7 @@ export interface BatchedImporterOptions {
   batchSize?: number;
   onFlush?: () => void;
   signal?: AbortSignal;
+  seen?: Set<string>;
 }
 
 type Outcome = 'imported' | 'skipped' | 'failed';
@@ -20,6 +21,7 @@ export class BatchedImporter {
   private readonly batchSize: number;
   private readonly onFlush?: () => void;
   private readonly signal?: AbortSignal;
+  private readonly seen: Set<string>;
 
   constructor(
     private readonly db: BetterSQLite3Database<typeof schema>,
@@ -28,32 +30,32 @@ export class BatchedImporter {
     this.batchSize = opts.batchSize ?? 500;
     this.onFlush = opts.onFlush;
     this.signal = opts.signal;
+    this.seen = opts.seen ?? new Set<string>();
   }
 
   async runAll(items: BookData[]): Promise<BackfillSummary> {
     const summary: BackfillSummary = { imported: 0, skipped: 0, notFound: 0, failed: 0 };
-    const seen = new Set<string>();
     let buffer: BookData[] = [];
 
     for (const item of items) {
       if (this.signal?.aborted) throw new Error('aborted');
       buffer.push(item);
       if (buffer.length >= this.batchSize) {
-        const flushed = this.flush(buffer, seen);
+        const flushed = this.flush(buffer);
         this.mergeSummary(summary, flushed);
         buffer = [];
         this.onFlush?.();
       }
     }
     if (buffer.length > 0) {
-      const flushed = this.flush(buffer, seen);
+      const flushed = this.flush(buffer);
       this.mergeSummary(summary, flushed);
       this.onFlush?.();
     }
     return summary;
   }
 
-  private flush(items: BookData[], seen: Set<string>): BackfillSummary {
+  private flush(items: BookData[]): BackfillSummary {
     if (this.signal?.aborted) throw new Error('aborted');
     const summary: BackfillSummary = { imported: 0, skipped: 0, notFound: 0, failed: 0 };
 
@@ -62,7 +64,7 @@ export class BatchedImporter {
       try {
         this.db.transaction(() => {
           for (const item of items) {
-            const outcome = this.insertOneSync(item, seen);
+            const outcome = this.insertOneSync(item);
             if (outcome === 'imported') summary.imported += 1;
             else if (outcome === 'skipped') summary.skipped += 1;
             else summary.failed += 1;
@@ -84,13 +86,13 @@ export class BatchedImporter {
     throw new Error('unreachable');
   }
 
-  private insertOneSync(data: BookData, seen: Set<string>): Outcome {
+  private insertOneSync(data: BookData): Outcome {
     const canonical = data.isbn13 || data.isbn10 || '';
     const idKey = data.identifiers.openlibrary ?? '';
     const dedupKey = idKey || canonical;
     if (dedupKey) {
-      if (seen.has(dedupKey)) return 'skipped';
-      seen.add(dedupKey);
+      if (this.seen.has(dedupKey)) return 'skipped';
+      this.seen.add(dedupKey);
     }
 
     const dhash = computeDeduplicationHash(data.title, data.author, data.publishedDate);

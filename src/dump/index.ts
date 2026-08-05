@@ -27,7 +27,11 @@ export interface RunOptions {
   minFreeBytes?: number;
   fetchMetadata?: () => Promise<{ lastModified: string | null; contentLength: number | null }>;
   streamFactory?: (path: string) => DumpStreamer;
-  importFactory?: (db: BetterSQLite3Database<typeof schema>, batchSize: number, signal?: AbortSignal) => BatchedImporter;
+  importFactory?: (
+    db: BetterSQLite3Database<typeof schema>,
+    batchSize: number,
+    seen: Set<string>,
+  ) => BatchedImporter;
   signal?: AbortSignal;
 }
 
@@ -44,7 +48,11 @@ interface RunContext {
   minFreeBytes: number;
   fetchMetadata: () => Promise<{ lastModified: string | null; contentLength: number | null }>;
   streamFactory: (path: string) => DumpStreamer;
-  importFactory: (db: BetterSQLite3Database<typeof schema>, batchSize: number, signal?: AbortSignal) => BatchedImporter;
+  importFactory: (
+    db: BetterSQLite3Database<typeof schema>,
+    batchSize: number,
+    seen: Set<string>,
+  ) => BatchedImporter;
   signal?: AbortSignal;
 }
 
@@ -65,7 +73,11 @@ export async function runEditionsDumpImport(opts: RunOptions): Promise<BackfillS
       contentLength: m.contentLength,
     }))),
     streamFactory: opts.streamFactory ?? ((p) => new DumpStreamer(p)),
-    importFactory: opts.importFactory ?? ((d, b, s) => new BatchedImporter(d, { batchSize: b, signal: s })),
+    importFactory: opts.importFactory ?? ((d, b, s) => new BatchedImporter(d, {
+      batchSize: b,
+      signal: opts.signal,
+      seen: s,
+    })),
     signal: opts.signal,
   };
 
@@ -92,7 +104,8 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   const streamer = ctx.streamFactory(ctx.gzPath);
   const buffer: NonNullable<ReturnType<typeof toBookData>>[] = [];
   const summary: BackfillSummary = { imported: 0, skipped: 0, notFound: 0, failed: 0 };
-  const importer = ctx.importFactory(ctx.db, ctx.batchSize, ctx.signal);
+  const seen = new Set<string>();
+  const importer = ctx.importFactory(ctx.db, ctx.batchSize, seen);
 
   const initialStartOffset = existing?.lastByteOffset ?? 0;
   const initialResumeKey = existing?.lastKeyCursor ?? null;
@@ -168,7 +181,6 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
 
   ctx.state.markComplete();
   ctx.state.set({
-    totalProcessed: summary.imported,
     lastKeyCursor: lastKey,
     lastNumericCursor: lastId,
     lastByteOffset: streamer.fileSize(),
@@ -194,6 +206,7 @@ async function flushBatch(
       lastKeyCursor: lastKey,
       lastNumericCursor: lastId,
       lastByteOffset: lastByte ?? 0,
+      totalProcessed: (state.get()?.totalProcessed ?? 0) + flushed.imported,
     });
   } catch (err) {
     logger.fatal(
