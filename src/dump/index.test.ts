@@ -156,4 +156,26 @@ describe('runEditionsDumpImport', () => {
     expect(after.lastKeyCursor).toBeNull();
     expect(after.complete).toBe(false);
   });
+
+  it('does not early-return when lastModified is null (forces a real attempt)', async () => {
+    const { db, state, downloader } = setUp();
+    state.set({
+      url: 'https://x',
+      filePath: gzPath,
+      lastModified: null,
+      fileSize: 1,
+      lastByteOffset: 1,
+      totalProcessed: 5,
+      complete: true,
+    });
+    const summary = await runEditionsDumpImport({
+      db, state, downloader, gzPath,
+      stateName: 'openlibrary_editions',
+      url: 'https://x',
+      lastModified: null,
+      fileSize: null,
+      fetchMetadata: async () => ({ lastModified: null, contentLength: null }),
+    });
+    expect(summary.imported).toBe(3);
+  });
 });

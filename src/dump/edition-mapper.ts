@@ -16,9 +16,17 @@ export interface DumpEditionRecord {
   [k: string]: unknown;
 }
 
+function isEditionShape(o: unknown): o is { key: string; type: string; title?: string; authors?: { name?: string }[]; isbn_13?: string[]; isbn_10?: string[]; publish_date?: string; number_of_pages?: number; subjects?: string[]; subject_places?: string[]; covers?: number[] } {
+  if (typeof o !== 'object' || o === null) return false;
+  const r = o as { key?: unknown; type?: unknown };
+  return typeof r.key === 'string' && typeof r.type === 'string';
+}
+
 const COVER_BASE = 'https://covers.openlibrary.org/b/id';
 
 export function toBookData(record: DumpEditionRecord): BookData | null {
+  if (!isEditionShape(record)) return null;
+
   const isbn13 = record.isbn_13?.[0];
   const isbn10 = record.isbn_10?.[0];
   if (!isbn13 && !isbn10) return null;

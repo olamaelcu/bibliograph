@@ -5,6 +5,7 @@ import { db } from '../db/connection.js';
 import { logger } from '../logger.js';
 import { DumpState } from './state.js';
 import { HttpDownloader } from './downloader.js';
+import { DumpStreamer } from './streamer.js';
 import { runEditionsDumpImport, prepareRun } from './index.js';
 
 interface ParsedCli {
@@ -35,7 +36,12 @@ const OL_DUMP_PATH_DEFAULT =
   process.env.OL_DUMP_PATH ?? resolve(process.cwd(), 'data', 'dumps');
 const OL_DUMP_URL_DEFAULT =
   process.env.OL_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
-const OL_DUMP_BATCH_SIZE_DEFAULT = Number(process.env.OL_DUMP_BATCH_SIZE ?? '500');
+export function OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS(raw: string | undefined): number {
+  if (!raw) return 500;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 500;
+}
+const OL_DUMP_BATCH_SIZE_DEFAULT = OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS(process.env.OL_DUMP_BATCH_SIZE);
 const STATE_NAME = 'openlibrary_editions';
 
 async function main(): Promise<void> {
@@ -66,7 +72,13 @@ async function main(): Promise<void> {
   });
 
   if (cli.dryRun) {
-    logger.info({ gzPath }, 'dump:openlibrary dry-run; not importing');
+    let total = 0;
+    let withIsbn = 0;
+    for await (const item of new DumpStreamer(gzPath).iter({ startByteOffset: 0, lastNumericCursor: null })) {
+      total += 1;
+      if (item.record.isbn_13?.[0] ?? item.record.isbn_10?.[0]) withIsbn += 1;
+    }
+    logger.info({ gzPath, total, withIsbn }, 'dry-run parse complete; not importing');
     return;
   }
 

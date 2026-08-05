@@ -81,4 +81,17 @@ describe('editionMapper.toBookData', () => {
     r.subject_places = ['Arrakis'];
     expect(toBookData(r)!.categories).toEqual(['Arrakis']);
   });
+
+  it('returns null when the record is not an object', () => {
+    expect(toBookData(null as any)).toBeNull();
+    expect(toBookData(undefined as any)).toBeNull();
+    expect(toBookData(123 as any)).toBeNull();
+    expect(toBookData('string' as any)).toBeNull();
+  });
+
+  it('returns null when type or key is missing or wrong-typed', () => {
+    expect(toBookData({} as any)).toBeNull();
+    expect(toBookData({ key: 1, type: '/type/edition' } as any)).toBeNull();
+    expect(toBookData({ key: '/books/OL1M', type: 999 } as any)).toBeNull();
+  });
 });

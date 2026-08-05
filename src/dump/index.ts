@@ -93,10 +93,15 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   }
 
   const existing = ctx.state.get();
-  if (
-    existing?.complete &&
-    existing.lastModified === ctx.lastModified
-  ) {
+  const urlMatches = existing?.url === undefined || existing.url === ctx.url;
+  const sizeMatches = ctx.contentLength === null || existing?.fileSize === ctx.contentLength;
+  const lastModKnown = existing?.lastModified !== null && existing?.lastModified !== undefined;
+  const isFresh = existing?.complete
+    && urlMatches
+    && sizeMatches
+    && lastModKnown
+    && existing.lastModified === ctx.lastModified;
+  if (isFresh) {
     logger.info({ stateName: ctx.stateName }, 'dump up to date; nothing to do');
     return { imported: 0, skipped: existing.totalProcessed, notFound: 0, failed: 0 };
   }
