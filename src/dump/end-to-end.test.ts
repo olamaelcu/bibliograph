@@ -60,6 +60,7 @@ describe('runEditionsDumpImport (end-to-end)', () => {
     expect(db.select().from(_s.books).all()).toHaveLength(50);
     expect(state.get()!.complete).toBe(true);
     expect(state.get()!.totalProcessed).toBe(50);
+    expect(state.get()!.lastByteOffset).toBe(statSync(gzPath).size);
   });
 
   it('a second run against the same dump is a no-op', async () => {
@@ -80,9 +81,11 @@ describe('runEditionsDumpImport (end-to-end)', () => {
 
     const first = await runEditionsDumpImport(opts);
     expect(first.imported).toBe(50);
+    expect(state.get()!.lastByteOffset).toBe(statSync(gzPath).size);
 
     const second = await runEditionsDumpImport(opts);
     expect(second.imported).toBe(0);
     expect(db.select().from(_s.books).all()).toHaveLength(50);
+    expect(state.get()!.lastByteOffset).toBe(statSync(gzPath).size);
   });
 });

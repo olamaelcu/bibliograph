@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -55,6 +55,8 @@ describe('runEditionsDumpImport', () => {
     expect(summary.failed).toBe(0);
     expect(state.get()!.complete).toBe(true);
     expect(state.get()!.totalProcessed).toBe(3);
+    expect(state.get()!.lastByteOffset).toBeGreaterThan(0);
+    expect(state.get()!.lastByteOffset).toBe(statSync(gzPath).size);
   });
 
   it('is a no-op when state.complete is true and last_modified matches', async () => {
@@ -80,6 +82,7 @@ describe('runEditionsDumpImport', () => {
     });
     expect(summary.imported).toBe(0);
     expect(downloaderSpy).not.toHaveBeenCalled();
+    expect(state.get()!.lastByteOffset).toBe(9_999_999_999);
   });
 
   it('falls back to key replay when byte-offset seek fails', async () => {

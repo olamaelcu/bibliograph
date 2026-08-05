@@ -96,9 +96,10 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   let seekFailed = false;
   let lastKey: string | null = initialResumeKey;
   let lastId: number | null = initialNumericCursor;
+  let lastByte: number | null = initialStartOffset;
 
   try {
-    if (initialStartOffset > streamer.fileSize()) {
+    if (initialStartOffset >= streamer.fileSize()) {
       throw new SeekError(
         `byte offset ${initialStartOffset} exceeds dump file size ${streamer.fileSize()}`,
       );
@@ -109,10 +110,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       buffer.push(data);
       lastKey = item.record.key;
       lastId = parseWorkId(lastKey);
+      lastByte = item.byteOffset;
       if (buffer.length >= ctx.batchSize) {
         const flushed = await importer.runAll(buffer.splice(0));
         mergeSummary(summary, flushed);
-        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId });
+        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId, lastByteOffset: lastByte ?? 0 });
       }
     }
   } catch (err) {
@@ -135,10 +137,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       buffer.push(data);
       lastKey = item.record.key;
       lastId = parseWorkId(lastKey);
+      lastByte = item.byteOffset;
       if (buffer.length >= ctx.batchSize) {
         const flushed = await importer.runAll(buffer.splice(0));
         mergeSummary(summary, flushed);
-        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId });
+        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId, lastByteOffset: lastByte ?? 0 });
       }
     }
   }
@@ -146,11 +149,16 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   if (buffer.length > 0) {
     const flushed = await importer.runAll(buffer.splice(0));
     mergeSummary(summary, flushed);
-    ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId });
+    ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId, lastByteOffset: lastByte ?? 0 });
   }
 
   ctx.state.markComplete();
-  ctx.state.set({ totalProcessed: summary.imported, lastKeyCursor: lastKey, lastNumericCursor: lastId });
+  ctx.state.set({
+    totalProcessed: summary.imported,
+    lastKeyCursor: lastKey,
+    lastNumericCursor: lastId,
+    lastByteOffset: streamer.fileSize(),
+  });
   logger.info({ stateName: ctx.stateName, ...summary }, 'editions dump import complete');
   return summary;
 }
