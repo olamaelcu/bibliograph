@@ -120,15 +120,8 @@ export class GoodreadsProvider extends BaseBookProvider implements BookProvider 
       const bookData = apolloState[bookId] as Record<string, unknown> | undefined;
       if (!bookData) return null;
 
-      const workRef = (bookData.work as { __ref?: string } | undefined)?.__ref;
-      const workData = workRef ? (apolloState[workRef] as Record<string, unknown>) : null;
-
       const authorRef = (bookData.primaryContributorEdge as { node?: { __ref?: string } } | undefined)?.node?.__ref;
       const authorData = authorRef ? (apolloState[authorRef] as Record<string, unknown>) : null;
-
-      const seriesEdge = (bookData.bookSeries as Array<{ series?: { __ref?: string }; userPosition?: string }> | undefined)?.[0];
-      const seriesRef = seriesEdge?.series?.__ref;
-      const seriesData = seriesRef ? (apolloState[seriesRef] as Record<string, unknown>) : null;
 
       const bookGenres = bookData.bookGenres as Array<{ genre?: { name?: string } }> | undefined;
       const genres = (bookGenres ?? [])
@@ -167,10 +160,6 @@ export class GoodreadsProvider extends BaseBookProvider implements BookProvider 
       }
 
       const imageUrl = typeof bookData.imageUrl === "string" ? bookData.imageUrl : undefined;
-
-      // Defensive use of workData — currently unmapped but kept available for
-      // future averageRating / ratingsCount fields.
-      void workData;
 
       return {
         title: (bookData.titleComplete as string | undefined) ?? "Unknown Title",
