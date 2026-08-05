@@ -92,14 +92,16 @@ async function main(): Promise<void> {
     return;
   }
 
-  const interrupted = { value: false };
+  const controller = new AbortController();
+  let secondSignal = false;
   const onSignal = (sig: NodeJS.Signals) => {
-    if (interrupted.value) {
+    if (secondSignal) {
       logger.warn({ sig }, 'dump:openlibrary second signal received; exiting hard');
       process.exit(130);
     }
-    interrupted.value = true;
-    logger.warn({ sig }, 'dump:openlibrary received signal; finishing current batch and checkpointing');
+    secondSignal = true;
+    logger.warn({ sig }, 'dump:openlibrary received signal; aborting after current batch');
+    controller.abort();
   };
   process.on('SIGTERM', onSignal);
   process.on('SIGINT', onSignal);
@@ -115,17 +117,17 @@ async function main(): Promise<void> {
     lastModified: existing?.lastModified ?? null,
     fileSize: existing?.fileSize ?? null,
     batchSize: cli.batchSize ?? OL_DUMP_BATCH_SIZE_DEFAULT,
+    signal: controller.signal,
   });
 
   process.off('SIGTERM', onSignal);
   process.off('SIGINT', onSignal);
 
-  if (interrupted.value) {
-    logger.warn({ summary }, 'dump:openlibrary interrupted; state persisted, safe to resume');
-    process.exit(130);
+  if (controller.signal.aborted) {
+    logger.warn({ summary }, 'dump:openlibrary aborted; state preserved, safe to resume');
+  } else {
+    logger.info({ summary }, 'dump:openlibrary finished');
   }
-
-  logger.info({ summary }, 'dump:openlibrary finished');
 }
 
 main().catch((err) => {

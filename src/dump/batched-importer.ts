@@ -11,6 +11,7 @@ import { SERVICE_DID } from '../backfill-import.js';
 export interface BatchedImporterOptions {
   batchSize?: number;
   onFlush?: () => void;
+  signal?: AbortSignal;
 }
 
 type Outcome = 'imported' | 'skipped' | 'failed';
@@ -18,6 +19,7 @@ type Outcome = 'imported' | 'skipped' | 'failed';
 export class BatchedImporter {
   private readonly batchSize: number;
   private readonly onFlush?: () => void;
+  private readonly signal?: AbortSignal;
 
   constructor(
     private readonly db: BetterSQLite3Database<typeof schema>,
@@ -25,6 +27,7 @@ export class BatchedImporter {
   ) {
     this.batchSize = opts.batchSize ?? 500;
     this.onFlush = opts.onFlush;
+    this.signal = opts.signal;
   }
 
   async runAll(items: BookData[]): Promise<BackfillSummary> {
@@ -33,6 +36,7 @@ export class BatchedImporter {
     let buffer: BookData[] = [];
 
     for (const item of items) {
+      if (this.signal?.aborted) throw new Error('aborted');
       buffer.push(item);
       if (buffer.length >= this.batchSize) {
         const flushed = this.flush(buffer, seen);
@@ -50,21 +54,34 @@ export class BatchedImporter {
   }
 
   private flush(items: BookData[], seen: Set<string>): BackfillSummary {
+    if (this.signal?.aborted) throw new Error('aborted');
     const summary: BackfillSummary = { imported: 0, skipped: 0, notFound: 0, failed: 0 };
 
-    try {
-      this.db.transaction(() => {
-        for (const item of items) {
-          const outcome = this.insertOneSync(item, seen);
-          if (outcome === 'imported') summary.imported += 1;
-          else if (outcome === 'skipped') summary.skipped += 1;
-          else summary.failed += 1;
-        }
-      });
-    } catch (err) {
-      logger.error({ err, count: items.length }, 'batched importer: whole batch failed');
+    let attempt = 0;
+    while (attempt < 2) {
+      try {
+        this.db.transaction(() => {
+          for (const item of items) {
+            const outcome = this.insertOneSync(item, seen);
+            if (outcome === 'imported') summary.imported += 1;
+            else if (outcome === 'skipped') summary.skipped += 1;
+            else summary.failed += 1;
+          }
+        });
+        return summary;
+      } catch (err) {
+        attempt += 1;
+        if (attempt >= 2) throw err;
+        logger.warn(
+          { err, count: items.length, attempt },
+          'batched importer: transaction failed; retrying once',
+        );
+        summary.imported = 0;
+        summary.skipped = 0;
+        summary.failed = 0;
+      }
     }
-    return summary;
+    throw new Error('unreachable');
   }
 
   private insertOneSync(data: BookData, seen: Set<string>): Outcome {

@@ -63,4 +63,36 @@ describe('BatchedImporter', () => {
     const idents = typeof row.identifiers === 'string' ? JSON.parse(row.identifiers) : row.identifiers;
     expect(idents).toContainEqual({ type: 'openlibrary', value: '/books/OL7M' });
   });
+
+  it('throws (without partial state) when transaction fails twice', async () => {
+    const localDb = createTestDb().db;
+    (localDb as any).transaction = () => { throw new Error('disk full'); };
+    const failing = new BatchedImporter(localDb, { batchSize: 5 });
+    await expect(failing.runAll([makeBook(0), makeBook(1)])).rejects.toThrow(/disk full/);
+    expect(localDb.select().from(_s.books).all()).toHaveLength(0);
+  });
+
+  it('retries once and succeeds if the second transaction attempt works', async () => {
+    const localDb = createTestDb().db;
+    let calls = 0;
+    const realTransaction = localDb.transaction.bind(localDb);
+    (localDb as any).transaction = (fn: (...args: unknown[]) => unknown) => {
+      calls += 1;
+      if (calls === 1) throw new Error('transient');
+      return realTransaction(fn);
+    };
+    const recovering = new BatchedImporter(localDb, { batchSize: 5 });
+    const summary = await recovering.runAll([makeBook(0), makeBook(1)]);
+    expect(calls).toBe(2);
+    expect(summary.imported).toBe(2);
+    expect(localDb.select().from(_s.books).all()).toHaveLength(2);
+  });
+
+  it('honors AbortSignal between batches', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const signaled = new BatchedImporter(db, { batchSize: 5, signal: controller.signal });
+    await expect(signaled.runAll([makeBook(0), makeBook(1)])).rejects.toThrow(/aborted/);
+    expect(db.select().from(_s.books).all()).toHaveLength(0);
+  });
 });

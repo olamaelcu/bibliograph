@@ -8,6 +8,7 @@ import { DumpState } from './state.js';
 import { HttpDownloader } from './downloader.js';
 import { SeekError } from './streamer.js';
 import { runEditionsDumpImport } from './index.js';
+import { BatchedImporter } from './batched-importer.js';
 
 const TSV_LINES = [
   '/type/edition\t/books/OL1M\t1\tWed, 01 Jan 2026 00:00:00 GMT\t{"key":"/books/OL1M","type":"/type/edition","title":"Dune","authors":[{"key":"/authors/OL1A","name":"Frank Herbert"}],"isbn_13":["9780441172719"]}',
@@ -120,5 +121,39 @@ describe('runEditionsDumpImport', () => {
       lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
       minFreeBytes: Number.MAX_SAFE_INTEGER,
     })).rejects.toThrow(/insufficient disk space/);
+  });
+
+  it('does not advance cursor when a batch retry is exhausted', async () => {
+    const { db, state, downloader } = setUp();
+    state.set({
+      url: 'https://x',
+      filePath: gzPath,
+      lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
+      fileSize: statSync(gzPath).size,
+      lastByteOffset: 0,
+      lastKeyCursor: null,
+      lastNumericCursor: 0,
+      totalProcessed: 0,
+    });
+    const failingFactory = (_d: unknown, _b: unknown) => {
+      const fakeDb = createTestDb().db;
+      (fakeDb as any).transaction = () => { throw new Error('disk full'); };
+      return new BatchedImporter(fakeDb as never, { batchSize: 5 });
+    };
+    await expect(runEditionsDumpImport({
+      db,
+      state,
+      downloader,
+      gzPath,
+      stateName: 'openlibrary_editions',
+      url: 'https://x',
+      lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
+      fileSize: statSync(gzPath).size,
+      importFactory: failingFactory as never,
+    })).rejects.toThrow(/disk full/);
+    const after = state.get()!;
+    expect(after.lastNumericCursor).toBe(0);
+    expect(after.lastKeyCursor).toBeNull();
+    expect(after.complete).toBe(false);
   });
 });

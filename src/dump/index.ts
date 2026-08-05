@@ -26,7 +26,8 @@ export interface RunOptions {
   minFreeBytes?: number;
   fetchMetadata?: () => Promise<{ lastModified: string | null; contentLength: number | null }>;
   streamFactory?: (path: string) => DumpStreamer;
-  importFactory?: (db: BetterSQLite3Database<typeof schema>, batchSize: number) => BatchedImporter;
+  importFactory?: (db: BetterSQLite3Database<typeof schema>, batchSize: number, signal?: AbortSignal) => BatchedImporter;
+  signal?: AbortSignal;
 }
 
 interface RunContext {
@@ -42,7 +43,8 @@ interface RunContext {
   minFreeBytes: number;
   fetchMetadata: () => Promise<{ lastModified: string | null; contentLength: number | null }>;
   streamFactory: (path: string) => DumpStreamer;
-  importFactory: (db: BetterSQLite3Database<typeof schema>, batchSize: number) => BatchedImporter;
+  importFactory: (db: BetterSQLite3Database<typeof schema>, batchSize: number, signal?: AbortSignal) => BatchedImporter;
+  signal?: AbortSignal;
 }
 
 export async function runEditionsDumpImport(opts: RunOptions): Promise<BackfillSummary> {
@@ -62,7 +64,8 @@ export async function runEditionsDumpImport(opts: RunOptions): Promise<BackfillS
       contentLength: m.contentLength,
     }))),
     streamFactory: opts.streamFactory ?? ((p) => new DumpStreamer(p)),
-    importFactory: opts.importFactory ?? ((d, b) => new BatchedImporter(d, { batchSize: b })),
+    importFactory: opts.importFactory ?? ((d, b, s) => new BatchedImporter(d, { batchSize: b, signal: s })),
+    signal: opts.signal,
   };
 
   await assertDiskSpace(ctx.gzPath, ctx.minFreeBytes);
@@ -88,12 +91,13 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   const streamer = ctx.streamFactory(ctx.gzPath);
   const buffer: NonNullable<ReturnType<typeof toBookData>>[] = [];
   const summary: BackfillSummary = { imported: 0, skipped: 0, notFound: 0, failed: 0 };
-  const importer = ctx.importFactory(ctx.db, ctx.batchSize);
+  const importer = ctx.importFactory(ctx.db, ctx.batchSize, ctx.signal);
 
   const initialStartOffset = existing?.lastByteOffset ?? 0;
   const initialResumeKey = existing?.lastKeyCursor ?? null;
   const initialNumericCursor = existing?.lastNumericCursor ?? null;
   let seekFailed = false;
+  let aborted = false;
   let lastKey: string | null = initialResumeKey;
   let lastId: number | null = initialNumericCursor;
   let lastByte: number | null = initialStartOffset;
@@ -105,6 +109,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       );
     }
     for await (const item of streamer.iter({ startByteOffset: initialStartOffset, lastNumericCursor: initialNumericCursor })) {
+      if (ctx.signal?.aborted) {
+        logger.warn({ stateName: ctx.stateName }, 'dump import: signal received; aborting');
+        aborted = true;
+        break;
+      }
       const data = toBookData(item.record);
       if (!data) continue;
       buffer.push(data);
@@ -112,9 +121,7 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       lastId = parseWorkId(lastKey);
       lastByte = item.byteOffset;
       if (buffer.length >= ctx.batchSize) {
-        const flushed = await importer.runAll(buffer.splice(0));
-        mergeSummary(summary, flushed);
-        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId, lastByteOffset: lastByte ?? 0 });
+        await flushBatch(importer, buffer, summary, ctx.state, lastKey, lastId, lastByte, ctx.stateName);
       }
     }
   } catch (err) {
@@ -132,6 +139,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   if (seekFailed) {
     summary.skipped += existing?.totalProcessed ?? 0;
     for await (const item of streamer.iter({ startByteOffset: 0, lastNumericCursor: initialNumericCursor })) {
+      if (ctx.signal?.aborted) {
+        logger.warn({ stateName: ctx.stateName }, 'dump import: signal received; aborting');
+        aborted = true;
+        break;
+      }
       const data = toBookData(item.record);
       if (!data) continue;
       buffer.push(data);
@@ -139,17 +151,18 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       lastId = parseWorkId(lastKey);
       lastByte = item.byteOffset;
       if (buffer.length >= ctx.batchSize) {
-        const flushed = await importer.runAll(buffer.splice(0));
-        mergeSummary(summary, flushed);
-        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId, lastByteOffset: lastByte ?? 0 });
+        await flushBatch(importer, buffer, summary, ctx.state, lastKey, lastId, lastByte, ctx.stateName);
       }
     }
   }
 
+  if (aborted) {
+    logger.warn({ stateName: ctx.stateName, summary }, 'dump import: aborted; checkpoint preserved');
+    return summary;
+  }
+
   if (buffer.length > 0) {
-    const flushed = await importer.runAll(buffer.splice(0));
-    mergeSummary(summary, flushed);
-    ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId, lastByteOffset: lastByte ?? 0 });
+    await flushBatch(importer, buffer, summary, ctx.state, lastKey, lastId, lastByte, ctx.stateName);
   }
 
   ctx.state.markComplete();
@@ -161,6 +174,33 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   });
   logger.info({ stateName: ctx.stateName, ...summary }, 'editions dump import complete');
   return summary;
+}
+
+async function flushBatch(
+  importer: BatchedImporter,
+  buffer: NonNullable<ReturnType<typeof toBookData>>[],
+  summary: BackfillSummary,
+  state: DumpState,
+  lastKey: string | null,
+  lastId: number | null,
+  lastByte: number | null,
+  stateName: string,
+): Promise<void> {
+  try {
+    const flushed = await importer.runAll(buffer.splice(0));
+    mergeSummary(summary, flushed);
+    state.set({
+      lastKeyCursor: lastKey,
+      lastNumericCursor: lastId,
+      lastByteOffset: lastByte ?? 0,
+    });
+  } catch (err) {
+    logger.fatal(
+      { err, stateName, lastKey },
+      'dump import: batch failed twice; aborting without cursor advance',
+    );
+    throw err;
+  }
 }
 
 function mergeSummary(into: BackfillSummary, from: BackfillSummary): void {
