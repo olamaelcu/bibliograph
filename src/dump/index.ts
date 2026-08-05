@@ -263,18 +263,32 @@ export async function prepareRun(opts: {
     && onDisk === (prior?.fileSize ?? 0)
     && (prior?.lastByteOffset ?? 0) >= onDisk;
 
-  if (!localIsCurrent) {
-    const tmpPath = `${opts.gzPath}.part`;
-    await opts.downloader.downloadWithRetry(tmpPath);
-    const freshSize = statSync(tmpPath).size;
-    if (meta.contentLength !== null && freshSize !== meta.contentLength) {
-      rmSync(tmpPath);
-      throw new Error(
-        `download size mismatch for ${opts.url}: expected ${meta.contentLength}, got ${freshSize}`,
-      );
-    }
-    renameSync(tmpPath, opts.gzPath);
+  if (localIsCurrent && prior?.complete) {
+    logger.info(
+      { gzPath: opts.gzPath, lastModified: meta.lastModified, fileSize: onDisk },
+      'prepareRun: local file is current; skipping download',
+    );
+    return { lastModified: meta.lastModified, fileSize: onDisk };
   }
+
+  if (localIsCurrent && !prior?.complete) {
+    logger.info(
+      { gzPath: opts.gzPath, lastModified: meta.lastModified, lastByteOffset: prior?.lastByteOffset },
+      'prepareRun: local file is current; resuming partial run',
+    );
+    return { lastModified: meta.lastModified, fileSize: onDisk };
+  }
+
+  const tmpPath = `${opts.gzPath}.part`;
+  await opts.downloader.downloadWithRetry(tmpPath);
+  const freshSize = statSync(tmpPath).size;
+  if (meta.contentLength !== null && freshSize !== meta.contentLength) {
+    rmSync(tmpPath);
+    throw new Error(
+      `download size mismatch for ${opts.url}: expected ${meta.contentLength}, got ${freshSize}`,
+    );
+  }
+  renameSync(tmpPath, opts.gzPath);
 
   opts.state.set({
     url: opts.url,

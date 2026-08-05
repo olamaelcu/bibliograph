@@ -63,7 +63,7 @@ describe('prepareRun', () => {
     expect(existsSync(`${gzPath}.part`)).toBe(false);
   });
 
-  it('no-ops the download when local file matches prior state', async () => {
+  it('short-circuits without rewriting state when local file is current and prior run is complete', async () => {
     const body = 'cached-body';
     writeFileSync(gzPath, body);
     const state = new DumpState(db, 'prepare_run');
@@ -73,6 +73,9 @@ describe('prepareRun', () => {
       lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
       fileSize: body.length,
       lastByteOffset: body.length,
+      lastKeyCursor: '/books/OL1M',
+      lastNumericCursor: 1,
+      totalProcessed: 42,
       complete: true,
     });
     const downloader = makeDownloader('not-used');
@@ -83,10 +86,61 @@ describe('prepareRun', () => {
       lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
       contentLength: body.length,
     }));
+
     const result = await prepareRun({
       downloader, state, gzPath, url: 'https://x', noDownload: false,
     });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
+      fileSize: body.length,
+    });
+    expect(state.get()).toMatchObject({
+      lastByteOffset: body.length,
+      lastKeyCursor: '/books/OL1M',
+      lastNumericCursor: 1,
+      totalProcessed: 42,
+      complete: true,
+    });
+  });
+
+  it('returns immediately without download when prior.complete=false (resume partial)', async () => {
+    const body = 'cached-body';
+    writeFileSync(gzPath, body);
+    const state = new DumpState(db, 'prepare_run');
+    state.set({
+      url: 'https://x',
+      filePath: gzPath,
+      lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
+      fileSize: body.length,
+      lastByteOffset: body.length,
+      lastKeyCursor: '/books/OL1M',
+      lastNumericCursor: 1,
+      totalProcessed: 21,
+      complete: false,
+    });
+    const downloader = makeDownloader('not-used');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    (downloader as any).headMetadata = vi.fn(async () => ({
+      url: 'https://x',
+      lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
+      contentLength: body.length,
+    }));
+
+    const result = await prepareRun({
+      downloader, state, gzPath, url: 'https://x', noDownload: false,
+    });
+
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.fileSize).toBe(body.length);
+    expect(state.get()).toMatchObject({
+      lastByteOffset: body.length,
+      lastKeyCursor: '/books/OL1M',
+      lastNumericCursor: 1,
+      totalProcessed: 21,
+      complete: false,
+    });
   });
 });
