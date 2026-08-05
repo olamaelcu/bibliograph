@@ -23,5 +23,12 @@
       "quantity": 1,
       "max_parallel": 1
     }
-  }
+  },
+  "cron": [
+    {
+      "command": "npm run dump:openlibrary",
+      "schedule": "0 3 1 * *",
+      "concurrency_policy": "forbid"
+    }
+  ]
 }
