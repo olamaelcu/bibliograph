@@ -96,4 +96,94 @@ describe('GoodreadsProvider', () => {
       expect(url).toContain('q=9780553573404');
     });
   });
+
+  describe('searchByTitle', () => {
+    it('returns empty array on no results', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([]),
+      });
+      const result = await provider.searchByTitle('NothingFound');
+      expect(result).toEqual([]);
+    });
+
+    it('returns empty array on network error', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('fail'));
+      const result = await provider.searchByTitle('Nothing');
+      expect(result).toEqual([]);
+    });
+
+    it('returns empty array when response is not ok', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
+      const result = await provider.searchByTitle('Nothing');
+      expect(result).toEqual([]);
+    });
+
+    it('maps multiple results', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([
+          {
+            imageUrl: 'https://x/a._SY50_.jpg',
+            bookId: '1',
+            bookTitleBare: 'Dune',
+            numPages: 412,
+            author: { name: 'Frank Herbert' },
+            description: { html: 'Sci-fi classic' },
+          },
+          {
+            imageUrl: 'https://x/b._SY50_.jpg',
+            bookId: '2',
+            bookTitleBare: 'Dune Messiah',
+            numPages: 256,
+            author: { name: 'Frank Herbert' },
+            description: { html: '' },
+          },
+        ]),
+      });
+      const results = await provider.searchByTitle('Dune');
+      expect(results).toHaveLength(2);
+      expect(results[0].title).toBe('Dune');
+      expect(results[1].title).toBe('Dune Messiah');
+    });
+
+    it('builds URL with title only', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([]),
+      });
+      await provider.searchByTitle('Dune');
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(url).toContain('q=Dune');
+      expect(url).not.toContain('Frank');
+    });
+
+    it('appends author to query when provided', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([]),
+      });
+      await provider.searchByTitle('Dune', 'Frank Herbert');
+      const url = fetchMock.mock.calls[0][0] as string;
+      expect(url).toContain('Dune');
+      expect(url).toContain('Frank+Herbert');
+    });
+
+    it('skips hits that fail to map (missing bookId)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([
+          { bookTitleBare: 'NoId', author: { name: 'X' } },
+          {
+            bookId: '99',
+            bookTitleBare: 'HasId',
+            author: { name: 'Y' },
+          },
+        ]),
+      });
+      const results = await provider.searchByTitle('Mixed');
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toBe('HasId');
+    });
+  });
 });

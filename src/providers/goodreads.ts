@@ -39,14 +39,26 @@ export class GoodreadsProvider extends BaseBookProvider implements BookProvider 
   }
 
   async searchByIsbn(isbn: string): Promise<BookData | null> {
-    const url = `${AUTO_COMPLETE_URL}?format=json&q=${encodeURIComponent(isbn)}&limit=20`;
+    const params = new URLSearchParams({ format: 'json', q: isbn, limit: '20' });
+    const url = `${AUTO_COMPLETE_URL}?${params.toString()}`;
     const data = await this.fetchJson<GoodreadsAutoCompleteHit[]>(url);
     if (!data || data.length === 0) return null;
     return this.mapAutoCompleteHitToBookData(data[0]);
   }
 
-  async searchByTitle(_title: string, _author?: string): Promise<BookData[]> {
-    return [];
+  async searchByTitle(title: string, author?: string): Promise<BookData[]> {
+    const q = author ? `${title} ${author}` : title;
+    const params = new URLSearchParams({ format: 'json', q, limit: '20' });
+    const url = `${AUTO_COMPLETE_URL}?${params.toString()}`;
+    const data = await this.fetchJson<GoodreadsAutoCompleteHit[]>(url);
+    if (!data || data.length === 0) return [];
+
+    const results: BookData[] = [];
+    for (const hit of data) {
+      const mapped = this.mapAutoCompleteHitToBookData(hit);
+      if (mapped) results.push(mapped);
+    }
+    return results;
   }
 
   async getBookDetails(_id: string): Promise<BookData | null> {
