@@ -25,6 +25,10 @@ export default defineConfig(({ mode }) => {
 
   // `vite` -> dev server: Vite owns the server, Hono app is the middleware
   return {
+    server: {
+      port: 5176,
+      strictPort: true,
+    },
     plugins: [
       devServer({
         entry: 'src/vite-dev.ts',
