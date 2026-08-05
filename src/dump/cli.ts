@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { db } from '../db/connection.js';
 import { logger } from '../logger.js';
 import { DumpState } from './state.js';
@@ -14,14 +14,24 @@ interface ParsedCli {
   batchSize?: number;
   dumpPath?: string;
   dryRun: boolean;
+  keepDump: boolean;
+  force: boolean;
 }
 
-function parseArgs(argv: string[]): ParsedCli {
-  const parsed: ParsedCli = { noDownload: false, reset: false, dryRun: false };
+export function parseArgs(argv: string[]): ParsedCli {
+  const parsed: ParsedCli = {
+    noDownload: false,
+    reset: false,
+    dryRun: false,
+    keepDump: false,
+    force: false,
+  };
   for (const arg of argv) {
     if (arg === '--no-download') parsed.noDownload = true;
     else if (arg === '--reset') parsed.reset = true;
     else if (arg === '--dry-run') parsed.dryRun = true;
+    else if (arg === '--keep-dump') parsed.keepDump = true;
+    else if (arg === '--force') parsed.force = true;
     else if (arg.startsWith('--path=')) parsed.dumpPath = arg.slice('--path='.length);
     else if (arg.startsWith('--batch-size=')) {
       const n = Number(arg.slice('--batch-size='.length));
@@ -116,6 +126,10 @@ async function main(): Promise<void> {
     logger.warn({ summary }, 'dump:openlibrary aborted; state preserved, safe to resume');
   } else {
     logger.info({ summary }, 'dump:openlibrary finished');
+    if (!cli.keepDump) {
+      try { rmSync(gzPath, { force: true }); } catch {}
+      try { rmSync(`${gzPath}.part`, { force: true }); } catch {}
+    }
   }
 }
 
