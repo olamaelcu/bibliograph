@@ -29,7 +29,7 @@ describe('DumpStreamer', () => {
   it('yields parsed records with key-cursor + byte offset', async () => {
     const streamer = new DumpStreamer(gzPath);
     const lines: Array<{ key: string; byteOffset: number }> = [];
-    for await (const item of streamer.iter({ startByteOffset: 0, resumeAfterKey: null })) {
+    for await (const item of streamer.iter({ startByteOffset: 0, lastNumericCursor: null })) {
       lines.push({ key: item.record.key, byteOffset: item.byteOffset });
     }
     expect(lines.map(l => l.key)).toEqual(['/books/OL1M', '/books/OL2M', '/books/OL3M']);
@@ -39,23 +39,37 @@ describe('DumpStreamer', () => {
   it('skips non-edition rows but advances byte offset', async () => {
     const streamer = new DumpStreamer(gzPath);
     const keys: string[] = [];
-    for await (const item of streamer.iter({ startByteOffset: 0, resumeAfterKey: null })) {
+    for await (const item of streamer.iter({ startByteOffset: 0, lastNumericCursor: null })) {
       keys.push(item.record.key);
     }
     expect(keys).not.toContain('/works/OL1W');
     expect(keys).toHaveLength(3);
   });
 
-  it('skips lines whose key <= resumeAfterKey (replay fallback)', async () => {
+  it('skips lines whose numeric id <= lastNumericCursor (replay fallback)', async () => {
     const streamer = new DumpStreamer(gzPath);
     const keys: string[] = [];
     for await (const item of streamer.iter({
       startByteOffset: 0,
-      resumeAfterKey: '/books/OL1M',
+      lastNumericCursor: 1,
     })) {
       keys.push(item.record.key);
     }
     expect(keys).toEqual(['/books/OL2M', '/books/OL3M']);
+  });
+
+  it('skips by numeric id, not lexicographic order', async () => {
+    const tsv = [
+      '/type/edition\t/books/OL9M\t1\tx\t{"key":"/books/OL9M","type":"/type/edition","title":"A"}',
+      '/type/edition\t/books/OL10M\t1\tx\t{"key":"/books/OL10M","type":"/type/edition","title":"B"}',
+    ].join('\n') + '\n';
+    writeFileSync(gzPath, gzipSync(tsv));
+    const streamer = new DumpStreamer(gzPath);
+    const keys: string[] = [];
+    for await (const item of streamer.iter({ startByteOffset: 0, lastNumericCursor: 9 })) {
+      keys.push(item.record.key);
+    }
+    expect(keys).toEqual(['/books/OL10M']);
   });
 
   it('emits a parse-skipped entry for unparseable JSON (does not throw)', async () => {
@@ -63,7 +77,7 @@ describe('DumpStreamer', () => {
     writeFileSync(gzPath, gzipSync(bad + TSV_A));
     const streamer = new DumpStreamer(gzPath);
     const records: unknown[] = [];
-    for await (const item of streamer.iter({ startByteOffset: 0, resumeAfterKey: null })) {
+    for await (const item of streamer.iter({ startByteOffset: 0, lastNumericCursor: null })) {
       records.push(item.record);
     }
     expect(records).toHaveLength(3);
@@ -72,19 +86,17 @@ describe('DumpStreamer', () => {
   it('uses gzip-stream seek when startByteOffset is non-zero (or throws SeekError)', async () => {
     const all = new DumpStreamer(gzPath);
     const allKeys: string[] = [];
-    for await (const item of all.iter({ startByteOffset: 0, resumeAfterKey: null })) {
+    for await (const item of all.iter({ startByteOffset: 0, lastNumericCursor: null })) {
       allKeys.push(item.record.key);
     }
     const halfOffset = Math.floor((await import('node:fs')).statSync(gzPath).size / 2);
     const fromHalf = new DumpStreamer(gzPath);
     const halfKeys: string[] = [];
     try {
-      for await (const item of fromHalf.iter({ startByteOffset: halfOffset, resumeAfterKey: null })) {
+      for await (const item of fromHalf.iter({ startByteOffset: halfOffset, lastNumericCursor: null })) {
         halfKeys.push(item.record.key);
       }
     } catch (err) {
-      // mid-stream seek over a small single-block gzip is not a block boundary,
-      // so gunzip may legitimately error. Orchestrator catches SeekError and replays.
       if (err instanceof SeekError) {
         expect(halfKeys).toEqual([]);
         return;

@@ -9,6 +9,7 @@ export interface DumpStateFields {
   fileSize?: number | null;
   lastByteOffset?: number;
   lastKeyCursor?: string | null;
+  lastNumericCursor?: number | null;
   totalProcessed?: number;
   complete?: boolean;
   startedAt?: string | null;
@@ -42,6 +43,7 @@ export class DumpState {
       fileSize: fields.fileSize ?? existing?.fileSize ?? null,
       lastByteOffset: fields.lastByteOffset ?? existing?.lastByteOffset ?? 0,
       lastKeyCursor: fields.lastKeyCursor ?? existing?.lastKeyCursor ?? null,
+      lastNumericCursor: fields.lastNumericCursor ?? existing?.lastNumericCursor ?? null,
       totalProcessed,
       complete: fields.complete ?? existing?.complete ?? false,
       startedAt,
@@ -60,6 +62,7 @@ export class DumpState {
           fileSize: values.fileSize,
           lastByteOffset: values.lastByteOffset,
           lastKeyCursor: values.lastKeyCursor,
+          lastNumericCursor: values.lastNumericCursor,
           totalProcessed: values.totalProcessed,
           complete: values.complete,
           startedAt: values.startedAt,

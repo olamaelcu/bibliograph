@@ -11,7 +11,7 @@ export interface StreamerItem {
 
 export interface StreamerOptions {
   startByteOffset: number;
-  resumeAfterKey: string | null;
+  lastNumericCursor: number | null;
 }
 
 const EDITION_TYPE = '/type/edition';
@@ -42,7 +42,10 @@ export class DumpStreamer {
         if (type !== EDITION_TYPE) continue;
         if (!key) continue;
 
-        if (opts.resumeAfterKey && key <= opts.resumeAfterKey) continue;
+        const candidateId = parseWorkId(key);
+        if (opts.lastNumericCursor !== null && candidateId !== null && candidateId <= opts.lastNumericCursor) {
+          continue;
+        }
 
         let record: DumpEditionRecord;
         try {
@@ -75,4 +78,9 @@ export class SeekError extends Error {
     super(message);
     this.name = 'SeekError';
   }
+}
+
+export function parseWorkId(key: string): number | null {
+  const m = /\/books\/OL(\d+)M$/.exec(key);
+  return m ? Number(m[1]) : null;
 }

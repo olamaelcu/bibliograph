@@ -6,7 +6,7 @@ import { logger } from '../logger.js';
 import type { BackfillSummary } from '../backfill-import.js';
 import { DumpState } from './state.js';
 import { HttpDownloader } from './downloader.js';
-import { DumpStreamer, SeekError } from './streamer.js';
+import { DumpStreamer, SeekError, parseWorkId } from './streamer.js';
 import { toBookData } from './edition-mapper.js';
 import { BatchedImporter } from './batched-importer.js';
 
@@ -92,8 +92,10 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
 
   const initialStartOffset = existing?.lastByteOffset ?? 0;
   const initialResumeKey = existing?.lastKeyCursor ?? null;
+  const initialNumericCursor = existing?.lastNumericCursor ?? null;
   let seekFailed = false;
   let lastKey: string | null = initialResumeKey;
+  let lastId: number | null = initialNumericCursor;
 
   try {
     if (initialStartOffset > streamer.fileSize()) {
@@ -101,15 +103,16 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
         `byte offset ${initialStartOffset} exceeds dump file size ${streamer.fileSize()}`,
       );
     }
-    for await (const item of streamer.iter({ startByteOffset: initialStartOffset, resumeAfterKey: initialResumeKey })) {
+    for await (const item of streamer.iter({ startByteOffset: initialStartOffset, lastNumericCursor: initialNumericCursor })) {
       const data = toBookData(item.record);
       if (!data) continue;
       buffer.push(data);
       lastKey = item.record.key;
+      lastId = parseWorkId(lastKey);
       if (buffer.length >= ctx.batchSize) {
         const flushed = await importer.runAll(buffer.splice(0));
         mergeSummary(summary, flushed);
-        ctx.state.set({ lastKeyCursor: lastKey });
+        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId });
       }
     }
   } catch (err) {
@@ -126,15 +129,16 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
 
   if (seekFailed) {
     summary.skipped += existing?.totalProcessed ?? 0;
-    for await (const item of streamer.iter({ startByteOffset: 0, resumeAfterKey: initialResumeKey })) {
+    for await (const item of streamer.iter({ startByteOffset: 0, lastNumericCursor: initialNumericCursor })) {
       const data = toBookData(item.record);
       if (!data) continue;
       buffer.push(data);
       lastKey = item.record.key;
+      lastId = parseWorkId(lastKey);
       if (buffer.length >= ctx.batchSize) {
         const flushed = await importer.runAll(buffer.splice(0));
         mergeSummary(summary, flushed);
-        ctx.state.set({ lastKeyCursor: lastKey });
+        ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId });
       }
     }
   }
@@ -142,10 +146,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   if (buffer.length > 0) {
     const flushed = await importer.runAll(buffer.splice(0));
     mergeSummary(summary, flushed);
+    ctx.state.set({ lastKeyCursor: lastKey, lastNumericCursor: lastId });
   }
 
   ctx.state.markComplete();
-  ctx.state.set({ totalProcessed: summary.imported, lastKeyCursor: lastKey });
+  ctx.state.set({ totalProcessed: summary.imported, lastKeyCursor: lastKey, lastNumericCursor: lastId });
   logger.info({ stateName: ctx.stateName, ...summary }, 'editions dump import complete');
   return summary;
 }

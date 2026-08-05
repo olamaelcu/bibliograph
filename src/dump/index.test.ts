@@ -89,7 +89,7 @@ describe('runEditionsDumpImport', () => {
       filePath: gzPath,
       lastModified: 'Wed, 01 Jan 2026 00:00:00 GMT',
       lastByteOffset: 99_999_999,
-      lastKeyCursor: '/books/OL1M',
+      lastNumericCursor: 1,
       totalProcessed: 1,
     });
     const summary = await runEditionsDumpImport({

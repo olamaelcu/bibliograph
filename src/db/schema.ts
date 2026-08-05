@@ -306,6 +306,7 @@ export const backfillState = sqliteTable('backfill_state', {
   fileSize: integer('file_size'),
   lastByteOffset: integer('last_byte_offset').notNull().default(0),
   lastKeyCursor: text('last_key_cursor'),
+  lastNumericCursor: integer('last_numeric_cursor'),
   totalProcessed: integer('total_processed').notNull().default(0),
   complete: integer({ mode: 'boolean' }).notNull().default(false),
   startedAt: text('started_at'),

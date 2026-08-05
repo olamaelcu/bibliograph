@@ -78,6 +78,13 @@
       "when": 1785949326326,
       "tag": "0010_loud_hobgoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1785953215192,
+      "tag": "0011_sticky_natasha_romanoff",
+      "breakpoints": true
     }
   ]
 }
