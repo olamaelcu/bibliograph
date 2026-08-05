@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { db, schema } from './db/connection.js';
 import { trackRepos } from './tap.js';
 import { logger } from './logger.js';
@@ -57,7 +58,7 @@ function readIsbns(path: string | undefined): string[] {
 async function main(): Promise<void> {
   const [cmd] = process.argv.slice(2);
   if (!cmd) {
-    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | googlebooks [isbns.txt|-] | googlebooks:author <authorName>');
+    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | openlibrary:dump [flags] | googlebooks [isbns.txt|-] | googlebooks:author <authorName>');
     process.exit(1);
   }
   if (cmd === 'tap') {
@@ -75,6 +76,51 @@ async function main(): Promise<void> {
     }
     const { backfillOpenLibraryAuthor } = await import('./openlibrary-backfill.js');
     await backfillOpenLibraryAuthor(db, authorKey);
+  } else if (cmd === 'openlibrary:dump') {
+    const { runEditionsDumpImport } = await import('./dump/index.js');
+    const { DumpState } = await import('./dump/state.js');
+    const { HttpDownloader } = await import('./dump/downloader.js');
+
+    const dumpDir = resolve(process.env.OL_DUMP_PATH ?? 'data/dumps');
+    const gzPath = resolve(dumpDir, 'ol_dump_editions_latest.txt.gz');
+    if (!existsSync(dumpDir)) mkdirSync(dumpDir, { recursive: true });
+
+    const stateName = 'openlibrary_editions';
+    const state = new DumpState(db, stateName);
+
+    if (process.argv.includes('--reset')) state.clear();
+
+    const downloader = new HttpDownloader(
+      process.env.OL_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz',
+    );
+
+    if (!process.argv.includes('--no-download')) {
+      const meta = await downloader.headMetadata();
+      await downloader.downloadWithRetry(gzPath);
+      state.set({
+        url: process.env.OL_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz',
+        filePath: gzPath,
+        lastModified: meta.lastModified,
+        fileSize: statSync(gzPath).size,
+        lastByteOffset: 0,
+        lastKeyCursor: null,
+        startedAt: new Date().toISOString(),
+        totalProcessed: 0,
+        complete: false,
+      });
+    }
+
+    const existing = state.get();
+    const summary = await runEditionsDumpImport({
+      db,
+      state,
+      downloader,
+      gzPath,
+      stateName,
+      lastModified: existing?.lastModified ?? null,
+      fileSize: existing?.fileSize ?? null,
+    });
+    logger.info({ summary }, 'openlibrary:dump finished');
   } else if (cmd === 'googlebooks') {
     const { backfillGoogleBooksFromIsbns } = await import('./googlebooks-backfill.js');
     await backfillGoogleBooksFromIsbns(db, readIsbns(process.argv[3]));
