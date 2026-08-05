@@ -164,6 +164,56 @@ log (same process, same SQLite database). The labeler DID document must declare
 an `atproto_labeler` service entry pointing at this endpoint for clients to
 discover it.
 
+### Monthly OpenLibrary import on Dokku
+
+The dump importer runs on a monthly schedule via Dokku's built-in `app.json`
+cron support (`0 3 1 * *` — 03:00 UTC on the 1st). Two layers protect against
+overlap: Dokku's `concurrency_policy: "forbid"` (no second concurrent run),
+plus a `<OL_DUMP_PATH>/.import.lock` file inside the CLI itself.
+
+Configure environment on the Dokku host:
+
+```bash
+dokku config:set bibliograph OL_DUMP_PATH=/app/data/dumps
+dokku config:set bibliograph OL_DUMP_USER_AGENT="bibliograph-app/0.1 (you@example.com)"
+```
+
+`/app/data/dumps` lives on the existing `/srv/data/bibliograph/data → /app/data`
+persistent volume mount — no `dokku storage:mount` work needed.
+
+Verify the cron entry registered after each deploy:
+
+```bash
+dokku cron:list bibliograph
+```
+
+Trigger the first run manually instead of waiting for the 1st of the month:
+
+```bash
+CRON_ID=$(dokku cron:list bibliograph --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')
+dokku cron:run bibliograph "$CRON_ID"
+dokku logs bibliograph -t
+```
+
+The CLI flags are useful for spot-checks and reruns:
+
+```bash
+# parse the local dump without inserting
+npm run dump:openlibrary -- --dry-run
+
+# force reprocessing from scratch (clears `backfill_state`)
+npm run dump:openlibrary -- --reset
+
+# keep the 9.2 GB gz on disk after the run (default is to delete it)
+npm run dump:openlibrary -- --keep-dump
+
+# override a stale lockfile (PID dead + >24h old)
+npm run dump:openlibrary -- --force
+```
+
+The importer is idempotent across runs — re-running against the same dump
+short-circuits in `prepareRun`, and dedup catches every previously-imported ISBN.
+
 ## Project structure
 
 ```
