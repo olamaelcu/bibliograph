@@ -190,6 +190,5 @@ export function createApp(): Hono {
   return app;
 }
 
-// EXPORT for the indexer to access the Open Library provider instance
 export const openLibrary = new OpenLibraryProvider();
 export const goodreads = new GoodreadsProvider();
