@@ -14,6 +14,7 @@ import { createBook, createReview, createStatus, createClaim, verifyClaim, appoi
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
 import { getServiceDid, buildDidDocument } from './did.js';
 import { OpenLibraryProvider } from './providers/openlibrary.js';
+import { GoodreadsProvider } from './providers/goodreads.js';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 
@@ -191,3 +192,4 @@ export function createApp(): Hono {
 
 // EXPORT for the indexer to access the Open Library provider instance
 export const openLibrary = new OpenLibraryProvider();
+export const goodreads = new GoodreadsProvider();

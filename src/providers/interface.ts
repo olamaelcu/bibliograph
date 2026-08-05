@@ -24,4 +24,5 @@ export interface BookProvider {
 export type Providers = {
   openLibrary: BookProvider;
   googleBooks?: BookProvider;
+  goodreads: BookProvider;
 };
