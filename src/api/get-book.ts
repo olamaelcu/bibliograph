@@ -3,6 +3,9 @@ import { and, eq, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
 import { parsePagination, nextCursor } from '../pagination.js';
+import { searchFallback, type FallbackSource } from './search-fallback.js';
+import { computeDeduplicationHash } from '../dedup.js';
+import type { BookData } from '../providers/interface.js';
 import type { GetBookParams, GetBooksParams, GetReviewsParams, GetReviewParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams, GetShelvesParams, GetShelfParams, GetShelfItemsParams } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
@@ -193,6 +196,53 @@ export async function getUserStatus(c: Context): Promise<Response> {
   });
 }
 
+async function findImportedBookRow(book: BookData) {
+  const canonical = book.isbn13 || book.isbn10;
+  if (canonical) {
+    const byIsbn = await db.query.books.findFirst({ where: eq(books.isbn, canonical) });
+    if (byIsbn) return byIsbn;
+  }
+  const dhash = computeDeduplicationHash(book.title, book.author, book.publishedDate);
+  if (dhash) {
+    const byHash = await db.query.books.findFirst({ where: eq(books.deduplicationHash, dhash) });
+    if (byHash) return byHash;
+  }
+  return null;
+}
+
+function providerRecord(book: BookData): Record<string, unknown> {
+  return {
+    $type: 'community.lexicon.book.book',
+    title: book.title,
+    author: book.author,
+    isbn: book.isbn13 || book.isbn10,
+    publishedDate: book.publishedDate,
+    description: book.description,
+    pageCount: book.pageCount,
+    language: book.language,
+    categories: book.categories || [],
+    identifiers: book.identifiers,
+    coverUrl: book.coverUrl,
+  };
+}
+
+interface FallbackEntry {
+  uri: string;
+  record: Record<string, unknown>;
+  source: FallbackSource;
+}
+
+async function enrichFallbackBooks(fallbackBooks: BookData[], source: FallbackSource): Promise<FallbackEntry[]> {
+  const entries: FallbackEntry[] = [];
+  for (const book of fallbackBooks) {
+    const row = await findImportedBookRow(book);
+    if (row) {
+      entries.push({ uri: row.uri, record: providerRecord(book), source });
+    }
+  }
+  return entries;
+}
+
 export async function searchBooksHandler(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const { q, limit = '20', cursor, identifier, includeUnverified } = c.req.query();
@@ -235,23 +285,37 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
       `,
     ) as Array<{ uri: string; title: string; author: string; isbn: string | null; identifier_type: string; identifier_value: string; claim_status: string }>;
 
-    log.info({ found: rows.length }, 'searchBooksHandler complete');
+    const bookEntries: Array<Record<string, unknown>> = rows.map(row => ({
+      uri: row.uri,
+      record: {
+        $type: 'community.lexicon.book.book',
+        title: row.title,
+        author: row.author,
+        isbn: row.isbn,
+      },
+      matchedIdentifier: {
+        type: row.identifier_type,
+        value: row.identifier_value,
+        status: row.claim_status,
+      },
+    }));
+
+    if (rows.length === 0 && identifierTypes.length === 1 && identifierTypes[0] === 'isbn' && sanitized) {
+      const fb = await searchFallback(db, sanitized, log);
+      const enriched = await enrichFallbackBooks(fb.books, fb.source);
+      for (const entry of enriched) {
+        bookEntries.push({
+          uri: entry.uri,
+          record: entry.record,
+          source: entry.source,
+        });
+      }
+    }
+
+    log.info({ found: bookEntries.length }, 'searchBooksHandler complete');
     return c.json({
-      books: rows.map(row => ({
-        uri: row.uri,
-        record: {
-          $type: 'community.lexicon.book.book',
-          title: row.title,
-          author: row.author,
-          isbn: row.isbn,
-        },
-        matchedIdentifier: {
-          type: row.identifier_type,
-          value: row.identifier_value,
-          status: row.claim_status,
-        },
-      })),
-      cursor: nextCursor(rows.length, offset, lim),
+      books: bookEntries,
+      cursor: nextCursor(bookEntries.length, offset, lim),
     });
   }
 
@@ -272,14 +336,28 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
     });
   }
 
-  log.info({ found: results.length }, 'searchBooksHandler complete');
+  const bookEntries: Array<{ uri: string; record: Record<string, unknown>; source?: FallbackSource }> = results.map(book => ({
+    uri: book.uri,
+    record: serializeBookRecord(book),
+  }));
+
+  if (results.length === 0 && sanitized) {
+    const fb = await searchFallback(db, sanitized, log);
+    const enriched = await enrichFallbackBooks(fb.books, fb.source);
+    for (const entry of enriched) {
+      bookEntries.push({
+        uri: entry.uri,
+        record: entry.record,
+        source: entry.source,
+      });
+    }
+  }
+
+  log.info({ found: bookEntries.length }, 'searchBooksHandler complete');
   return c.json({
-    books: results.map(book => ({
-      uri: book.uri,
-      record: serializeBookRecord(book),
-    })),
-    cursor: nextCursor(results.length, offset, lim),
-    total: results.length,
+    books: bookEntries,
+    cursor: nextCursor(bookEntries.length, offset, lim),
+    total: bookEntries.length,
   });
 }
 

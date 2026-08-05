@@ -15,8 +15,13 @@ vi.mock('../db/connection.js', async () => {
   return { db, schema };
 });
 
+vi.mock('./search-fallback.js', () => ({
+  searchFallback: vi.fn(async () => ({ source: 'none' as const, books: [] })),
+}));
+
 import { db, schema } from '../db/connection.js';
 import { clearSqliteTables } from '../test-utils/db.js';
+import { searchFallback } from './search-fallback.js';
 const _s = schema;
 const _d = db as any;
 
@@ -529,6 +534,125 @@ describe('api/get-book', () => {
       expect(res.status).toBe(200);
       const body = await readJson(res);
       expect(body.books).toEqual([]);
+    });
+
+    describe('with provider fallback', () => {
+      beforeEach(() => {
+        vi.mocked(searchFallback).mockReset();
+      });
+
+      it('does not call fallback when local search has results', async () => {
+        seedBook({ uri: 'at://did:plc:a/book/dune', title: 'Dune', author: 'Frank Herbert' });
+
+        const c = mockContext({ query: { q: 'Dune' } });
+        await searchBooksHandler(c);
+
+        expect(searchFallback).not.toHaveBeenCalled();
+      });
+
+      it('calls fallback when local has no results and merges provider books into response', async () => {
+        vi.mocked(searchFallback).mockResolvedValue({
+          source: 'googleBooks',
+          books: [
+            {
+              title: 'Dune',
+              author: 'Frank Herbert',
+              isbn13: '9780441172719',
+              identifiers: { googleBooks: 'gb1' },
+              sourceProvider: 'googleBooks',
+            },
+          ],
+        });
+
+        db.insert(_s.books).values({
+          uri: 'at://did:web:localhost/community.lexicon.book.book/newrkey',
+          did: 'did:web:localhost',
+          title: 'Unrelated Seed',
+          author: 'Other Author',
+          isbn: '9780441172719',
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }).run();
+
+        const c = mockContext({ query: { q: 'Dune' } });
+        const res = await searchBooksHandler(c);
+        const body = await readJson(res);
+
+        expect(res.status).toBe(200);
+        expect(searchFallback).toHaveBeenCalledTimes(1);
+        expect(body.books).toHaveLength(1);
+        expect(body.books[0].uri).toBe('at://did:web:localhost/community.lexicon.book.book/newrkey');
+        expect(body.books[0].source).toBe('googleBooks');
+        expect(body.books[0].record.title).toBe('Dune');
+      });
+
+      it('returns empty books when both local and fallback return nothing', async () => {
+        vi.mocked(searchFallback).mockResolvedValue({ source: 'googleBooks', books: [] });
+
+        const c = mockContext({ query: { q: 'Nothing' } });
+        const res = await searchBooksHandler(c);
+        const body = await readJson(res);
+
+        expect(res.status).toBe(200);
+        expect(searchFallback).toHaveBeenCalledTimes(1);
+        expect(body.books).toEqual([]);
+      });
+
+      it('calls fallback on ISBN identifier branch when local has no matches', async () => {
+        vi.mocked(searchFallback).mockResolvedValue({
+          source: 'googleBooks',
+          books: [
+            {
+              title: 'Dune',
+              author: 'Frank Herbert',
+              isbn13: '9780441172719',
+              identifiers: { googleBooks: 'gb1' },
+              sourceProvider: 'googleBooks',
+            },
+          ],
+        });
+
+        db.insert(_s.books).values({
+          uri: 'at://did:web:localhost/community.lexicon.book.book/isbnrkey',
+          did: 'did:web:localhost',
+          title: 'Unrelated Seed',
+          author: 'Other Author',
+          isbn: '9780441172719',
+          status: 'active',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }).run();
+
+        const c = mockContext({ query: { q: '9780441172719', identifier: 'isbn' } });
+        const res = await searchBooksHandler(c);
+        const body = await readJson(res);
+
+        expect(res.status).toBe(200);
+        expect(searchFallback).toHaveBeenCalledTimes(1);
+        expect(body.books).toHaveLength(1);
+        expect(body.books[0].source).toBe('googleBooks');
+      });
+
+      it('does not call fallback on non-ISBN identifier branch even when local is empty', async () => {
+        const c = mockContext({ query: { q: '9780441172719', identifier: 'oclc' } });
+        const res = await searchBooksHandler(c);
+        const body = await readJson(res);
+
+        expect(res.status).toBe(200);
+        expect(searchFallback).not.toHaveBeenCalled();
+        expect(body.books).toEqual([]);
+      });
+
+      it('does not call fallback on ISBN identifier branch when q is missing', async () => {
+        const c = mockContext({ query: { identifier: 'isbn' } });
+        const res = await searchBooksHandler(c);
+        const body = await readJson(res);
+
+        expect(res.status).toBe(200);
+        expect(searchFallback).not.toHaveBeenCalled();
+        expect(body.books).toEqual([]);
+      });
     });
   });
 
