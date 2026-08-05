@@ -295,3 +295,25 @@ export const features = sqliteTable('features', {
 
 export type Feature = typeof features.$inferSelect;
 export type NewFeature = typeof features.$inferInsert;
+
+// ─── Backfill state (importer checkpoints) ─────────────────────────────────
+
+export const backfillState = sqliteTable('backfill_state', {
+  name: text().primaryKey(),
+  url: text().notNull(),
+  filePath: text('file_path').notNull(),
+  lastModified: text('last_modified'),
+  fileSize: integer('file_size'),
+  lastByteOffset: integer('last_byte_offset').notNull().default(0),
+  lastKeyCursor: text('last_key_cursor'),
+  totalProcessed: integer('total_processed').notNull().default(0),
+  complete: integer({ mode: 'boolean' }).notNull().default(false),
+  startedAt: text('started_at'),
+  updatedAt: text('updated_at')
+    .notNull()
+    .$defaultFn(() => new Date().toISOString())
+    .$onUpdateFn(() => new Date().toISOString()),
+});
+
+export type BackfillState = typeof backfillState.$inferSelect;
+export type NewBackfillState = typeof backfillState.$inferInsert;
