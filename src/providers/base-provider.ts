@@ -8,4 +8,14 @@ export abstract class BaseBookProvider {
       return null;
     }
   }
+
+  protected async fetchText(url: string, init?: RequestInit): Promise<string | null> {
+    try {
+      const response = await fetch(url, init);
+      if (!response.ok) return null;
+      return await response.text();
+    } catch {
+      return null;
+    }
+  }
 }
