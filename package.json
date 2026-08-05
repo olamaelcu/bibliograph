@@ -17,6 +17,7 @@
     "lex:generate": "lex-cli generate",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
+    "dump:openlibrary": "tsx src/dump/cli.ts",
     "release": "tsx src/release.ts",
     "backfill": "tsx src/backfill.ts",
     "dedup": "tsx src/dedup-job.ts"
