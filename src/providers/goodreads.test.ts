@@ -186,4 +186,153 @@ describe('GoodreadsProvider', () => {
       expect(results[0].title).toBe('HasId');
     });
   });
+
+  describe('getBookDetails', () => {
+    // Minimal but exercises every field we map. Modeled on bookhive's ApolloState
+    // shape from src/scrapers/moreInfo.ts.
+    const NEXT_DATA_FIXTURE = {
+      props: {
+        pageProps: {
+          apolloState: {
+            ROOT_QUERY: {
+              'getBookByLegacyId({"legacyId":"13496"})': { __ref: 'Book:13496' },
+            },
+            'Book:13496': {
+              id: '13496',
+              titleComplete: 'A Game of Thrones',
+              description: 'A tale of fire and ice.',
+              imageUrl: 'https://images.gr-assets.com/books/1566474957._SX318_.jpg',
+              webUrl: 'https://www.goodreads.com/book/show/13496',
+              details: {
+                publicationTime: '1996-08-01T00:00:00.000Z',
+                publisher: 'Bantam',
+                language: { name: 'English' },
+                isbn: '0553573403',
+                isbn13: '9780553573404',
+                numPages: 807,
+              },
+              primaryContributorEdge: { node: { __ref: 'Author:472310' } },
+              secondaryContributorEdges: [
+                { role: 'Author', node: { __ref: 'Author:99999' } },
+                { role: 'Illustrator', node: { __ref: 'Author:88888' } },
+              ],
+              bookGenres: [
+                { genre: { name: 'Fantasy' } },
+                { genre: { name: 'Fiction' } },
+                { genre: { name: 'Epic' } },
+              ],
+              bookSeries: [
+                {
+                  userPosition: '1',
+                  series: { __ref: 'Series:36249' },
+                },
+              ],
+            },
+            'Author:472310': { id: '472310', name: 'George R.R. Martin', description: 'Author bio', profileImageUrl: 'https://x/martin.jpg' },
+            'Author:99999': { id: '99999', name: 'Co-Author' },
+            'Author:88888': { id: '88888', name: 'Some Illustrator' },
+            'Series:36249': { title: 'A Song of Ice and Fire', webUrl: 'https://www.goodreads.com/series/36249' },
+          },
+        },
+      },
+    };
+
+    it('returns null when response is not ok (covers 202 WAF)', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: false, status: 202 });
+      const result = await provider.getBookDetails('13496');
+      expect(result).toBeNull();
+    });
+
+    it('returns null on network error', async () => {
+      fetchMock.mockRejectedValueOnce(new Error('fail'));
+      const result = await provider.getBookDetails('13496');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when HTML has no __NEXT_DATA__', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve('<html><body>challenge page</body></html>'),
+      });
+      const result = await provider.getBookDetails('13496');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when __NEXT_DATA__ JSON is malformed', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            `<script id="__NEXT_DATA__" type="application/json">not json</script>`,
+          ),
+      });
+      const result = await provider.getBookDetails('13496');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when apolloState is missing (book gone upstream)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{}}}</script>`,
+          ),
+      });
+      const result = await provider.getBookDetails('13496');
+      expect(result).toBeNull();
+    });
+
+    it('extracts and maps full __NEXT_DATA__', async () => {
+      const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(NEXT_DATA_FIXTURE)}</script>`;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(html),
+      });
+
+      const result = await provider.getBookDetails('13496');
+      expect(result).not.toBeNull();
+      expect(result!.title).toBe('A Game of Thrones');
+      expect(result!.author).toBe('George R.R. Martin, Co-Author');
+      expect(result!.isbn10).toBe('0553573403');
+      expect(result!.isbn13).toBe('9780553573404');
+      expect(result!.publishedDate).toBe('1996');
+      expect(result!.description).toBe('A tale of fire and ice.');
+      expect(result!.pageCount).toBe(807);
+      expect(result!.language).toBe('English');
+      expect(result!.publisher).toBe('Bantam');
+      expect(result!.categories).toEqual(['Fantasy', 'Fiction', 'Epic']);
+      expect(result!.coverUrl).toBe('https://images.gr-assets.com/books/1566474957.jpg');
+      expect(result!.identifiers['goodreads']).toBe('13496');
+      expect(result!.sourceProvider).toBe('goodreads');
+    });
+
+    it('filters secondary contributors to Author role only', async () => {
+      const fixture = JSON.parse(JSON.stringify(NEXT_DATA_FIXTURE));
+      const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(fixture)}</script>`;
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        text: () => Promise.resolve(html),
+      });
+      const result = await provider.getBookDetails('13496');
+      expect(result!.author).not.toContain('Some Illustrator');
+      expect(result!.author).toContain('Co-Author');
+    });
+
+    it('sends browser-like headers and hits /book/show/{id}', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(NEXT_DATA_FIXTURE)}</script>`,
+          ),
+      });
+      await provider.getBookDetails('13496');
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://www.goodreads.com/book/show/13496');
+      const headers = (init as RequestInit).headers as Record<string, string>;
+      expect(headers['User-Agent']).toBeDefined();
+      expect(headers['Accept-Language']).toBeDefined();
+      expect(headers['Referer']).toBe('https://www.goodreads.com/');
+    });
+  });
 });
