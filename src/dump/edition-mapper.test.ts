@@ -93,5 +93,20 @@ describe('editionMapper.toBookData', () => {
     expect(toBookData({} as any)).toBeNull();
     expect(toBookData({ key: 1, type: '/type/edition' } as any)).toBeNull();
     expect(toBookData({ key: '/books/OL1M', type: 999 } as any)).toBeNull();
+    expect(toBookData({ key: '/books/OL1M', type: { key: '/type/work' } } as any)).toBeNull();
+  });
+
+  it('accepts the real OL dump shape where type is an object', () => {
+    const r = baseRecord();
+    r.type = { key: '/type/edition' } as any;
+    const data = toBookData(r)!;
+    expect(data.title).toBe('Dune');
+    expect(data.identifiers['openlibrary']).toBe('/books/OL1M');
+  });
+
+  it('rejects records whose embedded type object is not /type/edition', () => {
+    const r = baseRecord();
+    r.type = { key: '/type/work' } as any;
+    expect(toBookData(r)).toBeNull();
   });
 });

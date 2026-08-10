@@ -2,7 +2,7 @@ import type { BookData } from '../providers/interface.js';
 
 export interface DumpEditionRecord {
   key: string;
-  type: string;
+  type: string | { key: string };
   title?: string;
   authors?: Array<{ key: string; name?: string }>;
   isbn_13?: string[];
@@ -16,10 +16,18 @@ export interface DumpEditionRecord {
   [k: string]: unknown;
 }
 
+function extractTypeKey(type: unknown): string | null {
+  if (typeof type === 'string') return type;
+  if (type && typeof type === 'object' && typeof (type as { key?: unknown }).key === 'string') {
+    return (type as { key: string }).key;
+  }
+  return null;
+}
+
 function isEditionShape(o: unknown): o is { key: string; type: string; title?: string; authors?: { name?: string }[]; isbn_13?: string[]; isbn_10?: string[]; publish_date?: string; number_of_pages?: number; subjects?: string[]; subject_places?: string[]; covers?: number[] } {
   if (typeof o !== 'object' || o === null) return false;
   const r = o as { key?: unknown; type?: unknown };
-  return typeof r.key === 'string' && typeof r.type === 'string';
+  return typeof r.key === 'string' && extractTypeKey(r.type) === '/type/edition';
 }
 
 const COVER_BASE = 'https://covers.openlibrary.org/b/id';
