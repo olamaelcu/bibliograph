@@ -57,15 +57,23 @@ then
 fi
 
 if [ "\${TORRENT_OK}" -eq 0 ]; then
-    echo ">>> Torrent unavailable; falling back to HTTP from openlibrary.org (aria2c 16-way split)"
+    echo ">>> Torrent unavailable; falling back to HTTP from openlibrary.org"
+    # Sequential download only — parallel byte-range requests can reassemble
+    # out of order and corrupt the result (verified: a 12.5 GB parallel-split
+    # download passed zcat on the first record but failed at byte ~250 MB with
+    # Z_DATA_ERROR). Single connection at 1.67 MB/s ≈ 2 hours.
     sudo aria2c \
-        --split=16 \
-        --max-connection-per-server=16 \
-        --summary-interval=30 \
+        --split=1 \
+        --max-connection-per-server=1 \
+        --summary-interval=60 \
         --console-log-level=info \
         -o "\${TARGET_FILE}" \
         '${HTTP_URL}' || {
         echo "!!! HTTP download also failed" >&2
+        exit 1
+    }
+    sudo gzip -t "\${TARGET_FILE}" || {
+        echo "!!! Downloaded file failed gzip integrity check — not importing" >&2
         exit 1
     }
 fi
