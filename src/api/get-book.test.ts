@@ -25,7 +25,7 @@ import { searchFallback } from './search-fallback.js';
 const _s = schema;
 const _d = db as any;
 
-import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './get-book.js';
+import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHandler, listBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './get-book.js';
 
 function getSqlite() {
   return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
@@ -653,6 +653,111 @@ describe('api/get-book', () => {
         expect(searchFallback).not.toHaveBeenCalled();
         expect(body.books).toEqual([]);
       });
+    });
+  });
+
+  describe('listBooksHandler', () => {
+    function seedListBook(uri: string, opts: {
+      title?: string;
+      status?: 'pending' | 'active' | 'rejected';
+      createdAt?: string;
+      isbn?: string | null;
+    } = {}) {
+      const now = new Date().toISOString();
+      db.insert(_s.books).values({
+        uri,
+        did: 'did:plc:author',
+        title: opts.title ?? `Book ${uri}`,
+        author: 'Author',
+        isbn: opts.isbn ?? null,
+        status: opts.status ?? 'active',
+        createdAt: opts.createdAt ?? now,
+        updatedAt: opts.createdAt ?? now,
+      }).run();
+    }
+
+    it('returns the first page ordered by createdAt ASC, uri ASC with default limit 50', async () => {
+      seedListBook('at://did:plc:a/book/c', { title: 'C', createdAt: '2024-03-03T00:00:00.000Z' });
+      seedListBook('at://did:plc:a/book/a', { title: 'A', createdAt: '2024-03-01T00:00:00.000Z' });
+      seedListBook('at://did:plc:a/book/b', { title: 'B', createdAt: '2024-03-02T00:00:00.000Z' });
+
+      const c = mockContext();
+      const res = await listBooksHandler(c);
+      const body = await readJson(res);
+
+      expect(res.status).toBe(200);
+      expect(body.books.map((b: { uri: string }) => b.uri)).toEqual([
+        'at://did:plc:a/book/a',
+        'at://did:plc:a/book/b',
+        'at://did:plc:a/book/c',
+      ]);
+      expect(body.cursor).toBeUndefined();
+    });
+
+    it('advances to the next page when cursor is provided', async () => {
+      for (let i = 0; i < 5; i++) {
+        seedListBook(`at://did:plc:a/book/p${i}`, { createdAt: `2024-01-0${i + 1}T00:00:00.000Z` });
+      }
+
+      const page1 = await readJson(await listBooksHandler(mockContext({ query: { limit: '2' } })));
+      expect(page1.books.map((b: { uri: string }) => b.uri)).toEqual([
+        'at://did:plc:a/book/p0',
+        'at://did:plc:a/book/p1',
+      ]);
+      expect(page1.cursor).toBe('2');
+
+      const page2 = await readJson(await listBooksHandler(mockContext({ query: { limit: '2', cursor: '2' } })));
+      expect(page2.books.map((b: { uri: string }) => b.uri)).toEqual([
+        'at://did:plc:a/book/p2',
+        'at://did:plc:a/book/p3',
+      ]);
+      expect(page2.cursor).toBe('4');
+
+      const page3 = await readJson(await listBooksHandler(mockContext({ query: { limit: '2', cursor: '4' } })));
+      expect(page3.books.map((b: { uri: string }) => b.uri)).toEqual([
+        'at://did:plc:a/book/p4',
+      ]);
+      expect(page3.cursor).toBeUndefined();
+    });
+
+    it('excludes rejected records and includes pending only when includeUnverified=true', async () => {
+      seedListBook('at://did:plc:a/book/active', { status: 'active' });
+      seedListBook('at://did:plc:a/book/pending', { status: 'pending' });
+      seedListBook('at://did:plc:a/book/rejected', { status: 'rejected' });
+
+      const defaultBody = await readJson(await listBooksHandler(mockContext()));
+      expect(defaultBody.books.map((b: { uri: string }) => b.uri).sort()).toEqual([
+        'at://did:plc:a/book/active',
+      ]);
+
+      const withUnverified = await readJson(await listBooksHandler(mockContext({ query: { includeUnverified: 'true' } })));
+      expect(withUnverified.books.map((b: { uri: string }) => b.uri).sort()).toEqual([
+        'at://did:plc:a/book/active',
+        'at://did:plc:a/book/pending',
+      ]);
+    });
+
+    it('returns an empty page with no cursor when there are no more rows', async () => {
+      seedListBook('at://did:plc:a/book/single', { createdAt: '2024-01-01T00:00:00.000Z' });
+
+      const res = await listBooksHandler(mockContext({ query: { cursor: '50' } }));
+      const body = await readJson(res);
+
+      expect(res.status).toBe(200);
+      expect(body.books).toEqual([]);
+      expect(body.cursor).toBeUndefined();
+    });
+
+    it('clamps limit to the documented bounds via parsePagination', async () => {
+      for (let i = 0; i < 3; i++) {
+        seedListBook(`at://did:plc:a/book/c${i}`, { createdAt: `2024-02-0${i + 1}T00:00:00.000Z` });
+      }
+
+      const zeroBody = await readJson(await listBooksHandler(mockContext({ query: { limit: '0' } })));
+      expect(zeroBody.books).toHaveLength(1);
+
+      const hugeBody = await readJson(await listBooksHandler(mockContext({ query: { limit: '99999' } })));
+      expect(hugeBody.books).toHaveLength(3);
     });
   });
 

@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import { and, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
 import { parsePagination, nextCursor } from '../pagination.js';
@@ -349,6 +349,37 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
     books: bookEntries,
     cursor: nextCursor(bookEntries.length, offset, lim),
     total: bookEntries.length,
+  });
+}
+
+export async function listBooksHandler(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const { limit = '50', cursor, includeUnverified } = c.req.query();
+
+  const { limit: lim, offset } = parsePagination(limit, cursor, 50, 100);
+
+  log.info({ limit: lim, offset, includeUnverified }, 'handling listBooksHandler');
+
+  const statusFilter = includeUnverified === 'true'
+    ? or(eq(books.status, 'active'), eq(books.status, 'pending'))
+    : eq(books.status, 'active');
+
+  const rows = await db.select().from(books)
+    .where(statusFilter)
+    .orderBy(asc(books.createdAt), asc(books.uri))
+    .limit(lim)
+    .offset(offset)
+    .all();
+
+  const bookEntries: Array<{ uri: string; record: Record<string, unknown> }> = rows.map(book => ({
+    uri: book.uri,
+    record: serializeBookRecord(book),
+  }));
+
+  log.info({ found: bookEntries.length, nextOffset: offset + rows.length }, 'listBooksHandler complete');
+  return c.json({
+    books: bookEntries,
+    cursor: nextCursor(bookEntries.length, offset, lim),
   });
 }
 

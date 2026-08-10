@@ -1,0 +1,28 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.listBooks",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "limit":  { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 },
+          "cursor": { "type": "string" },
+          "includeUnverified": { "type": "boolean", "default": false }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["books"],
+          "properties": {
+            "books":  { "type": "array", "items": { "type": "object", "required": ["uri", "record"], "properties": { "uri": { "type": "string", "format": "at-uri" }, "record": { "type": "object" } } } },
+            "cursor": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

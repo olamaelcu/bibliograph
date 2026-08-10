@@ -8,7 +8,7 @@ import { HomePage } from './views/home.js';
 import { FeedsPage } from './views/feeds.js';
 import { upgradeWebSocket } from '@hono/node-server';
 import { createSubscribeLabelsEvents } from './labeler-service.js';
-import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './api/get-book.js';
+import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHandler, listBooksHandler, getClaims, getLabelerLabels, getShelves, getShelf, getShelfItems } from './api/get-book.js';
 import { getFeed } from './api/get-feed.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian, createShelf, addToShelf, removeFromShelf } from './api/create-book.js';
 import { createContributor, updateContributor, createContributorType } from './api/contributor.js';
@@ -40,6 +40,7 @@ export function createApp(): Hono {
       'getReview',
       'getUserStatus',
       'searchBooks',
+      'listBooks',
       'getClaims',
       'getLabelerLabels',
       'getShelves',
@@ -97,6 +98,7 @@ export function createApp(): Hono {
   app.get('/xrpc/community.lexicon.book.getReview', getReview);
   app.get('/xrpc/community.lexicon.book.getUserStatus', getUserStatus);
   app.get('/xrpc/community.lexicon.book.searchBooks', searchBooksHandler);
+  app.get('/xrpc/community.lexicon.book.listBooks', listBooksHandler);
   app.get('/xrpc/community.lexicon.book.getClaims', getClaims);
   app.get('/xrpc/community.lexicon.book.getLabelerLabels', getLabelerLabels);
   app.get(
