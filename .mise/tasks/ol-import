@@ -57,12 +57,17 @@ then
 fi
 
 if [ "\${TORRENT_OK}" -eq 0 ]; then
-    echo ">>> Torrent unavailable; falling back to HTTP from openlibrary.org"
-    sudo curl -sL --max-time 14400 -o "\${TARGET_FILE}.part" '${HTTP_URL}' || {
+    echo ">>> Torrent unavailable; falling back to HTTP from openlibrary.org (aria2c 16-way split)"
+    sudo aria2c \
+        --split=16 \
+        --max-connection-per-server=16 \
+        --summary-interval=30 \
+        --console-log-level=info \
+        -o "\${TARGET_FILE}" \
+        '${HTTP_URL}' || {
         echo "!!! HTTP download also failed" >&2
         exit 1
     }
-    sudo mv "\${TARGET_FILE}.part" "\${TARGET_FILE}"
 fi
 
 # 4. Place the file at the importer's expected path
