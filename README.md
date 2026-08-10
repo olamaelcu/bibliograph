@@ -63,7 +63,6 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | Path | Method | Description |
 |------|--------|-------------|
 | `/tap/event` | POST | Tap webhook — receives firehose events |
-| `/api/lookup/book` | GET | Open Library lookup by ISBN or title |
 
 ## Architecture
 
@@ -97,17 +96,6 @@ Books are created in a **pending** status. An author claim record (`community.le
 - **Claim owner** — the DID that claimed the book can edit it
 - **Librarian** — users with verified claims on multiple books gain edit privileges
 - **ISBN required** — book creation requires an ISBN/EAN for deduplication
-
-## Book data lookup
-
-The `/api/lookup/book` endpoint queries Open Library:
-
-```bash
-curl "http://localhost:3000/api/lookup/book?isbn=9780140328721"
-curl "http://localhost:3000/api/lookup/book?title=Dune&author=Frank+Herbert"
-```
-
-Google Books support is available via `GoogleBooksProvider` but requires an API key passed to the constructor.
 
 ## Contributors
 

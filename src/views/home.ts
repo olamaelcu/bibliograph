@@ -129,7 +129,6 @@ export function HomePage(props: { host: string; queries: string[]; procedures: s
       <div class="wa-stack">
         ${otherRow('GET', '/feeds', 'Live feed streams', html`<wa-button href="/feeds" size="s">Open</wa-button>`)}
         ${otherRow('POST', '/tap/event', 'Webhook fallback')}
-        ${otherRow('GET', '/api/lookup/book', 'Open Library / Google Books lookup')}
         ${otherRow('GET', '/health', 'Health check')}
       </div>
     </wa-card>

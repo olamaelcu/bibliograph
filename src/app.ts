@@ -15,8 +15,6 @@ import { createContributor, updateContributor, createContributorType } from './a
 import { listContributors, searchContributors, listContributorTypes } from './api/get-contributor.js';
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
 import { getServiceDid, buildDidDocument } from './did.js';
-import { OpenLibraryProvider } from './providers/openlibrary.js';
-import { GoodreadsProvider } from './providers/goodreads.js';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 
@@ -131,28 +129,6 @@ export function createApp(): Hono {
   app.post('/xrpc/community.lexicon.book.updateContributor', updateContributor);
   app.post('/xrpc/community.lexicon.book.createContributorType', createContributorType);
 
-  // Provider lookup endpoint
-  app.get('/api/lookup/book', async (c) => {
-    const { isbn, title, author } = c.req.query();
-    const provider = new OpenLibraryProvider();
-
-    try {
-      if (isbn) {
-        const result = await provider.searchByIsbn(isbn);
-        return c.json(result ? { found: true, data: result } : { found: false });
-      }
-
-      if (title) {
-        const results = await provider.searchByTitle(title, author);
-        return c.json({ found: results.length > 0, data: results });
-      }
-
-      return c.json({ error: 'Provide isbn or title' }, 400);
-    } catch (err) {
-      return c.json({ error: 'ProviderError', message: String(err) }, 502);
-    }
-  });
-
   // Live counts SSE endpoint
   app.get('/api/live-counts', async (c) => {
     let closed = false;
@@ -205,6 +181,3 @@ export function createApp(): Hono {
 
   return app;
 }
-
-export const openLibrary = new OpenLibraryProvider();
-export const goodreads = new GoodreadsProvider();
