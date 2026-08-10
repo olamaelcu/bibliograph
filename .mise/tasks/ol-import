@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# OpenLibrary editions dump importer — torrent download + import.
+#
+# Runs on the Dokku host (lescayes), NOT the calling host. SSHes in and
+# executes aria2c + dokku there. Run from any host with ssh access to veve@lescayes.
+#
+# Run with: `mise run ol-import`
+# (or `bash .mise/tasks/ol-import`)
+
+set -euo pipefail
+
+DOKKU_HOST="${DOKKU_HOST:-veve@lescayes}"
+DOKKU_APP="${DOKKU_APP:-bibliograph}"
+DUMP_DIR="${DUMP_DIR:-/srv/data/bibliograph/data/dumps}"
+TORRENT_URL="${TORRENT_URL:-https://archive.org/download/ol_dump_2026-07-31/ol_dump_editions_2026-07-31_archive.torrent}"
+
+ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes "${DOKKU_HOST}" bash <<REMOTE
+set -euo pipefail
+
+# 1. Install aria2c if missing
+if ! command -v aria2c >/dev/null 2>&1; then
+    echo ">>> aria2c not installed on ${DOKKU_HOST}; installing..."
+    sudo apt-get update -qq
+    sudo apt-get install -y aria2
+fi
+
+# 2. Clean up partial download or lock from a prior killed run
+sudo rm -f '${DUMP_DIR}'/*.part '${DUMP_DIR}'/.import.lock
+
+# 3. Download via torrent — single file (editions = file index 5 in the multi-file torrent)
+echo ">>> Downloading via torrent..."
+sudo aria2c \
+    --select-file=5 \
+    --seed-time=0 \
+    --summary-interval=10 \
+    --console-log-level=info \
+    --dir='${DUMP_DIR}' \
+    '${TORRENT_URL}'
+
+# 4. Rename to the name the importer expects
+SOURCE_FILE='${DUMP_DIR}/ol_dump_editions_2026-07-31.txt.gz'
+TARGET_FILE='${DUMP_DIR}/ol_dump_editions_latest.txt.gz'
+if [ ! -f "\${SOURCE_FILE}" ]; then
+    echo "!!! Expected \${SOURCE_FILE} not found after torrent download"
+    exit 1
+fi
+sudo mv "\${SOURCE_FILE}" "\${TARGET_FILE}"
+echo ">>> File placed at \${TARGET_FILE}"
+
+# 5. Run the import
+echo ">>> Running import..."
+dokku run '${DOKKU_APP}' npm run dump:openlibrary -- --reset --no-download --keep-dump
+REMOTE
