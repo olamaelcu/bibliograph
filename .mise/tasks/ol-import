@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# OpenLibrary editions dump importer — torrent download + import.
+# OpenLibrary editions dump importer — download + import.
 #
 # Runs on the Dokku host (lescayes), NOT the calling host. SSHes in and
 # executes aria2c + dokku there. Run from any host with ssh access to veve@lescayes.
+#
+# Prefers torrent (faster) and falls back to HTTP if the torrent URL is
+# unavailable. The torrent URL points to archive.org's BitTorrent
+# distribution of the monthly OpenLibrary data export; the same file is
+# also reachable directly over HTTPS (slower, per-IP rate-limited).
 #
 # Run with: `mise run ol-import`
 # (or `bash .mise/tasks/ol-import`)
@@ -12,10 +17,16 @@ set -euo pipefail
 DOKKU_HOST="${DOKKU_HOST:-veve@lescayes}"
 DOKKU_APP="${DOKKU_APP:-bibliograph}"
 DUMP_DIR="${DUMP_DIR:-/srv/data/bibliograph/data/dumps}"
-TORRENT_URL="${TORRENT_URL:-https://archive.org/download/ol_dump_2026-07-31/ol_dump_editions_2026-07-31_archive.torrent}"
+ARCHIVE_BASE="${ARCHIVE_BASE:-https://archive.org/download/ol_dump_2026-07-31}"
+SOURCE_FILENAME="${SOURCE_FILENAME:-ol_dump_editions_2026-07-31.txt.gz}"
+HTTP_URL="${HTTP_URL:-https://openlibrary.org/data/ol_dump_editions_latest.txt.gz}"
 
 ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes "${DOKKU_HOST}" bash <<REMOTE
 set -euo pipefail
+
+DUMP_DIR='${DUMP_DIR}'
+SOURCE_FILENAME='${SOURCE_FILENAME}'
+TARGET_FILE="\${DUMP_DIR}/ol_dump_editions_latest.txt.gz"
 
 # 1. Install aria2c if missing
 if ! command -v aria2c >/dev/null 2>&1; then
@@ -25,27 +36,42 @@ if ! command -v aria2c >/dev/null 2>&1; then
 fi
 
 # 2. Clean up partial download or lock from a prior killed run
-sudo rm -f '${DUMP_DIR}'/*.part '${DUMP_DIR}'/.import.lock
+sudo rm -f "\${DUMP_DIR}"/*.part "\${DUMP_DIR}"/.import.lock
 
-# 3. Download via torrent — single file (editions = file index 5 in the multi-file torrent)
-echo ">>> Downloading via torrent..."
-sudo aria2c \
-    --select-file=5 \
-    --seed-time=0 \
-    --summary-interval=10 \
-    --console-log-level=info \
-    --dir='${DUMP_DIR}' \
-    '${TORRENT_URL}'
-
-# 4. Rename to the name the importer expects
-SOURCE_FILE='${DUMP_DIR}/ol_dump_editions_2026-07-31.txt.gz'
-TARGET_FILE='${DUMP_DIR}/ol_dump_editions_latest.txt.gz'
-if [ ! -f "\${SOURCE_FILE}" ]; then
-    echo "!!! Expected \${SOURCE_FILE} not found after torrent download"
-    exit 1
+# 3. Download. Try torrent first (file index 5 = editions in the multi-file torrent).
+#    Fall back to HTTP if the torrent URL is unavailable (archive.org's torrent
+#    distribution has been intermittently 404 in 2026).
+TORRENT_OK=0
+if sudo aria2c \
+        --select-file=5 \
+        --seed-time=0 \
+        --summary-interval=10 \
+        --console-log-level=error \
+        --dir="\${DUMP_DIR}" \
+        '${ARCHIVE_BASE}/ol_dump_editions_2026-07-31_archive.torrent' 2>/dev/null
+then
+    if [ -f "\${DUMP_DIR}/\${SOURCE_FILENAME}" ]; then
+        TORRENT_OK=1
+        echo ">>> Torrent download complete"
+    fi
 fi
-sudo mv "\${SOURCE_FILE}" "\${TARGET_FILE}"
+
+if [ "\${TORRENT_OK}" -eq 0 ]; then
+    echo ">>> Torrent unavailable; falling back to HTTP from openlibrary.org"
+    sudo curl -sL --max-time 14400 -o "\${TARGET_FILE}.part" '${HTTP_URL}' || {
+        echo "!!! HTTP download also failed" >&2
+        exit 1
+    }
+    sudo mv "\${TARGET_FILE}.part" "\${TARGET_FILE}"
+fi
+
+# 4. Place the file at the importer's expected path
+SOURCE_FILE="\${DUMP_DIR}/\${SOURCE_FILENAME}"
+if [ -f "\${SOURCE_FILE}" ] && [ "\${SOURCE_FILE}" != "\${TARGET_FILE}" ]; then
+    sudo mv "\${SOURCE_FILE}" "\${TARGET_FILE}"
+fi
 echo ">>> File placed at \${TARGET_FILE}"
+ls -la "\${TARGET_FILE}"
 
 # 5. Run the import
 echo ">>> Running import..."
