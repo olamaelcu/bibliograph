@@ -13,3 +13,4 @@ docs/superpowers/
 .opencode/
 db.sqlite*
 static/
+.cortexkit/
