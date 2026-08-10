@@ -1,0 +1,45 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.createContributor",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["name", "identifiers"],
+          "properties": {
+            "name": { "type": "string", "maxLength": 200 },
+            "altNames": { "type": "array", "items": { "type": "string" } },
+            "images": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "community.lexicon.book.contributor#imageRef" }
+            },
+            "identifiers": {
+              "type": "array",
+              "minLength": 1,
+              "items": { "type": "ref", "ref": "community.lexicon.book.defs#identifier" }
+            },
+            "bio": { "type": "string", "maxLength": 16384 }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri" },
+            "cid": { "type": "string", "format": "cid" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidInput" },
+        { "name": "DuplicateContributor" }
+      ]
+    }
+  }
+}

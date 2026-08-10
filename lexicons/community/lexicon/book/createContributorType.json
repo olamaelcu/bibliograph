@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.createContributorType",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string", "maxLength": 256 },
+            "description": { "type": "string", "maxLength": 16384 }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": { "type": "string", "format": "at-uri" },
+            "cid": { "type": "string", "format": "cid" }
+          }
+        }
+      },
+      "errors": [
+        { "name": "InvalidInput" },
+        { "name": "DuplicateContributorType" },
+        { "name": "Forbidden" }
+      ]
+    }
+  }
+}

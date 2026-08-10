@@ -2,7 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 
-const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
+const { books, reviews, readingStatuses, claims, shelves, shelfItems, contributors, contributorTypes, bookContributors } = schema;
 
 export interface TapRecordEvent {
   type: 'record';
@@ -58,6 +58,12 @@ export async function handleRecordEvent(evt: TapRecordEvent): Promise<void> {
     case 'community.lexicon.book.shelfItem':
       await indexShelfItem(uri, evt.did, record);
       break;
+    case 'community.lexicon.book.contributor':
+      await indexContributor(uri, evt.did, record);
+      break;
+    case 'community.lexicon.book.contributorType':
+      await indexContributorType(uri, evt.did, record);
+      break;
   }
 }
 
@@ -81,12 +87,25 @@ async function handleDelete(collection: string, uri: string): Promise<void> {
     case 'community.lexicon.book.shelfItem':
       await db.delete(shelfItems).where(eq(shelfItems.uri, uri));
       break;
+    case 'community.lexicon.book.contributor':
+      await db.delete(contributors).where(eq(contributors.uri, uri));
+      break;
+    case 'community.lexicon.book.contributorType':
+      await db.delete(contributorTypes).where(eq(contributorTypes.uri, uri));
+      break;
   }
+}
+
+interface BookContributorInline {
+  contributor?: { uri?: string; cid?: string };
+  role?: { uri?: string; cid?: string };
+  order?: number;
 }
 
 async function indexBook(uri: string, did: string, record: Record<string, unknown>, action: string): Promise<void> {
   const cats = (Array.isArray(record.categories) ? record.categories : []) as string[];
   const idents = (Array.isArray(record.identifiers) ? record.identifiers : []) as Array<{ type: string; value: string }>;
+  const contribs = (Array.isArray(record.contributors) ? record.contributors : []) as BookContributorInline[];
   const now = new Date().toISOString();
   const data = {
     uri,
@@ -100,6 +119,7 @@ async function indexBook(uri: string, did: string, record: Record<string, unknow
     language: record.language as string | undefined,
     categories: cats,
     identifiers: idents,
+    contributors: contribs,
     coverUrl: record.coverUrl as string | undefined,
     deduplicationHash: record.deduplicationHash as string | undefined,
     status: (record.status as string) || 'pending',
@@ -117,6 +137,79 @@ async function indexBook(uri: string, did: string, record: Record<string, unknow
       .set(data)
       .where(eq(books.uri, uri));
   }
+
+  await rederiveBookContributors(uri, record);
+}
+
+async function rederiveBookContributors(bookUri: string, record: Record<string, unknown>): Promise<void> {
+  const raw = Array.isArray(record.contributors) ? record.contributors : [];
+  const desired: BookContributorInline[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const obj = entry as BookContributorInline;
+    if (!obj.contributor?.uri || !obj.role?.uri) continue;
+    desired.push({
+      contributor: { uri: obj.contributor.uri, cid: obj.contributor.cid ?? '' },
+      role: { uri: obj.role.uri, cid: obj.role.cid ?? '' },
+      order: typeof obj.order === 'number' ? obj.order : 0,
+    });
+  }
+
+  await db.delete(bookContributors).where(eq(bookContributors.bookUri, bookUri));
+
+  for (const entry of desired) {
+    await db
+      .insert(bookContributors)
+      .values({
+        bookUri,
+        contributorUri: entry.contributor!.uri!,
+        contributorCid: entry.contributor!.cid!,
+        roleUri: entry.role!.uri!,
+        roleCid: entry.role!.cid!,
+        ordering: entry.order ?? 0,
+      })
+      .run();
+  }
+}
+
+async function indexContributor(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
+  const altNames = Array.isArray(record.altNames) ? (record.altNames as string[]) : [];
+  const images = Array.isArray(record.images)
+    ? (record.images as Array<{ url: string; alt?: string }>)
+    : [];
+  const identifiers = Array.isArray(record.identifiers)
+    ? (record.identifiers as Array<{ type: string; value: string }>)
+    : [];
+  const data = {
+    uri,
+    did,
+    name: record.name as string,
+    altNames,
+    images,
+    identifiers,
+    bio: record.bio as string | undefined,
+    createdAt: (record.createdAt as string) || new Date().toISOString(),
+  };
+
+  await db.insert(contributors).values(data).onConflictDoUpdate({
+    target: contributors.uri,
+    set: data,
+  });
+}
+
+async function indexContributorType(uri: string, did: string, record: Record<string, unknown>): Promise<void> {
+  const data = {
+    uri,
+    did,
+    name: record.name as string,
+    description: record.description as string | undefined,
+    createdAt: (record.createdAt as string) || new Date().toISOString(),
+  };
+
+  await db.insert(contributorTypes).values(data).onConflictDoUpdate({
+    target: contributorTypes.uri,
+    set: data,
+  });
 }
 
 async function indexReview(uri: string, did: string, record: Record<string, unknown>, cid?: string): Promise<void> {

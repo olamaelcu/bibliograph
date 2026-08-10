@@ -30,6 +30,9 @@ export const books = sqliteTable(
     language: text().default('en'),
     categories: text({ mode: 'json' }).$type<string[]>().default(sql`'[]'`),
     identifiers: text({ mode: 'json' }).$type<Identifier[]>().default(sql`'[]'`),
+    contributors: text({ mode: 'json' })
+      .$type<Array<{ contributor?: { uri?: string; cid?: string }; role?: { uri?: string; cid?: string }; order?: number }>>()
+      .default(sql`'[]'`),
     coverUrl: text(),
     deduplicationHash: text('deduplication_hash'),
     status: text().notNull().default('pending'),
@@ -318,3 +321,82 @@ export const backfillState = sqliteTable('backfill_state', {
 
 export type BackfillState = typeof backfillState.$inferSelect;
 export type NewBackfillState = typeof backfillState.$inferInsert;
+
+// ─── Contributors ───────────────────────────────────────────────────────────
+
+export const contributors = sqliteTable(
+  'contributors',
+  {
+    uri: text().primaryKey(),
+    did: text().notNull(),
+    name: text().notNull(),
+    altNames: text({ mode: 'json' }).$type<string[]>().default(sql`'[]'`),
+    images: text({ mode: 'json' })
+      .$type<Array<{ url: string; alt?: string }>>()
+      .default(sql`'[]'`),
+    identifiers: text({ mode: 'json' }).$type<Identifier[]>().default(sql`'[]'`),
+    bio: text(),
+    createdAt: text()
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    nameIdx: index('contributors_name_idx').on(table.name),
+    didIdx: index('contributors_did_idx').on(table.did),
+    createdAtIdx: index('contributors_created_at_idx').on(table.createdAt),
+  }),
+);
+
+export type Contributor = typeof contributors.$inferSelect;
+export type NewContributor = typeof contributors.$inferInsert;
+
+// ─── Contributor Types ──────────────────────────────────────────────────────
+
+export const contributorTypes = sqliteTable(
+  'contributor_types',
+  {
+    uri: text().primaryKey(),
+    did: text().notNull(),
+    name: text().notNull().unique(),
+    description: text(),
+    createdAt: text()
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (table) => ({
+    didIdx: index('contributor_types_did_idx').on(table.did),
+    nameIdx: index('contributor_types_name_idx').on(table.name),
+  }),
+);
+
+export type ContributorType = typeof contributorTypes.$inferSelect;
+export type NewContributorType = typeof contributorTypes.$inferInsert;
+
+// ─── Book Contributors (join table for fast lookup) ────────────────────────
+
+export const bookContributors = sqliteTable(
+  'book_contributors',
+  {
+    bookUri: text()
+      .notNull()
+      .references(() => books.uri, { onDelete: 'cascade' }),
+    contributorUri: text().notNull(),
+    contributorCid: text().notNull(),
+    roleUri: text().notNull(),
+    roleCid: text().notNull(),
+    ordering: integer().default(0),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.bookUri, table.contributorUri, table.roleUri],
+    }),
+    bookIdx: index('book_contributors_book_idx').on(table.bookUri),
+    contributorIdx: index('book_contributors_contributor_idx').on(
+      table.contributorUri,
+    ),
+    roleIdx: index('book_contributors_role_idx').on(table.roleUri),
+  }),
+);
+
+export type BookContributor = typeof bookContributors.$inferSelect;
+export type NewBookContributor = typeof bookContributors.$inferInsert;

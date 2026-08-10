@@ -16,6 +16,9 @@ const DESCRIPTIONS: Record<string, string> = {
   getShelf: 'Fetch a single shelf',
   getShelfItems: 'Books on a shelf',
   getFeed: 'Feed generator buckets',
+  listContributors: 'List known contributors',
+  searchContributors: 'Full-text search over contributors',
+  listContributorTypes: 'List canonical contributor roles',
   createBook: 'Add a book record',
   createReview: 'Post a review',
   createStatus: 'Set reading status',
@@ -26,6 +29,9 @@ const DESCRIPTIONS: Record<string, string> = {
   createShelf: 'Create a shelf',
   addToShelf: 'Add a book to a shelf',
   removeFromShelf: 'Remove a book from a shelf',
+  createContributor: 'Create a contributor record',
+  updateContributor: 'Update a contributor record (creator or librarian)',
+  createContributorType: 'Create a contributor role (librarian only)',
 };
 
 function methodVariant(method: 'GET' | 'POST'): 'success' | 'warning' {

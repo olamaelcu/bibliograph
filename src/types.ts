@@ -12,6 +12,7 @@ export interface BookRecord {
   identifiers?: Array<{ type: string; value: string }>;
   coverUrl?: string;
   deduplicationHash?: string;
+  contributors?: BookContributorEntry[];
   status: 'pending' | 'active' | 'rejected';
   createdAt: string;
   updatedAt: string;
@@ -86,6 +87,50 @@ export interface ShelfItemRecord {
   createdAt: string;
 }
 
+// Contributor record
+export interface ContributorImageRef {
+  url: string;
+  alt?: string;
+}
+
+export interface ContributorRecord {
+  $type: 'community.lexicon.book.contributor';
+  name: string; // max 200
+  altNames?: string[];
+  images?: ContributorImageRef[];
+  identifiers?: Array<{ type: string; value: string }>; // min 1 enforced at runtime
+  bio?: string; // max 16384
+  createdAt: string;
+}
+
+// Contributor type record
+export interface ContributorTypeRecord {
+  $type: 'community.lexicon.book.contributorType';
+  name: string; // max 256
+  description?: string; // max 16384
+  createdAt: string;
+}
+
+// Strong ref to a record (uri + cid)
+export interface StrongRef {
+  uri: string;
+  cid: string;
+}
+
+// Inline contributor reference on a book record (strongRef + optional order)
+export interface BookContributorEntry {
+  contributor: StrongRef;
+  role: StrongRef;
+  order?: number;
+}
+
+// Joined contributor response (with embedded record for convenience)
+export interface BookContributorJoined {
+  contributor: { uri: string; cid: string; did: string; record: ContributorRecord };
+  role: { uri: string; cid: string; did: string; record: ContributorTypeRecord };
+  order?: number;
+}
+
 // XRPC input/output types
 export interface GetBookParams { uri: string; }
 export interface GetBookOutput { uri: string; record: unknown; cid?: string; }
@@ -137,6 +182,58 @@ export interface AddToShelfOutput { uri: string; cid: string; }
 
 export interface RemoveFromShelfInput { shelfUri: string; bookUri: string; }
 export interface RemoveFromShelfOutput { ok: boolean; }
+
+// Contributor I/O
+export interface CreateContributorInput {
+  name: string;
+  altNames?: string[];
+  images?: ContributorImageRef[];
+  identifiers: Array<{ type: string; value: string }>;
+  bio?: string;
+}
+export interface CreateContributorOutput { uri: string; cid: string; }
+
+export interface UpdateContributorPatch {
+  name?: string;
+  altNames?: string[];
+  bio?: string;
+}
+export interface UpdateContributorInput {
+  uri: string;
+  patch?: UpdateContributorPatch;
+  addIdentifiers?: Array<{ type: string; value: string }>;
+  removeIdentifiers?: Array<{ type: string; value: string }>;
+  addImages?: ContributorImageRef[];
+  removeImages?: Array<{ url: string }>;
+}
+export interface UpdateContributorOutput { uri: string; cid: string; }
+
+export interface CreateContributorTypeInput {
+  name: string;
+  description?: string;
+}
+export interface CreateContributorTypeOutput { uri: string; cid: string; }
+
+export interface ListContributorsParams { limit?: number; cursor?: string; }
+export interface ListContributorsOutput {
+  contributors: Array<{ uri: string; did: string; record: ContributorRecord }>;
+  cursor?: string;
+  total?: number;
+}
+
+export interface SearchContributorsParams { q: string; limit?: number; cursor?: string; }
+export interface SearchContributorsOutput {
+  contributors: Array<{ uri: string; did: string; record: ContributorRecord }>;
+  cursor?: string;
+  total?: number;
+}
+
+export interface ListContributorTypesParams { limit?: number; cursor?: string; }
+export interface ListContributorTypesOutput {
+  types: Array<{ uri: string; did: string; record: ContributorTypeRecord }>;
+  cursor?: string;
+  total?: number;
+}
 
 // Feed generator
 export type FeedWindow = 'day' | 'week' | 'month';

@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.contributor",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "createdAt"],
+        "properties": {
+          "name": { "type": "string", "maxLength": 200 },
+          "altNames": { "type": "array", "items": { "type": "string" } },
+          "images": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "#imageRef" }
+          },
+          "identifiers": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "community.lexicon.book.defs#identifier" }
+          },
+          "bio": { "type": "string", "maxLength": 16384 },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      },
+      "imageRef": {
+        "type": "object",
+        "required": ["url"],
+        "properties": {
+          "url": { "type": "string", "format": "uri" },
+          "alt": { "type": "string" }
+        }
+      }
+    }
+  }
+}

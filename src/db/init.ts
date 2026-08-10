@@ -1,5 +1,9 @@
 import { db } from './connection.js';
 import { logger } from '../logger.js';
+import { COLLECTIONS, makeRecordUri } from '../records.js';
+import { generateRkey } from '../rkey.js';
+import { contributorTypes } from './schema.js';
+import { eq } from 'drizzle-orm';
 
 export function setupIdentifiersView(): void {
   db.run(`CREATE VIEW IF NOT EXISTS books_identifiers AS
@@ -87,4 +91,44 @@ export function bootstrapFeatures(): void {
     `INSERT OR IGNORE INTO features (name, enabled) VALUES ('feedGenerator', ${enabled})`,
   );
   logger.info({ enabled }, 'bootstrapped feature feedGenerator');
+}
+
+const SEED_CONTRIBUTOR_TYPES: Array<{ name: string; description?: string }> = [
+  { name: 'author', description: 'Original writer of the work.' },
+  { name: 'illustrator', description: 'Provided the artwork or interior illustrations.' },
+  { name: 'editor', description: 'Edited or curated the work.' },
+  { name: 'translator', description: 'Translated the work into another language.' },
+  { name: 'narrator', description: 'Performed the audiobook version.' },
+];
+
+/**
+ * Seed the canonical contributor types Bibliograph publishes under its service DID.
+ * Idempotent: unique constraint on `name` ensures re-runs are safe.
+ */
+export function bootstrapContributorTypes(): void {
+  const did = process.env.ATP_SERVICE_DID ?? 'did:web:localhost';
+  const now = new Date().toISOString();
+
+  let inserted = 0;
+  for (const seed of SEED_CONTRIBUTOR_TYPES) {
+    const existing = db
+      .select()
+      .from(contributorTypes)
+      .where(eq(contributorTypes.name, seed.name))
+      .all();
+    if (existing.length > 0) continue;
+
+    const uri = makeRecordUri(did, COLLECTIONS.contributorType, generateRkey());
+    db.insert(contributorTypes)
+      .values({
+        uri,
+        did,
+        name: seed.name,
+        description: seed.description,
+        createdAt: now,
+      })
+      .run();
+    inserted++;
+  }
+  logger.info({ seeded: SEED_CONTRIBUTOR_TYPES.length, inserted }, 'bootstrapped contributor types');
 }

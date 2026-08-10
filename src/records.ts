@@ -1,5 +1,5 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from './db/schema.js';
 import { generateRkey } from './rkey.js';
 import { computeDeduplicationHash } from './dedup.js';
@@ -11,6 +11,8 @@ export const COLLECTIONS = {
   status: 'community.lexicon.book.status',
   shelf: 'community.lexicon.book.shelf',
   shelfItem: 'community.lexicon.book.shelfItem',
+  contributor: 'community.lexicon.book.contributor',
+  contributorType: 'community.lexicon.book.contributorType',
 } as const;
 
 export function makeRecordUri(did: string, collection: string, rkey: string): string {
@@ -104,4 +106,108 @@ export function findBookByIsbn(
   isbn: string,
 ): Promise<typeof schema.books.$inferSelect | undefined> {
   return db.query.books.findFirst({ where: eq(schema.books.isbn, isbn) });
+}
+
+// ─── Contributors ───────────────────────────────────────────────────────────
+
+export interface ContributorImage {
+  url: string;
+  alt?: string;
+}
+
+export interface ContributorInput {
+  did: string;
+  name: string;
+  altNames?: string[];
+  images?: ContributorImage[];
+  identifiers: Array<{ type: string; value: string }>;
+  bio?: string;
+}
+
+export async function insertContributor(
+  db: BetterSQLite3Database<typeof schema>,
+  input: ContributorInput,
+  opts: { rkey?: string; createdAt?: string } = {},
+): Promise<{ uri: string; rkey: string }> {
+  const rkey = opts.rkey ?? generateRkey();
+  const now = opts.createdAt ?? new Date().toISOString();
+  const uri = makeRecordUri(input.did, COLLECTIONS.contributor, rkey);
+
+  await db
+    .insert(schema.contributors)
+    .values({
+      uri,
+      did: input.did,
+      name: input.name,
+      altNames: input.altNames ?? [],
+      images: input.images ?? [],
+      identifiers: input.identifiers,
+      bio: input.bio,
+      createdAt: now,
+    })
+    .run();
+
+  return { uri, rkey };
+}
+
+export async function findContributorByIdentifier(
+  db: BetterSQLite3Database<typeof schema>,
+  type: string,
+  value: string,
+): Promise<typeof schema.contributors.$inferSelect | undefined> {
+  const rows = await db
+    .select()
+    .from(schema.contributors)
+    .where(
+      sql`EXISTS (SELECT 1 FROM json_each(${schema.contributors.identifiers}) je WHERE json_extract(je.value, '$.type') = ${type} AND json_extract(je.value, '$.value') = ${value})`,
+    )
+    .limit(1);
+  return rows[0];
+}
+
+export function findContributorByUri(
+  db: BetterSQLite3Database<typeof schema>,
+  uri: string,
+): Promise<typeof schema.contributors.$inferSelect | undefined> {
+  return db.query.contributors.findFirst({ where: eq(schema.contributors.uri, uri) });
+}
+
+// ─── Contributor Types ──────────────────────────────────────────────────────
+
+export interface ContributorTypeInput {
+  did: string;
+  name: string;
+  description?: string;
+}
+
+export async function insertContributorType(
+  db: BetterSQLite3Database<typeof schema>,
+  input: ContributorTypeInput,
+  opts: { rkey?: string; createdAt?: string } = {},
+): Promise<{ uri: string; rkey: string }> {
+  const rkey = opts.rkey ?? generateRkey();
+  const now = opts.createdAt ?? new Date().toISOString();
+  const uri = makeRecordUri(input.did, COLLECTIONS.contributorType, rkey);
+
+  await db
+    .insert(schema.contributorTypes)
+    .values({
+      uri,
+      did: input.did,
+      name: input.name,
+      description: input.description,
+      createdAt: now,
+    })
+    .run();
+
+  return { uri, rkey };
+}
+
+export function findContributorTypeByName(
+  db: BetterSQLite3Database<typeof schema>,
+  name: string,
+): Promise<typeof schema.contributorTypes.$inferSelect | undefined> {
+  return db.query.contributorTypes.findFirst({
+    where: eq(schema.contributorTypes.name, name),
+  });
 }

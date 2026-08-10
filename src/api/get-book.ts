@@ -1,38 +1,20 @@
 import type { Context } from 'hono';
-import { and, eq, like, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
 import { parsePagination, nextCursor } from '../pagination.js';
 import { searchFallback, type FallbackSource } from './search-fallback.js';
 import { computeDeduplicationHash } from '../dedup.js';
+import { serializeContributor, serializeContributorType } from './contributor.js';
 import type { BookData } from '../providers/interface.js';
-import type { GetBookParams, GetBooksParams, GetReviewsParams, GetReviewParams, GetUserStatusParams, SearchBooksParams, GetClaimsParams, GetShelvesParams, GetShelfParams, GetShelfItemsParams } from '../types.js';
+import type {
+  GetBookParams, GetBooksParams, GetReviewsParams, GetReviewParams,
+  GetUserStatusParams, SearchBooksParams, GetClaimsParams,
+  GetShelvesParams, GetShelfParams, GetShelfItemsParams,
+  BookContributorJoined,
+} from '../types.js';
 
-const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
-
-export async function getBook(c: Context): Promise<Response> {
-  const log = c.get('log') as import('pino').Logger;
-  const params = c.req.query() as unknown as GetBookParams;
-  if (!params.uri) {
-    log.warn('getBook rejected: missing uri');
-    return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
-  }
-
-  log.info({ uri: params.uri }, 'handling getBook');
-
-  const book = await db.query.books.findFirst({ where: eq(books.uri, params.uri) });
-  if (!book) {
-    log.info({ found: false }, 'getBook complete');
-    return c.json({ error: 'NotFound', message: 'Book not found' }, 404);
-  }
-
-  log.info({ found: true }, 'getBook complete');
-  return c.json({
-    uri: book.uri,
-    record: serializeBookRecord(book),
-    cid: undefined,
-  });
-}
+const { books, reviews, readingStatuses, claims, shelves, shelfItems, contributors, contributorTypes, bookContributors } = schema;
 
 export async function getBooks(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
@@ -49,12 +31,15 @@ export async function getBooks(c: Context): Promise<Response> {
     limit: 25,
   });
 
+  const contributorMap = await attachContributors(results.map((r) => r.uri));
+
   log.info({ found: results.length }, 'getBooks complete');
   return c.json({
     books: results.map(book => ({
       uri: book.uri,
       record: serializeBookRecord(book),
       cid: undefined,
+      contributors: contributorMap.get(book.uri) ?? [],
     })),
   });
 }
@@ -336,19 +321,25 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
     });
   }
 
-  const bookEntries: Array<{ uri: string; record: Record<string, unknown>; source?: FallbackSource }> = results.map(book => ({
+  const contributorMap = await attachContributors(results.map((r) => r.uri));
+
+  const bookEntries: Array<{ uri: string; record: Record<string, unknown>; source?: FallbackSource; contributors?: BookContributorJoined[] }> = results.map(book => ({
     uri: book.uri,
     record: serializeBookRecord(book),
+    contributors: contributorMap.get(book.uri) ?? [],
   }));
 
   if (results.length === 0 && sanitized) {
     const fb = await searchFallback(db, sanitized, log);
     const enriched = await enrichFallbackBooks(fb.books, fb.source);
+    const enrichedUris = enriched.map((e) => e.uri);
+    const enrichedContributorMap = await attachContributors(enrichedUris);
     for (const entry of enriched) {
       bookEntries.push({
         uri: entry.uri,
         record: entry.record,
         source: entry.source,
+        contributors: enrichedContributorMap.get(entry.uri) ?? [],
       });
     }
   }
@@ -414,6 +405,94 @@ function serializeBookRecord(book: typeof books.$inferSelect): Record<string, un
     createdAt: book.createdAt,
     updatedAt: book.updatedAt,
   };
+}
+
+export async function attachContributors(
+  bookUris: string[],
+): Promise<Map<string, BookContributorJoined[]>> {
+  const out = new Map<string, BookContributorJoined[]>();
+  if (bookUris.length === 0) return out;
+
+  const joinRows = await db
+    .select()
+    .from(bookContributors)
+    .where(inArray(bookContributors.bookUri, bookUris))
+    .all();
+
+  if (joinRows.length === 0) return out;
+
+  const contributorUris = Array.from(new Set(joinRows.map((r) => r.contributorUri)));
+  const roleUris = Array.from(new Set(joinRows.map((r) => r.roleUri)));
+
+  const [contribRows, typeRows] = await Promise.all([
+    contributorUris.length > 0
+      ? db.select().from(contributors).where(inArray(contributors.uri, contributorUris)).all()
+      : Promise.resolve([] as Array<typeof contributors.$inferSelect>),
+    roleUris.length > 0
+      ? db.select().from(contributorTypes).where(inArray(contributorTypes.uri, roleUris)).all()
+      : Promise.resolve([] as Array<typeof contributorTypes.$inferSelect>),
+  ]);
+
+  const contributorByUri = new Map(contribRows.map((r) => [r.uri, r]));
+  const typeByUri = new Map(typeRows.map((r) => [r.uri, r]));
+
+  for (const row of joinRows) {
+    const contrib = contributorByUri.get(row.contributorUri);
+    const type = typeByUri.get(row.roleUri);
+    if (!contrib || !type) continue;
+    const entry: BookContributorJoined = {
+      contributor: {
+        uri: contrib.uri,
+        cid: row.contributorCid,
+        did: contrib.did,
+        record: serializeContributor(contrib),
+      },
+      role: {
+        uri: type.uri,
+        cid: row.roleCid,
+        did: type.did,
+        record: serializeContributorType(type),
+      },
+      order: row.ordering ?? 0,
+    };
+    const arr = out.get(row.bookUri) ?? [];
+    arr.push(entry);
+    out.set(row.bookUri, arr);
+  }
+
+  for (const arr of out.values()) {
+    arr.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }
+
+  return out;
+}
+
+export async function getBook(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const params = c.req.query() as unknown as GetBookParams;
+  if (!params.uri) {
+    log.warn('getBook rejected: missing uri');
+    return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+  }
+
+  log.info({ uri: params.uri }, 'handling getBook');
+
+  const book = await db.query.books.findFirst({ where: eq(books.uri, params.uri) });
+  if (!book) {
+    log.info({ found: false }, 'getBook complete');
+    return c.json({ error: 'NotFound', message: 'Book not found' }, 404);
+  }
+
+  const contributorMap = await attachContributors([params.uri]);
+  const contributorsArr = contributorMap.get(params.uri) ?? [];
+
+  log.info({ found: true }, 'getBook complete');
+  return c.json({
+    uri: book.uri,
+    record: serializeBookRecord(book),
+    cid: undefined,
+    contributors: contributorsArr,
+  });
 }
 
 export async function getShelves(c: Context): Promise<Response> {

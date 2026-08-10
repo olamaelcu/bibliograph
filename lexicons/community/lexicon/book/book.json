@@ -22,6 +22,10 @@
           },
           "coverUrl": { "type": "string", "format": "uri" },
           "deduplicationHash": { "type": "string" },
+          "contributors": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "#bookContributorEntry" }
+          },
           "status": {
             "type": "string",
             "enum": ["pending", "active", "rejected"]
@@ -29,6 +33,23 @@
           "createdAt": { "type": "string", "format": "datetime" },
           "updatedAt": { "type": "string", "format": "datetime" }
         }
+      }
+    },
+    "bookContributorEntry": {
+      "type": "object",
+      "required": ["contributor", "role"],
+      "properties": {
+        "contributor": { "type": "ref", "ref": "#strongRef" },
+        "role": { "type": "ref", "ref": "#strongRef" },
+        "order": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "strongRef": {
+      "type": "object",
+      "required": ["uri", "cid"],
+      "properties": {
+        "uri": { "type": "string", "format": "at-uri" },
+        "cid": { "type": "string", "format": "cid" }
       }
     }
   }

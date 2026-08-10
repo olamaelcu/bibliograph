@@ -4,7 +4,7 @@ import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createApp } from './app.js';
 import { db } from './db/connection.js';
 import * as tableSchema from './db/schema.js';
-import { setupFts, setupIdentifiersView, bootstrapLibrarian, bootstrapFeatures } from './db/init.js';
+import { setupFts, setupIdentifiersView, bootstrapLibrarian, bootstrapFeatures, bootstrapContributorTypes } from './db/init.js';
 import { logger } from './logger.js';
 import { startTapChannel, stopTapChannel, trackRepos } from './tap.js';
 
@@ -17,6 +17,7 @@ async function main(): Promise<void> {
   setupIdentifiersView();
   bootstrapLibrarian();
   bootstrapFeatures();
+  bootstrapContributorTypes();
   logger.info('migrations complete');
 
   const app = createApp();

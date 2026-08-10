@@ -21,10 +21,12 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 
 | NSID | Type | Purpose |
 |------|------|---------|
-| `community.lexicon.book.book` | record | Core book definition (title, author, ISBN, metadata) |
+| `community.lexicon.book.book` | record | Core book definition (title, author, ISBN, metadata, optional contributors) |
 | `community.lexicon.book.claim` | record | Author/publisher claim with deduplication key |
 | `community.lexicon.book.review` | record | User review with optional rating |
 | `community.lexicon.book.status` | record | Reading status (reading, read, to-read, abandoned) |
+| `community.lexicon.book.contributor` | record | Person or entity that worked on a book (author, illustrator, etc.) |
+| `community.lexicon.book.contributorType` | record | Canonical contributor role published by Bibliograph (author, illustrator, editor, translator, narrator) |
 
 ### XRPC Endpoints
 
@@ -32,14 +34,17 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 
 | Endpoint | Description |
 |----------|-------------|
-| `getBook` | Fetch a single book by AT-URI |
-| `getBooks` | Batch fetch books by URIs |
+| `getBook` | Fetch a single book by AT-URI (returns joined contributors) |
+| `getBooks` | Batch fetch books by URIs (returns joined contributors) |
 | `getReviews` | Paginated reviews for a book |
 | `getReview` | Fetch a single review by AT-URI or user+book |
 | `getUserStatus` | Reading statuses for a user |
 | `searchBooks` | Full-text search on title, author, ISBN |
 | `getClaims` | Claims attached to a book |
 | `getFeed` | Home feed: recent status updates, newest books, trending, following, cross-user |
+| `listContributors` | Paginated list of all known contributors |
+| `searchContributors` | Full-text search over contributor name and alt names |
+| `listContributorTypes` | List canonical contributor roles seeded by Bibliograph |
 
 **Procedures** (POST `/xrpc/nsid`):
 
@@ -49,6 +54,9 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | `createReview` | Post a review |
 | `createStatus` | Record reading status |
 | `createClaim` | Claim a book as author/curator |
+| `createContributor` | Create a contributor record (requires at least one identifier) |
+| `updateContributor` | Patch or add/remove identifiers, images, altNames, bio (creator or librarian) |
+| `createContributorType` | Create a canonical contributor role (librarian only) |
 
 ### Other endpoints
 
@@ -100,6 +108,65 @@ curl "http://localhost:3000/api/lookup/book?title=Dune&author=Frank+Herbert"
 ```
 
 Google Books support is available via `GoogleBooksProvider` but requires an API key passed to the constructor.
+
+## Contributors
+
+Books can reference one or more contributor records via an inline `contributors`
+array on the book record (each entry is a strongRef to a contributor + a
+strongRef to a contributor role, plus an optional `order` int). The AppView
+also materializes this into a `book_contributors` join table so consumers
+can fetch the joined records alongside the book without an extra round trip
+to the PDS.
+
+```jsonc
+{
+  "uri": "at://did:plc:example/community.lexicon.book.book/abc",
+  "record": { "title": "Dune", "author": "Frank Herbert", ... },
+  "cid": "bafy…",
+  "contributors": [
+    {
+      "contributor": {
+        "uri": "at://did:plc:example/community.lexicon.book.contributor/x",
+        "cid": "bafy…",
+        "did": "did:plc:example",
+        "record": { "$type": "community.lexicon.book.contributor", "name": "Frank Herbert", ... }
+      },
+      "role": {
+        "uri": "at://did:web:biblio.example/community.lexicon.book.contributorType/author",
+        "cid": "bafy…",
+        "did": "did:web:biblio.example",
+        "record": { "$type": "community.lexicon.book.contributorType", "name": "author", ... }
+      },
+      "order": 0
+    }
+  ]
+}
+```
+
+Bibliograph seeds five canonical roles on boot — `author`, `illustrator`,
+`editor`, `translator`, `narrator`. Librarians can publish additional roles
+via `createContributorType`.
+
+### Backfill script
+
+For pre-existing books that landed in the index before this feature shipped,
+the `book_contributors` join table may be empty even if the book record carries
+a `contributors` array. Populate it with:
+
+```bash
+# Default: additive/upsert
+npm run backfill:contributors
+
+# Preview without writing
+npm run backfill:contributors -- --dry-run
+
+# Wipe book_contributors before repopulating
+npm run backfill:contributors -- --reset
+```
+
+Re-running is safe: the script uses `INSERT OR IGNORE` on the composite PK
+`(bookUri, contributorUri, roleUri)`. Exit code is non-zero if any rows were
+skipped due to malformed JSON in `books.contributors`.
 
 ## Bulk backfill (editions dump)
 
