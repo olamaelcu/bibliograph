@@ -32,6 +32,8 @@ import iconFileText from 'lucide-static/icons/file-text.svg?url';
 import iconSquarePen from 'lucide-static/icons/square-pen.svg?url';
 import iconList from 'lucide-static/icons/list.svg?url';
 
+import './live-counts.js';
+
 const icons: Record<string, string> = {
   'book-open': iconBookOpen,
   book: iconBook,

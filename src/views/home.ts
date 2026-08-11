@@ -147,31 +147,6 @@ export function HomePage(props: { host: string; queries: string[]; procedures: s
   <div slot="footer">
     <p class="wa-caption-s wa-color-text-quiet">Bibliograph &mdash; ${props.host}</p>
   </div>
-</wa-page>
-
-<script>
-(function () {
-  const bookEl = document.getElementById('book-count');
-  const statusEl = document.getElementById('status-count');
-  const sseStatus = document.getElementById('sse-status');
-
-  function connect() {
-    sseStatus.textContent = 'connecting\u2026';
-    const es = new EventSource('/api/live-counts');
-    es.onmessage = function (e) {
-      const data = JSON.parse(e.data);
-      bookEl.textContent = data.books.toLocaleString();
-      statusEl.textContent = data.statuses.toLocaleString();
-      sseStatus.textContent = 'live';
-    };
-    es.onerror = function () {
-      sseStatus.textContent = 'reconnecting\u2026';
-      es.close();
-      setTimeout(connect, 3000);
-    };
-  }
-  connect();
-})();
-</script>`;
+</wa-page>`;
   return Layout({ title: 'Bibliograph', content });
 }
