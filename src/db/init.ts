@@ -1,8 +1,8 @@
-import { db } from './connection.js';
+import { db, sqliteHandle } from './connection.js';
 import { logger } from '../logger.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
 import { generateRkey } from '../rkey.js';
-import { contributorTypes } from './schema.js';
+import { books, contributorTypes } from './schema.js';
 import { eq } from 'drizzle-orm';
 
 export function setupIdentifiersView(): void {
@@ -82,7 +82,7 @@ export function setupFts(): void {
 
   db.run(`CREATE TRIGGER IF NOT EXISTS books_ad AFTER DELETE ON books BEGIN
     INSERT INTO books_fts(books_fts, rowid, title, author, description, isbn)
-    VALUES ('delete', old.rowid, old.title, old.author, old.description, old.isbn);
+    VALUES ('delete', old.rowid, old.title, old.title, old.author, old.description, old.isbn);
   END`);
 
   db.run(`CREATE TRIGGER IF NOT EXISTS books_au AFTER UPDATE ON books BEGIN
@@ -100,14 +100,40 @@ export function searchBooks(
     .replace(/['"]/g, '')
     .trim()
     .split(/\s+/)
+    .filter((s) => s.length > 0)
     .join(' AND ');
 
-  return db.all(
+  if (!sanitized) return [];
+
+  return sqliteHandle.prepare(
     `SELECT b.uri, b.title, b.author, rank FROM books_fts fts
      JOIN books b ON b.rowid = fts.rowid
-     WHERE books_fts MATCH '${sanitized}'
+     WHERE books_fts MATCH ?
      ORDER BY rank`,
-  ) as any;
+  ).all(sanitized) as Array<{ uri: string; title: string; author: string; rank: number }>;
+}
+
+export function ftsSearchBooks(
+  query: string,
+  limit: number,
+  offset: number,
+): Array<typeof books.$inferSelect> {
+  const sanitized = query
+    .replace(/['"]/g, '')
+    .trim()
+    .split(/\s+/)
+    .filter((s) => s.length > 0)
+    .join(' AND ');
+
+  if (!sanitized) return [];
+
+  return sqliteHandle.prepare(
+    `SELECT b.* FROM books_fts fts
+     JOIN books b ON b.rowid = fts.rowid
+     WHERE books_fts MATCH ?
+     ORDER BY rank
+     LIMIT ? OFFSET ?`,
+  ).all(sanitized, limit, offset) as Array<typeof books.$inferSelect>;
 }
 
 export function bootstrapLibrarian(): void {

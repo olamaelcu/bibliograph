@@ -26,7 +26,7 @@ import { clearSqliteTables } from '../test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
-import { setupFts, setupIdentifiersView, searchBooks } from './init.js';
+import { setupFts, setupIdentifiersView, searchBooks, ftsSearchBooks } from './init.js';
 
 function getSqlite() {
   return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
@@ -168,6 +168,62 @@ describe('db/init', () => {
     it('returns empty array when no match', () => {
       const results = searchBooks('NonexistentBookXYZ');
       expect(results).toEqual([]);
+    });
+  });
+
+  describe('ftsSearchBooks', () => {
+    function seedBook(uri: string, title: string, author: string): void {
+      db.insert(_s.books).values({
+        uri,
+        did: 'did:plc:author',
+        title,
+        author,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+    }
+
+    it('returns empty array on empty query without hitting FTS', () => {
+      const results = ftsSearchBooks('', 20, 0);
+      expect(results).toEqual([]);
+    });
+
+    it('returns matching books as full rows', () => {
+      seedBook('at://did:plc:author/book/fts-moby', 'Moby Dick', 'Herman Melville');
+      seedBook('at://did:plc:author/book/fts-other', 'Other Book', 'Other Author');
+
+      const results = ftsSearchBooks('Moby', 20, 0);
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toBe('Moby Dick');
+      expect(results[0].uri).toBe('at://did:plc:author/book/fts-moby');
+    });
+
+    it('returns empty array for non-matching tokens', () => {
+      seedBook('at://did:plc:author/book/fts-moby2', 'Moby Dick', 'Herman Melville');
+
+      const results = ftsSearchBooks('__health_check__ __health_check__', 20, 0);
+      expect(results).toEqual([]);
+    });
+
+    it('honors limit and offset', () => {
+      for (let i = 0; i < 5; i++) {
+        seedBook(`at://did:plc:author/book/fts-seq-${i}`, `Pages Title ${i}`, 'Pages Author');
+      }
+
+      const first = ftsSearchBooks('Pages', 2, 0);
+      expect(first).toHaveLength(2);
+
+      const second = ftsSearchBooks('Pages', 2, 2);
+      expect(second).toHaveLength(2);
+
+      expect(first[0].uri).not.toBe(second[0].uri);
+    });
+
+    it('completes a non-matching FTS search in well under a second on an in-memory DB', () => {
+      const started = Date.now();
+      ftsSearchBooks('__nonexistent_token_xyz_qq__', 20, 0);
+      expect(Date.now() - started).toBeLessThan(50);
     });
   });
 

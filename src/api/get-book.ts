@@ -7,6 +7,7 @@ import { searchFallback, type FallbackResult, type FallbackSource } from './sear
 import { computeDeduplicationHash } from '../dedup.js';
 import { parseIdentifierInput, resolveBooksByIdentifier, type ResolvedBook } from './identifier-lookup.js';
 import { serializeContributor, serializeContributorType } from './contributor.js';
+import { ftsSearchBooks } from '../db/init.js';
 import type { BookData } from '../providers/interface.js';
 import type {
   GetBookParams, GetBooksParams, GetReviewsParams, GetReviewParams,
@@ -372,7 +373,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
 
   const sanitized = (q as string).replace(/['"]/g, '').trim();
 
-  let results;
+  let results: Array<typeof books.$inferSelect>;
   if (sanitized.match(/^[0-9-]+$/)) {
     results = await db.query.books.findMany({
       where: or(like(books.isbn, `%${sanitized}%`), like(books.title, `%${sanitized}%`)),
@@ -380,11 +381,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
       offset,
     });
   } else {
-    results = await db.query.books.findMany({
-      where: or(like(books.title, `%${sanitized}%`), like(books.author, `%${sanitized}%`)),
-      limit: lim,
-      offset,
-    });
+    results = ftsSearchBooks(sanitized, lim, offset);
   }
 
   const contributorMap = await attachContributors(results.map((r) => r.uri));
