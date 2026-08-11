@@ -325,6 +325,20 @@ export const backfillState = sqliteTable('backfill_state', {
 export type BackfillState = typeof backfillState.$inferSelect;
 export type NewBackfillState = typeof backfillState.$inferInsert;
 
+// ─── Backfill reservation (coordination between importer and live writes) ──────
+
+export const backfillReservation = sqliteTable('backfill_reservation', {
+  stateName: text('state_name').primaryKey(),
+  ownerPid: integer('owner_pid').notNull(),
+  acquiredAt: integer('acquired_at').notNull(),
+  heartbeatAt: integer('heartbeat_at').notNull(),
+  batchSize: integer('batch_size').notNull(),
+  status: text('status', { enum: ['active', 'closing'] }).notNull().default('active'),
+});
+
+export type BackfillReservation = typeof backfillReservation.$inferSelect;
+export type NewBackfillReservation = typeof backfillReservation.$inferInsert;
+
 // ─── Contributors ───────────────────────────────────────────────────────────
 
 export const contributors = sqliteTable(

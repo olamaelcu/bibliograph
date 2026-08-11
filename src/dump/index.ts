@@ -10,6 +10,7 @@ import { HttpDownloader } from './downloader.js';
 import { DumpStreamer, SeekError, parseWorkId } from './streamer.js';
 import { toBookData } from './edition-mapper.js';
 import { BatchedImporter } from './batched-importer.js';
+import { acquireReservation, releaseReservation, heartbeatReservation } from './reservation.js';
 
 const OL_DUMP_URL_DEFAULT = 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
 const MIN_FREE_BYTES_DEFAULT = 12 * 1024 * 1024 * 1024;
@@ -85,11 +86,17 @@ export async function runEditionsDumpImport(opts: RunOptions): Promise<BackfillS
     signal: opts.signal,
   };
 
-  await assertDiskSpace(ctx.gzPath, ctx.minFreeBytes);
-  return runWithContext(ctx);
+  acquireReservation(ctx.db, { stateName: ctx.stateName, batchSize: ctx.batchSize });
+  try {
+    await assertDiskSpace(ctx.gzPath, ctx.minFreeBytes);
+    return await runWithContext(ctx);
+  } finally {
+    releaseReservation(ctx.db, ctx.stateName);
+  }
 }
 
 async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
+  heartbeatReservation(ctx.db, ctx.stateName);
   if (ctx.lastModified === null) {
     const head = await ctx.fetchMetadata();
     ctx.lastModified = head.lastModified;
@@ -160,7 +167,7 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       if (buffer.length >= ctx.batchSize) {
         batchNumber += 1;
         await flushBatch(
-          importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
+          ctx.db, importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
           ctx.stateName, batchNumber, runStartTime,
         );
       }
@@ -194,7 +201,7 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       if (buffer.length >= ctx.batchSize) {
         batchNumber += 1;
         await flushBatch(
-          importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
+          ctx.db, importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
           ctx.stateName, batchNumber, runStartTime,
         );
       }
@@ -209,7 +216,7 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   if (buffer.length > 0) {
     batchNumber += 1;
     await flushBatch(
-      importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
+      ctx.db, importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
       ctx.stateName, batchNumber, runStartTime,
     );
   }
@@ -225,6 +232,7 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
 }
 
 async function flushBatch(
+  db: BetterSQLite3Database<typeof schema>,
   importer: BatchedImporter,
   buffer: NonNullable<ReturnType<typeof toBookData>>[],
   summary: BackfillSummary,
@@ -238,6 +246,11 @@ async function flushBatch(
 ): Promise<void> {
   const batchInputSize = buffer.length;
   const batchStart = Date.now();
+  try {
+    heartbeatReservation(db, stateName);
+  } catch (err) {
+    logger.warn({ err, stateName }, 'dump import: reservation heartbeat failed');
+  }
   try {
     const flushed = await importer.runAll(buffer.splice(0));
     mergeSummary(summary, flushed);

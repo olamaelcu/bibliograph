@@ -8,6 +8,7 @@ import { OpenLibraryProvider } from '../providers/openlibrary.js';
 import { GoodreadsProvider } from '../providers/goodreads.js';
 import { insertBook, insertClaim, makeRecordUri, makeId, findBookByIsbn, COLLECTIONS } from '../records.js';
 import { deriveCover } from '../cover-types.js';
+import { withWriteRetry } from '../db/connection.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput, CreateShelfInput, AddToShelfInput, RemoveFromShelfInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
@@ -413,17 +414,19 @@ export async function createReview(c: Context): Promise<Response> {
   const cid = `bafyrei-${rkey}`;
 
   try {
-    await db.insert(reviews).values({
-      uri,
-      did,
-      bookUri: input.bookUri,
-      text: input.text,
-      rating: input.rating,
-      cid,
-      bookTitle: book.title,
-      bookAuthor: book.author,
-      createdAt: now,
-    });
+    await withWriteRetry(() =>
+      db.insert(reviews).values({
+        uri,
+        did,
+        bookUri: input.bookUri,
+        text: input.text,
+        rating: input.rating,
+        cid,
+        bookTitle: book.title,
+        bookAuthor: book.author,
+        createdAt: now,
+      }),
+    );
   } catch (err) {
     log.error({ err, did, bookUri: input.bookUri, uri }, 'createReview insert failed');
     throw err;
@@ -491,20 +494,22 @@ export async function createStatus(c: Context): Promise<Response> {
     : (typeof resolvedBook.identifiers === 'string' ? JSON.parse(resolvedBook.identifiers) : resolvedBook.identifiers);
 
   try {
-    await db.insert(readingStatuses).values({
-      uri,
-      did,
-      bookUri: bookUri!,
-      status: input.status,
-      progress: input.progress,
-      rating: input.rating,
-      bookTitle: resolvedBook.title,
-      bookAuthor: resolvedBook.author,
-      identifiers: statusIdentifiers,
-      startedAt: input.startedAt,
-      finishedAt: input.finishedAt,
-      createdAt: now,
-    });
+    await withWriteRetry(() =>
+      db.insert(readingStatuses).values({
+        uri,
+        did,
+        bookUri: bookUri!,
+        status: input.status,
+        progress: input.progress,
+        rating: input.rating,
+        bookTitle: resolvedBook.title,
+        bookAuthor: resolvedBook.author,
+        identifiers: statusIdentifiers,
+        startedAt: input.startedAt,
+        finishedAt: input.finishedAt,
+        createdAt: now,
+      }),
+    );
   } catch (err) {
     log.error({ err, did, bookUri: bookUri!, status: input.status, uri }, 'createStatus insert failed');
     throw err;
@@ -584,17 +589,19 @@ export async function createShelf(c: Context): Promise<Response> {
   const uri = makeRecordUri(did, COLLECTIONS.shelf, rkey);
 
   try {
-    await db.insert(shelves).values({
-      uri,
-      did,
-      name: input.name.trim(),
-      description: input.description,
-      metadata: (input.metadata as Record<string, unknown>) || {},
-      coverUrl: input.coverUrl,
-      cover: deriveCover({ coverUrl: input.coverUrl, source: 'user' }),
-      createdAt: now,
-      updatedAt: now,
-    });
+    await withWriteRetry(() =>
+      db.insert(shelves).values({
+        uri,
+        did,
+        name: input.name.trim(),
+        description: input.description,
+        metadata: (input.metadata as Record<string, unknown>) || {},
+        coverUrl: input.coverUrl,
+        cover: deriveCover({ coverUrl: input.coverUrl, source: 'user' }),
+        createdAt: now,
+        updatedAt: now,
+      }),
+    );
   } catch (err) {
     log.error({ err, did, name: input.name, uri }, 'createShelf insert failed');
     throw err;
@@ -655,16 +662,18 @@ export async function addToShelf(c: Context): Promise<Response> {
   const uri = makeRecordUri(did, COLLECTIONS.shelfItem, rkey);
 
   try {
-    await db.insert(shelfItems).values({
-      uri,
-      did,
-      shelfUri: input.shelfUri,
-      bookUri,
-      bookTitle: resolvedBook.title,
-      bookAuthor: resolvedBook.author,
-      note: input.note,
-      createdAt: now,
-    });
+    await withWriteRetry(() =>
+      db.insert(shelfItems).values({
+        uri,
+        did,
+        shelfUri: input.shelfUri,
+        bookUri,
+        bookTitle: resolvedBook.title,
+        bookAuthor: resolvedBook.author,
+        note: input.note,
+        createdAt: now,
+      }),
+    );
   } catch (err) {
     log.error({ err, did, shelfUri: input.shelfUri, bookUri, uri }, 'addToShelf insert failed');
     throw err;
@@ -708,7 +717,7 @@ export async function removeFromShelf(c: Context): Promise<Response> {
   }
 
   try {
-    await db.delete(shelfItems).where(eq(shelfItems.uri, existing.uri));
+    await withWriteRetry(() => db.delete(shelfItems).where(eq(shelfItems.uri, existing.uri)));
   } catch (err) {
     log.error({ err, did, shelfUri: input.shelfUri, bookUri: input.bookUri }, 'removeFromShelf delete failed');
     throw err;
@@ -756,18 +765,22 @@ export async function verifyClaim(c: Context): Promise<Response> {
   const now = new Date().toISOString();
 
   try {
-    await db.update(claims)
-      .set({ status: 'verified', verifiedBy: did, verifiedAt: now })
-      .where(eq(claims.uri, claimUri));
+    await withWriteRetry(() =>
+      db.update(claims)
+        .set({ status: 'verified', verifiedBy: did, verifiedAt: now })
+        .where(eq(claims.uri, claimUri)),
+    );
   } catch (err) {
     log.error({ err, did, claimUri }, 'verifyClaim claim update failed');
     throw err;
   }
 
   try {
-    await db.update(schema.books)
-      .set({ status: 'active', updatedAt: now })
-      .where(eq(schema.books.uri, claim.bookUri));
+    await withWriteRetry(() =>
+      db.update(schema.books)
+        .set({ status: 'active', updatedAt: now })
+        .where(eq(schema.books.uri, claim.bookUri)),
+    );
   } catch (err) {
     log.error({ err, did, claimUri, bookUri: claim.bookUri }, 'verifyClaim book update failed');
     throw err;

@@ -6,13 +6,39 @@ vi.mock('../db/connection.js', async () => {
   const schema = await import('../db/schema.js');
   const { migrate } = await import('drizzle-orm/better-sqlite3/migrator');
 
-  const sqlite = new Database(':memory:');
+  const sqlite = new Database('file:bibliograph-test?mode=memory&cache=shared');
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.pragma('busy_timeout = 100');
   sqlite.pragma('foreign_keys = ON');
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: './drizzle' });
 
   (db as any).$sqlite = sqlite;
-  return { db, schema };
+  return {
+    db,
+    schema,
+    sqliteHandle: sqlite,
+    // Re-export the pure helpers so create-book.ts resolves them; they are
+    // stateless (busy detection / bounded retry loop) and safe to share.
+    withWriteRetry: async <T>(fn: () => T, opts?: { maxWaitMs?: number }) => {
+      const maxWaitMs = opts?.maxWaitMs ?? 3000;
+      const start = Date.now();
+      let attempt = 0;
+      for (;;) {
+        attempt += 1;
+        try {
+          return await fn();
+        } catch (err) {
+          const busy = err instanceof Error && /SQLITE_BUSY|database is locked/.test(err.message);
+          if (!busy || Date.now() - start >= maxWaitMs) throw err;
+          const backoff = Math.min(100 * 2 ** Math.min(attempt, 4), 250);
+          await new Promise((r) => setTimeout(r, backoff));
+        }
+      }
+    },
+    isBusyError: (err: unknown) =>
+      err instanceof Error && /SQLITE_BUSY|database is locked/.test(err.message),
+  };
 });
 
 vi.mock('../auth.js', async () => {
@@ -449,6 +475,46 @@ describe('api/create-book', () => {
       expect(statuses).toHaveLength(1);
       expect(statuses[0].status).toBe('to-read');
       delete process.env.GOOGLE_BOOKS_API_KEY;
+    });
+
+    it('succeeds even when the importer holds the write lock (SQLITE_BUSY retry)', async () => {
+      db.insert(_s.books).values({
+        uri: 'at://did:plc:a/book/locked',
+        did: 'did:plc:a',
+        title: 'Locked Book',
+        author: 'Lock Author',
+        isbn: '9780000000099',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+
+      // Simulate the backfill importer holding an IMMEDIATE write transaction
+      // from a SEPARATE connection so the handler genuinely hits SQLITE_BUSY.
+      // The lock is released shortly after so the retry loop wins.
+      const { default: Database } = await import('better-sqlite3');
+      const dbPath = getSqlite().name;
+      const lockConn = new Database(dbPath);
+      lockConn.pragma('busy_timeout = 100');
+      lockConn.exec('BEGIN IMMEDIATE');
+      const unlock = new Promise<void>((resolve) => {
+        setTimeout(() => {
+          try { lockConn.exec('COMMIT'); } catch { /* nothing to commit */ }
+          lockConn.close();
+          resolve();
+        }, 600);
+      });
+      try {
+        const c = mockContext({ jsonBody: { bookUri: 'at://did:plc:a/book/locked', status: 'reading' } });
+        const res = await createStatus(c);
+        expect(res.status).toBe(200);
+      } finally {
+        await unlock;
+      }
+
+      const statuses = db.select().from(_s.readingStatuses).all();
+      expect(statuses).toHaveLength(1);
+      expect(statuses[0].status).toBe('reading');
     });
   });
 
