@@ -105,7 +105,7 @@ export interface ContributorRecord {
 
 // Contributor type record
 export interface ContributorTypeRecord {
-  $type: 'community.lexicon.book.contributorType';
+  $type: 'community.lexicon.book.contributor.type';
   name: string; // max 256
   description?: string; // max 16384
   createdAt: string;

@@ -1,15 +1,13 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.searchContributors",
+  "id": "community.lexicon.book.contributor.listTypes",
   "defs": {
     "main": {
       "type": "query",
       "parameters": {
         "type": "params",
-        "required": ["q"],
         "properties": {
-          "q": { "type": "string" },
-          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 },
           "cursor": { "type": "string" }
         }
       },
@@ -17,9 +15,9 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["contributors"],
+          "required": ["types"],
           "properties": {
-            "contributors": {
+            "types": {
               "type": "array",
               "items": {
                 "type": "object",
@@ -27,7 +25,7 @@
                 "properties": {
                   "uri": { "type": "string", "format": "at-uri" },
                   "did": { "type": "string", "format": "did" },
-                  "record": { "type": "ref", "ref": "community.lexicon.book.contributor" }
+                  "record": { "type": "ref", "ref": "community.lexicon.book.contributorType" }
                 }
               }
             },

@@ -1,13 +1,15 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.listContributors",
+  "id": "community.lexicon.book.contributor.search",
   "defs": {
     "main": {
       "type": "query",
       "parameters": {
         "type": "params",
+        "required": ["q"],
         "properties": {
-          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 },
+          "q": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
           "cursor": { "type": "string" }
         }
       },

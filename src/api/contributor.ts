@@ -89,7 +89,7 @@ function serializeContributor(row: typeof contributors.$inferSelect): Contributo
 
 function serializeContributorType(row: typeof contributorTypes.$inferSelect): ContributorTypeRecord {
   const record: ContributorTypeRecord = {
-    $type: 'community.lexicon.book.contributorType',
+    $type: 'community.lexicon.book.contributor.type',
     name: row.name,
     createdAt: row.createdAt,
   };
@@ -101,7 +101,7 @@ export async function createContributor(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const did = await requireAuth(
     c.req.raw.headers,
-    'community.lexicon.book.createContributor',
+    'community.lexicon.book.contributor.create',
   );
   const input = await c.req.json<CreateContributorInput>();
 
@@ -180,7 +180,7 @@ export async function updateContributor(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const did = await requireAuth(
     c.req.raw.headers,
-    'community.lexicon.book.updateContributor',
+    'community.lexicon.book.contributor.update',
   );
   const input = await c.req.json<UpdateContributorInput>();
 
@@ -356,7 +356,7 @@ export async function createContributorType(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const did = await requireAuth(
     c.req.raw.headers,
-    'community.lexicon.book.createContributorType',
+    'community.lexicon.book.contributor.createType',
   );
 
   if (!isLibrarian(did)) {

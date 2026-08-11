@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.contributorType",
+  "id": "community.lexicon.book.contributor.type",
   "defs": {
     "main": {
       "type": "record",

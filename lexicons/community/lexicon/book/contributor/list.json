@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.listContributorTypes",
+  "id": "community.lexicon.book.contributor.list",
   "defs": {
     "main": {
       "type": "query",
@@ -15,9 +15,9 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["types"],
+          "required": ["contributors"],
           "properties": {
-            "types": {
+            "contributors": {
               "type": "array",
               "items": {
                 "type": "object",
@@ -25,7 +25,7 @@
                 "properties": {
                   "uri": { "type": "string", "format": "at-uri" },
                   "did": { "type": "string", "format": "did" },
-                  "record": { "type": "ref", "ref": "community.lexicon.book.contributorType" }
+                  "record": { "type": "ref", "ref": "community.lexicon.book.contributor" }
                 }
               }
             },

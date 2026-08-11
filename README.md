@@ -26,7 +26,7 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | `community.lexicon.book.review` | record | User review with optional rating |
 | `community.lexicon.book.status` | record | Reading status (reading, read, to-read, abandoned) |
 | `community.lexicon.book.contributor` | record | Person or entity that worked on a book (author, illustrator, etc.) |
-| `community.lexicon.book.contributorType` | record | Canonical contributor role published by Bibliograph (author, illustrator, editor, translator, narrator) |
+| `community.lexicon.book.contributor.type` | record | Canonical contributor role published by Bibliograph (author, illustrator, editor, translator, narrator) |
 
 ### XRPC Endpoints
 
@@ -42,9 +42,9 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | `searchBooks` | Full-text search on title, author, ISBN |
 | `getClaims` | Claims attached to a book |
 | `getFeed` | Home feed: recent status updates, newest books, trending, following, cross-user |
-| `listContributors` | Paginated list of all known contributors |
-| `searchContributors` | Full-text search over contributor name and alt names |
-| `listContributorTypes` | List canonical contributor roles seeded by Bibliograph |
+| `community.lexicon.book.contributor.list` | Paginated list of all known contributors |
+| `community.lexicon.book.contributor.search` | Full-text search over contributor name and alt names |
+| `community.lexicon.book.contributor.listTypes` | List canonical contributor roles seeded by Bibliograph |
 
 **Procedures** (POST `/xrpc/nsid`):
 
@@ -54,9 +54,9 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | `createReview` | Post a review |
 | `createStatus` | Record reading status |
 | `createClaim` | Claim a book as author/curator |
-| `createContributor` | Create a contributor record (requires at least one identifier) |
-| `updateContributor` | Patch or add/remove identifiers, images, altNames, bio (creator or librarian) |
-| `createContributorType` | Create a canonical contributor role (librarian only) |
+| `community.lexicon.book.contributor.create` | Create a contributor record (requires at least one identifier) |
+| `community.lexicon.book.contributor.update` | Patch or add/remove identifiers, images, altNames, bio (creator or librarian) |
+| `community.lexicon.book.contributor.createType` | Create a canonical contributor role (librarian only) |
 
 ### Other endpoints
 
@@ -120,10 +120,10 @@ to the PDS.
         "record": { "$type": "community.lexicon.book.contributor", "name": "Frank Herbert", ... }
       },
       "role": {
-        "uri": "at://did:web:biblio.example/community.lexicon.book.contributorType/author",
+        "uri": "at://did:web:biblio.example/community.lexicon.book.contributor.type/author",
         "cid": "bafy…",
         "did": "did:web:biblio.example",
-        "record": { "$type": "community.lexicon.book.contributorType", "name": "author", ... }
+        "record": { "$type": "community.lexicon.book.contributor.type", "name": "author", ... }
       },
       "order": 0
     }

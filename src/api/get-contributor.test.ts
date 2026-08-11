@@ -74,7 +74,7 @@ function seedContributor(overrides: Partial<typeof _s.contributors.$inferInsert>
 
 function seedContributorType(overrides: Partial<typeof _s.contributorTypes.$inferInsert> = {}) {
   const now = new Date().toISOString();
-  const uri = overrides.uri || `at://did:web:localhost/community.lexicon.book.contributorType/${Math.random().toString(36).slice(2, 10)}`;
+  const uri = overrides.uri || `at://did:web:localhost/community.lexicon.book.contributor.type/${Math.random().toString(36).slice(2, 10)}`;
   db.insert(_s.contributorTypes).values({
     uri,
     did: overrides.did ?? 'did:web:localhost',

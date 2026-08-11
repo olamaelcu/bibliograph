@@ -12,7 +12,8 @@ export const COLLECTIONS = {
   shelf: 'community.lexicon.book.shelf',
   shelfItem: 'community.lexicon.book.shelfItem',
   contributor: 'community.lexicon.book.contributor',
-  contributorType: 'community.lexicon.book.contributorType',
+  contributorType: 'community.lexicon.book.contributor.type',
+  contributorClaim: 'community.lexicon.book.contributor.claim',
 } as const;
 
 export function makeRecordUri(did: string, collection: string, rkey: string): string {

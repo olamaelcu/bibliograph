@@ -93,7 +93,7 @@ function seedContributor(overrides: Partial<typeof _s.contributors.$inferInsert>
 
 function seedContributorType(overrides: Partial<typeof _s.contributorTypes.$inferInsert> = {}) {
   const now = new Date().toISOString();
-  const uri = overrides.uri || 'at://did:web:localhost/community.lexicon.book.contributorType/test001';
+  const uri = overrides.uri || 'at://did:web:localhost/community.lexicon.book.contributor.type/test001';
   db.insert(_s.contributorTypes).values({
     uri,
     did: overrides.did ?? 'did:web:localhost',
@@ -438,7 +438,7 @@ describe('api/contributor', () => {
       const res = await createContributorType(c);
       expect(res.status).toBe(200);
       const body = await readJson(res);
-      expect(body.uri).toMatch(/^at:\/\/did:plc:test\/community\.lexicon\.book\.contributorType\//);
+      expect(body.uri).toMatch(/^at:\/\/did:plc:test\/community\.lexicon\.book\.contributor\.type\//);
     });
 
     it('returns 409 on duplicate name', async () => {
@@ -510,7 +510,7 @@ describe('api/contributor', () => {
       } as any;
       const rec = serializeContributorType(row);
       expect(rec).toEqual({
-        $type: 'community.lexicon.book.contributorType',
+        $type: 'community.lexicon.book.contributor.type',
         name: 'editor',
         description: 'Edited the work',
         createdAt: '2024-01-01T00:00:00Z',

@@ -45,9 +45,9 @@ export function createApp(): Hono {
       'getShelf',
       'getShelfItems',
       'getFeed',
-      'listContributors',
-      'searchContributors',
-      'listContributorTypes',
+      'contributor.list',
+      'contributor.search',
+      'contributor.listTypes',
     ];
     const procedures = [
       'createBook',
@@ -60,9 +60,9 @@ export function createApp(): Hono {
       'createShelf',
       'addToShelf',
       'removeFromShelf',
-      'createContributor',
-      'updateContributor',
-      'createContributorType',
+      'contributor.create',
+      'contributor.update',
+      'contributor.createType',
     ];
 
     return c.html(HomePage({ host, queries, procedures }));
@@ -110,9 +110,9 @@ export function createApp(): Hono {
   app.get('/xrpc/community.lexicon.book.getShelf', getShelf);
   app.get('/xrpc/community.lexicon.book.getShelfItems', getShelfItems);
   app.get('/xrpc/community.lexicon.book.getFeed', getFeed);
-  app.get('/xrpc/community.lexicon.book.listContributors', listContributors);
-  app.get('/xrpc/community.lexicon.book.searchContributors', searchContributors);
-  app.get('/xrpc/community.lexicon.book.listContributorTypes', listContributorTypes);
+  app.get('/xrpc/community.lexicon.book.contributor.list', listContributors);
+  app.get('/xrpc/community.lexicon.book.contributor.search', searchContributors);
+  app.get('/xrpc/community.lexicon.book.contributor.listTypes', listContributorTypes);
 
   // Procedure endpoints (POST /xrpc/...)
   app.post('/xrpc/community.lexicon.book.createBook', createBook);
@@ -125,9 +125,9 @@ export function createApp(): Hono {
   app.post('/xrpc/community.lexicon.book.createShelf', createShelf);
   app.post('/xrpc/community.lexicon.book.addToShelf', addToShelf);
   app.post('/xrpc/community.lexicon.book.removeFromShelf', removeFromShelf);
-  app.post('/xrpc/community.lexicon.book.createContributor', createContributor);
-  app.post('/xrpc/community.lexicon.book.updateContributor', updateContributor);
-  app.post('/xrpc/community.lexicon.book.createContributorType', createContributorType);
+  app.post('/xrpc/community.lexicon.book.contributor.create', createContributor);
+  app.post('/xrpc/community.lexicon.book.contributor.update', updateContributor);
+  app.post('/xrpc/community.lexicon.book.contributor.createType', createContributorType);
 
   // Live counts SSE endpoint
   app.get('/api/live-counts', async (c) => {
