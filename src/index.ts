@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server';
 import { WebSocketServer } from 'ws';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createApp } from './app.js';
-import { db } from './db/connection.js';
+import { db, sqliteHandle } from './db/connection.js';
 import * as tableSchema from './db/schema.js';
 import { setupFts, setupIdentifiersView, setupCoverViews, bootstrapLibrarian, bootstrapFeatures, bootstrapContributorTypes } from './db/init.js';
 import { logger } from './logger.js';
@@ -39,6 +39,19 @@ async function main(): Promise<void> {
   });
   logger.info({ port: PORT, serviceDid: process.env.ATP_SERVICE_DID || 'did:web:localhost' }, 'HTTP server running');
 
+  const walCheckpointInterval = setInterval(() => {
+    try {
+      const result = sqliteHandle.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number; log: number; checkpointed: number }>;
+      const frame = result[0];
+      if (frame && frame.checkpointed > 0) {
+        logger.info({ busy: frame.busy, log: frame.log, checkpointed: frame.checkpointed }, 'wal_checkpoint(TRUNCATE)');
+      }
+    } catch (err) {
+      logger.warn({ err }, 'wal_checkpoint failed');
+    }
+  }, 30_000);
+  walCheckpointInterval.unref();
+
   process.on('unhandledRejection', (reason) => {
     logger.fatal({ reason }, 'unhandledRejection');
   });
@@ -69,6 +82,7 @@ async function main(): Promise<void> {
 
   const shutdown = async () => {
     logger.info('shutting down...');
+    clearInterval(walCheckpointInterval);
     await stopTapChannel();
     process.exit(0);
   };

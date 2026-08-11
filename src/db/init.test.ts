@@ -7,15 +7,21 @@ vi.mock('./connection.js', async () => {
   const { migrate } = await import('drizzle-orm/better-sqlite3/migrator');
 
   const sqlite = new Database(':memory:');
+  sqlite.pragma('journal_mode = WAL');
+  sqlite.pragma('journal_size_limit = 134217728');
+  sqlite.pragma('synchronous = NORMAL');
   sqlite.pragma('foreign_keys = ON');
+  sqlite.pragma('busy_timeout = 5000');
+  sqlite.pragma('cache_size = -20000');
+
   const db = drizzle(sqlite, { schema });
   migrate(db, { migrationsFolder: './drizzle' });
 
   (db as any).$sqlite = sqlite;
-  return { db, schema };
+  return { db, schema, sqliteHandle: sqlite };
 });
 
-import { db, schema } from './connection.js';
+import { db, schema, sqliteHandle } from './connection.js';
 import { clearSqliteTables } from '../test-utils/db.js';
 const _s = schema;
 const _d = db as any;
@@ -27,6 +33,33 @@ function getSqlite() {
 }
 
 describe('db/init', () => {
+  describe('connection pragmas', () => {
+    it('uses WAL journal mode (memory DBs fall back to memory, which is acceptable for tests)', () => {
+      const mode = String(sqliteHandle.pragma('journal_mode', { simple: true })).toLowerCase();
+      expect(['wal', 'memory']).toContain(mode);
+    });
+
+    it('caps the WAL at 128 MB', () => {
+      const limit = sqliteHandle.pragma('journal_size_limit', { simple: true });
+      expect(limit).toBe(134217728);
+    });
+
+    it('sets synchronous to NORMAL', () => {
+      const value = sqliteHandle.pragma('synchronous', { simple: true });
+      expect(value).toBe(1);
+    });
+
+    it('enables foreign keys', () => {
+      const value = sqliteHandle.pragma('foreign_keys', { simple: true });
+      expect(value).toBe(1);
+    });
+
+    it('exposes the sqlite handle for wal_checkpoint', () => {
+      const result = sqliteHandle.pragma('wal_checkpoint');
+      expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
   beforeEach(() => {
     const sqlite = getSqlite();
     clearSqliteTables(sqlite);

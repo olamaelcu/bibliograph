@@ -445,4 +445,23 @@ describe('indexer', () => {
       expect(rows).toHaveLength(0);
     });
   });
+
+  describe('handleRecordEventQueued throttle', () => {
+    beforeEach(() => {
+      vi.stubEnv('TAP_PARALLEL', '2');
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+
+    it('exposes TAP_PARALLEL-aware inflight metrics', async () => {
+      const { __tapInflightMetrics } = await import('./indexer.js');
+      const m = __tapInflightMetrics();
+      expect(m.parallel).toBe(2);
+      expect(m.inflight).toBe(0);
+      expect(m.queued).toBe(0);
+    });
+  });
 });
+

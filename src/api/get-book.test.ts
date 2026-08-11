@@ -824,6 +824,47 @@ describe('api/get-book', () => {
         expect(searchFallback).not.toHaveBeenCalled();
         expect(body.books).toEqual([]);
       });
+
+      describe('timeout bound', () => {
+        beforeEach(() => {
+          vi.stubEnv('SEARCH_FALLBACK_TIMEOUT_MS', '200');
+        });
+        afterEach(() => {
+          vi.unstubAllEnvs();
+        });
+
+        it('returns empty fallback when provider hangs on the q branch', async () => {
+          vi.mocked(searchFallback).mockImplementationOnce(
+            () => new Promise(() => {}),
+          );
+
+          const before = Date.now();
+          const c = mockContext({ query: { q: 'Stuck' } });
+          const res = await searchBooksHandler(c);
+          const elapsed = Date.now() - before;
+          const body = await readJson(res);
+
+          expect(res.status).toBe(200);
+          expect(elapsed).toBeLessThan(2000);
+          expect(body.books).toEqual([]);
+        });
+
+        it('returns empty fallback when provider hangs on the isbn branch', async () => {
+          vi.mocked(searchFallback).mockImplementationOnce(
+            () => new Promise(() => {}),
+          );
+
+          const before = Date.now();
+          const c = mockContext({ query: { q: '9780441172719', identifier: 'isbn' } });
+          const res = await searchBooksHandler(c);
+          const elapsed = Date.now() - before;
+          const body = await readJson(res);
+
+          expect(res.status).toBe(200);
+          expect(elapsed).toBeLessThan(2000);
+          expect(body.books).toEqual([]);
+        });
+      });
     });
   });
 

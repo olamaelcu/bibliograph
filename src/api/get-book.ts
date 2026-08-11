@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, like, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
 import { parsePagination, nextCursor } from '../pagination.js';
-import { searchFallback, type FallbackSource } from './search-fallback.js';
+import { searchFallback, type FallbackResult, type FallbackSource } from './search-fallback.js';
 import { computeDeduplicationHash } from '../dedup.js';
 import { parseIdentifierInput, resolveBooksByIdentifier, type ResolvedBook } from './identifier-lookup.js';
 import { serializeContributor, serializeContributorType } from './contributor.js';
@@ -267,6 +267,33 @@ async function enrichFallbackBooks(fallbackBooks: BookData[], source: FallbackSo
   return entries;
 }
 
+function getSearchFallbackTimeoutMs(): number {
+  const raw = process.env.SEARCH_FALLBACK_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return 4000;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 4000;
+}
+
+async function searchFallbackWithTimeout(
+  sanitized: string,
+  log: import('pino').Logger,
+): Promise<FallbackResult> {
+  const timeoutMs = getSearchFallbackTimeoutMs();
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<FallbackResult>(resolve => {
+    timer = setTimeout(() => {
+      log.warn({ q: sanitized, timeoutMs }, 'searchFallback timeout — returning empty');
+      resolve({ books: [], source: 'none' });
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([searchFallback(db, sanitized, log), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function searchBooksHandler(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const { q, limit = '20', cursor, identifier, includeUnverified } = c.req.query();
@@ -325,7 +352,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
     }));
 
     if (rows.length === 0 && identifierTypes.length === 1 && identifierTypes[0] === 'isbn' && sanitized) {
-      const fb = await searchFallback(db, sanitized, log);
+      const fb = await searchFallbackWithTimeout(sanitized, log);
       const enriched = await enrichFallbackBooks(fb.books, fb.source);
       for (const entry of enriched) {
         bookEntries.push({
@@ -369,7 +396,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
   }));
 
   if (results.length === 0 && sanitized) {
-    const fb = await searchFallback(db, sanitized, log);
+    const fb = await searchFallbackWithTimeout(sanitized, log);
     const enriched = await enrichFallbackBooks(fb.books, fb.source);
     const enrichedUris = enriched.map((e) => e.uri);
     const enrichedContributorMap = await attachContributors(enrichedUris);

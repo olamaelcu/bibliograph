@@ -5,6 +5,34 @@ import type { Cover } from './cover-types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems, contributors, contributorTypes, bookContributors } = schema;
 
+function getTapParallel(): number {
+  const raw = process.env.TAP_PARALLEL;
+  if (raw === undefined || raw === '') return 4;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 4;
+}
+
+let inflightTap = 0;
+const tapWaiters: Array<() => void> = [];
+
+function withTapThrottle<T>(fn: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      inflightTap += 1;
+      fn().then(resolve, reject).finally(() => {
+        inflightTap -= 1;
+        const next = tapWaiters.shift();
+        if (next) next();
+      });
+    };
+    if (inflightTap < getTapParallel()) {
+      run();
+    } else {
+      tapWaiters.push(run);
+    }
+  });
+}
+
 export interface TapRecordEvent {
   type: 'record';
   action: 'create' | 'update' | 'delete';
@@ -26,6 +54,12 @@ export interface TapIdentityEvent {
 }
 
 export type TapEvent = TapRecordEvent | TapIdentityEvent;
+
+export async function handleRecordEventQueued(evt: TapRecordEvent): Promise<void> {
+  await withTapThrottle(() => handleRecordEvent(evt));
+}
+
+export const __tapInflightMetrics = () => ({ inflight: inflightTap, queued: tapWaiters.length, parallel: getTapParallel() });
 
 export async function handleRecordEvent(evt: TapRecordEvent): Promise<void> {
   const uri = `at://${evt.did}/${evt.collection}/${evt.rkey}`;

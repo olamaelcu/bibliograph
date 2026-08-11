@@ -1,6 +1,6 @@
 import { Tap, SimpleIndexer } from '@atproto/tap';
 import type { RecordEvent, IdentityEvent, TapChannel } from '@atproto/tap';
-import { handleRecordEvent } from './indexer.js';
+import { handleRecordEventQueued } from './indexer.js';
 import { logger } from './logger.js';
 
 const TAP_URL = process.env.TAP_URL;
@@ -22,8 +22,8 @@ function buildIndexer(): SimpleIndexer {
     logger.info({ did: evt.did, handle: evt.handle, isActive: evt.isActive }, 'tap identity event');
   });
 
-  indexer.record(async (evt: RecordEvent) => {
-    await handleRecordEvent({
+  indexer.record((evt: RecordEvent) => {
+    return handleRecordEventQueued({
       type: 'record',
       action: evt.action,
       did: evt.did,
