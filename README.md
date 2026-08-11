@@ -34,10 +34,10 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 
 | Endpoint | Description |
 |----------|-------------|
-| `getBook` | Fetch a single book by AT-URI (returns joined contributors) |
-| `getBooks` | Batch fetch books by URIs (returns joined contributors) |
-| `getReviews` | Paginated reviews for a book |
-| `getReview` | Fetch a single review by AT-URI or user+book |
+| `get` | Fetch a single book by AT-URI (returns joined contributors) |
+| `getAll` | Batch fetch books by URIs (returns joined contributors) |
+| `review.getAll` | Paginated reviews for a book |
+| `review.get` | Fetch a single review by AT-URI or user+book |
 | `getUserStatus` | Reading statuses for a user |
 | `searchBooks` | Full-text search on title, author, ISBN |
 | `getClaims` | Claims attached to a book |
@@ -51,7 +51,7 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 | Endpoint | Description |
 |----------|-------------|
 | `createBook` | Create a book definition (requires ISBN for dedup) |
-| `createReview` | Post a review |
+| `review.create` | Post a review |
 | `createStatus` | Record reading status |
 | `createClaim` | Claim a book as author/curator |
 | `community.lexicon.book.contributor.create` | Create a contributor record (requires at least one identifier) |
@@ -269,7 +269,91 @@ npm run dump:openlibrary -- --force
 The importer is idempotent across runs — re-running against the same dump
 short-circuits in `prepareRun`, and dedup catches every previously-imported ISBN.
 
+## Cover image pipeline
+
+Books and shelves carry a `cover` JSON object with multi-size, multi-format
+image URLs. The local AppView hosts the transcoded bytes and serves them on
+demand from `/covers/{collection}/{rkey}-{size}.{ext}`.
+
+```jsonc
+{
+  "cover": {
+    "small":      "/covers/book/abc234567defg-S.jpg",
+    "medium":     "/covers/book/abc234567defg-M.jpg",
+    "large":      "/covers/book/abc234567defg-L.jpg",
+    "smallAvif":  "/covers/book/abc234567defg-S.avif",
+    "mediumAvif": "/covers/book/abc234567defg-M.avif",
+    "largeAvif":  "/covers/book/abc234567defg-L.avif",
+    "color":      "#3a4f6c",
+    "width":      600,
+    "height":     900,
+    "source":     "openlibrary",
+    "updatedAt":  "2026-08-01T18:13:52.216Z"
+  }
+}
+```
+
+`coverUrl` on book/shelf records remains a backward-compatible alias for
+`cover.medium`. Returning `cover.medium` before the worker has run yields the
+provider's original URL; after the worker, it points at the local variant.
+
+The worker transcodes missing variants in the background:
+
+```bash
+npm run cover-worker              # one-shot run
+npm run cover-worker -- --batch-size 200
+```
+
+It selects rows from the `books_missing_cover_variants` and
+`shelves_missing_cover_variants` SQLite views (defined in `drizzle/0015` and
+`drizzle/0016`), fetches the source once, transcodes to all six variants
+(JPG + AVIF at small/medium/large), writes them to the configured storage
+backend, and updates the row's `cover` JSON. Cron schedule is `0 */4 * * *`
+in `app.json`.
+
+Configure storage and optional schedules:
+
+```bash
+# default: local filesystem under ./data/covers
+COVER_STORAGE_KIND=fs \
+COVER_STORAGE_ROOT=/var/lib/bibliograph/covers \
+  npm run cover-worker
+```
+
+The `fs` backend is the only backend currently configured. Add S3/R2 by
+extending `src/cover-storage.ts` with the relevant OpenDAL scheme.
+
 ## Project structure
+
+```
+src/
+  app.ts           Hono app wiring and route mounting
+  index.ts         Entrypoint — runs migrations, starts server
+  types.ts         TypeScript interfaces for all lexicons
+  auth.ts          Authorization guard (claim ownership, librarian)
+  indexer.ts       Tap event handler — indexes record creates/updates/deletes
+  api/
+    cover.ts       Cover image serving (GET /covers/*)
+    get-book.ts    Query handlers (GET /xrpc/*)
+    create-book.ts Procedure handlers (POST /xrpc/*)
+  cover-storage.ts OpenDAL wrapper for cover image bytes
+  cover-transcode.ts Sharp pipeline — produces all 6 variants
+  cover-worker.ts  Background job — reads views, transcodes, uploads
+  cover-source.ts  Source fetcher (local OpenDAL or remote URL)
+  cover-types.ts   CoverCover types, helpers, type guards
+  db/
+    schema.ts      Drizzle ORM table definitions
+    connection.ts  better-sqlite3 database singleton
+    views.ts       View name constants for the cover worker
+    init.ts        Table creation, FTS5 setup, view bootstrap
+  providers/
+    interface.ts   BookProvider interface
+    openlibrary.ts Open Library API provider
+    googlebooks.ts Google Books API provider
+lexicons/
+  community/lexicon/book/
+    *.json         14 ATProto lexicon schema definitions
+```
 
 ```
 src/
@@ -284,9 +368,10 @@ src/
   db/
     schema.ts      Drizzle ORM table definitions
     connection.ts  better-sqlite3 database singleton
-    init.ts        Table creation, FTS5 setup, search helper
+    init.ts        Table creation, FTS5 setup, view bootstrap
   providers/
     interface.ts   BookProvider interface
+    cover-variants.ts OpenLibrary cover URL helpers
     openlibrary.ts Open Library API provider
     googlebooks.ts Google Books API provider
 lexicons/

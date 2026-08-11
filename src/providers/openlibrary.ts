@@ -1,5 +1,7 @@
 import type { BookData, BookProvider } from "./interface.js";
 import { BaseBookProvider } from "./base-provider.js";
+import { buildCover, firstCoverVariant, olCoverVariantUrls } from "./cover-variants.js";
+import type { Cover } from "../cover-types.js";
 
 const BASE_URL = "https://openlibrary.org";
 const USER_AGENT = "bibliograph-app/0.1 (contact@example.org)";
@@ -104,6 +106,11 @@ export class OpenLibraryProvider extends BaseBookProvider implements BookProvide
       }
     }
 
+    const coverVariants = this.extractCoverVariants(doc);
+    const cover: Cover | undefined = coverVariants
+      ? buildCover("openlibrary", coverVariants)
+      : undefined;
+
     return {
       title: (typeof doc.title === "string" ? doc.title : "") || "Unknown Title",
       author: authorName,
@@ -125,9 +132,24 @@ export class OpenLibraryProvider extends BaseBookProvider implements BookProvide
           : undefined,
       categories: this.extractSubjects(doc),
       coverUrl: this.extractCoverUrl(doc),
+      cover,
       identifiers,
       sourceProvider: "openLibrary",
     };
+  }
+
+  private extractCoverVariants(doc: Record<string, unknown>): { small: string; medium: string; large: string } | undefined {
+    const coverI = doc.cover_i as number | undefined;
+    if (coverI) {
+      const urls = olCoverVariantUrls(coverI);
+      if (urls.small && urls.medium && urls.large) return urls;
+    }
+    const covers = doc.covers as number[] | undefined;
+    if (covers?.[0]) {
+      const urls = olCoverVariantUrls(covers[0]);
+      if (urls.small && urls.medium && urls.large) return urls;
+    }
+    return undefined;
   }
 
   private extractAuthor(doc: Record<string, unknown>): string {
@@ -164,10 +186,10 @@ export class OpenLibraryProvider extends BaseBookProvider implements BookProvide
 
   private extractCoverUrl(doc: Record<string, unknown>): string | undefined {
     const coverI = doc.cover_i as number | undefined;
-    if (coverI) return `https://covers.openlibrary.org/b/id/${coverI}-M.jpg`;
+    if (coverI) return firstCoverVariant(olCoverVariantUrls(coverI));
 
     const covers = doc.covers as number[] | undefined;
-    if (covers?.[0]) return `https://covers.openlibrary.org/b/id/${covers[0]}-M.jpg`;
+    if (covers?.[0]) return firstCoverVariant(olCoverVariantUrls(covers[0]));
 
     return undefined;
   }

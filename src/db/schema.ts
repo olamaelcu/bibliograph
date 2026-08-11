@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from 'drizzle-orm/sqlite-core';
+import type { Cover } from '../cover-types.js';
 
 // ─── Type aliases for JSON columns ───────────────────────────────────────────
 
@@ -34,6 +35,7 @@ export const books = sqliteTable(
       .$type<Array<{ contributor?: { uri?: string; cid?: string }; role?: { uri?: string; cid?: string }; order?: number }>>()
       .default(sql`'[]'`),
     coverUrl: text(),
+    cover: text({ mode: 'json' }).$type<Cover>(),
     deduplicationHash: text('deduplication_hash'),
     status: text().notNull().default('pending'),
     createdAt: text()
@@ -197,6 +199,7 @@ export const shelves = sqliteTable(
     description: text(),
     metadata: text({ mode: 'json' }).$type<Record<string, unknown>>().default(sql`'{}'`),
     coverUrl: text(),
+    cover: text({ mode: 'json' }).$type<Cover>(),
     createdAt: text()
       .notNull()
       .$defaultFn(() => new Date().toISOString()),

@@ -17,6 +17,7 @@ import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
 import { getServiceDid, buildDidDocument } from './did.js';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
+import { serveCover } from './api/cover.js';
 
 export function createApp(): Hono {
   const app = new Hono();
@@ -32,10 +33,10 @@ export function createApp(): Hono {
   app.get('/', (c) => {
     const host = new URL(c.req.url).host;
     const queries = [
-      'getBook',
-      'getBooks',
-      'getReviews',
-      'getReview',
+      'get',
+      'getAll',
+      'review.getAll',
+      'review.get',
       'getUserStatus',
       'searchBooks',
       'listBooks',
@@ -51,7 +52,7 @@ export function createApp(): Hono {
     ];
     const procedures = [
       'createBook',
-      'createReview',
+      'review.create',
       'createStatus',
       'createClaim',
       'verifyClaim',
@@ -89,11 +90,15 @@ export function createApp(): Hono {
   app.get('/lexicon/:nsid', serveLexicon);
   app.get('/lexicon-hashes.json', serveLexiconHashes);
 
+  // Cover image proxy — serves transcoded JPG/AVIF variants from OpenDAL.
+  // Path: /covers/{collection}/{rkey}-{size}.{ext} — parsed inside serveCover.
+  app.get('/covers/*', serveCover);
+
   // Query endpoints (GET /xrpc/...)
-  app.get('/xrpc/community.lexicon.book.getBook', getBook);
-  app.get('/xrpc/community.lexicon.book.getBooks', getBooks);
-  app.get('/xrpc/community.lexicon.book.getReviews', getReviews);
-  app.get('/xrpc/community.lexicon.book.getReview', getReview);
+  app.get('/xrpc/community.lexicon.book.get', getBook);
+  app.get('/xrpc/community.lexicon.book.getAll', getBooks);
+  app.get('/xrpc/community.lexicon.book.review.getAll', getReviews);
+  app.get('/xrpc/community.lexicon.book.review.get', getReview);
   app.get('/xrpc/community.lexicon.book.getUserStatus', getUserStatus);
   app.get('/xrpc/community.lexicon.book.searchBooks', searchBooksHandler);
   app.get('/xrpc/community.lexicon.book.listBooks', listBooksHandler);
@@ -116,7 +121,7 @@ export function createApp(): Hono {
 
   // Procedure endpoints (POST /xrpc/...)
   app.post('/xrpc/community.lexicon.book.createBook', createBook);
-  app.post('/xrpc/community.lexicon.book.createReview', createReview);
+  app.post('/xrpc/community.lexicon.book.review.create', createReview);
   app.post('/xrpc/community.lexicon.book.createStatus', createStatus);
   app.post('/xrpc/community.lexicon.book.createClaim', createClaim);
   app.post('/xrpc/community.lexicon.book.verifyClaim', verifyClaim);

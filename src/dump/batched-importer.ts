@@ -7,6 +7,7 @@ import { computeDeduplicationHash } from '../dedup.js';
 import { generateRkey } from '../rkey.js';
 import { logger } from '../logger.js';
 import { SERVICE_DID } from '../backfill-import.js';
+import { deriveCover } from '../cover-types.js';
 
 export interface BatchedImporterOptions {
   batchSize?: number;
@@ -136,6 +137,7 @@ export class BatchedImporter {
           categories: data.categories || [],
           identifiers: Object.entries(data.identifiers).map(([type, value]) => ({ type, value })),
           coverUrl: data.coverUrl,
+          cover: data.cover ?? deriveCover({ coverUrl: data.coverUrl, source: 'openlibrary' }),
           deduplicationHash: dhash,
           status: 'active',
           createdAt: now,

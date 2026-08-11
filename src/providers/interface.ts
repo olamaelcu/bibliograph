@@ -1,3 +1,5 @@
+import type { Cover } from '../cover-types.js';
+
 export interface BookData {
   title: string;
   author: string;
@@ -10,6 +12,7 @@ export interface BookData {
   publisher?: string;
   categories?: string[];
   coverUrl?: string;
+  cover?: Cover;
   identifiers: Record<string, string>;
   sourceProvider: string;
 }

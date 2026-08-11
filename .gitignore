@@ -3,6 +3,7 @@ node_modules
 dist/
 data/dumps/*
 !data/dumps/.gitkeep
+data/covers/
 *.db
 *.db-wal
 *.db-shm

@@ -1,6 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
+import type { Cover } from './cover-types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems, contributors, contributorTypes, bookContributors } = schema;
 
@@ -121,6 +122,7 @@ async function indexBook(uri: string, did: string, record: Record<string, unknow
     identifiers: idents,
     contributors: contribs,
     coverUrl: record.coverUrl as string | undefined,
+    cover: (record.cover as Cover | undefined) ?? undefined,
     deduplicationHash: record.deduplicationHash as string | undefined,
     status: (record.status as string) || 'pending',
     createdAt: (record.createdAt as string) || now,
@@ -296,6 +298,7 @@ async function indexShelf(uri: string, did: string, record: Record<string, unkno
     description: record.description as string | undefined,
     metadata: record.metadata as Record<string, unknown> | undefined,
     coverUrl: record.coverUrl as string | undefined,
+    cover: (record.cover as Cover | undefined) ?? undefined,
     createdAt: (record.createdAt as string) || now,
     updatedAt: now,
   };

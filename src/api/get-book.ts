@@ -246,6 +246,7 @@ function providerRecord(book: BookData): Record<string, unknown> {
     categories: book.categories || [],
     identifiers: book.identifiers,
     coverUrl: book.coverUrl,
+    cover: book.cover,
   };
 }
 
@@ -468,7 +469,8 @@ function serializeBookRecord(book: typeof books.$inferSelect): Record<string, un
     language: book.language,
     categories: typeof book.categories === 'string' ? JSON.parse(book.categories) : book.categories,
     identifiers: typeof book.identifiers === 'string' ? JSON.parse(book.identifiers) : book.identifiers,
-    coverUrl: book.coverUrl,
+    coverUrl: book.cover?.medium ?? book.coverUrl,
+    cover: book.cover,
     deduplicationHash: book.deduplicationHash,
     status: book.status,
     createdAt: book.createdAt,
@@ -698,7 +700,8 @@ function serializeShelfRecord(shelf: typeof shelves.$inferSelect): Record<string
     name: shelf.name,
     description: shelf.description,
     metadata: typeof shelf.metadata === 'string' ? JSON.parse(shelf.metadata) : shelf.metadata,
-    coverUrl: shelf.coverUrl,
+    coverUrl: shelf.cover?.medium ?? shelf.coverUrl,
+    cover: shelf.cover,
     createdAt: shelf.createdAt,
   };
 }

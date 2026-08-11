@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import * as schema from './db/schema.js';
 import { generateRkey } from './rkey.js';
 import { computeDeduplicationHash } from './dedup.js';
+import type { Cover } from './cover-types.js';
 
 export const COLLECTIONS = {
   book: 'community.lexicon.book.book',
@@ -36,6 +37,7 @@ export interface BookInput {
   categories?: string[];
   identifiers: Array<{ type: string; value: string }>;
   coverUrl?: string;
+  cover?: Cover;
 }
 
 export async function insertBook(
@@ -62,6 +64,7 @@ export async function insertBook(
     categories: input.categories ?? [],
     identifiers: input.identifiers,
     coverUrl: input.coverUrl,
+    cover: input.cover,
     deduplicationHash: dedupHash,
     status: opts.status ?? 'pending',
     createdAt: now,

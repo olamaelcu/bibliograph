@@ -7,6 +7,7 @@ import { HttpError } from '../errors.js';
 import { OpenLibraryProvider } from '../providers/openlibrary.js';
 import { GoodreadsProvider } from '../providers/goodreads.js';
 import { insertBook, insertClaim, makeRecordUri, makeId, findBookByIsbn, COLLECTIONS } from '../records.js';
+import { deriveCover } from '../cover-types.js';
 import type { CreateBookInput, CreateReviewInput, CreateStatusInput, CreateClaimInput, CreateShelfInput, AddToShelfInput, RemoveFromShelfInput } from '../types.js';
 
 const { books, reviews, readingStatuses, claims, shelves, shelfItems } = schema;
@@ -83,6 +84,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
       categories: data.categories || [],
       identifiers: bookIdentifiers(data),
       coverUrl: data.coverUrl,
+      cover: data.cover ?? deriveCover({ coverUrl: data.coverUrl, source: 'openlibrary' }),
     }, { rkey, createdAt: now });
 
     await insertClaim(db, {
@@ -124,6 +126,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
       categories: data.categories || [],
       identifiers: bookIdentifiers(data),
       coverUrl: data.coverUrl,
+      cover: data.cover ?? deriveCover({ coverUrl: data.coverUrl, source: 'openlibrary' }),
     });
 
     log.info({ olid: ident.value, uri }, 'book discovered and created');
@@ -153,6 +156,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
       categories: data.categories || [],
       identifiers: bookIdentifiers(data),
       coverUrl: data.coverUrl,
+      cover: data.cover ?? deriveCover({ coverUrl: data.coverUrl, source: 'goodreads' }),
     });
 
     log.info({ goodreadsId: ident.value, uri }, 'book discovered and created');
@@ -291,6 +295,7 @@ async function createBookFromProviderData(
       categories: data.categories || [],
       identifiers: bookIdentifiers(data),
       coverUrl: data.coverUrl,
+      cover: data.cover ?? deriveCover({ coverUrl: data.coverUrl, source: 'openlibrary' }),
     }, { rkey, createdAt: now });
 
     await insertClaim(db, {
@@ -354,6 +359,7 @@ export async function createBook(c: Context): Promise<Response> {
     categories: input.categories || [],
     identifiers: [],
     coverUrl: input.coverUrl,
+    cover: deriveCover({ coverUrl: input.coverUrl, source: 'user' }),
   }, { rkey, createdAt: now }).catch((err) => {
     log.error({ err, did, uri: bookUri, title: input.title, isbn: input.isbn }, 'createBook insert failed');
     throw err;
@@ -376,7 +382,7 @@ export async function createBook(c: Context): Promise<Response> {
 
 export async function createReview(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createReview');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.review.create');
   const input = await c.req.json<CreateReviewInput>();
 
   if (!input.bookUri || !input.text) {
@@ -585,6 +591,7 @@ export async function createShelf(c: Context): Promise<Response> {
       description: input.description,
       metadata: (input.metadata as Record<string, unknown>) || {},
       coverUrl: input.coverUrl,
+      cover: deriveCover({ coverUrl: input.coverUrl, source: 'user' }),
       createdAt: now,
       updatedAt: now,
     });

@@ -31,6 +31,44 @@ export function setupIdentifiersView(): void {
     JOIN claims c ON c.bookUri = b.uri`);
 }
 
+/**
+ * Create the cover-variant views used by the cover worker. Idempotent
+ * (`CREATE VIEW IF NOT EXISTS`). The migration files in drizzle/ also
+ * declare these, but running them at boot ensures the views exist even
+ * on databases that were set up before the migrations landed.
+ */
+export function setupCoverViews(): void {
+  db.run(`CREATE VIEW IF NOT EXISTS books_missing_cover_variants AS
+    SELECT
+      uri,
+      cover,
+      substr(uri, -13) AS rkey
+    FROM books
+    WHERE cover IS NOT NULL
+      AND (
+        json_extract(cover, '$.small')      IS NULL OR
+        json_extract(cover, '$.large')      IS NULL OR
+        json_extract(cover, '$.smallAvif')  IS NULL OR
+        json_extract(cover, '$.mediumAvif') IS NULL OR
+        json_extract(cover, '$.largeAvif')  IS NULL
+      )`);
+
+  db.run(`CREATE VIEW IF NOT EXISTS shelves_missing_cover_variants AS
+    SELECT
+      uri,
+      cover,
+      substr(uri, -13) AS rkey
+    FROM shelves
+    WHERE cover IS NOT NULL
+      AND (
+        json_extract(cover, '$.small')      IS NULL OR
+        json_extract(cover, '$.large')      IS NULL OR
+        json_extract(cover, '$.smallAvif')  IS NULL OR
+        json_extract(cover, '$.mediumAvif') IS NULL OR
+        json_extract(cover, '$.largeAvif')  IS NULL
+      )`);
+}
+
 export function setupFts(): void {
   db.run(`CREATE VIRTUAL TABLE IF NOT EXISTS books_fts USING fts5(
     title, author, description, isbn,

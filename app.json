@@ -30,6 +30,11 @@
       "command": "npm run dump:openlibrary -- --keep-dump",
       "schedule": "0 3 1 * *",
       "concurrency_policy": "forbid"
+    },
+    {
+      "command": "tsx src/cover-worker.ts",
+      "schedule": "0 */4 * * *",
+      "concurrency_policy": "forbid"
     }
   ]
 }
