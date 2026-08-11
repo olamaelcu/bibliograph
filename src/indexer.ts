@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 import type { Cover } from './cover-types.js';
@@ -99,6 +99,9 @@ export async function handleRecordEvent(evt: TapRecordEvent): Promise<void> {
     case 'community.lexicon.book.contributorType':
       await indexContributorType(uri, evt.did, record);
       break;
+    case 'buzz.bookhive.catalogBook':
+      await indexBookhiveCatalogBook(uri, evt.did, record, evt.action);
+      break;
   }
 }
 
@@ -128,7 +131,44 @@ async function handleDelete(collection: string, uri: string): Promise<void> {
     case 'community.lexicon.book.contributorType':
       await db.delete(contributorTypes).where(eq(contributorTypes.uri, uri));
       break;
+    case 'buzz.bookhive.catalogBook': {
+      // Look up the Bibliograph-mirrored row by hiveBookUri (bookhive AT-URI)
+      // embedded as the source of truth; fall back to the canonical hiveId identifier.
+      const sourceUri = uri;
+      const rkey = sourceUri.split('/').pop() ?? '';
+      await db
+        .delete(books)
+        .where(
+          sql`EXISTS (SELECT 1 FROM json_each(${books.identifiers}) je WHERE json_extract(je.value, '$.type') = 'hiveBookUri' AND json_extract(je.value, '$.value') = ${sourceUri})`,
+        )
+        .run();
+      // If we couldn't match via hiveBookUri, also try hiveId == rkey
+      await db
+        .delete(books)
+        .where(
+          sql`EXISTS (SELECT 1 FROM json_each(${books.identifiers}) je WHERE json_extract(je.value, '$.type') = 'hiveId' AND json_extract(je.value, '$.value') = ${rkey})`,
+        )
+        .run();
+      break;
+    }
   }
+}
+
+async function indexBookhiveCatalogBook(
+  uri: string,
+  _did: string,
+  record: Record<string, unknown>,
+  _action: string,
+): Promise<void> {
+  void _action;
+  const { catalogBookToBookData } = await import('./bookhive/mapper.js');
+  const { importBookhiveCatalogBook } = await import('./bookhive/importer.js');
+  const mapped = catalogBookToBookData(record as never, { sourceUri: uri });
+  const result = importBookhiveCatalogBook(db, mapped);
+  logger.info(
+    { uri, action: result.action, hiveId: mapped.hiveId, bibliographUri: mapped.uri },
+    'bookhive catalogBook indexed',
+  );
 }
 
 interface BookContributorInline {

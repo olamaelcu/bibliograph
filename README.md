@@ -185,6 +185,43 @@ State — including byte offset and last-processed edition key — is persisted 
 `backfill_state`. An interrupted run resumes from the last checkpoint, not
 from line 1.
 
+## Bulk backfill (Bookhive catalog)
+
+Bibliograph also consumes [`@bookhive.buzz`'s on-protocol catalog](https://nick-the-sick.pckt.blog/the-design-philosophy-of-bookhive-s23cz85)
+(`buzz.bookhive.catalogBook` records). The importer paginates the catalog
+over XRPC `listRecords`, mirrors each record into a Bibliograph-owned
+`community.lexicon.book.book` row, and reuses contributor records keyed by
+name. The catalog DID is resolved at startup via the DNS TXT record at
+`_lexicon.bookhive.buzz` — overridable for tests via `BOOKHIVE_CATALOG_DID`
+and `BOOKHIVE_PDS_URL`.
+
+```bash
+# one-off: import the entire catalog (resumable)
+npm run bookhive:catalog
+
+# clear the checkpoint and re-process from page 0
+npm run bookhive:catalog -- --reset
+
+# force-run even if a stale lockfile is on disk
+npm run bookhive:catalog -- --force
+
+# tune page/batch size
+npm run bookhive:catalog -- --page-size=100 --batch-size=500
+```
+
+Reach the same importer through the dispatcher:
+
+```bash
+npx tsx src/backfill.ts bookhive:catalog [flags]
+```
+
+Author bylines are stored under each book's `contributors` array (each entry
+references a `community.lexicon.book.contributor` record with the
+`author` role), in keeping with BookHive's "store the maximally useful data"
+philosophy. Live updates to BookHive catalog records are streamed via Tap
+when the operator adds `buzz.bookhive.catalogBook` to the `--collection-filters`
+list (see *Connecting Tap* below).
+
 ## Connecting Tap
 
 Run Tap with the book lexicon signal collection:
@@ -192,10 +229,14 @@ Run Tap with the book lexicon signal collection:
 ```bash
 tap run \
   --signal-collection=community.lexicon.book.book \
-  --collection-filters=community.lexicon.book.* \
+  --collection-filters=community.lexicon.book.*,buzz.bookhive.catalogBook \
   --webhook-url=http://localhost:3000/tap/event \
   --admin-password=secret
 ```
+
+The `buzz.bookhive.catalogBook` filter lets Tap stream live catalog updates
+from `@bookhive.buzz` into the Bibliograph index. The bulk backfill above
+is the initial seed; live edits and deletes flow through this webhook.
 
 ## Deploying to Dokku
 

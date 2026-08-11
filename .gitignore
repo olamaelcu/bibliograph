@@ -4,6 +4,7 @@ dist/
 data/dumps/*
 !data/dumps/.gitkeep
 data/covers/
+data/bookhive/*
 *.db
 *.db-wal
 *.db-shm

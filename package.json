@@ -18,6 +18,7 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "dump:openlibrary": "tsx src/dump/cli.ts",
+    "bookhive:catalog": "tsx src/bookhive/cli.ts",
     "release": "tsx src/release.ts",
     "backfill": "tsx src/backfill.ts",
     "backfill:contributors": "tsx src/backfill-contributors.ts",

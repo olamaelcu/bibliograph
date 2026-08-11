@@ -58,7 +58,7 @@ function readIsbns(path: string | undefined): string[] {
 async function main(): Promise<void> {
   const [cmd] = process.argv.slice(2);
   if (!cmd) {
-    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | openlibrary:dump [flags] | googlebooks [isbns.txt|-] | googlebooks:author <authorName>');
+    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | openlibrary:dump [flags] | googlebooks [isbns.txt|-] | googlebooks:author <authorName> | bookhive:catalog [flags]');
     process.exit(1);
   }
   if (cmd === 'tap') {
@@ -123,6 +123,34 @@ async function main(): Promise<void> {
     }
     const { backfillGoogleBooksAuthor } = await import('./googlebooks-backfill.js');
     await backfillGoogleBooksAuthor(db, authorName);
+  } else if (cmd === 'bookhive:catalog') {
+    const { runCatalogImport } = await import('./bookhive/index.js');
+    const { BookhiveCatalogState } = await import('./bookhive/state.js');
+    const { createBookhiveResolver } = await import('./bookhive/resolver.js');
+    const { existsSync, mkdirSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+
+    const stateName = 'bookhive_catalog';
+    const statePath = resolve(process.env.BOOKHIVE_STATE_PATH ?? 'data/bookhive');
+    if (!existsSync(statePath)) mkdirSync(statePath, { recursive: true });
+
+    const state = new BookhiveCatalogState(db, stateName);
+    if (process.argv.includes('--reset')) state.clear();
+
+    const resolver = createBookhiveResolver();
+    const { catalogDid, pdsUrl } = await resolver.resolveCatalog();
+
+    let batchSize: number | undefined;
+    const batchArg = process.argv.find((a) => a.startsWith('--batch-size='));
+    if (batchArg) batchSize = Number(batchArg.slice('--batch-size='.length));
+
+    const summary = await runCatalogImport(db, {
+      state,
+      catalogDid,
+      pdsUrl,
+      batchSize,
+    });
+    logger.info({ summary }, 'bookhive:catalog finished');
   } else {
     console.error(`unknown command: ${cmd}`);
     process.exit(1);
