@@ -18,13 +18,14 @@
     "web": {
       "quantity": 1,
       "max_parallel": 1
-    },
-    "worker": {
-      "quantity": 1,
-      "max_parallel": 1
     }
   },
   "cron": [
+    {
+      "command": "tsx src/dedup-job.ts run",
+      "schedule": "0 15 * * *",
+      "concurrency_policy": "forbid"
+    },
     {
       "command": "npm run dump:openlibrary -- --keep-dump",
       "schedule": "0 3 1 * *",

@@ -21,8 +21,7 @@
     "release": "tsx src/release.ts",
     "backfill": "tsx src/backfill.ts",
     "backfill:contributors": "tsx src/backfill-contributors.ts",
-    "dedup": "tsx src/dedup-job.ts",
-    "dedup:watch": "tsx src/dedup-job.ts watch 3600"
+    "dedup": "tsx src/dedup-job.ts"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.3",

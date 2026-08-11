@@ -352,7 +352,7 @@ describe('dedup-merge', () => {
   });
 });
 
-describe('dedup-job watch mode', () => {
+describe('dedup-job run', () => {
   beforeEach(() => {
     clearAllTables(connDb);
   });

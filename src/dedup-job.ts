@@ -23,19 +23,15 @@ async function main(): Promise<void> {
     case 'run':
       await runFullDedup(args);
       break;
-    case 'watch':
-      await runWatch(args);
-      break;
     default:
       console.error(`Usage: dedup <command>
 
 Commands:
-  stats            Show deduplication statistics
-  analyze [limit]  List duplicate groups (default: 50)
-  populate-hashes  Compute and store deduplication hashes for all books
+  stats              Show deduplication statistics
+  analyze [limit]    List duplicate groups (default: 50)
+  populate-hashes    Compute and store deduplication hashes for all books
   merge [--dry-run]  Merge duplicate books (keep newest, merge identifiers)
-  run [--dry-run]  Run full pipeline: populate hashes + merge
-  watch [interval] Monitor and auto-dedup at interval (seconds, default: 3600)
+  run [--dry-run]    Run full pipeline: populate hashes + merge
 `);
       process.exit(1);
   }
@@ -102,64 +98,71 @@ async function runMerge(args: string[]): Promise<void> {
 }
 
 export async function runFullDedup(args: string[]): Promise<void> {
+  const startTime = Date.now();
   const dryRun = args.includes('--dry-run');
-  if (dryRun) logger.info('DRY RUN - no changes will be made');
+  logger.info({ dryRun, startedAt: new Date().toISOString() }, 'dedup run: starting');
 
-  logger.info('step 1: populating deduplication hashes');
+  logger.info('dedup run: step 1/3 — populating deduplication hashes');
+  const t1 = Date.now();
   const hashResult = await populateAllHashes(db);
-  logger.info(hashResult, 'hashes populated');
+  logger.info(
+    { ...hashResult, durationMs: Date.now() - t1 },
+    'dedup run: step 1/3 complete — hashes populated',
+  );
 
-  logger.info('step 2: analyzing duplicates');
+  logger.info('dedup run: step 2/3 — analyzing duplicates');
+  const t2 = Date.now();
   const analysis = await analyzeDuplicates(db, 1000);
   logger.info(
     {
+      totalBooks: analysis.totalBooks,
       duplicateGroups: analysis.duplicateGroups,
       totalDuplicateRecords: analysis.totalDuplicateRecords,
+      durationMs: Date.now() - t2,
     },
-    'analysis complete',
+    'dedup run: step 2/3 complete — duplicate analysis (aggregate)',
   );
 
+  if (analysis.duplicateGroups > 0) {
+    logger.info(
+      { groups: analysis.groups.length },
+      `dedup run: listing ${analysis.groups.length} duplicate group(s) found`,
+    );
+    for (const group of analysis.groups) {
+      logger.info(
+        {
+          hash: group.hash,
+          title: group.title,
+          author: group.author,
+          count: group.books.length,
+          uris: group.books.map((b) => b.uri),
+          createdAt: group.books.map((b) => b.createdAt),
+        },
+        `dedup run: duplicate group (${group.books.length} copies) — ${group.title} by ${group.author}`,
+      );
+    }
+  }
+
   if (analysis.duplicateGroups === 0) {
-    logger.info('no duplicates found, skipping merge');
+    logger.info(
+      { totalDurationMs: Date.now() - startTime },
+      'dedup run: complete — no duplicates found, skipping merge',
+    );
     return;
   }
 
-  logger.info('step 3: merging duplicates');
+  logger.info(
+    { groups: analysis.duplicateGroups, records: analysis.totalDuplicateRecords },
+    'dedup run: step 3/3 — merging duplicates',
+  );
+  const t3 = Date.now();
   await runMerge(dryRun ? ['--dry-run'] : []);
-}
+  logger.info({ durationMs: Date.now() - t3 }, 'dedup run: step 3/3 complete — merge done');
 
-function parseInterval(raw?: string): number {
-  if (!raw) return 3600;
-  const n = parseInt(raw, 10);
-  if (isNaN(n) || n < 60) return 3600;
-  return n;
-}
-
-async function runWatch(args: string[]): Promise<void> {
-  const intervalSec = parseInterval(args[0]);
-  logger.info({ intervalSec }, 'starting dedup watch mode');
-
-  const tick = async () => {
-    try {
-      logger.info('dedup watch: running cycle');
-      await runFullDedup([]);
-      logger.info('dedup watch: cycle complete');
-    } catch (err) {
-      logger.error({ err }, 'dedup watch: cycle failed');
-    }
-  };
-
-  await tick();
-  setInterval(tick, intervalSec * 1000);
-
-  process.on('SIGINT', () => {
-    logger.info('dedup watch: shutting down');
-    process.exit(0);
-  });
-  process.on('SIGTERM', () => {
-    logger.info('dedup watch: shutting down');
-    process.exit(0);
-  });
+  logger.info(
+    { totalDurationMs: Date.now() - startTime, dryRun, merged: analysis.totalDuplicateRecords },
+    'dedup run: complete',
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
