@@ -92,6 +92,7 @@ export function HomePage(props: { host: string; queries: string[]; procedures: s
         <wa-button href="https://github.com/olamaelcu/bibliograph" target="_blank" variant="neutral">
           <wa-icon library="lucide" name="external-link" slot="prefix"></wa-icon>GitHub
         </wa-button>
+        <wa-button href="https://userinput.app/s/did:plc:ejggqolmgpylroktvaktibik/3mst4pvyu7m2f">Send Feedback</wa-button>
       </wa-button-group>
     </div>
   </div>
