@@ -145,7 +145,7 @@ export function HomePage(props: { host: string; queries: string[]; procedures: s
   </div>
 
   <div slot="footer">
-    <p class="wa-caption-s wa-color-text-quiet">Bibliograph &mdash; ${props.host}</p>
+    <p class="wa-caption-s wa-color-text-quiet">Bibliograph &mdash; ${props.host} &mdash; <a href="https://userinput.app/s/did:plc:ejggqolmgpylroktvaktibik/3mst4pvyu7m2f">Submit Feedback</a></p>
   </div>
 </wa-page>`;
   return Layout({ title: 'Bibliograph', content });

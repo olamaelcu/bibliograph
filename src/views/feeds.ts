@@ -43,7 +43,9 @@ export function FeedsPage(props: { host: string }) {
   </div>
 
   <div slot="footer">
-    <p class="wa-caption-s wa-color-text-quiet">Polling /xrpc/community.lexicon.book.getFeed every 5s &middot; Bibliograph &mdash; ${props.host}</p>
+    <p class="wa-caption-s wa-color-text-quiet">Polling /xrpc/community.lexicon.book.getFeed every 5s &middot; Bibliograph &mdash; ${props.host}
+&mdash; <a href="https://userinput.app/s/did:plc:ejggqolmgpylroktvaktibik/3mst4pvyu7m2f">Submit Feedback</a>
+      </p>
   </div>
 </wa-page>
 
