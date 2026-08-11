@@ -13,6 +13,10 @@ import { BatchedImporter } from './batched-importer.js';
 
 const OL_DUMP_URL_DEFAULT = 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
 const MIN_FREE_BYTES_DEFAULT = 12 * 1024 * 1024 * 1024;
+const BATCH_LOG_INTERVAL = Math.max(
+  1,
+  Number.parseInt(process.env.OL_DUMP_BATCH_LOG_INTERVAL ?? '1', 10) || 1,
+);
 
 export interface RunOptions {
   db: BetterSQLite3Database<typeof schema>;
@@ -120,6 +124,20 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   let lastKey: string | null = initialResumeKey;
   let lastId: number | null = initialNumericCursor;
   let lastByte: number | null = initialStartOffset;
+  let batchNumber = 0;
+  const runStartTime = Date.now();
+
+  logger.info(
+    {
+      stateName: ctx.stateName,
+      startByteOffset: initialStartOffset,
+      resumeCursor: initialResumeKey,
+      fileSize: streamer.fileSize(),
+      batchSize: ctx.batchSize,
+      batchLogInterval: BATCH_LOG_INTERVAL,
+    },
+    'dump import: starting stream',
+  );
 
   try {
     if (initialStartOffset >= streamer.fileSize()) {
@@ -140,7 +158,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       lastId = parseWorkId(lastKey);
       lastByte = item.byteOffset;
       if (buffer.length >= ctx.batchSize) {
-        await flushBatch(importer, buffer, summary, ctx.state, lastKey, lastId, lastByte, ctx.stateName);
+        batchNumber += 1;
+        await flushBatch(
+          importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
+          ctx.stateName, batchNumber, runStartTime,
+        );
       }
     }
   } catch (err) {
@@ -170,7 +192,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
       lastId = parseWorkId(lastKey);
       lastByte = item.byteOffset;
       if (buffer.length >= ctx.batchSize) {
-        await flushBatch(importer, buffer, summary, ctx.state, lastKey, lastId, lastByte, ctx.stateName);
+        batchNumber += 1;
+        await flushBatch(
+          importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
+          ctx.stateName, batchNumber, runStartTime,
+        );
       }
     }
   }
@@ -181,7 +207,11 @@ async function runWithContext(ctx: RunContext): Promise<BackfillSummary> {
   }
 
   if (buffer.length > 0) {
-    await flushBatch(importer, buffer, summary, ctx.state, lastKey, lastId, lastByte, ctx.stateName);
+    batchNumber += 1;
+    await flushBatch(
+      importer, buffer, summary, ctx.state, lastKey, lastId, lastByte,
+      ctx.stateName, batchNumber, runStartTime,
+    );
   }
 
   ctx.state.markComplete();
@@ -203,7 +233,11 @@ async function flushBatch(
   lastId: number | null,
   lastByte: number | null,
   stateName: string,
+  batchNumber: number,
+  runStartTime: number,
 ): Promise<void> {
+  const batchInputSize = buffer.length;
+  const batchStart = Date.now();
   try {
     const flushed = await importer.runAll(buffer.splice(0));
     mergeSummary(summary, flushed);
@@ -213,9 +247,36 @@ async function flushBatch(
       lastByteOffset: lastByte ?? 0,
       totalProcessed: (state.get()?.totalProcessed ?? 0) + flushed.imported,
     });
+    if (batchNumber % BATCH_LOG_INTERVAL === 0) {
+      const now = Date.now();
+      logger.info(
+        {
+          stateName,
+          batch: {
+            n: batchNumber,
+            size: batchInputSize,
+            imported: flushed.imported,
+            skipped: flushed.skipped,
+            failed: flushed.failed,
+            durationMs: now - batchStart,
+          },
+          cumulative: {
+            imported: summary.imported,
+            skipped: summary.skipped,
+            failed: summary.failed,
+            notFound: summary.notFound,
+            lastKey,
+            lastNumericCursor: lastId,
+            lastByteOffset: lastByte,
+          },
+          elapsedSec: Math.round((now - runStartTime) / 1000),
+        },
+        `dump import: batch ${batchNumber} flushed (${flushed.imported} new, ${flushed.skipped} dup, ${flushed.failed} failed)`,
+      );
+    }
   } catch (err) {
     logger.fatal(
-      { err, stateName, lastKey },
+      { err, stateName, lastKey, batch: batchNumber },
       'dump import: batch failed twice; aborting without cursor advance',
     );
     throw err;

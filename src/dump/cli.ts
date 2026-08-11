@@ -54,8 +54,6 @@ export function OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS(raw: string | undefined): n
 const OL_DUMP_BATCH_SIZE_DEFAULT = OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS(process.env.OL_DUMP_BATCH_SIZE);
 const STATE_NAME = 'openlibrary_editions';
 
-const STALE_LOCK_AGE_MS = 24 * 60 * 60 * 1000;
-
 export function acquireLock(lockPath: string, force: boolean): boolean {
   if (!existsSync(lockPath)) {
     let fd: number;
@@ -84,15 +82,45 @@ export function acquireLock(lockPath: string, force: boolean): boolean {
   return acquireLock(lockPath, false);
 }
 
+export function clearStaleLockIfNeeded(lockPath: string): boolean {
+  if (!existsSync(lockPath)) return false;
+  let pidStr: string | undefined;
+  let pid: number;
+  try {
+    const raw = readFileSync(lockPath, 'utf8');
+    pidStr = raw.split('\n', 1)[0];
+    pid = Number(pidStr);
+  } catch (err) {
+    logger.warn({ lockPath, err }, 'lockfile unreadable; leaving alone');
+    return false;
+  }
+  if (!Number.isFinite(pid)) {
+    logger.warn({ lockPath, pidStr }, 'lockfile has invalid pid; leaving alone');
+    return false;
+  }
+  let alive = false;
+  try { process.kill(pid, 0); alive = true; } catch {}
+  if (alive) {
+    logger.warn({ lockPath, pid }, 'lockfile held by a live process; cannot auto-clear');
+    return false;
+  }
+  logger.info({ lockPath, pid }, 'clearing stale lockfile on startup (PID no longer alive)');
+  try { unlinkSync(lockPath); } catch (err) {
+    logger.warn({ lockPath, err }, 'failed to unlink stale lockfile');
+    return false;
+  }
+  return true;
+}
+
 export function isStaleLock(lockPath: string): boolean {
   try {
     const raw = readFileSync(lockPath, 'utf8');
-    const [pidStr, isoStr] = raw.split('\n', 2);
+    const [pidStr] = raw.split('\n', 2);
     const pid = Number(pidStr);
-    const ageMs = Date.now() - new Date(isoStr).getTime();
+    if (!Number.isFinite(pid)) return false;
     let alive = false;
     try { process.kill(pid, 0); alive = true; } catch {}
-    return !alive && ageMs > STALE_LOCK_AGE_MS;
+    return !alive;
   } catch {
     return false;
   }
@@ -111,6 +139,7 @@ async function main(): Promise<void> {
   if (!existsSync(dumpDir)) mkdirSync(dumpDir, { recursive: true });
 
   const lockPath = resolve(dumpDir, '.import.lock');
+  clearStaleLockIfNeeded(lockPath);
   if (!acquireLock(lockPath, cli.force)) {
     process.exit(0);
   }

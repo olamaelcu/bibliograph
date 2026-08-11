@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS as resolver, parseArgs, acquireLock, isStaleLock, releaseLock } from './cli.js';
+import { OL_DUMP_BATCH_SIZE_DEFAULT_FOR_TESTS as resolver, parseArgs, acquireLock, clearStaleLockIfNeeded, isStaleLock, releaseLock } from './cli.js';
 
 describe('cli batch-size env handling', () => {
   it('falls back to 500 for empty / NaN / non-positive env values', () => {
@@ -70,6 +70,60 @@ describe('lockfile', () => {
   it('isStaleLock returns false for a recent live lockfile', () => {
     const lockPath = join(dir, '.import.lock');
     writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n`);
+    expect(isStaleLock(lockPath)).toBe(false);
+  });
+});
+
+describe('clearStaleLockIfNeeded', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'cli-stale-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('is a no-op when no lockfile exists', () => {
+    const lockPath = join(dir, '.import.lock');
+    expect(clearStaleLockIfNeeded(lockPath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('clears a lockfile whose PID is dead', () => {
+    const lockPath = join(dir, '.import.lock');
+    writeFileSync(lockPath, `${process.pid + 999_999}\n${new Date().toISOString()}\n`);
+    expect(clearStaleLockIfNeeded(lockPath)).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('does not clear a lockfile held by a live process', () => {
+    const lockPath = join(dir, '.import.lock');
+    writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}\n`);
+    expect(clearStaleLockIfNeeded(lockPath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(true);
+    releaseLock(lockPath);
+  });
+
+  it('does not clear a corrupted lockfile', () => {
+    const lockPath = join(dir, '.import.lock');
+    writeFileSync(lockPath, 'this is not a valid pid\n');
+    expect(clearStaleLockIfNeeded(lockPath)).toBe(false);
+    expect(existsSync(lockPath)).toBe(true);
+  });
+});
+
+describe('isStaleLock (PID-death only)', () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'cli-stale-check-')); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  it('returns true immediately for any dead PID, regardless of file age', () => {
+    const lockPath = join(dir, '.import.lock');
+    const recent = new Date().toISOString();
+    writeFileSync(lockPath, `999999\n${recent}\n`);
+    expect(isStaleLock(lockPath)).toBe(true);
+  });
+
+  it('returns false for a live PID even if the file is old', () => {
+    const lockPath = join(dir, '.import.lock');
+    const old = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    writeFileSync(lockPath, `${process.pid}\n${old}\n`);
     expect(isStaleLock(lockPath)).toBe(false);
   });
 });
