@@ -15,9 +15,13 @@ vi.mock('../db/connection.js', async () => {
   return { db, schema };
 });
 
-vi.mock('./search-fallback.js', () => ({
-  searchFallback: vi.fn(async () => ({ source: 'none' as const, books: [] })),
-}));
+vi.mock('./search-fallback.js', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    searchFallback: vi.fn(async () => ({ source: 'none' as const, books: [] })),
+  };
+});
 
 import { db, schema } from '../db/connection.js';
 import { clearSqliteTables } from '../test-utils/db.js';
@@ -114,6 +118,106 @@ describe('api/get-book', () => {
       expect(body.uri).toBe('at://did:plc:author/book/test001');
       expect(body.record.title).toBe('Test Book');
     });
+
+    describe('external identifier lookup', () => {
+      it('returns the book when the uri is an ISBN-13 (urn:isbn: form)', async () => {
+        seedBook({ isbn: '9780441172719' });
+        const c = mockContext({ query: { uri: 'urn:isbn:9780441172719' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(200);
+        const body = await readJson(res);
+        expect(body.record.isbn).toBe('9780441172719');
+      });
+
+      it('returns the book when the uri is a bare ISBN-13', async () => {
+        seedBook({ isbn: '9780441172719' });
+        const c = mockContext({ query: { uri: '9780441172719' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(200);
+      });
+
+      it('returns the book when the uri is a dashed ISBN-13', async () => {
+        seedBook({ isbn: '9780441172719' });
+        const c = mockContext({ query: { uri: '978-0-441-17271-9' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(200);
+      });
+
+      it('returns the book when the uri is an OLID edition key', async () => {
+        seedBook({
+          identifiers: [{ type: 'openlibrary', value: '/books/OL1234567M' }],
+        });
+        const c = mockContext({ query: { uri: 'OL1234567M' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(200);
+        const body = await readJson(res);
+        expect(body.record.identifiers).toEqual([
+          { type: 'openlibrary', value: '/books/OL1234567M' },
+        ]);
+      });
+
+      it('returns the book when the uri is an OLID path form', async () => {
+        seedBook({
+          identifiers: [{ type: 'openlibrary', value: '/works/OL50W' }],
+        });
+        const c = mockContext({ query: { uri: '/works/OL50W' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(200);
+      });
+
+      it('returns the book when the uri is a full openlibrary.org URL', async () => {
+        seedBook({
+          identifiers: [{ type: 'openlibrary', value: '/works/OL50W' }],
+        });
+        const c = mockContext({
+          query: { uri: 'https://openlibrary.org/works/OL50W' },
+        });
+        const res = await getBook(c);
+        expect(res.status).toBe(200);
+      });
+
+      it('returns 409 MultipleChoices when an OLID work key resolves to multiple books', async () => {
+        seedBook({
+          uri: 'at://did:plc:a/community.lexicon.book.book/ed1',
+          isbn: '9780000000001',
+          identifiers: [{ type: 'openlibrary', value: '/works/OL50W' }],
+          createdAt: '2024-01-01T00:00:00.000Z',
+        });
+        seedBook({
+          uri: 'at://did:plc:a/community.lexicon.book.book/ed2',
+          isbn: '9780000000002',
+          identifiers: [{ type: 'openlibrary', value: '/works/OL50W' }],
+          createdAt: '2024-02-01T00:00:00.000Z',
+        });
+
+        const c = mockContext({ query: { uri: 'OL50W' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(409);
+        const body = await readJson(res);
+        expect(body.error).toBe('MultipleBooks');
+        expect(body.identifier).toBe('OL50W');
+        expect(body.candidates).toHaveLength(2);
+        const candidateUris = body.candidates.map((c: { uri: string }) => c.uri);
+        expect(candidateUris).toContain('at://did:plc:a/community.lexicon.book.book/ed1');
+        expect(candidateUris).toContain('at://did:plc:a/community.lexicon.book.book/ed2');
+      });
+
+      it('returns 404 when an ISBN is not in the DB', async () => {
+        seedBook({ isbn: '9780441172719' });
+        const c = mockContext({ query: { uri: 'urn:isbn:9780000000000' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(404);
+      });
+
+      it('returns 400 when the input is unparseable', async () => {
+        seedBook();
+        const c = mockContext({ query: { uri: 'not-a-valid-identifier' } });
+        const res = await getBook(c);
+        expect(res.status).toBe(400);
+        const body = await readJson(res);
+        expect(body.error).toBe('InvalidInput');
+      });
+    });
   });
 
   describe('getBooks', () => {
@@ -134,6 +238,73 @@ describe('api/get-book', () => {
       expect(res.status).toBe(200);
       const body = await readJson(res);
       expect(body.books).toHaveLength(2);
+    });
+
+    describe('external identifier lookup', () => {
+      it('resolves a mix of AT-URIs and ISBNs', async () => {
+        seedBook({ uri: 'at://did:plc:a/community.lexicon.book.book/x', title: 'X' });
+        seedBook({ isbn: '9780441172719', title: 'Y' });
+
+        const c = mockContext({
+          queries: {
+            uris: ['at://did:plc:a/community.lexicon.book.book/x', 'urn:isbn:9780441172719'],
+          },
+        });
+        const res = await getBooks(c);
+        expect(res.status).toBe(200);
+        const body = await readJson(res);
+        expect(body.books).toHaveLength(2);
+        expect(body.notFound).toEqual([]);
+      });
+
+      it('includes inputs that did not resolve in notFound', async () => {
+        seedBook({ uri: 'at://did:plc:a/community.lexicon.book.book/x' });
+
+        const c = mockContext({
+          queries: {
+            uris: [
+              'at://did:plc:a/community.lexicon.book.book/x',
+              'urn:isbn:9780000000000',
+              'OL9999999X',
+            ],
+          },
+        });
+        const res = await getBooks(c);
+        expect(res.status).toBe(200);
+        const body = await readJson(res);
+        expect(body.books).toHaveLength(1);
+        expect(body.notFound).toEqual(['urn:isbn:9780000000000', 'OL9999999X']);
+      });
+
+      it('collapses multi-match inputs to one book each and reports the count', async () => {
+        seedBook({
+          uri: 'at://did:plc:a/community.lexicon.book.book/ed1',
+          isbn: '9780000000001',
+          title: 'Dune (1)',
+          identifiers: [{ type: 'openlibrary', value: '/works/OL50W' }],
+        });
+        seedBook({
+          uri: 'at://did:plc:a/community.lexicon.book.book/ed2',
+          isbn: '9780000000002',
+          title: 'Dune (2)',
+          identifiers: [{ type: 'openlibrary', value: '/works/OL50W' }],
+        });
+
+        const c = mockContext({ queries: { uris: ['OL50W'] } });
+        const res = await getBooks(c);
+        expect(res.status).toBe(200);
+        const body = await readJson(res);
+        expect(body.books).toHaveLength(1);
+        expect(body.multiMatch).toEqual([{ input: 'OL50W', count: 2 }]);
+      });
+
+      it('rejects unparseable inputs as invalid request', async () => {
+        const c = mockContext({
+          queries: { uris: ['not-a-real-identifier'] },
+        });
+        const res = await getBooks(c);
+        expect(res.status).toBe(400);
+      });
     });
   });
 

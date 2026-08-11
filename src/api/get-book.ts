@@ -5,6 +5,7 @@ import { getLabels } from '../labeler.js';
 import { parsePagination, nextCursor } from '../pagination.js';
 import { searchFallback, type FallbackSource } from './search-fallback.js';
 import { computeDeduplicationHash } from '../dedup.js';
+import { parseIdentifierInput, resolveBooksByIdentifier, type ResolvedBook } from './identifier-lookup.js';
 import { serializeContributor, serializeContributorType } from './contributor.js';
 import type { BookData } from '../providers/interface.js';
 import type {
@@ -26,21 +27,49 @@ export async function getBooks(c: Context): Promise<Response> {
 
   log.info({ count: uris.length }, 'handling getBooks');
 
-  const results = await db.query.books.findMany({
-    where: (fields, { inArray }) => inArray(fields.uri, uris),
-    limit: 25,
-  });
+  const sliced = uris.slice(0, 25);
+  const notFound: string[] = [];
+  const multiMatch: Array<{ input: string; count: number }> = [];
+  const matched: ResolvedBook[] = [];
 
-  const contributorMap = await attachContributors(results.map((r) => r.uri));
+  for (const input of sliced) {
+    const ident = parseIdentifierInput(input);
+    if (!ident) {
+      log.warn({ input }, 'getBooks rejected: unparseable identifier');
+      return c.json(
+        {
+          error: 'InvalidInput',
+          message: 'one or more uris is not a recognized identifier',
+        },
+        400,
+      );
+    }
+    const rows = await resolveBooksByIdentifier(db, input);
+    if (rows.length === 0) {
+      notFound.push(input);
+      continue;
+    }
+    matched.push(pickCanonicalBook(rows));
+    if (rows.length > 1) {
+      multiMatch.push({ input, count: rows.length });
+    }
+  }
 
-  log.info({ found: results.length }, 'getBooks complete');
+  const contributorMap = await attachContributors(matched.map((r) => r.uri));
+
+  log.info(
+    { found: matched.length, notFound: notFound.length, multiMatch: multiMatch.length },
+    'getBooks complete',
+  );
   return c.json({
-    books: results.map(book => ({
+    books: matched.map((book) => ({
       uri: book.uri,
       record: serializeBookRecord(book),
       cid: undefined,
       contributors: contributorMap.get(book.uri) ?? [],
     })),
+    notFound,
+    multiMatch,
   });
 }
 
@@ -179,6 +208,15 @@ export async function getUserStatus(c: Context): Promise<Response> {
     })),
     cursor: cursorOut,
   });
+}
+
+function pickCanonicalBook(rows: ResolvedBook[]): ResolvedBook {
+  return [...rows].sort((a, b) => {
+    const aActive = a.status === 'active' ? 0 : 1;
+    const bActive = b.status === 'active' ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+    return a.createdAt.localeCompare(b.createdAt);
+  })[0];
 }
 
 async function findImportedBookRow(book: BookData) {
@@ -508,14 +546,43 @@ export async function getBook(c: Context): Promise<Response> {
 
   log.info({ uri: params.uri }, 'handling getBook');
 
-  const book = await db.query.books.findFirst({ where: eq(books.uri, params.uri) });
-  if (!book) {
+  const ident = parseIdentifierInput(params.uri);
+  if (!ident) {
+    log.warn({ uri: params.uri }, 'getBook rejected: unparseable identifier');
+    return c.json(
+      {
+        error: 'InvalidInput',
+        message: 'uri must be an AT-URI, ISBN, OLID, or other recognized identifier',
+      },
+      400,
+    );
+  }
+
+  const matches = await resolveBooksByIdentifier(db, params.uri);
+  if (matches.length === 0) {
     log.info({ found: false }, 'getBook complete');
     return c.json({ error: 'NotFound', message: 'Book not found' }, 404);
   }
+  if (matches.length > 1) {
+    log.info({ count: matches.length }, 'getBook 409 MultipleBooks');
+    return c.json(
+      {
+        error: 'MultipleBooks',
+        message: 'Identifier matches multiple books; use getBooks to disambiguate',
+        identifier: params.uri,
+        candidates: matches.slice(0, 10).map((b) => ({
+          uri: b.uri,
+          title: b.title,
+          author: b.author,
+        })),
+      },
+      409,
+    );
+  }
 
-  const contributorMap = await attachContributors([params.uri]);
-  const contributorsArr = contributorMap.get(params.uri) ?? [];
+  const book = matches[0];
+  const contributorMap = await attachContributors([book.uri]);
+  const contributorsArr = contributorMap.get(book.uri) ?? [];
 
   log.info({ found: true }, 'getBook complete');
   return c.json({

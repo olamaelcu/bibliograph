@@ -24,7 +24,7 @@ interface FallbackLog {
 
 const DEFAULT_CAP = 10;
 
-function normalizeIsbn(raw: string | undefined): string | undefined {
+export function normalizeIsbn(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   const stripped = raw.replace(/[\s-]/g, '');
   return stripped.length > 0 ? stripped : undefined;
