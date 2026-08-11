@@ -37,7 +37,7 @@
     "@hono/node-server": "^2.0.12",
     "better-sqlite3": "^13.0.2",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.33",
+    "hono": "^4.13.0",
     "lucide-static": "^1.28.0",
     "pino": "^10.3.1",
     "tsx": "^4.23.1",
