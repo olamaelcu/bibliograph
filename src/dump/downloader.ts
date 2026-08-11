@@ -12,13 +12,13 @@ export interface DownloaderOptions {
   userAgent?: string;
 }
 
-const DEFAULT_USER_AGENT = 'bibliograph-app/0.1 (contact@example.org)';
+const DEFAULT_USER_AGENT = 'bibliograph/0.1.0 (+https://github.com/olamaelcu/bibliograph)';
 
 export class HttpDownloader {
   constructor(
     private readonly _url: string,
     private readonly opts: DownloaderOptions = {},
-  ) {}
+  ) { }
 
   get url(): string {
     return this._url;
