@@ -47,14 +47,18 @@ export interface BookhiveMappedBook {
 
 const BASE32 = '234567abcdefghijklmnopqrstuvwxyz';
 
-function hiveIdToBookRkey(hiveId: string): string {
-  const hex = createHash('sha256').update(hiveId).digest('hex');
+export function contentRkey(value: string): string {
+  const hex = createHash('sha256').update(value).digest('hex');
   let result = '';
   for (let i = 0; i < 13; i++) {
     const nibble = parseInt(hex[i], 16);
     result += BASE32[nibble & 0x1f];
   }
   return result;
+}
+
+function hiveIdToBookRkey(hiveId: string): string {
+  return contentRkey(hiveId);
 }
 
 function splitAuthors(authors: string): string[] {
@@ -69,6 +73,122 @@ const DEFAULT_DID = process.env.ATP_SERVICE_DID || 'did:web:localhost';
 export interface CatalogBookToBookDataOptions {
   serviceDid?: string;
   sourceUri?: string;
+}
+
+export interface BookhiveUserBookRecord {
+  $type?: string;
+  title?: string;
+  authors?: string;
+  hiveId?: string;
+  hiveBookUri?: string;
+  status?: string;
+  stars?: number;
+  review?: string;
+  bookProgress?: {
+    percent?: number;
+    currentPage?: number;
+    totalPages?: number;
+    currentChapter?: number;
+    totalChapters?: number;
+    updatedAt?: string;
+  };
+  startedAt?: string;
+  finishedAt?: string;
+  owned?: boolean;
+  identifiers?: {
+    hiveId?: string;
+    isbn10?: string;
+    isbn13?: string;
+    goodreadsId?: string;
+  };
+  createdAt?: string;
+  [k: string]: unknown;
+}
+
+export interface MappedUserBookStatus {
+  userDid: string;
+  title: string;
+  author: string;
+  hiveId: string;
+  status: string | null;
+  rating: number | null;
+  progress: number | null;
+  bookProgress: {
+    percent?: number;
+    currentPage?: number;
+    totalPages?: number;
+    currentChapter?: number;
+    totalChapters?: number;
+    updatedAt?: string;
+  } | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  review: string | null;
+  identifiers: Array<{ type: string; value: string }>;
+}
+
+export interface MappedUserBookReview {
+  userDid: string;
+  title: string;
+  author: string;
+  text: string;
+  rating: number | null;
+}
+
+const BOOKHIVE_STATUS_TO_BIBLIOGRAPH: Record<string, string> = {
+  'buzz.bookhive.defs#finished': 'read',
+  'buzz.bookhive.defs#reading': 'reading',
+  'buzz.bookhive.defs#wantToRead': 'to-read',
+  'buzz.bookhive.defs#abandoned': 'abandoned',
+};
+
+export function bookhiveUserBookToReadingStatus(
+  record: BookhiveUserBookRecord,
+  opts: { userDid: string },
+): MappedUserBookStatus {
+  const idents = record.identifiers ?? {};
+  const identifiers: Array<{ type: string; value: string }> = [];
+  if (record.hiveId) identifiers.push({ type: 'hiveId', value: record.hiveId });
+  if (idents.isbn13) identifiers.push({ type: 'isbn13', value: idents.isbn13 });
+  if (idents.isbn10) identifiers.push({ type: 'isbn10', value: idents.isbn10 });
+  if (idents.goodreadsId)
+    identifiers.push({ type: 'goodreadsId', value: idents.goodreadsId });
+
+  const bp = record.bookProgress;
+  const stars = typeof record.stars === 'number' ? record.stars : null;
+  const rating =
+    stars === null ? null : Math.max(1, Math.min(5, Math.round(stars / 2)));
+
+  return {
+    userDid: opts.userDid,
+    title: record.title ?? '',
+    author: splitAuthors(record.authors ?? '').join(', '),
+    hiveId: record.hiveId ?? '',
+    status: record.status ? (BOOKHIVE_STATUS_TO_BIBLIOGRAPH[record.status] ?? null) : null,
+    rating,
+    progress: bp && typeof bp.percent === 'number' ? bp.percent : null,
+    bookProgress: bp ?? null,
+    startedAt: record.startedAt ?? null,
+    finishedAt: record.finishedAt ?? null,
+    review: record.review ?? null,
+    identifiers,
+  };
+}
+
+export function bookhiveUserBookToReview(
+  record: BookhiveUserBookRecord,
+  opts: { userDid: string },
+): MappedUserBookReview | null {
+  const text = (record.review ?? '').trim();
+  if (!text) return null;
+  const stars = typeof record.stars === 'number' ? record.stars : null;
+  return {
+    userDid: opts.userDid,
+    title: record.title ?? '',
+    author: splitAuthors(record.authors ?? '').join(', '),
+    text,
+    rating: stars === null ? null : Math.max(1, Math.min(5, Math.round(stars / 2))),
+  };
 }
 
 export function catalogBookToBookData(

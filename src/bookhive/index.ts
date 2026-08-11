@@ -1,11 +1,16 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as schema from '../db/schema.js';
 import { logger } from '../logger.js';
 import { BookhiveCatalogState } from './state.js';
 import { BookhiveStreamer, type ListRecordsFn } from './streamer.js';
-import { catalogBookToBookData, type BookhiveCatalogRecord } from './mapper.js';
-import { importBookhiveCatalogBook } from './importer.js';
+import {
+  bookhiveUserBookToReadingStatus,
+  catalogBookToBookData,
+  type BookhiveCatalogRecord,
+  type BookhiveUserBookRecord,
+} from './mapper.js';
+import { importBookhiveCatalogBook, importUserBookRecord } from './importer.js';
 
 export interface BookhiveRunOptions {
   state: BookhiveCatalogState;
@@ -192,4 +197,109 @@ function skippedByHiveId(
     )
     .get();
   return row !== undefined;
+}
+
+export interface UserBackfillOptions {
+  pageSize?: number;
+  listRecords?: ListRecordsFn;
+  pdsUrlForDid: (did: string) => Promise<string>;
+  onUserState?: (did: string, cursor: string | null) => void;
+  signal?: AbortSignal;
+}
+
+export interface UserBackfillSummary {
+  usersProcessed: number;
+  imported: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  aborted: boolean;
+}
+
+/**
+ * Backfill reading statuses for every user in bookhive_user_discovery.
+ * Each user's `buzz.bookhive.book` records stream through the shared
+ * importUserBookRecord. A failing user is logged and skipped; the run
+ * continues with the next.
+ */
+export async function runUserBackfill(
+  db: BetterSQLite3Database<typeof schema>,
+  opts: UserBackfillOptions,
+): Promise<UserBackfillSummary> {
+  const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
+  const users = db.select().from(schema.bookhiveUserDiscovery).all();
+  const summary: UserBackfillSummary = {
+    usersProcessed: 0,
+    imported: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    aborted: false,
+  };
+
+  logger.info({ userCount: users.length }, 'bookhive user backfill: starting');
+
+  for (const user of users) {
+    if (opts.signal?.aborted) {
+      summary.aborted = true;
+      break;
+    }
+    summary.usersProcessed += 1;
+
+    let pdsUrl: string;
+    try {
+      pdsUrl = await opts.pdsUrlForDid(user.did);
+    } catch (err) {
+      logger.warn({ did: user.did, err }, 'bookhive user backfill: pds resolution failed');
+      db.update(schema.bookhiveUserDiscovery)
+        .set({ lastError: (err as Error).message.slice(0, 500) })
+        .where(eq(schema.bookhiveUserDiscovery.did, user.did))
+        .run();
+      summary.failed += 1;
+      continue;
+    }
+
+    try {
+      const streamer = new BookhiveStreamer({
+        pdsUrl,
+        repoDid: user.did,
+        collection: 'buzz.bookhive.book',
+        pageSize,
+        listRecords: opts.listRecords as ListRecordsFn,
+      });
+
+      for await (const item of streamer.iter()) {
+        if (opts.signal?.aborted) {
+          summary.aborted = true;
+          break;
+        }
+        const mapped = bookhiveUserBookToReadingStatus(
+          item.record as unknown as BookhiveUserBookRecord,
+          { userDid: user.did },
+        );
+        const result = importUserBookRecord(db, mapped, {
+          sourceUri: item.uri,
+        });
+        if (result.action === 'inserted') summary.imported += 1;
+        else if (result.action === 'updated') summary.updated += 1;
+        else if (result.action === 'skipped') summary.skipped += 1;
+        else summary.failed += 1;
+        opts.onUserState?.(user.did, item.rkey);
+      }
+    } catch (err) {
+      logger.warn(
+        { did: user.did, err },
+        'bookhive user backfill: failed; continuing to next user',
+      );
+      db.update(schema.bookhiveUserDiscovery)
+        .set({ lastError: (err as Error).message.slice(0, 500) })
+        .where(eq(schema.bookhiveUserDiscovery.did, user.did))
+        .run();
+      summary.failed += 1;
+      continue;
+    }
+  }
+
+  logger.info({ ...summary }, 'bookhive user backfill: complete');
+  return summary;
 }

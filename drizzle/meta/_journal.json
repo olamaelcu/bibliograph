@@ -127,6 +127,20 @@
       "when": 1786800000000,
       "tag": "0017_backfill_reservation",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1786481329042,
+      "tag": "0017_bookhive_user_book_progress",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1786481591013,
+      "tag": "0018_bookhive_user_discovery",
+      "breakpoints": true
     }
   ]
 }

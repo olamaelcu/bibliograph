@@ -4,9 +4,11 @@ import { createTestDb, clearSqliteTables } from '../test-utils/db.js';
 import { schema } from '../db/connection.js';
 import {
   catalogBookToBookData,
+  bookhiveUserBookToReadingStatus,
   type BookhiveCatalogRecord,
+  type BookhiveUserBookRecord,
 } from './mapper.js';
-import { importBookhiveCatalogBook } from './importer.js';
+import { importBookhiveCatalogBook, importUserBookRecord } from './importer.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
 import { generateRkey } from '../rkey.js';
 
@@ -163,5 +165,118 @@ describe('importBookhiveCatalogBook', () => {
     const row = db.select().from(schema.books).where(eq(schema.books.uri, mapped.uri)).get();
     const types = (row!.identifiers as Array<{ type: string; value: string }>).map((i) => i.type).sort();
     expect(types).toEqual(['goodreadsId', 'hiveId', 'isbn10', 'isbn13']);
+  });
+});
+
+describe('importUserBookRecord', () => {
+  const USER_DID = 'did:plc:reader1';
+
+  function seedCatalogBook(hiveId: string = 'M5fR8aBcDeFgHiJkLmNoP'): string {
+    const rec = baseRecord();
+    rec.id = hiveId;
+    rec.identifiers = { isbn13: `97804411727${hiveId.slice(-2)}`, isbn10: undefined as never, goodreadsId: undefined as never };
+    const mapped = catalogBookToBookData(rec, { serviceDid: SERVICE_DID });
+    importBookhiveCatalogBook(db, mapped);
+    return mapped.uri;
+  }
+
+  const userBookRecord = (): BookhiveUserBookRecord => ({
+    $type: 'buzz.bookhive.book',
+    title: 'Dune',
+    authors: 'Frank Herbert',
+    hiveId: 'M5fR8aBcDeFgHiJkLmNoP',
+    status: 'buzz.bookhive.defs#finished',
+    stars: 8,
+    review: 'A masterpiece of worldbuilding.',
+    bookProgress: { percent: 100, currentPage: 412, totalPages: 412, updatedAt: '2026-02-20T18:30:00.000Z' },
+    startedAt: '2026-01-10T00:00:00.000Z',
+    finishedAt: '2026-02-20T18:30:00.000Z',
+    createdAt: '2026-01-10T00:00:00.000Z',
+  });
+
+  const SOURCE_URI =
+    'at://did:plc:reader1/buzz.bookhive.book/3jx5fabc7defghj';
+
+  it('inserts a reading_statuses row for a known book, with review mirror', async () => {
+    const bookUri = seedCatalogBook();
+    const mapped = bookhiveUserBookToReadingStatus(userBookRecord(), { userDid: USER_DID });
+
+    const result = importUserBookRecord(db, mapped, { sourceUri: SOURCE_URI });
+    expect(result.action).toBe('inserted');
+
+    const statuses = db.select().from(schema.readingStatuses).all();
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0].did).toBe(USER_DID);
+    expect(statuses[0].bookUri).toBe(bookUri);
+    expect(statuses[0].status).toBe('read');
+    expect(statuses[0].rating).toBe(4);
+    expect(statuses[0].progress).toBe(100);
+    expect(statuses[0].startedAt).toBe('2026-01-10T00:00:00.000Z');
+    expect(statuses[0].finishedAt).toBe('2026-02-20T18:30:00.000Z');
+    expect(statuses[0].bookProgress).toEqual({
+      percent: 100,
+      currentPage: 412,
+      totalPages: 412,
+      updatedAt: '2026-02-20T18:30:00.000Z',
+    });
+
+    const reviews = db.select().from(schema.reviews).all();
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].bookUri).toBe(bookUri);
+    expect(reviews[0].did).toBe(USER_DID);
+    expect(reviews[0].text).toBe('A masterpiece of worldbuilding.');
+    expect(reviews[0].rating).toBe(4);
+  });
+
+  it('skips when the book is not known to Bibliograph', async () => {
+    const rec = userBookRecord();
+    rec.hiveId = 'UNKNOWNHIVEID01';
+    const mapped = bookhiveUserBookToReadingStatus(rec, { userDid: USER_DID });
+
+    const result = importUserBookRecord(db, mapped, { sourceUri: SOURCE_URI });
+    expect(result.action).toBe('skipped');
+    expect(db.select().from(schema.readingStatuses).all()).toHaveLength(0);
+    expect(db.select().from(schema.reviews).all()).toHaveLength(0);
+  });
+
+  it('updates in place when the same user re-imports the same book', async () => {
+    seedCatalogBook();
+    const first = bookhiveUserBookToReadingStatus(userBookRecord(), { userDid: USER_DID });
+    importUserBookRecord(db, first, { sourceUri: SOURCE_URI });
+
+    const rec = userBookRecord();
+    rec.status = 'buzz.bookhive.defs#reading';
+    rec.stars = 5;
+    rec.review = 'Re-reading for the fourth time.';
+    rec.bookProgress = { percent: 42, currentPage: 173, totalPages: 412, updatedAt: '2026-01-15T00:00:00.000Z' };
+    const second = bookhiveUserBookToReadingStatus(rec, { userDid: USER_DID });
+
+    const result = importUserBookRecord(db, second, { sourceUri: SOURCE_URI });
+    expect(result.action).toBe('updated');
+
+    const statuses = db.select().from(schema.readingStatuses).all();
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0].status).toBe('reading');
+    expect(statuses[0].rating).toBe(3);
+    expect(statuses[0].progress).toBe(42);
+
+    const reviews = db.select().from(schema.reviews).all();
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].text).toBe('Re-reading for the fourth time.');
+  });
+
+  it('creates a deterministic status uri from the source uri', async () => {
+    seedCatalogBook();
+    const mapped = bookhiveUserBookToReadingStatus(userBookRecord(), { userDid: USER_DID });
+    importUserBookRecord(db, mapped, { sourceUri: SOURCE_URI });
+
+    const status = db.select().from(schema.readingStatuses).get();
+    expect(status!.uri).toMatch(/^at:\/\/[^/]+\/community\.lexicon\.book\.status\/[a-z0-9]{13}$/);
+
+    // re-import with same source uri lands on the same row
+    const mapped2 = bookhiveUserBookToReadingStatus(userBookRecord(), { userDid: USER_DID });
+    const result = importUserBookRecord(db, mapped2, { sourceUri: SOURCE_URI });
+    expect(result.action).toBe('updated');
+    expect(db.select().from(schema.readingStatuses).all()).toHaveLength(1);
   });
 });

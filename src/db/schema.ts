@@ -15,6 +15,15 @@ import type { Cover } from '../cover-types.js';
 
 type Identifier = { type: string; value: string };
 
+type BookProgress = {
+  percent?: number;
+  currentPage?: number;
+  totalPages?: number;
+  currentChapter?: number;
+  totalChapters?: number;
+  updatedAt?: string;
+};
+
 // ─── Books ───────────────────────────────────────────────────────────────────
 
 export const books = sqliteTable(
@@ -153,6 +162,7 @@ export const readingStatuses = sqliteTable(
     bookTitle: text('book_title').notNull(),
     bookAuthor: text('book_author').notNull(),
     identifiers: text({ mode: 'json' }).$type<Identifier[]>().default(sql`'[]'`),
+    bookProgress: text({ mode: 'json' }).$type<BookProgress>(),
     startedAt: text(),
     finishedAt: text(),
     createdAt: text()
@@ -417,3 +427,21 @@ export const bookContributors = sqliteTable(
 
 export type BookContributor = typeof bookContributors.$inferSelect;
 export type NewBookContributor = typeof bookContributors.$inferInsert;
+
+// ─── Bookhive user discovery ────────────────────────────────────────────────
+
+/**
+ * Users discovered from @bookhive.buzz's `buzz.bookhive.activity` feed.
+ * Each row is a user whose reading statuses we intend to backfill.
+ */
+export const bookhiveUserDiscovery = sqliteTable('bookhive_user_discovery', {
+  did: text().primaryKey(),
+  handle: text(),
+  firstSeenActivityAt: text('first_seen_activity_at').notNull(),
+  lastSeenAt: text('last_seen_at').notNull(),
+  bookCountDiscovered: integer('book_count_discovered').notNull().default(0),
+  lastError: text('last_error'),
+});
+
+export type BookhiveUserDiscovery = typeof bookhiveUserDiscovery.$inferSelect;
+export type NewBookhiveUserDiscovery = typeof bookhiveUserDiscovery.$inferInsert;

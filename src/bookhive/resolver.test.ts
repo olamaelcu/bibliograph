@@ -102,4 +102,43 @@ describe('BookhiveResolver', () => {
     expect(dnsCalls).toBe(1);
     expect(didCalls).toBe(1);
   });
+
+  it('resolvePds resolves an arbitrary did:plc user to its PDS', async () => {
+    const resolver = createBookhiveResolver({
+      fetchDidDoc: async (did) => {
+        expect(did).toBe('did:plc:reader123');
+        return { pds: 'https://reader.pds.example' };
+      },
+    });
+    const pds = await resolver.resolvePds('did:plc:reader123');
+    expect(pds).toBe('https://reader.pds.example');
+  });
+
+  it('resolvePds resolves did:web users via well-known document', async () => {
+    const resolver = createBookhiveResolver({
+      fetchDidDoc: async (did) => {
+        expect(did).toBe('did:web:reader.example');
+        return { pds: 'https://reader.example/pds' };
+      },
+    });
+    const pds = await resolver.resolvePds('did:web:reader.example');
+    expect(pds).toBe('https://reader.example/pds');
+  });
+
+  it('resolvePds caches per-DID results', async () => {
+    let calls = 0;
+    const resolver = createBookhiveResolver(
+      {
+        fetchDidDoc: async () => {
+          calls++;
+          return { pds: 'https://reader.pds.example' };
+        },
+      },
+      { cacheTtlMs: 60_000 },
+    );
+    await resolver.resolvePds('did:plc:reader123');
+    await resolver.resolvePds('did:plc:reader123');
+    await resolver.resolvePds('did:plc:reader123');
+    expect(calls).toBe(1);
+  });
 });

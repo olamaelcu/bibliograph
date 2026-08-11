@@ -21,6 +21,7 @@ const STATE_NAME = 'bookhive_catalog';
 const STATE_PATH_DEFAULT = resolve(process.env.BOOKHIVE_STATE_PATH ?? 'data/bookhive');
 
 interface ParsedCli {
+  command: 'catalog' | 'activity' | 'users';
   reset: boolean;
   batchSize?: number;
   pageSize?: number;
@@ -29,7 +30,12 @@ interface ParsedCli {
 }
 
 function parseArgs(argv: string[]): ParsedCli {
-  const parsed: ParsedCli = { reset: false, force: false, dryRun: false };
+  const nonFlags = argv.filter((a) => !a.startsWith('--'));
+  const command = (nonFlags[0] as ParsedCli['command']) ?? 'catalog';
+  if (command !== 'catalog' && command !== 'activity' && command !== 'users') {
+    throw new Error(`unknown bookhive command: ${command} (expected catalog | activity | users)`);
+  }
+  const parsed: ParsedCli = { command, reset: false, force: false, dryRun: false };
   for (const arg of argv) {
     if (arg === '--reset') parsed.reset = true;
     else if (arg === '--force') parsed.force = true;
@@ -95,19 +101,8 @@ function clearStaleLockIfNeeded(lockPath: string): void {
   } catch {}
 }
 
-async function main(): Promise<void> {
+async function runCatalog(): Promise<void> {
   const cli = parseArgs(process.argv.slice(2));
-
-  if (!existsSync(STATE_PATH_DEFAULT)) mkdirSync(STATE_PATH_DEFAULT, { recursive: true });
-  const lockPath = resolve(STATE_PATH_DEFAULT, '.import.lock');
-  clearStaleLockIfNeeded(lockPath);
-  if (!acquireLock(lockPath, cli.force)) {
-    process.exit(0);
-  }
-  process.on('exit', () => {
-    try { unlinkSync(lockPath); } catch {}
-  });
-
   const state = new BookhiveCatalogState(db, STATE_NAME);
   if (cli.reset) {
     state.clear();
@@ -152,6 +147,51 @@ async function main(): Promise<void> {
     logger.warn({ summary }, 'bookhive:catalog aborted; checkpoint preserved');
   } else {
     logger.info({ summary }, 'bookhive:catalog finished');
+  }
+}
+
+async function runActivity(): Promise<void> {
+  const { BookhiveActivityEnumerator } = await import('./activity.js');
+  const resolver = createBookhiveResolver();
+  const { catalogDid } = await resolver.resolveCatalog();
+  const enumerator = new BookhiveActivityEnumerator(db, { catalogDid });
+  const result = await enumerator.enumerate();
+  logger.info({ result }, 'bookhive:activity finished');
+}
+
+async function runUsers(): Promise<void> {
+  const { runUserBackfill } = await import('./index.js');
+  const resolver = createBookhiveResolver();
+  const summary = await runUserBackfill(db, {
+    pdsUrlForDid: (did) => resolver.resolvePds(did),
+    pageSize: parseArgs(process.argv.slice(2)).pageSize,
+  });
+  logger.info({ summary }, 'bookhive:users finished');
+}
+
+async function main(): Promise<void> {
+  const cli = parseArgs(process.argv.slice(2));
+
+  if (!existsSync(STATE_PATH_DEFAULT)) mkdirSync(STATE_PATH_DEFAULT, { recursive: true });
+  const lockPath = resolve(STATE_PATH_DEFAULT, '.import.lock');
+  clearStaleLockIfNeeded(lockPath);
+  if (!acquireLock(lockPath, cli.force)) {
+    process.exit(0);
+  }
+  process.on('exit', () => {
+    try { unlinkSync(lockPath); } catch {}
+  });
+
+  switch (cli.command) {
+    case 'catalog':
+      await runCatalog();
+      break;
+    case 'activity':
+      await runActivity();
+      break;
+    case 'users':
+      await runUsers();
+      break;
   }
 }
 

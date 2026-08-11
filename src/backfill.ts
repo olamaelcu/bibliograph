@@ -58,7 +58,7 @@ function readIsbns(path: string | undefined): string[] {
 async function main(): Promise<void> {
   const [cmd] = process.argv.slice(2);
   if (!cmd) {
-    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | openlibrary:dump [flags] | googlebooks [isbns.txt|-] | googlebooks:author <authorName> | bookhive:catalog [flags]');
+    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | openlibrary:dump [flags] | googlebooks [isbns.txt|-] | googlebooks:author <authorName> | bookhive:catalog | bookhive:activity | bookhive:users');
     process.exit(1);
   }
   if (cmd === 'tap') {
@@ -151,6 +151,22 @@ async function main(): Promise<void> {
       batchSize,
     });
     logger.info({ summary }, 'bookhive:catalog finished');
+  } else if (cmd === 'bookhive:activity') {
+    const { BookhiveActivityEnumerator } = await import('./bookhive/activity.js');
+    const { createBookhiveResolver } = await import('./bookhive/resolver.js');
+    const resolver = createBookhiveResolver();
+    const { catalogDid } = await resolver.resolveCatalog();
+    const enumerator = new BookhiveActivityEnumerator(db, { catalogDid });
+    const result = await enumerator.enumerate();
+    logger.info({ result }, 'bookhive:activity finished');
+  } else if (cmd === 'bookhive:users') {
+    const { runUserBackfill } = await import('./bookhive/index.js');
+    const { createBookhiveResolver } = await import('./bookhive/resolver.js');
+    const resolver = createBookhiveResolver();
+    const summary = await runUserBackfill(db, {
+      pdsUrlForDid: (did) => resolver.resolvePds(did),
+    });
+    logger.info({ summary }, 'bookhive:users finished');
   } else {
     console.error(`unknown command: ${cmd}`);
     process.exit(1);

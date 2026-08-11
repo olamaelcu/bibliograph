@@ -37,6 +37,16 @@
       "concurrency_policy": "forbid"
     },
     {
+      "command": "npm run bookhive:activity",
+      "schedule": "0 5 1 * *",
+      "concurrency_policy": "forbid"
+    },
+    {
+      "command": "npm run bookhive:users",
+      "schedule": "0 6 1 * *",
+      "concurrency_policy": "forbid"
+    },
+    {
       "command": "tsx src/cover-worker.ts",
       "schedule": "0 */4 * * *",
       "concurrency_policy": "forbid"

@@ -102,6 +102,9 @@ export async function handleRecordEvent(evt: TapRecordEvent): Promise<void> {
     case 'buzz.bookhive.catalogBook':
       await indexBookhiveCatalogBook(uri, evt.did, record, evt.action);
       break;
+    case 'buzz.bookhive.book':
+      await indexBookhiveUserBook(uri, evt.did, record, evt.action);
+      break;
   }
 }
 
@@ -151,6 +154,9 @@ async function handleDelete(collection: string, uri: string): Promise<void> {
         .run();
       break;
     }
+    case 'buzz.bookhive.book':
+      await deleteBookhiveUserBook(uri);
+      break;
   }
 }
 
@@ -169,6 +175,30 @@ async function indexBookhiveCatalogBook(
     { uri, action: result.action, hiveId: mapped.hiveId, bibliographUri: mapped.uri },
     'bookhive catalogBook indexed',
   );
+}
+
+async function indexBookhiveUserBook(
+  uri: string,
+  did: string,
+  record: Record<string, unknown>,
+  action: string,
+): Promise<void> {
+  void action;
+  const { bookhiveUserBookToReadingStatus } = await import('./bookhive/mapper.js');
+  const { importUserBookRecord } = await import('./bookhive/importer.js');
+  const mapped = bookhiveUserBookToReadingStatus(record as never, { userDid: did });
+  const result = importUserBookRecord(db, mapped, { sourceUri: uri });
+  logger.info(
+    { uri, userDid: did, action: result.action, hiveId: mapped.hiveId, status: mapped.status },
+    'bookhive user book indexed',
+  );
+}
+
+async function deleteBookhiveUserBook(uri: string): Promise<void> {
+  const { deleteUserBookRecord } = await import('./bookhive/importer.js');
+  // Deterministic status/review uris are derived from the source uri alone, so
+  // the DID isn't needed at delete time.
+  deleteUserBookRecord(db, { sourceUri: uri, userDid: '' });
 }
 
 interface BookContributorInline {

@@ -3,7 +3,9 @@ import { eq } from 'drizzle-orm';
 import { createTestDb, clearSqliteTables } from '../test-utils/db.js';
 import { schema } from '../db/connection.js';
 import { BookhiveCatalogState } from './state.js';
-import { runCatalogImport } from './index.js';
+import { runCatalogImport, runUserBackfill } from './index.js';
+import { catalogBookToBookData } from './mapper.js';
+import { importBookhiveCatalogBook } from './importer.js';
 import type { ListRecordsFn, ListRecordsResponse } from './streamer.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
 import { generateRkey } from '../rkey.js';
@@ -278,5 +280,143 @@ describe('runCatalogImport', () => {
     });
 
     expect(summary.imported).toBe(24); // 25 - 1 already-imported hiveId
+  });
+});
+
+describe('runUserBackfill', () => {
+  const USER_DID = 'did:plc:reader1';
+
+  function seedCatalogBook(hiveId: string, isbn: string): string {
+    const rec = {
+      $type: 'buzz.bookhive.catalogBook',
+      id: hiveId,
+      title: 'Dune',
+      authors: 'Frank Herbert',
+      identifiers: { isbn13: isbn },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    const mapped = catalogBookToBookData(rec, { serviceDid: SERVICE_DID });
+    importBookhiveCatalogBook(db, mapped);
+    return mapped.uri;
+  }
+
+  beforeEach(() => {
+    clearSqliteTables((db as any).$sqlite);
+    seedAuthorRole();
+  });
+
+  it('backfills each discovered user through importUserBookRecord', async () => {
+    const bookUri = seedCatalogBook('hive-DUNE01', '9780441172719');
+
+    db.insert(schema.bookhiveUserDiscovery)
+      .values({
+        did: USER_DID,
+        handle: 'reader1.bsky.social',
+        firstSeenActivityAt: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+        bookCountDiscovered: 1,
+      })
+      .run();
+
+    const listRecords: ListRecordsFn = async (opts) => {
+      expect(opts.repo).toBe(USER_DID);
+      expect(opts.collection).toBe('buzz.bookhive.book');
+      return {
+        records: [
+          {
+            uri: `at://${USER_DID}/buzz.bookhive.book/3jx5f`,
+            cid: 'cid-1',
+            value: {
+              $type: 'buzz.bookhive.book',
+              title: 'Dune',
+              authors: 'Frank Herbert',
+              hiveId: 'hive-DUNE01',
+              status: 'buzz.bookhive.defs#finished',
+              stars: 8,
+              review: 'A desert planet.',
+              createdAt: '2026-01-10T00:00:00.000Z',
+            },
+          },
+        ],
+        cursor: undefined,
+      };
+    };
+
+    const summary = await runUserBackfill(db, {
+      listRecords,
+      pdsUrlForDid: async (did) => `https://pds.${did.slice(-6)}.example`,
+      onUserState: () => {},
+    });
+
+    expect(summary.usersProcessed).toBe(1);
+    expect(summary.imported).toBe(1);
+
+    const statuses = db.select().from(schema.readingStatuses).all();
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0].did).toBe(USER_DID);
+    expect(statuses[0].bookUri).toBe(bookUri);
+    expect(statuses[0].status).toBe('read');
+
+    const reviews = db.select().from(schema.reviews).all();
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0].text).toBe('A desert planet.');
+  });
+
+  it('continues to the next user when one user errors', async () => {
+    seedCatalogBook('hive-DUNE01', '9780441172719');
+    seedCatalogBook('hive-DUNE02', '9780441172726');
+
+    db.insert(schema.bookhiveUserDiscovery)
+      .values([
+        {
+          did: 'did:plc:reader-broken',
+          handle: null,
+          firstSeenActivityAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          bookCountDiscovered: 0,
+        },
+        {
+          did: USER_DID,
+          handle: 'reader1.bsky.social',
+          firstSeenActivityAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          bookCountDiscovered: 1,
+        },
+      ])
+      .run();
+
+    const listRecords: ListRecordsFn = async (opts) => {
+      if (opts.repo === 'did:plc:reader-broken') {
+        throw new Error('PDS unreachable');
+      }
+      return {
+        records: [
+          {
+            uri: `at://${opts.repo}/buzz.bookhive.book/3jx5f`,
+            cid: 'cid-1',
+            value: {
+              $type: 'buzz.bookhive.book',
+              title: 'Dune',
+              authors: 'Frank Herbert',
+              hiveId: 'hive-DUNE02',
+              status: 'buzz.bookhive.defs#reading',
+              createdAt: '2026-01-10T00:00:00.000Z',
+            },
+          },
+        ],
+        cursor: undefined,
+      };
+    };
+
+    const summary = await runUserBackfill(db, {
+      listRecords,
+      pdsUrlForDid: async (did) => `https://pds.${did}.example`,
+      onUserState: () => {},
+    });
+
+    expect(summary.usersProcessed).toBe(2);
+    expect(summary.failed).toBe(1);
+    expect(summary.imported).toBe(1);
   });
 });

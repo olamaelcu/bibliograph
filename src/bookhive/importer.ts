@@ -1,5 +1,5 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { eq, sql, like } from 'drizzle-orm';
+import { eq, sql, and } from 'drizzle-orm';
 import { encode } from '@atcute/cbor';
 import { fromDigest, CODEC_DCBOR, toString as cidToString } from '@atcute/cid';
 import { createHash } from 'node:crypto';
@@ -7,8 +7,132 @@ import * as schema from '../db/schema.js';
 import { computeDeduplicationHash } from '../dedup.js';
 import { generateRkey } from '../rkey.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
-import type { BookhiveMappedBook } from './mapper.js';
+import type { BookhiveMappedBook, MappedUserBookStatus } from './mapper.js';
+import { contentRkey } from './mapper.js';
 import { logger } from '../logger.js';
+
+export interface UserBookImportResult {
+  action: 'inserted' | 'updated' | 'skipped' | 'failed';
+}
+
+export function findBookByHiveId(
+  db: BetterSQLite3Database<typeof schema>,
+  hiveId: string,
+): string | null {
+  const row = db
+    .select({ uri: schema.books.uri })
+    .from(schema.books)
+    .where(
+      sql`EXISTS (SELECT 1 FROM json_each(${schema.books.identifiers}) je WHERE json_extract(je.value, '$.type') = 'hiveId' AND json_extract(je.value, '$.value') = ${hiveId})`,
+    )
+    .get();
+  return row?.uri ?? null;
+}
+
+function deterministicUri(collection: string, sourceUri: string): string {
+  return makeRecordUri(getServiceDid(), collection, contentRkey(sourceUri));
+}
+
+/**
+ * Mirror a user's BookHive book record into reading_statuses (+ reviews when the
+ * record carries review prose). Shared by the live Tap path and the per-user
+ * backfill. Unknown books (catalog not yet imported) are skipped with a warn.
+ */
+export function importUserBookRecord(
+  db: BetterSQLite3Database<typeof schema>,
+  mapped: MappedUserBookStatus,
+  opts: { sourceUri: string },
+): UserBookImportResult {
+  if (!mapped.hiveId) return { action: 'skipped' };
+  const bookUri = findBookByHiveId(db, mapped.hiveId);
+  if (!bookUri) {
+    logger.warn(
+      { hiveId: mapped.hiveId, userDid: mapped.userDid },
+      'bookhive user book: unknown hiveId, skipping (catalog not imported yet)',
+    );
+    return { action: 'skipped' };
+  }
+
+  try {
+    return db.transaction((tx) => {
+      const now = new Date().toISOString();
+      const statusUri = deterministicUri(COLLECTIONS.status, opts.sourceUri);
+
+      const statusData = {
+        uri: statusUri,
+        did: mapped.userDid,
+        bookUri,
+        status: mapped.status ?? 'to-read',
+        progress: mapped.progress,
+        rating: mapped.rating,
+        bookTitle: mapped.title,
+        bookAuthor: mapped.author,
+        identifiers: mapped.identifiers,
+        bookProgress: mapped.bookProgress,
+        startedAt: mapped.startedAt,
+        finishedAt: mapped.finishedAt,
+        createdAt: now,
+      };
+
+      const existing = tx
+        .select()
+        .from(schema.readingStatuses)
+        .where(and(eq(schema.readingStatuses.did, mapped.userDid), eq(schema.readingStatuses.bookUri, bookUri)))
+        .get();
+
+      let action: 'inserted' | 'updated';
+      if (existing) {
+        const { uri, ...rest } = statusData;
+        void uri;
+        tx.update(schema.readingStatuses)
+          .set({ ...rest, createdAt: existing.createdAt })
+          .where(eq(schema.readingStatuses.uri, existing.uri))
+          .run();
+        action = 'updated';
+      } else {
+        tx.insert(schema.readingStatuses).values(statusData).run();
+        action = 'inserted';
+      }
+
+      if (mapped.review && mapped.review.trim()) {
+        const reviewUri = deterministicUri(COLLECTIONS.review, opts.sourceUri);
+        const reviewData = {
+          uri: reviewUri,
+          did: mapped.userDid,
+          bookUri,
+          text: mapped.review,
+          rating: mapped.rating,
+          bookTitle: mapped.title,
+          bookAuthor: mapped.author,
+          createdAt: now,
+        };
+        tx.insert(schema.reviews)
+          .values(reviewData)
+          .onConflictDoUpdate({ target: schema.reviews.uri, set: reviewData })
+          .run();
+      }
+
+      return { action };
+    });
+  } catch (err) {
+    logger.error({ err, sourceUri: opts.sourceUri }, 'bookhive user book: import failed');
+    return { action: 'failed' };
+  }
+}
+
+/**
+ * Remove the mirrored reading_statuses (+ review) rows for a deleted
+ * buzz.bookhive.book record.
+ */
+export function deleteUserBookRecord(
+  db: BetterSQLite3Database<typeof schema>,
+  opts: { sourceUri: string; userDid: string },
+): void {
+  const statusUri = deterministicUri(COLLECTIONS.status, opts.sourceUri);
+  db.delete(schema.readingStatuses).where(eq(schema.readingStatuses.uri, statusUri)).run();
+  const reviewUri = deterministicUri(COLLECTIONS.review, opts.sourceUri);
+  db.delete(schema.reviews).where(eq(schema.reviews.uri, reviewUri)).run();
+}
 
 function getServiceDid(): string {
   return process.env.ATP_SERVICE_DID || 'did:web:localhost';

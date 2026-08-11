@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { catalogBookToBookData, type BookhiveCatalogRecord } from './mapper.js';
+import {
+  catalogBookToBookData,
+  bookhiveUserBookToReadingStatus,
+  bookhiveUserBookToReview,
+  type BookhiveCatalogRecord,
+  type BookhiveUserBookRecord,
+} from './mapper.js';
 
 const baseRecord = (): BookhiveCatalogRecord => ({
   $type: 'buzz.bookhive.catalogBook',
@@ -131,5 +137,140 @@ describe('catalogBookToBookData', () => {
     expect(out.identifiers.find((i) => i.type === 'hiveBookUri')!.value).toBe(
       'at://did:plc:enu2j5xjlqsjaylv3du4myh4/buzz.bookhive.catalogBook/3jabc',
     );
+  });
+});
+
+const baseUserBookRecord = (): BookhiveUserBookRecord => ({
+  $type: 'buzz.bookhive.book',
+  title: 'Dune',
+  authors: 'Frank Herbert',
+  hiveId: 'M5fR8aBcDeFgHiJkLmNoP',
+  hiveBookUri: 'at://did:plc:enu2j5xjlqsjaylv3du4myh4/buzz.bookhive.catalogBook/bk_abc',
+  status: 'buzz.bookhive.defs#finished',
+  stars: 8,
+  review: 'A masterpiece of worldbuilding.',
+  bookProgress: {
+    percent: 100,
+    currentPage: 412,
+    totalPages: 412,
+    updatedAt: '2026-02-20T18:30:00.000Z',
+  },
+  startedAt: '2026-01-10T00:00:00.000Z',
+  finishedAt: '2026-02-20T18:30:00.000Z',
+  identifiers: {
+    isbn13: '9780441172719',
+    isbn10: '0441172717',
+    goodreadsId: '17347618',
+  },
+  createdAt: '2026-01-10T00:00:00.000Z',
+});
+
+describe('bookhiveUserBookToReadingStatus', () => {
+  it('maps a fully-populated record', () => {
+    const out = bookhiveUserBookToReadingStatus(baseUserBookRecord(), {
+      userDid: 'did:plc:user1',
+    });
+    expect(out.title).toBe('Dune');
+    expect(out.author).toBe('Frank Herbert');
+    expect(out.hiveId).toBe('M5fR8aBcDeFgHiJkLmNoP');
+    expect(out.status).toBe('read');
+    expect(out.rating).toBe(4);
+    expect(out.progress).toBe(100);
+    expect(out.startedAt).toBe('2026-01-10T00:00:00.000Z');
+    expect(out.finishedAt).toBe('2026-02-20T18:30:00.000Z');
+    expect(out.review).toBe('A masterpiece of worldbuilding.');
+    expect(out.userDid).toBe('did:plc:user1');
+    expect(out.bookProgress).toEqual({
+      percent: 100,
+      currentPage: 412,
+      totalPages: 412,
+      updatedAt: '2026-02-20T18:30:00.000Z',
+    });
+    expect(out.identifiers).toEqual([
+      { type: 'hiveId', value: 'M5fR8aBcDeFgHiJkLmNoP' },
+      { type: 'isbn13', value: '9780441172719' },
+      { type: 'isbn10', value: '0441172717' },
+      { type: 'goodreadsId', value: '17347618' },
+    ]);
+  });
+
+  it('translates each BookHive status token to Bibliograph status', () => {
+    const cases: Array<[string, string]> = [
+      ['buzz.bookhive.defs#finished', 'read'],
+      ['buzz.bookhive.defs#reading', 'reading'],
+      ['buzz.bookhive.defs#wantToRead', 'to-read'],
+      ['buzz.bookhive.defs#abandoned', 'abandoned'],
+    ];
+    for (const [bookhive, bibliograph] of cases) {
+      const rec = baseUserBookRecord();
+      rec.status = bookhive;
+      const out = bookhiveUserBookToReadingStatus(rec, { userDid: 'did:plc:u' });
+      expect(out.status).toBe(bibliograph);
+    }
+  });
+
+  it('defaults to null status for unknown token', () => {
+    const rec = baseUserBookRecord();
+    rec.status = 'buzz.bookhive.defs#nonsense';
+    const out = bookhiveUserBookToReadingStatus(rec, { userDid: 'did:plc:u' });
+    expect(out.status).toBeNull();
+  });
+
+  it('scales 1-10 stars to 1-5 rating (rounds)', () => {
+    for (const [stars, rating] of [
+      [1, 1],
+      [3, 2],
+      [5, 3],
+      [8, 4],
+      [10, 5],
+    ] as Array<[number, number]>) {
+      const rec = baseUserBookRecord();
+      rec.stars = stars;
+      const out = bookhiveUserBookToReadingStatus(rec, { userDid: 'did:plc:u' });
+      expect(out.rating).toBe(rating);
+    }
+  });
+
+  it('leaves rating null when stars is absent', () => {
+    const rec = baseUserBookRecord();
+    rec.stars = undefined;
+    const out = bookhiveUserBookToReadingStatus(rec, { userDid: 'did:plc:u' });
+    expect(out.rating).toBeNull();
+  });
+
+  it('handles missing bookProgress', () => {
+    const rec = baseUserBookRecord();
+    rec.bookProgress = undefined;
+    const out = bookhiveUserBookToReadingStatus(rec, { userDid: 'did:plc:u' });
+    expect(out.progress).toBeNull();
+    expect(out.bookProgress).toBeNull();
+  });
+
+  it('joins tab-separated authors for bookAuthor', () => {
+    const rec = baseUserBookRecord();
+    rec.authors = 'Alice	Bob';
+    const out = bookhiveUserBookToReadingStatus(rec, { userDid: 'did:plc:u' });
+    expect(out.author).toBe('Alice, Bob');
+  });
+});
+
+describe('bookhiveUserBookToReview', () => {
+  it('maps a record with review text and stars', () => {
+    const out = bookhiveUserBookToReview(baseUserBookRecord(), {
+      userDid: 'did:plc:user1',
+    });
+    expect(out).not.toBeNull();
+    expect(out!.userDid).toBe('did:plc:user1');
+    expect(out!.title).toBe('Dune');
+    expect(out!.author).toBe('Frank Herbert');
+    expect(out!.text).toBe('A masterpiece of worldbuilding.');
+    expect(out!.rating).toBe(4);
+  });
+
+  it('returns null when there is no review text', () => {
+    const rec = baseUserBookRecord();
+    rec.review = undefined;
+    const out = bookhiveUserBookToReview(rec, { userDid: 'did:plc:u' });
+    expect(out).toBeNull();
   });
 });

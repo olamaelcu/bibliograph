@@ -222,6 +222,37 @@ philosophy. Live updates to BookHive catalog records are streamed via Tap
 when the operator adds `buzz.bookhive.catalogBook` to the `--collection-filters`
 list (see *Connecting Tap* below).
 
+## Bookhive user reading statuses
+
+Bibliograph also mirrors BookHive users' `buzz.bookhive.book` records — the
+per-user reading statuses (reading/read/to-read/abandoned), 1–10 star ratings
+(scaled to 1–5), review prose, and `bookProgress` — into the existing
+`community.lexicon.book.status` and `community.lexicon.book.review` tables.
+
+Users are discovered from two on-protocol sources:
+
+1. `@bookhive.buzz`'s `buzz.bookhive.activity` feed (each record names the
+   `userDid` who started/finished/rated a book), and
+2. the `@bookhive.buzz` repo's own `buzz.bookhive.book` records (the service
+   account's library is itself a backfill source).
+
+```bash
+# enumerate users into bookhive_user_discovery
+npm run bookhive:activity
+
+# backfill each discovered user's reading statuses
+npm run bookhive:users
+
+# full pipeline is reachable through the dispatcher too
+npx tsx src/backfill.ts bookhive:activity
+npx tsx src/backfill.ts bookhive:users
+```
+
+Records whose `hiveId` hasn't been imported into `books` yet (catalog backfill
+lag) are skipped with a warn — they resolve on a later run once the catalog
+catches up. Live `buzz.bookhive.book` events stream through Tap when the
+operator adds `buzz.bookhive.book` to `--collection-filters`.
+
 ## Connecting Tap
 
 Run Tap with the book lexicon signal collection:
@@ -229,14 +260,15 @@ Run Tap with the book lexicon signal collection:
 ```bash
 tap run \
   --signal-collection=community.lexicon.book.book \
-  --collection-filters=community.lexicon.book.*,buzz.bookhive.catalogBook \
+  --collection-filters=community.lexicon.book.*,buzz.bookhive.catalogBook,buzz.bookhive.book \
   --webhook-url=http://localhost:3000/tap/event \
   --admin-password=secret
 ```
 
-The `buzz.bookhive.catalogBook` filter lets Tap stream live catalog updates
-from `@bookhive.buzz` into the Bibliograph index. The bulk backfill above
-is the initial seed; live edits and deletes flow through this webhook.
+The `buzz.bookhive.catalogBook` and `buzz.bookhive.book` filters let Tap
+stream live catalog updates and user reading-status events from
+`@bookhive.buzz` into the Bibliograph index. The bulk backfills above are
+initial seeds; live edits and deletes flow through this webhook.
 
 ## Deploying to Dokku
 

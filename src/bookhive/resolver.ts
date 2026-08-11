@@ -63,14 +63,21 @@ async function defaultFetchDidDoc(did: string): Promise<{ pds: string }> {
   return { pds: pdsService.serviceEndpoint };
 }
 
+export interface BookhiveResolverApi {
+  resolveCatalog: () => Promise<ResolvedCatalog>;
+  /** Resolve an arbitrary user DID to its PDS service URL (did:plc via plc.directory, did:web via well-known). */
+  resolvePds: (did: string) => Promise<string>;
+}
+
 export function createBookhiveResolver(
   deps: BookhiveResolverDeps = {},
   opts: BookhiveResolverOptions = {},
-): { resolveCatalog: () => Promise<ResolvedCatalog> } {
+): BookhiveResolverApi {
   const dnsTxtLookup = deps.dnsTxtLookup ?? defaultDnsTxt;
   const fetchDidDoc = deps.fetchDidDoc ?? defaultFetchDidDoc;
   const ttlMs = opts.cacheTtlMs ?? DEFAULT_TTL_MS;
   let cache: { value: ResolvedCatalog; expires: number } | null = null;
+  const pdsCache = new Map<string, { pds: string; expires: number }>();
 
   async function resolveCatalog(): Promise<ResolvedCatalog> {
     if (cache && cache.expires > Date.now()) {
@@ -113,5 +120,18 @@ export function createBookhiveResolver(
     return cache.value;
   }
 
-  return { resolveCatalog };
+  async function resolvePds(did: string): Promise<string> {
+    if (did === process.env.BOOKHIVE_CATALOG_DID && process.env.BOOKHIVE_PDS_URL) {
+      return process.env.BOOKHIVE_PDS_URL;
+    }
+    const cached = pdsCache.get(did);
+    if (cached && cached.expires > Date.now()) {
+      return cached.pds;
+    }
+    const { pds } = await fetchDidDoc(did);
+    pdsCache.set(did, { pds, expires: Date.now() + ttlMs });
+    return pds;
+  }
+
+  return { resolveCatalog, resolvePds };
 }
