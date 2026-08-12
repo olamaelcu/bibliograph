@@ -32,6 +32,13 @@ describe('parseArgs', () => {
     expect(parseArgs(['--path=/tmp/d']).dumpPath).toBe('/tmp/d');
     expect(parseArgs(['--batch-size=200']).batchSize).toBe(200);
   });
+
+  it('recognizes the hydrate-book-contributors subcommand', () => {
+    expect(parseArgs(['hydrate-book-contributors']).command).toBe('hydrate-book-contributors');
+    expect(parseArgs(['hydrate-book-contributors', '--reset']).command).toBe('hydrate-book-contributors');
+    expect(parseArgs(['hydrate-book-contributors', '--reset']).reset).toBe(true);
+    expect(parseArgs(['hydrate-book-contributors', '--dry-run']).dryRun).toBe(true);
+  });
 });
 
 describe('lockfile', () => {

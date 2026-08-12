@@ -779,7 +779,7 @@ describe('api/get-book', () => {
           books: [
             {
               title: 'Dune',
-              author: 'Frank Herbert',
+              contributors: [{ name: 'Frank Herbert', order: 0 }],
               isbn13: '9780441172719',
               identifiers: { googleBooks: 'gb1' },
               sourceProvider: 'googleBooks',
@@ -828,7 +828,7 @@ describe('api/get-book', () => {
           books: [
             {
               title: 'Dune',
-              author: 'Frank Herbert',
+              contributors: [{ name: 'Frank Herbert', order: 0 }],
               isbn13: '9780441172719',
               identifiers: { googleBooks: 'gb1' },
               sourceProvider: 'googleBooks',

@@ -1,4 +1,4 @@
-import type { BookData, BookProvider } from "./interface.js";
+import type { BookContributor, BookData, BookProvider } from "./interface.js";
 import { BaseBookProvider } from "./base-provider.js";
 import { buildCover, firstCoverVariant, olCoverVariantUrls } from "./cover-variants.js";
 import type { Cover } from "../cover-types.js";
@@ -89,7 +89,7 @@ export class OpenLibraryProvider extends BaseBookProvider implements BookProvide
   }
 
   private mapDocToBookData(doc: Record<string, unknown>): BookData {
-    const authorName = this.extractAuthor(doc);
+    const contributors = this.extractContributors(doc);
 
     const identifiers: Record<string, string> = {};
     const olKey =
@@ -113,7 +113,7 @@ export class OpenLibraryProvider extends BaseBookProvider implements BookProvide
 
     return {
       title: (typeof doc.title === "string" ? doc.title : "") || "Unknown Title",
-      author: authorName,
+      contributors,
       isbn10: this.extractFirstString(
         doc.isbn as string[] | undefined,
       ) ?? this.extractFirstString(doc.isbn_10 as string[] | undefined),
@@ -152,16 +152,38 @@ export class OpenLibraryProvider extends BaseBookProvider implements BookProvide
     return undefined;
   }
 
-  private extractAuthor(doc: Record<string, unknown>): string {
-    const authorName = doc.author_name as string[] | undefined;
-    if (authorName?.[0]) return authorName[0];
+  private extractContributors(doc: Record<string, unknown>): BookContributor[] {
+    const names = (doc.author_name as string[] | undefined) ?? [];
+    const keys = (doc.author_key as string[] | undefined) ?? [];
+    const out: BookContributor[] = [];
+    for (let i = 0; i < names.length; i += 1) {
+      const name = names[i];
+      if (!name) continue;
+      const rawKey = keys[i];
+      const key =
+        typeof rawKey === "string"
+          ? rawKey.startsWith("/")
+            ? rawKey
+            : `/authors/${rawKey}`
+          : undefined;
+      out.push({ name, key, order: out.length });
+    }
+    if (out.length > 0) return out;
 
     const authors = doc.authors as
-      | { name?: string }[]
+      | { key?: string; name?: string }[]
       | undefined;
-    if (authors?.[0]?.name) return authors[0].name;
-
-    return "Unknown";
+    if (authors) {
+      for (const a of authors) {
+        const name = a?.name;
+        if (!name) continue;
+        out.push({ name, key: a.key, order: out.length });
+      }
+    }
+    if (out.length === 0) {
+      return [{ name: "Unknown", order: 0 }];
+    }
+    return out;
   }
 
   private extractDescription(doc: Record<string, unknown>): string | undefined {

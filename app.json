@@ -32,6 +32,11 @@
       "concurrency_policy": "forbid"
     },
     {
+      "command": "npm run dump:authors -- --keep-dump",
+      "schedule": "0 4 1 * *",
+      "concurrency_policy": "forbid"
+    },
+    {
       "command": "npm run bookhive:catalog",
       "schedule": "0 4 1 * *",
       "concurrency_policy": "forbid"

@@ -226,7 +226,7 @@ async function findImportedBookRow(book: BookData) {
     const byIsbn = await db.query.books.findFirst({ where: eq(books.isbn, canonical) });
     if (byIsbn) return byIsbn;
   }
-  const dhash = computeDeduplicationHash(book.title, book.author, book.publishedDate);
+  const dhash = computeDeduplicationHash(book.title, book.contributors[0]?.name ?? '', book.publishedDate);
   if (dhash) {
     const byHash = await db.query.books.findFirst({ where: eq(books.deduplicationHash, dhash) });
     if (byHash) return byHash;
@@ -238,7 +238,7 @@ function providerRecord(book: BookData): Record<string, unknown> {
   return {
     $type: 'community.lexicon.book.book',
     title: book.title,
-    author: book.author,
+    author: book.contributors[0]?.name ?? '',
     isbn: book.isbn13 || book.isbn10,
     publishedDate: book.publishedDate,
     description: book.description,

@@ -1,8 +1,15 @@
 import type { Cover } from '../cover-types.js';
 
+export interface BookContributor {
+  name: string;
+  key?: string;
+  role?: string;
+  order?: number;
+}
+
 export interface BookData {
   title: string;
-  author: string;
+  contributors: BookContributor[];
   isbn10?: string;
   isbn13?: string;
   publishedDate?: string;
@@ -29,3 +36,9 @@ export type Providers = {
   googleBooks?: BookProvider;
   goodreads: BookProvider;
 };
+
+/** First contributor's display name, or '' if BookData has none. Use this
+ *  wherever the legacy denormalized `books.author` TEXT column is populated. */
+export function primaryAuthor(book: BookData): string {
+  return book.contributors[0]?.name ?? '';
+}

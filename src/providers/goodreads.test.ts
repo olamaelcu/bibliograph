@@ -76,7 +76,8 @@ describe('GoodreadsProvider', () => {
       const result = await provider.searchByIsbn('9780553573404');
       expect(result).not.toBeNull();
       expect(result!.title).toBe('A Game of Thrones');
-      expect(result!.author).toBe('George R.R. Martin');
+      expect(result!.contributors[0]?.name).toBe('George R.R. Martin');
+      expect(result!.contributors).toEqual([{ name: 'George R.R. Martin', order: 0 }]);
       expect(result!.pageCount).toBe(807);
       expect(result!.description).toBe('Epic fantasy at its finest.');
       expect(result!.coverUrl).toBe('https://images.gr-assets.com/books/123.jpg');
@@ -292,7 +293,11 @@ describe('GoodreadsProvider', () => {
       const result = await provider.getBookDetails('13496');
       expect(result).not.toBeNull();
       expect(result!.title).toBe('A Game of Thrones');
-      expect(result!.author).toBe('George R.R. Martin, Co-Author');
+      expect(result!.contributors[0]?.name).toBe('George R.R. Martin');
+      expect(result!.contributors).toEqual([
+        { name: 'George R.R. Martin', order: 0 },
+        { name: 'Co-Author', order: 1 },
+      ]);
       expect(result!.isbn10).toBe('0553573403');
       expect(result!.isbn13).toBe('9780553573404');
       expect(result!.publishedDate).toBe('1996');
@@ -314,8 +319,11 @@ describe('GoodreadsProvider', () => {
         text: () => Promise.resolve(html),
       });
       const result = await provider.getBookDetails('13496');
-      expect(result!.author).not.toContain('Some Illustrator');
-      expect(result!.author).toContain('Co-Author');
+      expect(result!.contributors?.map((c) => c.name)).toEqual([
+        'George R.R. Martin',
+        'Co-Author',
+      ]);
+      expect(result!.contributors?.map((c) => c.name)).not.toContain('Some Illustrator');
     });
 
     it('sends browser-like headers and hits /book/show/{id}', async () => {

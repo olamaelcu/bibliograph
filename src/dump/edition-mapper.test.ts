@@ -19,7 +19,10 @@ describe('editionMapper.toBookData', () => {
   it('maps a fully populated record', () => {
     const data = toBookData(baseRecord())!;
     expect(data.title).toBe('Dune');
-    expect(data.author).toBe('Frank Herbert');
+    expect(data.contributors[0]?.name).toBe('Frank Herbert');
+    expect(data.contributors).toEqual([
+      { name: 'Frank Herbert', key: '/authors/OL1A', order: 0 },
+    ]);
     expect(data.isbn13).toBe('9780441172719');
     expect(data.isbn10).toBe('0441172717');
     expect(data.publishedDate).toBe('August 1, 1965');
@@ -45,10 +48,40 @@ describe('editionMapper.toBookData', () => {
     expect(data.isbn10).toBe('0441172717');
   });
 
-  it('defaults author to "Unknown" when authors is missing', () => {
+  it('defaults contributors to a single "Unknown" entry when authors is missing', () => {
     const r = baseRecord();
     delete r.authors;
-    expect(toBookData(r)!.author).toBe('Unknown');
+    const data = toBookData(r)!;
+    expect(data.contributors[0]?.name).toBe('Unknown');
+    expect(data.contributors).toEqual([{ name: 'Unknown', order: 0 }]);
+  });
+
+  it('forwards every author entry preserving order and OL keys', () => {
+    const r = baseRecord();
+    r.authors = [
+      { key: '/authors/OL1A', name: 'Frank Herbert' },
+      { key: '/authors/OL2A', name: 'Brian Herbert' },
+      { key: '/authors/OL3A', name: 'Kevin J. Anderson' },
+    ];
+    const data = toBookData(r)!;
+    expect(data.contributors).toEqual([
+      { name: 'Frank Herbert', key: '/authors/OL1A', order: 0 },
+      { name: 'Brian Herbert', key: '/authors/OL2A', order: 1 },
+      { name: 'Kevin J. Anderson', key: '/authors/OL3A', order: 2 },
+    ]);
+    expect(data.contributors[0]?.name).toBe('Frank Herbert');
+  });
+
+  it('drops author entries whose name is missing but keeps keyed ones', () => {
+    const r = baseRecord();
+    r.authors = [
+      { key: '/authors/OL1A', name: 'Frank Herbert' },
+      { key: '/authors/OL2A' },
+    ];
+    const data = toBookData(r)!;
+    expect(data.contributors).toEqual([
+      { name: 'Frank Herbert', key: '/authors/OL1A', order: 0 },
+    ]);
   });
 
   it('defaults title to "Unknown Title" when title is missing', () => {

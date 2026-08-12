@@ -3,7 +3,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './db/schema.js';
 import { generateRkey } from './rkey.js';
 import { computeDeduplicationHash } from './dedup.js';
-import type { BookData } from './providers/interface.js';
+import { primaryAuthor, type BookData } from './providers/interface.js';
 import { logger } from './logger.js';
 
 export const SERVICE_DID = process.env.ATP_SERVICE_DID || 'did:web:localhost';
@@ -31,7 +31,7 @@ export async function importBookData(
     seen.add(dedupKey);
   }
 
-  const dhash = computeDeduplicationHash(data.title, data.author, data.publishedDate);
+  const dhash = computeDeduplicationHash(data.title, primaryAuthor(data), data.publishedDate);
 
   if (dhash) {
     const hashMatch = await db.query.books.findFirst({
@@ -52,7 +52,7 @@ export async function importBookData(
       uri,
       did: SERVICE_DID,
       title: data.title,
-      author: data.author,
+      author: primaryAuthor(data),
       isbn: canonical,
       publishedDate: data.publishedDate,
       description: data.description,

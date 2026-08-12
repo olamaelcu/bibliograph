@@ -1,5 +1,5 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import type { BookData } from '../providers/interface.js';
+import { primaryAuthor, type BookData } from '../providers/interface.js';
 import type { BackfillSummary } from '../backfill-import.js';
 import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema.js';
@@ -96,7 +96,7 @@ export class BatchedImporter {
       this.seen.add(dedupKey);
     }
 
-    const dhash = computeDeduplicationHash(data.title, data.author, data.publishedDate);
+    const dhash = computeDeduplicationHash(data.title, primaryAuthor(data), data.publishedDate);
     if (dhash) {
       const hashMatch = this.db
         .select({ uri: schema.books.uri })
@@ -115,7 +115,7 @@ export class BatchedImporter {
       if (existing) return 'skipped';
     }
 
-    if (!data.title || !data.author) {
+    if (!data.title || !primaryAuthor(data)) {
       return 'failed';
     }
 
@@ -128,7 +128,7 @@ export class BatchedImporter {
           uri,
           did: SERVICE_DID,
           title: data.title,
-          author: data.author,
+          author: primaryAuthor(data),
           isbn: canonical,
           publishedDate: data.publishedDate,
           description: data.description,

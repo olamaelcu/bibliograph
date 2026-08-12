@@ -1,6 +1,6 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '../db/schema.js';
-import type { BookData } from '../providers/interface.js';
+import { primaryAuthor, type BookData } from '../providers/interface.js';
 import { importBookData } from '../backfill-import.js';
 import { computeDeduplicationHash } from '../dedup.js';
 import { logger } from '../logger.js';
@@ -36,7 +36,7 @@ function isIsbnQuery(q: string): boolean {
 
 function dedupKey(book: BookData): { isbn?: string; hash?: string } {
   const isbn = normalizeIsbn(book.isbn13);
-  const hash = computeDeduplicationHash(book.title, book.author, book.publishedDate);
+  const hash = computeDeduplicationHash(book.title, primaryAuthor(book), book.publishedDate);
   return { isbn, hash };
 }
 

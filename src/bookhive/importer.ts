@@ -154,23 +154,67 @@ interface ContributorRow {
   name: string;
 }
 
-function findOrComputeContributor(
+export interface FindOrComputeContributorOpts {
+  olKey?: string;
+}
+
+export function findOrComputeContributor(
   db: BetterSQLite3Database<typeof schema>,
   name: string,
+  opts?: FindOrComputeContributorOpts,
 ): ContributorRow {
-  const existing = db
+  const olKey = opts?.olKey;
+
+  if (olKey) {
+    const byKey = db
+      .select()
+      .from(schema.contributors)
+      .where(
+        sql`EXISTS (SELECT 1 FROM json_each(${schema.contributors.identifiers}) je WHERE json_extract(je.value, '$.type') = 'openlibrary' AND json_extract(je.value, '$.value') = ${olKey})`,
+      )
+      .get();
+    if (byKey) {
+      const existingIdents = readIdents(byKey.identifiers);
+      const merged = mergeIdentifiers(existingIdents, [{ type: 'openlibrary', value: olKey }]);
+      if (JSON.stringify(merged) !== JSON.stringify(existingIdents)) {
+        db.update(schema.contributors)
+          .set({ identifiers: merged })
+          .where(sql`uri = ${byKey.uri}`)
+          .run();
+      }
+      const cid = recordCid({
+        $type: COLLECTIONS.contributor,
+        name: byKey.name,
+        createdAt: byKey.createdAt,
+      });
+      return { uri: byKey.uri, cid, name: byKey.name };
+    }
+  }
+
+  const byName = db
     .select()
     .from(schema.contributors)
     .where(sql`LOWER(${schema.contributors.name}) = LOWER(${name})`)
     .get();
-  if (existing) {
+  if (byName) {
+    if (olKey) {
+      const existingIdents = readIdents(byName.identifiers);
+      const merged = mergeIdentifiers(existingIdents, [{ type: 'openlibrary', value: olKey }]);
+      if (JSON.stringify(merged) !== JSON.stringify(existingIdents)) {
+        db.update(schema.contributors)
+          .set({ identifiers: merged })
+          .where(sql`uri = ${byName.uri}`)
+          .run();
+      }
+    }
     const cid = recordCid({
       $type: COLLECTIONS.contributor,
-      name: existing.name,
-      createdAt: existing.createdAt,
+      name: byName.name,
+      createdAt: byName.createdAt,
     });
-    return { uri: existing.uri, cid, name: existing.name };
+    return { uri: byName.uri, cid, name: byName.name };
   }
+
   const rkey = generateRkey();
   const uri = makeRecordUri(getServiceDid(), COLLECTIONS.contributor, rkey);
   const createdAt = new Date().toISOString();
@@ -186,11 +230,26 @@ function findOrComputeContributor(
       name,
       altNames: [],
       images: [],
-      identifiers: [],
+      identifiers: olKey ? [{ type: 'openlibrary', value: olKey }] : [],
       createdAt,
     })
     .run();
   return { uri, cid, name };
+}
+
+function readIdents(
+  value: unknown,
+): Array<{ type: string; value: string }> {
+  if (value === null || value === undefined) return [];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value) ? (value as Array<{ type: string; value: string }>) : [];
 }
 
 function loadAuthorRole(db: BetterSQLite3Database<typeof schema>): {
@@ -270,9 +329,10 @@ export function importBookhiveCatalogBook(
       );
 
       const now = new Date().toISOString();
+      const primaryAuthor = mapped.contributors[0]?.name ?? '';
       const dedupHash = computeDeduplicationHash(
         mapped.title,
-        mapped.author,
+        primaryAuthor,
         undefined,
       );
 
@@ -286,7 +346,7 @@ export function importBookhiveCatalogBook(
         uri: mapped.uri,
         did: mapped.did,
         title: mapped.title,
-        author: mapped.author,
+        author: primaryAuthor,
         isbn: mapped.isbn ?? null,
         description: mapped.description ?? null,
         coverUrl: mapped.coverUrl ?? null,
