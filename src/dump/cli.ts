@@ -7,8 +7,10 @@ import { DumpState } from './state.js';
 import { HttpDownloader } from './downloader.js';
 import { DumpStreamer } from './streamer.js';
 import { runEditionsDumpImport, prepareRun } from './index.js';
+import { runAuthorsCli } from './authors/cli.js';
 
 interface ParsedCli {
+  command: 'editions' | 'authors';
   noDownload: boolean;
   reset: boolean;
   batchSize?: number;
@@ -20,14 +22,18 @@ interface ParsedCli {
 
 export function parseArgs(argv: string[]): ParsedCli {
   const parsed: ParsedCli = {
+    command: 'editions',
     noDownload: false,
     reset: false,
     dryRun: false,
     keepDump: false,
     force: false,
   };
+  const positional: string[] = [];
   for (const arg of argv) {
-    if (arg === '--no-download') parsed.noDownload = true;
+    if (arg === 'editions') parsed.command = 'editions';
+    else if (arg === 'authors') parsed.command = 'authors';
+    else if (arg === '--no-download') parsed.noDownload = true;
     else if (arg === '--reset') parsed.reset = true;
     else if (arg === '--dry-run') parsed.dryRun = true;
     else if (arg === '--keep-dump') parsed.keepDump = true;
@@ -37,7 +43,12 @@ export function parseArgs(argv: string[]): ParsedCli {
       const n = Number(arg.slice('--batch-size='.length));
       if (!Number.isFinite(n) || n <= 0) throw new Error(`invalid batch-size: ${arg}`);
       parsed.batchSize = n;
+    } else {
+      positional.push(arg);
     }
+  }
+  if (positional.length > 0 && (positional[0] === 'editions' || positional[0] === 'authors')) {
+    parsed.command = positional[0];
   }
   return parsed;
 }
@@ -130,8 +141,8 @@ export function releaseLock(lockPath: string): void {
   try { unlinkSync(lockPath); } catch { /* already gone */ }
 }
 
-async function main(): Promise<void> {
-  const cli = parseArgs(process.argv.slice(2));
+export async function runEditionsCli(argv: string[] = process.argv.slice(2)): Promise<void> {
+  const cli = parseArgs([...argv]);
   const dumpDir = resolve(cli.dumpPath ?? OL_DUMP_PATH_DEFAULT);
   const filename = 'ol_dump_editions_latest.txt.gz';
   const gzPath = resolve(dumpDir, filename);
@@ -216,7 +227,59 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  logger.fatal({ err }, 'dump:openlibrary failed');
-  process.exit(1);
-});
+async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  const command = argv[0];
+  if (command === 'authors') {
+    await runAuthorsCli(parseAuthorsArgsRest(argv.slice(1)));
+    return;
+  }
+  if (command === 'editions' || command === undefined) {
+    await runEditionsCli(command === 'editions' ? argv.slice(1) : argv);
+    return;
+  }
+  throw new Error(`unknown command: ${command}`);
+}
+
+function parseAuthorsArgsRest(rest: string[]): {
+  noDownload: boolean;
+  reset: boolean;
+  batchSize?: number;
+  dumpPath?: string;
+  force: boolean;
+  keepDump: boolean;
+} {
+  const parsed = {
+    noDownload: false,
+    reset: false,
+    force: false,
+    keepDump: false,
+  } as {
+    noDownload: boolean;
+    reset: boolean;
+    batchSize?: number;
+    dumpPath?: string;
+    force: boolean;
+    keepDump: boolean;
+  };
+  for (const arg of rest) {
+    if (arg === '--no-download') parsed.noDownload = true;
+    else if (arg === '--reset') parsed.reset = true;
+    else if (arg === '--force') parsed.force = true;
+    else if (arg === '--keep-dump') parsed.keepDump = true;
+    else if (arg.startsWith('--path=')) parsed.dumpPath = arg.slice('--path='.length);
+    else if (arg.startsWith('--batch-size=')) {
+      const n = Number(arg.slice('--batch-size='.length));
+      if (!Number.isFinite(n) || n <= 0) throw new Error(`invalid batch-size: ${arg}`);
+      parsed.batchSize = n;
+    }
+  }
+  return parsed;
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    logger.fatal({ err }, 'dump cli failed');
+    process.exit(1);
+  });
+}
