@@ -48,6 +48,46 @@ export async function backfillDid(did: string): Promise<void> {
   await trackRepos([did]);
 }
 
+function parseAuthorsFlags(rest: string[]): {
+  noDownload: boolean;
+  reset: boolean;
+  force: boolean;
+  keepDump: boolean;
+  batchSize?: number;
+  dumpPath?: string;
+} {
+  const parsed = { noDownload: false, reset: false, force: false, keepDump: false } as {
+    noDownload: boolean;
+    reset: boolean;
+    force: boolean;
+    keepDump: boolean;
+    batchSize?: number;
+    dumpPath?: string;
+  };
+  for (const arg of rest) {
+    if (arg === '--no-download') parsed.noDownload = true;
+    else if (arg === '--reset') parsed.reset = true;
+    else if (arg === '--force') parsed.force = true;
+    else if (arg === '--keep-dump') parsed.keepDump = true;
+    else if (arg.startsWith('--path=')) parsed.dumpPath = arg.slice('--path='.length);
+    else if (arg.startsWith('--batch-size=')) {
+      const n = Number(arg.slice('--batch-size='.length));
+      if (!Number.isFinite(n) || n <= 0) throw new Error(`invalid batch-size: ${arg}`);
+      parsed.batchSize = n;
+    }
+  }
+  return parsed;
+}
+
+function parseHydrateFlags(rest: string[]): { dryRun: boolean; reset: boolean } {
+  const parsed = { dryRun: false, reset: false };
+  for (const arg of rest) {
+    if (arg === '--dry-run') parsed.dryRun = true;
+    else if (arg === '--reset') parsed.reset = true;
+  }
+  return parsed;
+}
+
 function readIsbns(path: string | undefined): string[] {
   if (!path || path === '-') {
     return readFileSync(0, 'utf8').split('\n');
@@ -58,7 +98,7 @@ function readIsbns(path: string | undefined): string[] {
 async function main(): Promise<void> {
   const [cmd] = process.argv.slice(2);
   if (!cmd) {
-    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | openlibrary:dump [flags] | googlebooks [isbns.txt|-] | googlebooks:author <authorName> | bookhive:catalog | bookhive:activity | bookhive:users');
+    console.error('usage: backfill tap | did:<did> | openlibrary [isbns.txt|-] | openlibrary:author <authorKey> | openlibrary:dump [flags] | authors:dump [flags] | hydrate-book-contributors [--reset] [--dry-run] | googlebooks [isbns.txt|-] | googlebooks:author <authorName> | bookhive:catalog | bookhive:activity | bookhive:users');
     process.exit(1);
   }
   if (cmd === 'tap') {
@@ -76,6 +116,18 @@ async function main(): Promise<void> {
     }
     const { backfillOpenLibraryAuthor } = await import('./openlibrary-backfill.js');
     await backfillOpenLibraryAuthor(db, authorKey);
+  } else if (cmd === 'authors:dump') {
+    const { runAuthorsCli } = await import('./dump/authors/cli.js');
+    const flagArgs = process.argv.slice(3);
+    const opts = parseAuthorsFlags(flagArgs);
+    await runAuthorsCli(opts);
+  } else if (cmd === 'hydrate-book-contributors') {
+    const flagArgs = process.argv.slice(3);
+    const opts = parseHydrateFlags(flagArgs);
+    const { hydrateBookContributors } = await import('./dump/hydrate-book-contributors.js');
+    const summary = hydrateBookContributors(db, opts);
+    logger.info({ summary }, 'backfill:hydrate-book-contributors finished');
+    if (summary.errors > 0) process.exit(1);
   } else if (cmd === 'openlibrary:dump') {
     const { runEditionsDumpImport, prepareRun } = await import('./dump/index.js');
     const { DumpState } = await import('./dump/state.js');
