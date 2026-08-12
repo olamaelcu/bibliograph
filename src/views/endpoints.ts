@@ -33,6 +33,8 @@ export function navHeader(props: {
   subtitle: string;
   links: Array<{ href: string; icon: string; label: string; external?: boolean }>;
 }): HtmlContent {
+  const allLinks = [...props.links, ...[{ href: 'https://github.com/olamaelcu/bibliograph', icon: 'external-link', label: 'GitHub', external: true },
+  { href: 'https://userinput.app/s/did:plc:ejggqolmgpylroktvaktibik/3mst4pvyu7m2f', icon: 'message-circle', label: 'Feedback', external: true }]];
   return html`<div slot="header">
   <div class="wa-cluster wa-gap-l" style="justify-content: space-between; align-items: center; flex-wrap: wrap">
     <div class="wa-cluster wa-gap-m" style="align-items: center">
@@ -43,7 +45,7 @@ export function navHeader(props: {
       </div>
     </div>
     <wa-button-group>
-      ${props.links.map((l) => html`<wa-button href="${l.href}" ${l.external ? 'target="_blank"' : ''} variant="${l.external ? 'neutral' : ''}"><wa-icon library="lucide" name="${l.icon}" slot="prefix"></wa-icon>${l.label}</wa-button>`)}
+      ${allLinks.map((l) => html`<wa-button href="${l.href}" ${l.external ? 'target="_blank"' : ''} variant="${l.external ? 'brand' : ''}"><wa-icon library="lucide" name="${l.icon}" slot="prefix"></wa-icon>${l.label}</wa-button>`)}
     </wa-button-group>
   </div>
 </div>`;

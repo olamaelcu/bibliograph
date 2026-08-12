@@ -23,19 +23,17 @@ const HEADER_LINKS = [
   { href: '/queries', icon: 'file-text', label: 'Queries' },
   { href: '/procedures', icon: 'square-pen', label: 'Procedures' },
   { href: '/feeds', icon: 'rss', label: 'Feeds' },
-  { href: 'https://github.com/olamaelcu/bibliograph', icon: 'external-link', label: 'GitHub', external: true },
-  { href: 'https://userinput.app/s/did:plc:ejggqolmgpylroktvaktibik/3mst4pvyu7m2f', icon: 'message-circle', label: 'Feedback', external: true },
 ];
 
 export function HomePage(props: { host: string }) {
   const content = html`<wa-page style="max-width: 60rem; margin: 0 auto;">
     ${navHeader({
-      host: props.host,
-      icon: 'book-open',
-      title: 'Bibliograph',
-      subtitle: 'community.lexicon.book',
-      links: HEADER_LINKS,
-    })}
+    host: props.host,
+    icon: 'book-open',
+    title: 'Bibliograph',
+    subtitle: 'community.lexicon.book',
+    links: HEADER_LINKS,
+  })}
 
     <div>
       <wa-card>
@@ -62,7 +60,7 @@ export function HomePage(props: { host: string }) {
       <wa-card>
         <h2 slot="header" class="wa-cluster wa-gap-m">
           <wa-icon library="lucide" name="list"></wa-icon>
-          <span>Other endpoints</span>
+          <span>Endpoints</span>
         </h2>
         <div class="wa-stack">
           ${otherRow('GET', '/feeds', 'Live feed streams', html`<wa-button href="/feeds" size="s">Open</wa-button>`)}
