@@ -98,12 +98,71 @@ function bookRow(uri: string) {
   return db.select().from(schema.books).where(eq(schema.books.uri, uri)).get();
 }
 
+function reservationRow() {
+  return db
+    .select()
+    .from(schema.backfillReservation)
+    .where(eq(schema.backfillReservation.stateName, 'book_contributors_hydrate'))
+    .get();
+}
+
 beforeEach(() => {
   clearSqliteTables((db as any).$sqlite);
   seedAuthorRole();
 });
 
 describe('hydrateBookContributors', () => {
+  it('acquires and releases a backfill_reservation row around the walk', () => {
+    seedBook({
+      author: 'Frank Herbert',
+      identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
+    });
+
+    expect(reservationRow()).toBeUndefined();
+
+    hydrateBookContributors(db, {});
+
+    expect(reservationRow()).toBeUndefined();
+  });
+
+  it('throws when another active reservation holds the same stateName', () => {
+    db.insert(schema.backfillReservation)
+      .values({
+        stateName: 'book_contributors_hydrate',
+        ownerPid: 99999,
+        acquiredAt: Date.now(),
+        heartbeatAt: Date.now(),
+        batchSize: 1,
+        status: 'active',
+      })
+      .run();
+
+    expect(() => hydrateBookContributors(db, {})).toThrow(/backfill reservation/i);
+  });
+
+  it('takes over a stale active reservation', () => {
+    const stale = Date.now() - 200_000;
+    db.insert(schema.backfillReservation)
+      .values({
+        stateName: 'book_contributors_hydrate',
+        ownerPid: 99999,
+        acquiredAt: stale,
+        heartbeatAt: stale,
+        batchSize: 1,
+        status: 'active',
+      })
+      .run();
+
+    seedBook({
+      author: 'Frank Herbert',
+      identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
+    });
+
+    const summary = hydrateBookContributors(db, {});
+    expect(summary.joinRowsCreated).toBe(1);
+    expect(summary.errors).toBe(0);
+  });
+
   it('creates a join row and a contributor for an OL-imported book with author + OL key', () => {
     const olKey = '/authors/OL42A';
     const bookUri = seedBook({

@@ -23,11 +23,14 @@ import { eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '../db/schema.js';
 import { findOrComputeContributor } from '../bookhive/importer.js';
+import { acquireReservation, releaseReservation } from './reservation.js';
 import { logger } from '../logger.js';
 import { COLLECTIONS } from '../records.js';
 import { encode } from '@atcute/cbor';
 import { fromDigest, CODEC_DCBOR, toString as cidToString } from '@atcute/cid';
 import { createHash } from 'node:crypto';
+
+const HYDRATE_STATE_NAME = 'book_contributors_hydrate';
 
 export interface HydrateSummary {
   booksWalked: number;
@@ -106,6 +109,22 @@ export function hydrateBookContributors(
     errors: 0,
     dryRun,
   };
+
+  acquireReservation(db, { stateName: HYDRATE_STATE_NAME, batchSize: 1 });
+  try {
+    return hydrateWalk(db, opts, summary);
+  } finally {
+    releaseReservation(db, HYDRATE_STATE_NAME);
+  }
+}
+
+function hydrateWalk(
+  db: BetterSQLite3Database<typeof schema>,
+  opts: HydrateOptions,
+  summary: HydrateSummary,
+): HydrateSummary {
+  const dryRun = summary.dryRun;
+  const reset = Boolean(opts.reset);
 
   if (reset && !dryRun) {
     const result = db.delete(schema.bookContributors).run();
