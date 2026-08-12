@@ -8,6 +8,7 @@ data/bookhive/*
 *.db
 *.db-wal
 *.db-shm
+file:bibliograph-test*
 src/lexicons/
 .env
 coverage/
