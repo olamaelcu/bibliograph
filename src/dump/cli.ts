@@ -229,16 +229,12 @@ export async function runEditionsCli(argv: string[] = process.argv.slice(2)): Pr
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const command = argv[0];
-  if (command === 'authors') {
+  const first = argv[0];
+  if (first === 'authors') {
     await runAuthorsCli(parseAuthorsArgsRest(argv.slice(1)));
     return;
   }
-  if (command === 'editions' || command === undefined) {
-    await runEditionsCli(command === 'editions' ? argv.slice(1) : argv);
-    return;
-  }
-  throw new Error(`unknown command: ${command}`);
+  await runEditionsCli(argv);
 }
 
 function parseAuthorsArgsRest(rest: string[]): {
