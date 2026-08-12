@@ -5,6 +5,8 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { fileURLToPath } from 'node:url';
 import { requestTracing } from './middleware.js';
 import { HomePage } from './views/home.js';
+import { QueriesPage } from './views/queries.js';
+import { ProceduresPage } from './views/procedures.js';
 import { FeedsPage } from './views/feeds.js';
 import { upgradeWebSocket } from '@hono/node-server';
 import { createSubscribeLabelsEvents } from './labeler-service.js';
@@ -30,18 +32,27 @@ export function createApp(): Hono {
     app.use('/static/*', serveStatic({ root: fileURLToPath(new URL('../', import.meta.url)) }));
   }
 
-  // Root route — endpoint reference rendered with Web Awesome components.
-  // queries/procedures are derived from the lex files at startup so the home
-  // page always reflects exactly what's served at /lexicon/<nsid>.
+  // Root route — landing page with nav links to /queries, /procedures, /feeds.
   app.get('/', (c) => {
+    const host = new URL(c.req.url).host;
+    return c.html(HomePage({ host }));
+  });
+
+  // Endpoint reference pages — queries and procedures derived from the lex
+  // files at request time so they always reflect exactly what's served at
+  // /lexicon/<nsid>.
+  app.get('/queries', (c) => {
     const host = new URL(c.req.url).host;
     const descriptions = loadDescriptions();
     const endpoints = discoverEndpoints('community.lexicon.book', descriptions);
-    return c.html(HomePage({
-      host,
-      queries: endpoints.queries,
-      procedures: endpoints.procedures,
-    }));
+    return c.html(QueriesPage({ host, endpoints: endpoints.queries }));
+  });
+
+  app.get('/procedures', (c) => {
+    const host = new URL(c.req.url).host;
+    const descriptions = loadDescriptions();
+    const endpoints = discoverEndpoints('community.lexicon.book', descriptions);
+    return c.html(ProceduresPage({ host, endpoints: endpoints.procedures }));
   });
 
   // Feeds page — live view of the feed generator buckets
