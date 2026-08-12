@@ -23,7 +23,7 @@
     "bookhive:users": "tsx src/bookhive/cli.ts users",
     "release": "tsx src/release.ts",
     "backfill": "tsx src/backfill.ts",
-    "backfill:contributors": "tsx src/backfill-contributors.ts",
+    "backfill:contributors": "tsx src/dump/cli.ts hydrate-book-contributors",
     "dedup": "tsx src/dedup-job.ts",
     "cover-worker": "tsx src/cover-worker.ts"
   },
