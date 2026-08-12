@@ -9,7 +9,7 @@ or error variants, follow the links.
 | | |
 |---|---|
 | Authoritative namespace | `community.lexicon.book.*` |
-| Schema files | [`lexicons/community/lexicon/book/`](lexicons/community/lexicon/book) (35 files) |
+| Schema files | [`lexicons/community/lexicon/book/`](lexicons/community/lexicon/book) (39 files; the `_descriptions.json` sidecar carries human-readable summaries for the home page) |
 | Codegen | `@atcute/lex-cli`, config in [`lex.config.js`](lex.config.js) |
 | Codegen output | `src/lexicons/` (runtime loaders; not currently emitted as checked-in TS) |
 | Service identity | `did:web:biblio.livtet.olamaelcu.net` (driven by `ATP_SERVICE_DID`, defaults to `did:web:localhost`) |

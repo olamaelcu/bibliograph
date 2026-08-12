@@ -14,6 +14,7 @@ import { createBook, createReview, createStatus, createClaim, verifyClaim, appoi
 import { createContributor, updateContributor, createContributorType } from './api/contributor.js';
 import { getContributor, listContributors, searchContributors, listContributorTypes } from './api/get-contributor.js';
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
+import { discoverEndpoints, loadDescriptions } from './lexicons/discovery.js';
 import { getServiceDid, buildDidDocument } from './did.js';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
@@ -29,45 +30,18 @@ export function createApp(): Hono {
     app.use('/static/*', serveStatic({ root: fileURLToPath(new URL('../', import.meta.url)) }));
   }
 
-  // Root route — endpoint reference rendered with Web Awesome components
+  // Root route — endpoint reference rendered with Web Awesome components.
+  // queries/procedures are derived from the lex files at startup so the home
+  // page always reflects exactly what's served at /lexicon/<nsid>.
   app.get('/', (c) => {
     const host = new URL(c.req.url).host;
-    const queries = [
-      'get',
-      'getMany',
-      'list',
-      'search',
-      'feed',
-      'review.get',
-      'review.getMany',
-      'status.list',
-      'claim.getMany',
-      'shelf.list',
-      'shelf.get',
-      'shelfItem.list',
-      'getLabelerLabels',
-      'contributor.get',
-      'contributor.list',
-      'contributor.search',
-      'contributor.listTypes',
-    ];
-    const procedures = [
-      'create',
-      'review.create',
-      'status.create',
-      'claim.create',
-      'verifyClaim',
-      'appointLibrarian',
-      'revokeLibrarian',
-      'shelf.create',
-      'shelfItem.create',
-      'shelfItem.delete',
-      'contributor.create',
-      'contributor.update',
-      'contributor.createType',
-    ];
-
-    return c.html(HomePage({ host, queries, procedures }));
+    const descriptions = loadDescriptions();
+    const endpoints = discoverEndpoints('community.lexicon.book', descriptions);
+    return c.html(HomePage({
+      host,
+      queries: endpoints.queries,
+      procedures: endpoints.procedures,
+    }));
   });
 
   // Feeds page — live view of the feed generator buckets

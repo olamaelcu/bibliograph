@@ -1,67 +1,33 @@
 import { html } from 'hono/html';
 import { Layout, type HtmlContent } from './layout.js';
-
-const prefix = 'community.lexicon.book';
-
-const DESCRIPTIONS: Record<string, string> = {
-  'get': 'Fetch a single book by rkey',
-  'getMany': 'Batch fetch books by URI',
-  'list': 'List books (paginated)',
-  'search': 'Full-text search on title, author, ISBN',
-  'feed': 'Feed generator buckets',
-  'review.get': 'Fetch a single review',
-  'review.getMany': 'List reviews for a book',
-  'status.list': 'Reading statuses for a DID',
-  'claim.getMany': 'List edition/translation claims',
-  getLabelerLabels: 'Labels emitted by the labeler',
-  'shelf.list': 'List a user’s shelves',
-  'shelf.get': 'Fetch a single shelf',
-  'shelfItem.list': 'Books on a shelf',
-  'contributor.get': 'Fetch a single contributor by URI',
-  'contributor.list': 'List known contributors',
-  'contributor.search': 'Full-text search over contributors',
-  'contributor.listTypes': 'List canonical contributor roles',
-  'create': 'Add a book record',
-  'review.create': 'Post a review',
-  'status.create': 'Set reading status',
-  'claim.create': 'Claim an edition/translation',
-  verifyClaim: 'Verify a claim as librarian',
-  appointLibrarian: 'Grant the librarian role',
-  revokeLibrarian: 'Revoke the librarian role',
-  'shelf.create': 'Create a shelf',
-  'shelfItem.create': 'Add a book to a shelf',
-  'shelfItem.delete': 'Remove a book from a shelf',
-  'contributor.create': 'Create a contributor record',
-  'contributor.update': 'Update a contributor record (creator or librarian)',
-  'contributor.createType': 'Create a contributor role (librarian only)',
-};
+import type { LexEndpoint } from '../lexicons/discovery.js';
 
 function methodVariant(method: 'GET' | 'POST'): 'success' | 'warning' {
   return method === 'GET' ? 'success' : 'warning';
 }
 
-function endpointDetails(method: 'GET' | 'POST', name: string): HtmlContent {
-  const path = `/xrpc/${prefix}.${name}`;
+function endpointDetails(method: 'GET' | 'POST', endpoint: LexEndpoint): HtmlContent {
+  const path = `/xrpc/${endpoint.nsid}`;
   return html`<wa-details>
   <div slot="summary" class="wa-cluster wa-gap-m">
     <wa-badge variant="${methodVariant(method)}">${method}</wa-badge>
     <code>${path}</code>
   </div>
   <div class="wa-cluster wa-gap-m" style="justify-content: space-between; align-items: center">
-    <span class="wa-body-s wa-color-text-quiet">${DESCRIPTIONS[name] ?? ''}</span>
+    <span class="wa-body-s wa-color-text-quiet">${endpoint.description ?? ''}</span>
     <wa-copy-button value="${path}"></wa-copy-button>
   </div>
 </wa-details>`;
 }
 
-function groupCard(title: string, icon: string, method: 'GET' | 'POST', names: string[]): HtmlContent {
+function groupCard(title: string, icon: string, method: 'GET' | 'POST', endpoints: LexEndpoint[]): HtmlContent {
   return html`<wa-card>
   <h2 slot="header" class="wa-cluster wa-gap-m">
     <wa-icon library="lucide" name="${icon}"></wa-icon>
     <span>${title}</span>
-    <wa-badge variant="${methodVariant(method)}">${names.length}</wa-badge>
+    <wa-badge variant="${methodVariant(method)}">${endpoints.length}</wa-badge>
   </h2>
-  <div class="wa-stack">${names.map((n) => endpointDetails(method, n))}</div>
+  <div class="wa-stack">${endpoints.map((e) => endpointDetails(method, e))}</div>
 </wa-card>`;
 }
 
@@ -78,7 +44,7 @@ function otherRow(method: 'GET' | 'POST', path: string, desc: string, extra?: Ht
 </div>`;
 }
 
-export function HomePage(props: { host: string; queries: string[]; procedures: string[] }) {
+export function HomePage(props: { host: string; queries: LexEndpoint[]; procedures: LexEndpoint[] }) {
   const content = html`<wa-page style="max-width: 60rem; margin: 0 auto;">
   <div slot="header">
     <div class="wa-cluster wa-gap-l" style="justify-content: space-between; align-items: center; flex-wrap: wrap">

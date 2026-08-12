@@ -433,7 +433,7 @@ src/
     googlebooks.ts Google Books API provider
 lexicons/
   community/lexicon/book/
-    *.json         35 ATProto lexicon schema files (records and book operations at top level, other-resource operations under per-resource subdirectories)
+    *.json         39 ATProto lexicon schema files + `_descriptions.json` sidecar (records and book operations at top level, other-resource operations under per-resource subdirectories)
 ```
 
 ```
@@ -457,7 +457,7 @@ src/
     googlebooks.ts Google Books API provider
 lexicons/
   community/lexicon/book/
-    *.json         35 ATProto lexicon schema files (records and book operations at top level, other-resource operations under per-resource subdirectories)
+    *.json         39 ATProto lexicon schema files + `_descriptions.json` sidecar (records and book operations at top level, other-resource operations under per-resource subdirectories)
 ```
 
 ## License

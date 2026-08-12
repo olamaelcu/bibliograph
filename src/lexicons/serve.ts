@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { logger } from '../logger.js';
@@ -58,6 +58,7 @@ export function serveLexiconHashes(c: Context): Response {
   const hashes: Record<string, string> = {};
 
   for (const file of files) {
+    if (basename(file).startsWith('_')) continue;
     const nsid = pathToNsid(file);
     if (nsid.endsWith('.defs')) continue;
     const content = readFileSync(file, 'utf-8');
