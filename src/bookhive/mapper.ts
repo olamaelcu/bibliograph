@@ -35,7 +35,6 @@ export interface BookhiveMappedBook {
   uri: string;
   did: string;
   title: string;
-  author: string;
   hiveId: string;
   isbn?: string;
   description?: string;
@@ -212,7 +211,6 @@ export function catalogBookToBookData(
     uri: `at://${did}/community.lexicon.book.book/${hiveIdToBookRkey(record.id)}`,
     did,
     title: record.title,
-    author: names.join(', '),
     hiveId: record.id,
     isbn: idents.isbn13 ?? idents.isbn10 ?? undefined,
     description: record.description,

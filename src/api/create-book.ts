@@ -6,6 +6,7 @@ import { publishLabel, negateLabel, LABEL_AUTHOR, LABEL_LIBRARIAN } from '../lab
 import { HttpError } from '../errors.js';
 import { OpenLibraryProvider } from '../providers/openlibrary.js';
 import { GoodreadsProvider } from '../providers/goodreads.js';
+import { primaryAuthor } from '../providers/interface.js';
 import { insertBook, insertClaim, makeRecordUri, makeId, findBookByIsbn, COLLECTIONS } from '../records.js';
 import { deriveCover } from '../cover-types.js';
 import { withWriteRetry } from '../db/connection.js';
@@ -76,7 +77,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
     await insertBook(db, {
       did,
       title: data.title,
-      author: data.author,
+      author: primaryAuthor(data),
       isbn,
       publishedDate: data.publishedDate,
       description: data.description,
@@ -118,7 +119,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
     const { uri } = await insertBook(db, {
       did,
       title: data.title,
-      author: data.author,
+      author: primaryAuthor(data),
       isbn: data.isbn13 || data.isbn10 || undefined,
       publishedDate: data.publishedDate,
       description: data.description,
@@ -148,7 +149,7 @@ async function resolveBookUri(did: string, bookUri: string, log: import('pino').
     const { uri } = await insertBook(db, {
       did,
       title: data.title,
-      author: data.author,
+      author: primaryAuthor(data),
       isbn: data.isbn13 || data.isbn10 || undefined,
       publishedDate: data.publishedDate,
       description: data.description,
@@ -287,7 +288,7 @@ async function createBookFromProviderData(
     await insertBook(db, {
       did,
       title: data.title,
-      author: data.author,
+      author: primaryAuthor(data),
       isbn,
       publishedDate: data.publishedDate,
       description: data.description,

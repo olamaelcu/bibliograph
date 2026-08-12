@@ -270,9 +270,10 @@ export function importBookhiveCatalogBook(
       );
 
       const now = new Date().toISOString();
+      const primaryAuthor = mapped.contributors[0]?.name ?? '';
       const dedupHash = computeDeduplicationHash(
         mapped.title,
-        mapped.author,
+        primaryAuthor,
         undefined,
       );
 
@@ -286,7 +287,7 @@ export function importBookhiveCatalogBook(
         uri: mapped.uri,
         did: mapped.did,
         title: mapped.title,
-        author: mapped.author,
+        author: primaryAuthor,
         isbn: mapped.isbn ?? null,
         description: mapped.description ?? null,
         coverUrl: mapped.coverUrl ?? null,

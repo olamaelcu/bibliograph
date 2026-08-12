@@ -11,7 +11,7 @@ let importer: BatchedImporter;
 function makeBook(i: number): BookData {
   return {
     title: `Book ${i}`,
-    author: 'Author',
+    contributors: [{ name: 'Author', order: 0 }],
     isbn13: `978000000000${i}`,
     publishedDate: '2020',
     identifiers: { openlibrary: `/books/OL${i}M` },
@@ -56,7 +56,7 @@ describe('BatchedImporter', () => {
     const bad: BookData = {
       ...makeBook(0),
       title: '',
-      author: '',
+      contributors: [],
     };
     const ok1 = makeBook(1);
     const ok2 = makeBook(2);

@@ -35,7 +35,8 @@ describe('catalogBookToBookData', () => {
   it('maps a fully populated record', () => {
     const out = catalogBookToBookData(baseRecord());
     expect(out.title).toBe('Dune');
-    expect(out.author).toBe('Frank Herbert');
+    expect(out.contributors).toEqual([{ name: 'Frank Herbert', order: 0 }]);
+    expect(out).not.toHaveProperty('author');
     expect(out.description).toBe('A desert planet. A boy who would be prophet.');
     expect(out.coverUrl).toBe('https://bookhive.buzz/covers/M5fR8-thumb.jpg');
     expect(out.categories).toEqual(['Science Fiction', 'Epic']);
@@ -89,11 +90,10 @@ describe('catalogBookToBookData', () => {
     expect(catalogBookToBookData(rec).coverUrl).toBeUndefined();
   });
 
-  it('joins tab-separated authors with ", " in legacy author field', () => {
+  it('joins tab-separated authors into ordered contributors', () => {
     const rec = baseRecord();
     rec.authors = 'Alice\tBob\tCarol';
     const out = catalogBookToBookData(rec);
-    expect(out.author).toBe('Alice, Bob, Carol');
     expect(out.contributors).toEqual([
       { name: 'Alice', order: 0 },
       { name: 'Bob', order: 1 },
@@ -105,7 +105,6 @@ describe('catalogBookToBookData', () => {
     const rec = baseRecord();
     rec.authors = '  Alice  \t\t  Bob  \t  \tCarol\t';
     const out = catalogBookToBookData(rec);
-    expect(out.author).toBe('Alice, Bob, Carol');
     expect(out.contributors).toEqual([
       { name: 'Alice', order: 0 },
       { name: 'Bob', order: 1 },
@@ -125,7 +124,6 @@ describe('catalogBookToBookData', () => {
     rec.authors = '';
     const out = catalogBookToBookData(rec);
     expect(out.contributors).toEqual([]);
-    expect(out.author).toBe('');
   });
 
   it('records the sourceUri as a hiveBookUri identifier when provided', () => {

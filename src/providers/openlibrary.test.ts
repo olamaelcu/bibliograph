@@ -52,7 +52,10 @@ describe('OpenLibraryProvider', () => {
       const result = await provider.searchByIsbn('9780441172719');
       expect(result).not.toBeNull();
       expect(result!.title).toBe('Dune');
-      expect(result!.author).toBe('Frank Herbert');
+      expect(result!.contributors[0]?.name).toBe('Frank Herbert');
+      expect(result!.contributors).toEqual([
+        { name: 'Frank Herbert', order: 0 },
+      ]);
       expect(result!.sourceProvider).toBe('openLibrary');
     });
 
@@ -246,7 +249,8 @@ describe('OpenLibraryProvider', () => {
       });
 
       const result = await provider.getBookDetails('OL999W');
-      expect(result!.author).toBe('Unknown');
+      expect(result!.contributors[0]?.name).toBe('Unknown');
+      expect(result!.contributors).toEqual([{ name: 'Unknown', order: 0 }]);
     });
 
     it('handles missing title gracefully', async () => {

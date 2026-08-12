@@ -1,4 +1,4 @@
-import type { BookData, BookProvider } from "./interface.js";
+import { type BookContributor, type BookData, type BookProvider } from "./interface.js";
 import { BaseBookProvider } from "./base-provider.js";
 
 const BASE_URL = "https://www.goodreads.com";
@@ -152,7 +152,10 @@ export class GoodreadsProvider extends BaseBookProvider implements BookProvider 
       const primaryAuthorName =
         typeof authorData?.name === "string" ? authorData.name : "";
       const authors = [primaryAuthorName, ...secondaryContributors].filter(Boolean);
-      const author = authors.length > 0 ? authors.join(", ") : "Unknown";
+      const contributors: BookContributor[] =
+        authors.length > 0
+          ? authors.map((name, order) => ({ name, order }))
+          : [{ name: "Unknown", order: 0 }];
 
       const identifiers: Record<string, string> = {};
       if (typeof bookData.id === "string") {
@@ -163,7 +166,7 @@ export class GoodreadsProvider extends BaseBookProvider implements BookProvider 
 
       return {
         title: (bookData.titleComplete as string | undefined) ?? "Unknown Title",
-        author,
+        contributors,
         isbn10: typeof details.isbn === "string" ? details.isbn : undefined,
         isbn13: typeof details.isbn13 === "string" ? details.isbn13 : undefined,
         publishedDate: publicationYear,
@@ -188,9 +191,12 @@ export class GoodreadsProvider extends BaseBookProvider implements BookProvider 
     const identifiers: Record<string, string> = {};
     identifiers["goodreads"] = bookId;
 
+    const name = hit.author?.name ?? "Unknown";
+    const contributors: BookContributor[] = [{ name, order: 0 }];
+
     return {
       title: hit.bookTitleBare ?? hit.title ?? "Unknown Title",
-      author: hit.author?.name ?? "Unknown",
+      contributors,
       publishedDate: undefined,
       description: hit.description?.html ? stripHtml(hit.description.html) : undefined,
       pageCount: typeof hit.numPages === "number" ? hit.numPages : undefined,

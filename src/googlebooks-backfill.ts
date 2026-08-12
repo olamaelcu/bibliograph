@@ -54,7 +54,7 @@ export async function backfillGoogleBooksAuthor(
     }
 
     for (const item of result.items) {
-      const titleKey = `${item.title}|${item.author}`.toLowerCase();
+      const titleKey = `${item.title}|${item.contributors[0]?.name ?? ''}`.toLowerCase();
       if (seenTitles.has(titleKey)) {
         summary.skipped += 1;
         continue;

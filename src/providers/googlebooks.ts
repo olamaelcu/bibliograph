@@ -1,4 +1,4 @@
-import type { BookData, BookProvider } from "./interface.js";
+import type { BookContributor, BookData, BookProvider } from "./interface.js";
 import { BaseBookProvider } from "./base-provider.js";
 
 const BASE_URL = "https://www.googleapis.com/books/v1/volumes";
@@ -105,9 +105,15 @@ export class GoogleBooksProvider extends BaseBookProvider implements BookProvide
       identifiers["googleBooks"] = item.id;
     }
 
+    const authorNames = vi.authors ?? [];
+    const contributors: BookContributor[] =
+      authorNames.length > 0
+        ? authorNames.map((name, order) => ({ name, order }))
+        : [{ name: "Unknown", order: 0 }];
+
     return {
       title: vi.title ?? "Unknown Title",
-      author: vi.authors?.join(", ") ?? "Unknown",
+      contributors,
       isbn10: this.findIsbn(vi, "ISBN_10"),
       isbn13: this.findIsbn(vi, "ISBN_13"),
       publishedDate: vi.publishedDate,

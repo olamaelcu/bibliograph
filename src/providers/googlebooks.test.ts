@@ -62,7 +62,8 @@ describe('GoogleBooksProvider', () => {
       const result = await provider.searchByIsbn('9780441172719');
       expect(result).not.toBeNull();
       expect(result!.title).toBe('Dune');
-      expect(result!.author).toBe('Frank Herbert');
+      expect(result!.contributors[0]?.name).toBe('Frank Herbert');
+      expect(result!.contributors).toEqual([{ name: 'Frank Herbert', order: 0 }]);
       expect(result!.isbn10).toBe('0441172717');
       expect(result!.isbn13).toBe('9780441172719');
       expect(result!.publishedDate).toBe('1965-08-01');
@@ -172,10 +173,11 @@ describe('GoogleBooksProvider', () => {
 
       const result = await provider.getBookDetails('min');
       expect(result!.title).toBe('Unknown Title');
-      expect(result!.author).toBe('Unknown');
+      expect(result!.contributors[0]?.name).toBe('Unknown');
+      expect(result!.contributors).toEqual([{ name: 'Unknown', order: 0 }]);
     });
 
-    it('joins multiple authors with commas', async () => {
+    it('emits one contributor per author in volumeInfo.authors', async () => {
       fetchMock.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({
@@ -187,7 +189,11 @@ describe('GoogleBooksProvider', () => {
       });
 
       const result = await provider.getBookDetails('collab');
-      expect(result!.author).toBe('First Author, Second Author');
+      expect(result!.contributors[0]?.name).toBe('First Author');
+      expect(result!.contributors).toEqual([
+        { name: 'First Author', order: 0 },
+        { name: 'Second Author', order: 1 },
+      ]);
     });
 
     it('falls back to smallThumbnail when thumbnail is missing', async () => {
