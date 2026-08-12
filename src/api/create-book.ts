@@ -317,7 +317,7 @@ async function createBookFromProviderData(
 
 export async function createBook(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createBook');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.book.create');
   const input = await c.req.json<CreateBookInput>();
 
   if (!input.title || !input.author) {
@@ -438,7 +438,7 @@ export async function createReview(c: Context): Promise<Response> {
 
 export async function createStatus(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createStatus');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.status.create');
   const input = await c.req.json<CreateStatusInput>();
 
   if ((!input.bookUri && (!input.identifiers || input.identifiers.length === 0)) || !input.status) {
@@ -521,7 +521,7 @@ export async function createStatus(c: Context): Promise<Response> {
 
 export async function createClaim(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createClaim');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.claim.create');
   const input = await c.req.json<CreateClaimInput>();
 
   if (!input.bookUri || !input.identifier || !input.identifierType) {
@@ -570,7 +570,7 @@ export async function createClaim(c: Context): Promise<Response> {
 
 export async function createShelf(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.createShelf');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.shelf.create');
   const input = await c.req.json<CreateShelfInput>();
 
   if (!input.name || !input.name.trim()) {
@@ -613,7 +613,7 @@ export async function createShelf(c: Context): Promise<Response> {
 
 export async function addToShelf(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.addToShelf');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.shelfItem.create');
   const input = await c.req.json<AddToShelfInput>();
 
   if (!input.shelfUri || !input.bookUri) {
@@ -685,7 +685,7 @@ export async function addToShelf(c: Context): Promise<Response> {
 
 export async function removeFromShelf(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.removeFromShelf');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.shelfItem.delete');
   const input = await c.req.json<RemoveFromShelfInput>();
 
   if (!input.shelfUri || !input.bookUri) {

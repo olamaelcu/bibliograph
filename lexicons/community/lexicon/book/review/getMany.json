@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.getReviews",
+  "id": "community.lexicon.book.review.getMany",
   "defs": {
     "main": {
       "type": "query",

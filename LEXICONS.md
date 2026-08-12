@@ -9,7 +9,7 @@ or error variants, follow the links.
 | | |
 |---|---|
 | Authoritative namespace | `community.lexicon.book.*` |
-| Schema files | [`lexicons/community/lexicon/book/`](lexicons/community/lexicon/book) (28 files) |
+| Schema files | [`lexicons/community/lexicon/book/`](lexicons/community/lexicon/book) (35 files) |
 | Codegen | `@atcute/lex-cli`, config in [`lex.config.js`](lex.config.js) |
 | Codegen output | `src/lexicons/` (runtime loaders; not currently emitted as checked-in TS) |
 | Service identity | `did:web:biblio.livtet.olamaelcu.net` (driven by `ATP_SERVICE_DID`, defaults to `did:web:localhost`) |
@@ -62,15 +62,19 @@ XRPC GET `/xrpc/<nsid>`.
 
 | NSID | What it returns |
 |---|---|
-| [`community.lexicon.book.getBook`](lexicons/community/lexicon/book/getBook.json) | Single book by `at-uri`; resolves the inline `contributors[]` array |
-| [`community.lexicon.book.getBooks`](lexicons/community/lexicon/book/getBooks.json) | Batch fetch up to 25 books by `at-uri` |
-| [`community.lexicon.book.getReview`](lexicons/community/lexicon/book/getReview.json) | Single review by `at-uri` or by `did + bookUri` |
-| [`community.lexicon.book.getReviews`](lexicons/community/lexicon/book/getReviews.json) | Paginated reviews for a book |
-| [`community.lexicon.book.getUserStatus`](lexicons/community/lexicon/book/getUserStatus.json) | Reading statuses for a user, filterable by book/status |
-| [`community.lexicon.book.searchBooks`](lexicons/community/lexicon/book/searchBooks.json) | Full-text search on title, author, ISBN; identifier search via `identifier=isbn,oclc,asin` |
-| [`community.lexicon.book.listBooks`](lexicons/community/lexicon/book/listBooks.json) | Paginated book list |
-| [`community.lexicon.book.getClaims`](lexicons/community/lexicon/book/getClaims.json) | Claims attached to a book |
-| [`community.lexicon.book.getFeed`](lexicons/community/lexicon/book/getFeed.json) | Aggregator: `recent`, `newestBooks`, `trending {day, week, month}`, optional `following` and `crossUser` buckets (feature-flagged via `ATP_FEATURE_FEED_GENERATOR=1`) |
+| [`community.lexicon.book.book.get`](lexicons/community/lexicon/book/book/get.json) | Single book by `at-uri`; resolves the inline `contributors[]` array |
+| [`community.lexicon.book.book.getMany`](lexicons/community/lexicon/book/book/getMany.json) | Batch fetch up to 25 books by `at-uri` |
+| [`community.lexicon.book.book.list`](lexicons/community/lexicon/book/book/list.json) | Paginated book list |
+| [`community.lexicon.book.book.search`](lexicons/community/lexicon/book/book/search.json) | Full-text search on title, author, ISBN; identifier search via `identifier=isbn,oclc,asin` |
+| [`community.lexicon.book.book.feed`](lexicons/community/lexicon/book/book/feed.json) | Aggregator: `recent`, `newestBooks`, `trending {day, week, month}`, optional `following` and `crossUser` buckets (feature-flagged via `ATP_FEATURE_FEED_GENERATOR=1`) |
+| [`community.lexicon.book.review.get`](lexicons/community/lexicon/book/review/get.json) | Single review by `at-uri` or by `did + bookUri` |
+| [`community.lexicon.book.review.getMany`](lexicons/community/lexicon/book/review/getMany.json) | Paginated reviews for a book |
+| [`community.lexicon.book.status.list`](lexicons/community/lexicon/book/status/list.json) | Reading statuses for a user, filterable by book/status |
+| [`community.lexicon.book.claim.getMany`](lexicons/community/lexicon/book/claim/getMany.json) | Claims attached to a book |
+| [`community.lexicon.book.shelf.get`](lexicons/community/lexicon/book/shelf/get.json) | Single shelf by `at-uri` |
+| [`community.lexicon.book.shelf.list`](lexicons/community/lexicon/book/shelf/list.json) | A user's shelves (paginated) |
+| [`community.lexicon.book.shelfItem.list`](lexicons/community/lexicon/book/shelfItem/list.json) | Books on a shelf |
+| [`community.lexicon.book.contributor.get`](lexicons/community/lexicon/book/contributor/get.json) | Single contributor by `at-uri` |
 | [`community.lexicon.book.contributor.list`](lexicons/community/lexicon/book/contributor/list.json) | Paginated list of known contributors |
 | [`community.lexicon.book.contributor.search`](lexicons/community/lexicon/book/contributor/search.json) | Full-text search over contributor name and alt names |
 | [`community.lexicon.book.contributor.listTypes`](lexicons/community/lexicon/book/contributor/listTypes.json) | List canonical contributor roles |
@@ -84,10 +88,13 @@ claim-owner, librarian, or actor-DID-equals-record-DID.
 
 | NSID | Input summary | Errors |
 |---|---|---|
-| [`community.lexicon.book.createBook`](lexicons/community/lexicon/book/createBook.json) | `title` (required), `author` (required), plus optional ISBN, dates, description, page count, language, categories, cover URL | `DuplicateBook`, `InvalidInput` |
-| [`community.lexicon.book.createReview`](lexicons/community/lexicon/book/createReview.json) | `bookUri`, `text`, optional `rating` | `BookNotFound` |
-| [`community.lexicon.book.createStatus`](lexicons/community/lexicon/book/createStatus.json) | `status`, plus `bookUri` or `identifiers[]`, optional `progress`, `rating`, dates | `BookNotFound`, `StatusAlreadyExists` |
-| [`community.lexicon.book.createClaim`](lexicons/community/lexicon/book/createClaim.json) | `bookUri`, `identifier`, `identifierType ∈ {isbn, ean, issn}` | `BookNotFound`, `ClaimAlreadyExists` |
+| [`community.lexicon.book.book.create`](lexicons/community/lexicon/book/book/create.json) | `title` (required), `author` (required), plus optional ISBN, dates, description, page count, language, categories, cover URL | `DuplicateBook`, `InvalidInput` |
+| [`community.lexicon.book.review.create`](lexicons/community/lexicon/book/review/create.json) | `bookUri`, `text`, optional `rating` | `BookNotFound` |
+| [`community.lexicon.book.status.create`](lexicons/community/lexicon/book/status/create.json) | `status`, plus `bookUri` or `identifiers[]`, optional `progress`, `rating`, dates | `BookNotFound`, `StatusAlreadyExists` |
+| [`community.lexicon.book.claim.create`](lexicons/community/lexicon/book/claim/create.json) | `bookUri`, `identifier`, `identifierType ∈ {isbn, ean, issn}` | `BookNotFound`, `ClaimAlreadyExists` |
+| [`community.lexicon.book.shelf.create`](lexicons/community/lexicon/book/shelf/create.json) | `name` (required), optional `description`, `metadata`, `coverUrl` | `InvalidInput` |
+| [`community.lexicon.book.shelfItem.create`](lexicons/community/lexicon/book/shelfItem/create.json) | `shelfUri`, `bookUri`, optional `note` | `ShelfNotFound`, `BookNotFound`, `Forbidden`, `DuplicateShelfItem`, `InvalidInput` |
+| [`community.lexicon.book.shelfItem.delete`](lexicons/community/lexicon/book/shelfItem/delete.json) | `shelfUri`, `bookUri` | `ShelfNotFound`, `Forbidden`, `NotFound`, `InvalidInput` |
 | [`community.lexicon.book.contributor.create`](lexicons/community/lexicon/book/contributor/create.json) | `name`, `identifiers[]` (≥1), optional `altNames`, `images`, `bio` | `InvalidInput`, `DuplicateContributor` |
 | [`community.lexicon.book.contributor.update`](lexicons/community/lexicon/book/contributor/update.json) | `uri`, optional `patch`, add/remove identifiers, images | `InvalidInput`, `DuplicateContributor`, `NotFound`, `Forbidden` |
 | [`community.lexicon.book.contributor.createType`](lexicons/community/lexicon/book/contributor/createType.json) | `name`, optional `description` (librarian-only) | `InvalidInput`, `DuplicateContributorType`, `Forbidden` |

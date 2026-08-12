@@ -1,15 +1,14 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.getReview",
+  "id": "community.lexicon.book.contributor.get",
   "defs": {
     "main": {
       "type": "query",
       "parameters": {
         "type": "params",
+        "required": ["uri"],
         "properties": {
-          "uri": { "type": "string", "format": "at-uri" },
-          "did": { "type": "string", "format": "did" },
-          "bookUri": { "type": "string", "format": "at-uri" }
+          "uri": { "type": "string", "format": "at-uri" }
         }
       },
       "output": {
@@ -20,11 +19,14 @@
           "properties": {
             "uri": { "type": "string", "format": "at-uri" },
             "did": { "type": "string", "format": "did" },
-            "record": { "type": "ref", "ref": "community.lexicon.book.review" },
+            "record": { "type": "ref", "ref": "community.lexicon.book.contributor" },
             "cid": { "type": "string", "format": "cid" }
           }
         }
-      }
+      },
+      "errors": [
+        { "name": "NotFound" }
+      ]
     }
   }
 }

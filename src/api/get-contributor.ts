@@ -7,6 +7,8 @@ import {
   serializeContributorType,
 } from './contributor.js';
 import type {
+  GetContributorParams,
+  GetContributorOutput,
   ListContributorsParams,
   ListContributorsOutput,
   ListContributorTypesParams,
@@ -18,6 +20,32 @@ import type {
 const { contributors, contributorTypes } = schema;
 
 const SERVICE_DID = process.env.ATP_SERVICE_DID ?? 'did:web:localhost';
+
+export async function getContributor(c: Context): Promise<Response> {
+  const log = c.get('log') as import('pino').Logger;
+  const { uri } = c.req.query() as unknown as GetContributorParams;
+  if (!uri) {
+    log.warn('getContributor rejected: missing uri');
+    return c.json({ error: 'InvalidRequest', message: 'uri is required' }, 400);
+  }
+
+  log.info({ uri }, 'handling getContributor');
+
+  const row = await db.query.contributors.findFirst({ where: eq(contributors.uri, uri) });
+  if (!row) {
+    log.info({ found: false }, 'getContributor complete');
+    return c.json({ error: 'NotFound', message: 'Contributor not found' }, 404);
+  }
+
+  log.info({ found: true }, 'getContributor complete');
+  const out: GetContributorOutput = {
+    uri: row.uri,
+    did: row.did,
+    record: serializeContributor(row),
+    cid: undefined,
+  };
+  return c.json(out);
+}
 
 export async function listContributors(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;

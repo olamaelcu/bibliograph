@@ -20,7 +20,7 @@ import { clearSqliteTables } from '../test-utils/db.js';
 const _d = db as any;
 const _s = schema;
 
-import { listContributors, searchContributors, listContributorTypes } from './get-contributor.js';
+import { getContributor, listContributors, searchContributors, listContributorTypes } from './get-contributor.js';
 
 function getSqlite() {
   return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
@@ -89,6 +89,36 @@ describe('api/get-contributor', () => {
   beforeEach(() => {
     clearTables();
     vi.clearAllMocks();
+  });
+
+  describe('getContributor', () => {
+    it('returns 400 when uri is missing', async () => {
+      const c = mockContext();
+      const res = await getContributor(c);
+      expect(res.status).toBe(400);
+      const body = await readJson(res);
+      expect(body.error).toBe('InvalidRequest');
+    });
+
+    it('returns 404 when contributor is not found', async () => {
+      const c = mockContext({ query: { uri: 'at://did:plc:nope/community.lexicon.book.contributor/missing' } });
+      const res = await getContributor(c);
+      expect(res.status).toBe(404);
+      const body = await readJson(res);
+      expect(body.error).toBe('NotFound');
+    });
+
+    it('returns a contributor by uri', async () => {
+      const uri = seedContributor({ name: 'Found Author' });
+      const c = mockContext({ query: { uri } });
+      const res = await getContributor(c);
+      expect(res.status).toBe(200);
+      const body = await readJson(res);
+      expect(body.uri).toBe(uri);
+      expect(body.did).toBe('did:plc:test');
+      expect(body.record.name).toBe('Found Author');
+      expect(body.record.$type).toBe('community.lexicon.book.contributor');
+    });
   });
 
   describe('listContributors', () => {

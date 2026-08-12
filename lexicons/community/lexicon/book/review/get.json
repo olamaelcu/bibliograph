@@ -1,24 +1,26 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.getBook",
+  "id": "community.lexicon.book.review.get",
   "defs": {
     "main": {
       "type": "query",
       "parameters": {
         "type": "params",
-        "required": ["uri"],
         "properties": {
-          "uri": { "type": "string" }
+          "uri": { "type": "string", "format": "at-uri" },
+          "did": { "type": "string", "format": "did" },
+          "bookUri": { "type": "string", "format": "at-uri" }
         }
       },
       "output": {
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["uri", "record"],
+          "required": ["uri", "did", "record"],
           "properties": {
             "uri": { "type": "string", "format": "at-uri" },
-            "record": { "type": "object" },
+            "did": { "type": "string", "format": "did" },
+            "record": { "type": "ref", "ref": "community.lexicon.book.review" },
             "cid": { "type": "string", "format": "cid" }
           }
         }

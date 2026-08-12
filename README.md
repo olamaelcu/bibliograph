@@ -34,14 +34,19 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 
 | Endpoint | Description |
 |----------|-------------|
-| `get` | Fetch a single book by AT-URI (returns joined contributors) |
-| `getAll` | Batch fetch books by URIs (returns joined contributors) |
-| `review.getAll` | Paginated reviews for a book |
-| `review.get` | Fetch a single review by AT-URI or user+book |
-| `getUserStatus` | Reading statuses for a user |
-| `searchBooks` | Full-text search on title, author, ISBN |
-| `getClaims` | Claims attached to a book |
-| `getFeed` | Home feed: recent status updates, newest books, trending, following, cross-user |
+| `community.lexicon.book.book.get` | Fetch a single book by AT-URI (returns joined contributors) |
+| `community.lexicon.book.book.getMany` | Batch fetch books by URIs (returns joined contributors) |
+| `community.lexicon.book.book.list` | Paginated book list |
+| `community.lexicon.book.book.search` | Full-text search on title, author, ISBN |
+| `community.lexicon.book.book.feed` | Home feed: recent status updates, newest books, trending, following, cross-user |
+| `community.lexicon.book.review.get` | Fetch a single review by AT-URI or user+book |
+| `community.lexicon.book.review.getMany` | Paginated reviews for a book |
+| `community.lexicon.book.status.list` | Reading statuses for a user |
+| `community.lexicon.book.claim.getMany` | Claims attached to a book |
+| `community.lexicon.book.shelf.get` | Fetch a single shelf by AT-URI |
+| `community.lexicon.book.shelf.list` | A user's shelves (paginated) |
+| `community.lexicon.book.shelfItem.list` | Books on a shelf |
+| `community.lexicon.book.contributor.get` | Fetch a single contributor by AT-URI |
 | `community.lexicon.book.contributor.list` | Paginated list of all known contributors |
 | `community.lexicon.book.contributor.search` | Full-text search over contributor name and alt names |
 | `community.lexicon.book.contributor.listTypes` | List canonical contributor roles seeded by Bibliograph |
@@ -50,10 +55,13 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 
 | Endpoint | Description |
 |----------|-------------|
-| `createBook` | Create a book definition (requires ISBN for dedup) |
-| `review.create` | Post a review |
-| `createStatus` | Record reading status |
-| `createClaim` | Claim a book as author/curator |
+| `community.lexicon.book.book.create` | Create a book definition (requires ISBN for dedup) |
+| `community.lexicon.book.review.create` | Post a review |
+| `community.lexicon.book.status.create` | Record reading status |
+| `community.lexicon.book.claim.create` | Claim a book as author/curator |
+| `community.lexicon.book.shelf.create` | Create a named shelf |
+| `community.lexicon.book.shelfItem.create` | Add a book to a shelf |
+| `community.lexicon.book.shelfItem.delete` | Remove a book from a shelf |
 | `community.lexicon.book.contributor.create` | Create a contributor record (requires at least one identifier) |
 | `community.lexicon.book.contributor.update` | Patch or add/remove identifiers, images, altNames, bio (creator or librarian) |
 | `community.lexicon.book.contributor.createType` | Create a canonical contributor role (librarian only) |
@@ -425,7 +433,7 @@ src/
     googlebooks.ts Google Books API provider
 lexicons/
   community/lexicon/book/
-    *.json         14 ATProto lexicon schema definitions
+    *.json         35 ATProto lexicon schema files (records at top level, operations under per-resource subdirectories)
 ```
 
 ```
@@ -449,7 +457,7 @@ src/
     googlebooks.ts Google Books API provider
 lexicons/
   community/lexicon/book/
-    *.json         14 ATProto lexicon schema definitions
+    *.json         35 ATProto lexicon schema files (records at top level, operations under per-resource subdirectories)
 ```
 
 ## License

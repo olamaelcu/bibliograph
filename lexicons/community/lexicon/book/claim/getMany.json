@@ -1,0 +1,37 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.claim.getMany",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["bookUri"],
+        "properties": {
+          "bookUri": { "type": "string", "format": "at-uri" }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["claims"],
+          "properties": {
+            "claims": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["uri", "did", "record"],
+                "properties": {
+                  "uri": { "type": "string", "format": "at-uri" },
+                  "did": { "type": "string", "format": "did" },
+                  "record": { "type": "object" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

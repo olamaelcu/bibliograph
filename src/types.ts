@@ -214,6 +214,9 @@ export interface CreateContributorTypeInput {
 }
 export interface CreateContributorTypeOutput { uri: string; cid: string; }
 
+export interface GetContributorParams { uri: string; }
+export interface GetContributorOutput { uri: string; did: string; record: ContributorRecord; cid?: string; }
+
 export interface ListContributorsParams { limit?: number; cursor?: string; }
 export interface ListContributorsOutput {
   contributors: Array<{ uri: string; did: string; record: ContributorRecord }>;

@@ -12,7 +12,7 @@ import { getBook, getBooks, getReviews, getReview, getUserStatus, searchBooksHan
 import { getFeed } from './api/get-feed.js';
 import { createBook, createReview, createStatus, createClaim, verifyClaim, appointLibrarian, revokeLibrarian, createShelf, addToShelf, removeFromShelf } from './api/create-book.js';
 import { createContributor, updateContributor, createContributorType } from './api/contributor.js';
-import { listContributors, searchContributors, listContributorTypes } from './api/get-contributor.js';
+import { getContributor, listContributors, searchContributors, listContributorTypes } from './api/get-contributor.js';
 import { serveLexicon, serveLexiconHashes } from './lexicons/serve.js';
 import { getServiceDid, buildDidDocument } from './did.js';
 import { db, schema } from './db/connection.js';
@@ -33,34 +33,35 @@ export function createApp(): Hono {
   app.get('/', (c) => {
     const host = new URL(c.req.url).host;
     const queries = [
-      'get',
-      'getAll',
-      'review.getAll',
+      'book.get',
+      'book.getMany',
+      'book.list',
+      'book.search',
+      'book.feed',
       'review.get',
-      'getUserStatus',
-      'searchBooks',
-      'listBooks',
-      'getClaims',
+      'review.getMany',
+      'status.list',
+      'claim.getMany',
+      'shelf.list',
+      'shelf.get',
+      'shelfItem.list',
       'getLabelerLabels',
-      'getShelves',
-      'getShelf',
-      'getShelfItems',
-      'getFeed',
+      'contributor.get',
       'contributor.list',
       'contributor.search',
       'contributor.listTypes',
     ];
     const procedures = [
-      'createBook',
+      'book.create',
       'review.create',
-      'createStatus',
-      'createClaim',
+      'status.create',
+      'claim.create',
       'verifyClaim',
       'appointLibrarian',
       'revokeLibrarian',
-      'createShelf',
-      'addToShelf',
-      'removeFromShelf',
+      'shelf.create',
+      'shelfItem.create',
+      'shelfItem.delete',
       'contributor.create',
       'contributor.update',
       'contributor.createType',
@@ -95,14 +96,14 @@ export function createApp(): Hono {
   app.get('/covers/*', serveCover);
 
   // Query endpoints (GET /xrpc/...)
-  app.get('/xrpc/community.lexicon.book.get', getBook);
-  app.get('/xrpc/community.lexicon.book.getAll', getBooks);
-  app.get('/xrpc/community.lexicon.book.review.getAll', getReviews);
+  app.get('/xrpc/community.lexicon.book.book.get', getBook);
+  app.get('/xrpc/community.lexicon.book.book.getMany', getBooks);
+  app.get('/xrpc/community.lexicon.book.book.list', listBooksHandler);
+  app.get('/xrpc/community.lexicon.book.book.search', searchBooksHandler);
   app.get('/xrpc/community.lexicon.book.review.get', getReview);
-  app.get('/xrpc/community.lexicon.book.getUserStatus', getUserStatus);
-  app.get('/xrpc/community.lexicon.book.searchBooks', searchBooksHandler);
-  app.get('/xrpc/community.lexicon.book.listBooks', listBooksHandler);
-  app.get('/xrpc/community.lexicon.book.getClaims', getClaims);
+  app.get('/xrpc/community.lexicon.book.review.getMany', getReviews);
+  app.get('/xrpc/community.lexicon.book.status.list', getUserStatus);
+  app.get('/xrpc/community.lexicon.book.claim.getMany', getClaims);
   app.get('/xrpc/community.lexicon.book.getLabelerLabels', getLabelerLabels);
   app.get(
     '/xrpc/com.atproto.label.subscribeLabels',
@@ -111,25 +112,26 @@ export function createApp(): Hono {
       return createSubscribeLabelsEvents()({ params: cursor !== undefined ? { cursor } : {} });
     }),
   );
-  app.get('/xrpc/community.lexicon.book.getShelves', getShelves);
-  app.get('/xrpc/community.lexicon.book.getShelf', getShelf);
-  app.get('/xrpc/community.lexicon.book.getShelfItems', getShelfItems);
-  app.get('/xrpc/community.lexicon.book.getFeed', getFeed);
+  app.get('/xrpc/community.lexicon.book.shelf.list', getShelves);
+  app.get('/xrpc/community.lexicon.book.shelf.get', getShelf);
+  app.get('/xrpc/community.lexicon.book.shelfItem.list', getShelfItems);
+  app.get('/xrpc/community.lexicon.book.book.feed', getFeed);
+  app.get('/xrpc/community.lexicon.book.contributor.get', getContributor);
   app.get('/xrpc/community.lexicon.book.contributor.list', listContributors);
   app.get('/xrpc/community.lexicon.book.contributor.search', searchContributors);
   app.get('/xrpc/community.lexicon.book.contributor.listTypes', listContributorTypes);
 
   // Procedure endpoints (POST /xrpc/...)
-  app.post('/xrpc/community.lexicon.book.createBook', createBook);
+  app.post('/xrpc/community.lexicon.book.book.create', createBook);
   app.post('/xrpc/community.lexicon.book.review.create', createReview);
-  app.post('/xrpc/community.lexicon.book.createStatus', createStatus);
-  app.post('/xrpc/community.lexicon.book.createClaim', createClaim);
+  app.post('/xrpc/community.lexicon.book.status.create', createStatus);
+  app.post('/xrpc/community.lexicon.book.claim.create', createClaim);
   app.post('/xrpc/community.lexicon.book.verifyClaim', verifyClaim);
   app.post('/xrpc/community.lexicon.book.appointLibrarian', appointLibrarian);
   app.post('/xrpc/community.lexicon.book.revokeLibrarian', revokeLibrarian);
-  app.post('/xrpc/community.lexicon.book.createShelf', createShelf);
-  app.post('/xrpc/community.lexicon.book.addToShelf', addToShelf);
-  app.post('/xrpc/community.lexicon.book.removeFromShelf', removeFromShelf);
+  app.post('/xrpc/community.lexicon.book.shelf.create', createShelf);
+  app.post('/xrpc/community.lexicon.book.shelfItem.create', addToShelf);
+  app.post('/xrpc/community.lexicon.book.shelfItem.delete', removeFromShelf);
   app.post('/xrpc/community.lexicon.book.contributor.create', createContributor);
   app.post('/xrpc/community.lexicon.book.contributor.update', updateContributor);
   app.post('/xrpc/community.lexicon.book.contributor.createType', createContributorType);
