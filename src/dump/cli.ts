@@ -8,9 +8,10 @@ import { HttpDownloader } from './downloader.js';
 import { DumpStreamer } from './streamer.js';
 import { runEditionsDumpImport, prepareRun } from './index.js';
 import { runAuthorsCli } from './authors/cli.js';
+import { hydrateBookContributors } from './hydrate-book-contributors.js';
 
 interface ParsedCli {
-  command: 'editions' | 'authors';
+  command: 'editions' | 'authors' | 'hydrate-book-contributors';
   noDownload: boolean;
   reset: boolean;
   batchSize?: number;
@@ -33,6 +34,7 @@ export function parseArgs(argv: string[]): ParsedCli {
   for (const arg of argv) {
     if (arg === 'editions') parsed.command = 'editions';
     else if (arg === 'authors') parsed.command = 'authors';
+    else if (arg === 'hydrate-book-contributors') parsed.command = 'hydrate-book-contributors';
     else if (arg === '--no-download') parsed.noDownload = true;
     else if (arg === '--reset') parsed.reset = true;
     else if (arg === '--dry-run') parsed.dryRun = true;
@@ -47,7 +49,7 @@ export function parseArgs(argv: string[]): ParsedCli {
       positional.push(arg);
     }
   }
-  if (positional.length > 0 && (positional[0] === 'editions' || positional[0] === 'authors')) {
+  if (positional.length > 0 && (positional[0] === 'editions' || positional[0] === 'authors' || positional[0] === 'hydrate-book-contributors')) {
     parsed.command = positional[0];
   }
   return parsed;
@@ -234,7 +236,24 @@ async function main(): Promise<void> {
     await runAuthorsCli(parseAuthorsArgsRest(argv.slice(1)));
     return;
   }
+  if (first === 'hydrate-book-contributors') {
+    const opts = parseHydrateArgs(argv.slice(1));
+    const summary = hydrateBookContributors(db, opts);
+    if (summary.errors > 0) {
+      process.exit(1);
+    }
+    return;
+  }
   await runEditionsCli(argv);
+}
+
+function parseHydrateArgs(rest: string[]): { dryRun: boolean; reset: boolean } {
+  const parsed = { dryRun: false, reset: false };
+  for (const arg of rest) {
+    if (arg === '--dry-run') parsed.dryRun = true;
+    else if (arg === '--reset') parsed.reset = true;
+  }
+  return parsed;
 }
 
 function parseAuthorsArgsRest(rest: string[]): {
