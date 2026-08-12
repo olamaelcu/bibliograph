@@ -8,7 +8,7 @@ import {
   type BookhiveCatalogRecord,
   type BookhiveUserBookRecord,
 } from './mapper.js';
-import { importBookhiveCatalogBook, importUserBookRecord } from './importer.js';
+import { importBookhiveCatalogBook, importUserBookRecord, findOrComputeContributor } from './importer.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
 import { generateRkey } from '../rkey.js';
 
@@ -165,6 +165,116 @@ describe('importBookhiveCatalogBook', () => {
     const row = db.select().from(schema.books).where(eq(schema.books.uri, mapped.uri)).get();
     const types = (row!.identifiers as Array<{ type: string; value: string }>).map((i) => i.type).sort();
     expect(types).toEqual(['goodreadsId', 'hiveId', 'isbn10', 'isbn13']);
+  });
+});
+
+describe('findOrComputeContributor', () => {
+  function seedContributor(row: Partial<schema.Contributor> = {}): schema.Contributor {
+    const createdAt = new Date().toISOString();
+    const rkey = generateRkey();
+    const inserted = db.insert(schema.contributors)
+      .values({
+        uri: makeRecordUri(SERVICE_DID, COLLECTIONS.contributor, rkey),
+        did: SERVICE_DID,
+        name: 'Frank Herbert',
+        altNames: [],
+        images: [],
+        identifiers: [],
+        createdAt,
+        ...row,
+      })
+      .returning()
+      .get();
+    return inserted!;
+  }
+
+  it('matches an existing contributor by OL key and reuses the row', () => {
+    const existing = seedContributor({
+      name: 'Frank Herbert',
+      identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
+    });
+
+    const result = findOrComputeContributor(db, 'A Different Name', { olKey: '/authors/OL1A' });
+
+    expect(result.uri).toBe(existing.uri);
+    expect(result.name).toBe('Frank Herbert');
+    expect(db.select().from(schema.contributors).all()).toHaveLength(1);
+  });
+
+  it('falls back to case-insensitive name match when no OL-key match, and merges the OL key in', () => {
+    const existing = seedContributor({
+      name: 'Frank Herbert',
+      identifiers: [],
+    });
+
+    const result = findOrComputeContributor(db, 'frank herbert', { olKey: '/authors/OL1A' });
+
+    expect(result.uri).toBe(existing.uri);
+    expect(result.name).toBe('Frank Herbert');
+
+    const after = db.select().from(schema.contributors).where(eq(schema.contributors.uri, result.uri)).get();
+    expect(after!.identifiers).toEqual([{ type: 'openlibrary', value: '/authors/OL1A' }]);
+  });
+
+  it('inserts a new contributor carrying the OL key when nothing matches', () => {
+    const result = findOrComputeContributor(db, 'New Author', { olKey: '/authors/OL2A' });
+
+    expect(result.name).toBe('New Author');
+    const rows = db.select().from(schema.contributors).all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.uri).toBe(result.uri);
+    expect(rows[0]!.identifiers).toEqual([{ type: 'openlibrary', value: '/authors/OL2A' }]);
+  });
+
+  it('does not duplicate the OL key when the existing row already has it', () => {
+    const existing = seedContributor({
+      name: 'Frank Herbert',
+      identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
+    });
+
+    findOrComputeContributor(db, 'Frank Herbert', { olKey: '/authors/OL1A' });
+
+    const after = db.select().from(schema.contributors).where(eq(schema.contributors.uri, existing.uri)).get();
+    expect(after!.identifiers).toEqual([{ type: 'openlibrary', value: '/authors/OL1A' }]);
+  });
+
+  it('preserves OL-key match priority over name match when both could apply', () => {
+    const byKey = seedContributor({
+      name: 'Frank Herbert',
+      identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
+    });
+    seedContributor({
+      name: 'Frank H. Different',
+      identifiers: [],
+    });
+
+    const result = findOrComputeContributor(db, 'Frank H. Different', { olKey: '/authors/OL1A' });
+
+    expect(result.uri).toBe(byKey.uri);
+    expect(result.name).toBe('Frank Herbert');
+  });
+
+  it('keeps existing altNames and bio when OL-key match is found', () => {
+    const existing = seedContributor({
+      name: 'Frank Herbert',
+      identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
+      altNames: ['Frank H.'],
+      bio: 'Original bio',
+    });
+
+    findOrComputeContributor(db, 'New Alias', { olKey: '/authors/OL1A' });
+
+    const after = db.select().from(schema.contributors).where(eq(schema.contributors.uri, existing.uri)).get();
+    expect(after!.altNames).toEqual(['Frank H.']);
+    expect(after!.bio).toBe('Original bio');
+  });
+
+  it('works without opts (backward-compat with existing bookhive callers)', () => {
+    const result = findOrComputeContributor(db, 'Frank Herbert');
+
+    expect(result.name).toBe('Frank Herbert');
+    const after = db.select().from(schema.contributors).where(eq(schema.contributors.uri, result.uri)).get();
+    expect(after!.identifiers).toEqual([]);
   });
 });
 
