@@ -62,11 +62,11 @@ XRPC GET `/xrpc/<nsid>`.
 
 | NSID | What it returns |
 |---|---|
-| [`community.lexicon.book.book.get`](lexicons/community/lexicon/book/book/get.json) | Single book by `at-uri`; resolves the inline `contributors[]` array |
-| [`community.lexicon.book.book.getMany`](lexicons/community/lexicon/book/book/getMany.json) | Batch fetch up to 25 books by `at-uri` |
-| [`community.lexicon.book.book.list`](lexicons/community/lexicon/book/book/list.json) | Paginated book list |
-| [`community.lexicon.book.book.search`](lexicons/community/lexicon/book/book/search.json) | Full-text search on title, author, ISBN; identifier search via `identifier=isbn,oclc,asin` |
-| [`community.lexicon.book.book.feed`](lexicons/community/lexicon/book/book/feed.json) | Aggregator: `recent`, `newestBooks`, `trending {day, week, month}`, optional `following` and `crossUser` buckets (feature-flagged via `ATP_FEATURE_FEED_GENERATOR=1`) |
+| [`community.lexicon.book.get`](lexicons/community/lexicon/book/get.json) | Single book by `at-uri`; resolves the inline `contributors[]` array |
+| [`community.lexicon.book.getMany`](lexicons/community/lexicon/book/getMany.json) | Batch fetch up to 25 books by `at-uri` |
+| [`community.lexicon.book.list`](lexicons/community/lexicon/book/list.json) | Paginated book list |
+| [`community.lexicon.book.search`](lexicons/community/lexicon/book/search.json) | Full-text search on title, author, ISBN; identifier search via `identifier=isbn,oclc,asin` |
+| [`community.lexicon.book.feed`](lexicons/community/lexicon/book/feed.json) | Aggregator: `recent`, `newestBooks`, `trending {day, week, month}`, optional `following` and `crossUser` buckets (feature-flagged via `ATP_FEATURE_FEED_GENERATOR=1`) |
 | [`community.lexicon.book.review.get`](lexicons/community/lexicon/book/review/get.json) | Single review by `at-uri` or by `did + bookUri` |
 | [`community.lexicon.book.review.getMany`](lexicons/community/lexicon/book/review/getMany.json) | Paginated reviews for a book |
 | [`community.lexicon.book.status.list`](lexicons/community/lexicon/book/status/list.json) | Reading statuses for a user, filterable by book/status |
@@ -88,7 +88,7 @@ claim-owner, librarian, or actor-DID-equals-record-DID.
 
 | NSID | Input summary | Errors |
 |---|---|---|
-| [`community.lexicon.book.book.create`](lexicons/community/lexicon/book/book/create.json) | `title` (required), `author` (required), plus optional ISBN, dates, description, page count, language, categories, cover URL | `DuplicateBook`, `InvalidInput` |
+| [`community.lexicon.book.create`](lexicons/community/lexicon/book/create.json) | `title` (required), `author` (required), plus optional ISBN, dates, description, page count, language, categories, cover URL | `DuplicateBook`, `InvalidInput` |
 | [`community.lexicon.book.review.create`](lexicons/community/lexicon/book/review/create.json) | `bookUri`, `text`, optional `rating` | `BookNotFound` |
 | [`community.lexicon.book.status.create`](lexicons/community/lexicon/book/status/create.json) | `status`, plus `bookUri` or `identifiers[]`, optional `progress`, `rating`, dates | `BookNotFound`, `StatusAlreadyExists` |
 | [`community.lexicon.book.claim.create`](lexicons/community/lexicon/book/claim/create.json) | `bookUri`, `identifier`, `identifierType ∈ {isbn, ean, issn}` | `BookNotFound`, `ClaimAlreadyExists` |

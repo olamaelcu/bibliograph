@@ -72,20 +72,20 @@ describe('auth', () => {
   describe('optionalAuth', () => {
     it('returns undefined when no authorization header is present', async () => {
       const headers = new Headers();
-      const did = await optionalAuth(headers, 'community.lexicon.book.book.feed');
+      const did = await optionalAuth(headers, 'community.lexicon.book.feed');
       expect(did).toBeUndefined();
     });
 
     it('returns the viewer DID for a valid bearer token', async () => {
       process.env.FAKE_JWT_OK = '1';
       const headers = new Headers({ authorization: 'Bearer fake.jwt.token' });
-      const did = await optionalAuth(headers, 'community.lexicon.book.book.feed');
+      const did = await optionalAuth(headers, 'community.lexicon.book.feed');
       expect(did).toBe('did:plc:viewer');
     });
 
     it('throws 401 for an invalid bearer token', async () => {
       const headers = new Headers({ authorization: 'Bearer fake.jwt.token' });
-      await expect(optionalAuth(headers, 'community.lexicon.book.book.feed')).rejects.toMatchObject({
+      await expect(optionalAuth(headers, 'community.lexicon.book.feed')).rejects.toMatchObject({
         status: 401,
         error: 'AuthenticationRequired',
       });

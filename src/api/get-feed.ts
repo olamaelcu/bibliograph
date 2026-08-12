@@ -8,7 +8,7 @@ import type { BookRef, FeedRecentItem, FeedWindow } from '../types.js';
 
 const { books, reviews, readingStatuses } = schema;
 
-const NSID = 'community.lexicon.book.book.feed';
+const NSID = 'community.lexicon.book.feed';
 const WINDOWS: Record<FeedWindow, number> = { day: 24, week: 7 * 24, month: 30 * 24 };
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 50;

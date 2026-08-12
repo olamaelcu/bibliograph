@@ -4,11 +4,11 @@ import { Layout, type HtmlContent } from './layout.js';
 const prefix = 'community.lexicon.book';
 
 const DESCRIPTIONS: Record<string, string> = {
-  'book.get': 'Fetch a single book by rkey',
-  'book.getMany': 'Batch fetch books by URI',
-  'book.list': 'List books (paginated)',
-  'book.search': 'Full-text search on title, author, ISBN',
-  'book.feed': 'Feed generator buckets',
+  'get': 'Fetch a single book by rkey',
+  'getMany': 'Batch fetch books by URI',
+  'list': 'List books (paginated)',
+  'search': 'Full-text search on title, author, ISBN',
+  'feed': 'Feed generator buckets',
   'review.get': 'Fetch a single review',
   'review.getMany': 'List reviews for a book',
   'status.list': 'Reading statuses for a DID',
@@ -21,7 +21,7 @@ const DESCRIPTIONS: Record<string, string> = {
   'contributor.list': 'List known contributors',
   'contributor.search': 'Full-text search over contributors',
   'contributor.listTypes': 'List canonical contributor roles',
-  'book.create': 'Add a book record',
+  'create': 'Add a book record',
   'review.create': 'Post a review',
   'status.create': 'Set reading status',
   'claim.create': 'Claim an edition/translation',

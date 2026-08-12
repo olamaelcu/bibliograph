@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "community.lexicon.book.book.search",
+  "id": "community.lexicon.book.search",
   "defs": {
     "main": {
       "type": "query",

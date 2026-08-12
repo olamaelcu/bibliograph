@@ -317,7 +317,7 @@ async function createBookFromProviderData(
 
 export async function createBook(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
-  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.book.create');
+  const did = await requireAuth(c.req.raw.headers, 'community.lexicon.book.create');
   const input = await c.req.json<CreateBookInput>();
 
   if (!input.title || !input.author) {

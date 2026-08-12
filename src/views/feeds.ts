@@ -43,7 +43,7 @@ export function FeedsPage(props: { host: string }) {
   </div>
 
   <div slot="footer">
-    <p class="wa-caption-s wa-color-text-quiet">Polling /xrpc/community.lexicon.book.book.feed every 5s &middot; Bibliograph &mdash; ${props.host}
+    <p class="wa-caption-s wa-color-text-quiet">Polling /xrpc/community.lexicon.book.feed every 5s &middot; Bibliograph &mdash; ${props.host}
 &mdash; <a href="https://userinput.app/s/did:plc:ejggqolmgpylroktvaktibik/3mst4pvyu7m2f">Submit Feedback</a>
       </p>
   </div>
@@ -58,7 +58,7 @@ export function FeedsPage(props: { host: string }) {
                      week: document.getElementById('trend-week'),
                      month: document.getElementById('trend-month') };
 
-  const ENDPOINT = '/xrpc/community.lexicon.book.book.feed?limit=25';
+  const ENDPOINT = '/xrpc/community.lexicon.book.feed?limit=25';
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (ch) {

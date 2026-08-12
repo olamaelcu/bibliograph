@@ -34,11 +34,11 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 
 | Endpoint | Description |
 |----------|-------------|
-| `community.lexicon.book.book.get` | Fetch a single book by AT-URI (returns joined contributors) |
-| `community.lexicon.book.book.getMany` | Batch fetch books by URIs (returns joined contributors) |
-| `community.lexicon.book.book.list` | Paginated book list |
-| `community.lexicon.book.book.search` | Full-text search on title, author, ISBN |
-| `community.lexicon.book.book.feed` | Home feed: recent status updates, newest books, trending, following, cross-user |
+| `community.lexicon.book.get` | Fetch a single book by AT-URI (returns joined contributors) |
+| `community.lexicon.book.getMany` | Batch fetch books by URIs (returns joined contributors) |
+| `community.lexicon.book.list` | Paginated book list |
+| `community.lexicon.book.search` | Full-text search on title, author, ISBN |
+| `community.lexicon.book.feed` | Home feed: recent status updates, newest books, trending, following, cross-user |
 | `community.lexicon.book.review.get` | Fetch a single review by AT-URI or user+book |
 | `community.lexicon.book.review.getMany` | Paginated reviews for a book |
 | `community.lexicon.book.status.list` | Reading statuses for a user |
@@ -55,7 +55,7 @@ Bibliograph consumes book-related ATProto records via [Tap](https://github.com/b
 
 | Endpoint | Description |
 |----------|-------------|
-| `community.lexicon.book.book.create` | Create a book definition (requires ISBN for dedup) |
+| `community.lexicon.book.create` | Create a book definition (requires ISBN for dedup) |
 | `community.lexicon.book.review.create` | Post a review |
 | `community.lexicon.book.status.create` | Record reading status |
 | `community.lexicon.book.claim.create` | Claim a book as author/curator |
@@ -433,7 +433,7 @@ src/
     googlebooks.ts Google Books API provider
 lexicons/
   community/lexicon/book/
-    *.json         35 ATProto lexicon schema files (records at top level, operations under per-resource subdirectories)
+    *.json         35 ATProto lexicon schema files (records and book operations at top level, other-resource operations under per-resource subdirectories)
 ```
 
 ```
@@ -457,7 +457,7 @@ src/
     googlebooks.ts Google Books API provider
 lexicons/
   community/lexicon/book/
-    *.json         35 ATProto lexicon schema files (records at top level, operations under per-resource subdirectories)
+    *.json         35 ATProto lexicon schema files (records and book operations at top level, other-resource operations under per-resource subdirectories)
 ```
 
 ## License

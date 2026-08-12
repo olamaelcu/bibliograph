@@ -33,11 +33,11 @@ export function createApp(): Hono {
   app.get('/', (c) => {
     const host = new URL(c.req.url).host;
     const queries = [
-      'book.get',
-      'book.getMany',
-      'book.list',
-      'book.search',
-      'book.feed',
+      'get',
+      'getMany',
+      'list',
+      'search',
+      'feed',
       'review.get',
       'review.getMany',
       'status.list',
@@ -52,7 +52,7 @@ export function createApp(): Hono {
       'contributor.listTypes',
     ];
     const procedures = [
-      'book.create',
+      'create',
       'review.create',
       'status.create',
       'claim.create',
@@ -96,10 +96,10 @@ export function createApp(): Hono {
   app.get('/covers/*', serveCover);
 
   // Query endpoints (GET /xrpc/...)
-  app.get('/xrpc/community.lexicon.book.book.get', getBook);
-  app.get('/xrpc/community.lexicon.book.book.getMany', getBooks);
-  app.get('/xrpc/community.lexicon.book.book.list', listBooksHandler);
-  app.get('/xrpc/community.lexicon.book.book.search', searchBooksHandler);
+  app.get('/xrpc/community.lexicon.book.get', getBook);
+  app.get('/xrpc/community.lexicon.book.getMany', getBooks);
+  app.get('/xrpc/community.lexicon.book.list', listBooksHandler);
+  app.get('/xrpc/community.lexicon.book.search', searchBooksHandler);
   app.get('/xrpc/community.lexicon.book.review.get', getReview);
   app.get('/xrpc/community.lexicon.book.review.getMany', getReviews);
   app.get('/xrpc/community.lexicon.book.status.list', getUserStatus);
@@ -115,14 +115,14 @@ export function createApp(): Hono {
   app.get('/xrpc/community.lexicon.book.shelf.list', getShelves);
   app.get('/xrpc/community.lexicon.book.shelf.get', getShelf);
   app.get('/xrpc/community.lexicon.book.shelfItem.list', getShelfItems);
-  app.get('/xrpc/community.lexicon.book.book.feed', getFeed);
+  app.get('/xrpc/community.lexicon.book.feed', getFeed);
   app.get('/xrpc/community.lexicon.book.contributor.get', getContributor);
   app.get('/xrpc/community.lexicon.book.contributor.list', listContributors);
   app.get('/xrpc/community.lexicon.book.contributor.search', searchContributors);
   app.get('/xrpc/community.lexicon.book.contributor.listTypes', listContributorTypes);
 
   // Procedure endpoints (POST /xrpc/...)
-  app.post('/xrpc/community.lexicon.book.book.create', createBook);
+  app.post('/xrpc/community.lexicon.book.create', createBook);
   app.post('/xrpc/community.lexicon.book.review.create', createReview);
   app.post('/xrpc/community.lexicon.book.status.create', createStatus);
   app.post('/xrpc/community.lexicon.book.claim.create', createClaim);
