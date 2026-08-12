@@ -1,17 +1,22 @@
 import { html } from 'hono/html';
 import { Layout } from './layout.js';
+import { navHeader } from './endpoints.js';
+
+const HEADER_LINKS = [
+  { href: '/', icon: 'home', label: 'Home' },
+  { href: '/queries', icon: 'file-text', label: 'Queries' },
+  { href: '/procedures', icon: 'square-pen', label: 'Procedures' },
+];
 
 export function FeedsPage(props: { host: string }) {
   const content = html`<wa-page  style="max-width: 60rem; margin: 0 auto;">
-  <div slot="header">
-    <div class="wa-cluster wa-gap-l" style="justify-content: space-between; align-items: center; flex-wrap: wrap">
-      <div class="wa-cluster wa-gap-m" style="align-items: center">
-        <wa-icon library="lucide" name="radio"></wa-icon>
-        <h1 class="wa-heading-l">Feeds</h1>
-      </div>
-      <wa-button href="/" variant="neutral"><wa-icon library="lucide" name="home" slot="prefix"></wa-icon>Home</wa-button>
-    </div>
-  </div>
+  ${navHeader({
+    host: props.host,
+    icon: 'radio',
+    title: 'Feeds',
+    subtitle: 'community.lexicon.book',
+    links: HEADER_LINKS,
+  })}
 
   <div>
 
