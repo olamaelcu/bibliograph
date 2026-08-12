@@ -143,11 +143,17 @@ Bibliograph seeds five canonical roles on boot — `author`, `illustrator`,
 `editor`, `translator`, `narrator`. Librarians can publish additional roles
 via `createContributorType`.
 
-### Backfill script
+### Hydrate book_contributors
 
-For pre-existing books that landed in the index before this feature shipped,
-the `book_contributors` join table may be empty even if the book record carries
-a `contributors` array. Populate it with:
+Books imported from the OpenLibrary editions dump carry only the denormalized
+`books.author` string and an `openlibrary` identifier — they don't have
+`book_contributors` join rows yet. The hydrate pass walks the `books` table,
+skips books that already have join rows (bookhive-imported), resolves each
+remaining OL key + author name to a `contributors` row via
+`findOrComputeContributor` (which prefers an OL-key match over a case-insensitive
+name match and merges the OL key into the contributor's `identifiers`), and
+inserts a `book_contributors` join row keyed on `(bookUri, contributorUri,
+roleUri)`.
 
 ```bash
 # Default: additive/upsert
@@ -161,8 +167,14 @@ npm run backfill:contributors -- --reset
 ```
 
 Re-running is safe: the script uses `INSERT OR IGNORE` on the composite PK
-`(bookUri, contributorUri, roleUri)`. Exit code is non-zero if any rows were
-skipped due to malformed JSON in `books.contributors`.
+`(bookUri, contributorUri, roleUri)`. The walk acquires a `backfill_reservation`
+row (`stateName='book_contributors_hydrate'`) so concurrent web writes retry
+out via `withWriteRetry` instead of failing. Exit code is non-zero if any rows
+were skipped due to errors. Reach the same script through the dispatcher:
+
+```bash
+npx tsx src/backfill.ts hydrate-book-contributors [--reset] [--dry-run]
+```
 
 ## Bulk backfill (editions dump)
 
@@ -192,6 +204,42 @@ npx tsx src/backfill.ts openlibrary:dump [--no-download] [--reset]
 State — including byte offset and last-processed edition key — is persisted in
 `backfill_state`. An interrupted run resumes from the last checkpoint, not
 from line 1.
+
+## Bulk backfill (authors dump)
+
+The OpenLibrary authors dump (~778 MB compressed, redirects to the monthly
+archive.org snapshot) populates `schema.contributors` with `name`, `altNames`,
+`bio`, and `identifiers.openlibrary`. Run once after first deploy to seed the
+contributors table, then monthly via the cron schedule to pick up new
+authors:
+
+```bash
+# one-off: download + import
+npm run dump:authors
+
+# cron-friendly: skip the network download when local file is already current
+npm run dump:authors -- --no-download
+
+# clear the checkpoint and re-process from byte 0
+npm run dump:authors -- --reset
+
+# override the dump URL (defaults to https://openlibrary.org/data/ol_dump_authors_latest.txt.gz)
+OL_AUTHORS_DUMP_URL=https://archive.org/download/ol_dump_2026-07-31/ol_dump_authors_2026-07-31.txt.gz \
+  npm run dump:authors
+```
+
+The same importer is reachable through the dispatcher:
+
+```bash
+npx tsx src/backfill.ts authors:dump [--no-download] [--reset]
+```
+
+The importer uses a bespoke batch loop (not `BatchedImporter`, which is
+BookData-shaped) with tiered lookup: OL-key match via `json_each` on
+`contributors.identifiers` → case-insensitive name match → INSERT. Import
+counting increments only on INSERT to avoid `totalProcessed` inflation on
+re-runs. State lives in `backfill_state` (`name='authors'`); an interrupted
+run resumes from the last byte offset.
 
 ## Bulk backfill (Bookhive catalog)
 
