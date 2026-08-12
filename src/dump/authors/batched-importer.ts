@@ -47,7 +47,7 @@ interface RunAuthorsContext {
 }
 
 const OL_AUTHORS_DUMP_URL_DEFAULT =
-  'https://openlibrary.org/data/ol_dump_authors_latest.txt.gz';
+  process.env.OL_AUTHORS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_authors_latest.txt.gz';
 const BATCH_LOG_INTERVAL = Math.max(
   1,
   Number.parseInt(process.env.OL_DUMP_BATCH_LOG_INTERVAL ?? '1', 10) || 1,

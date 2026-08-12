@@ -21,7 +21,7 @@ const STATE_NAME = 'authors';
 const OL_DUMP_PATH_DEFAULT =
   process.env.OL_DUMP_PATH ?? resolve(process.cwd(), 'data', 'dumps');
 const OL_AUTHORS_DUMP_URL_DEFAULT =
-  'https://openlibrary.org/data/ol_dump_authors_latest.txt.gz';
+  process.env.OL_AUTHORS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_authors_latest.txt.gz';
 
 export function parseAuthorsArgs(argv: string[]): AuthorsCliOptions {
   const parsed: AuthorsCliOptions = {};
