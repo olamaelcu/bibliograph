@@ -1,0 +1,46 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.format",
+  "description": "A format or edition type for a book.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "string",
+      "record": {
+        "type": "object",
+        "required": [
+          "description",
+          "emoji",
+          "unit"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxGraphemes": 128,
+            "description": "Human-readable description of the format."
+          },
+          "emoji": {
+            "type": "string",
+            "maxGraphemes": 8,
+            "description": "Emoji representing the format."
+          },
+          "iconImageUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Small icon image for the format."
+          },
+          "unit": {
+            "type": "string",
+            "description": "The unit a progress value for a book in this format is measured in.",
+            "knownValues": [
+              "other",
+              "pages",
+              "seconds",
+              "percent"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,5 +1,20 @@
 {
-	"version": "7",
-	"dialect": "sqlite",
-	"entries": []
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1786655560938,
+      "tag": "0000_reflective_lake",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786661418594,
+      "tag": "0001_parallel_chronomancer",
+      "breakpoints": true
+    }
+  ]
 }

@@ -2,8 +2,11 @@
 
 A collection of tools in one:
 
-- An [ATProto AppView][1] that provides a means of finding information about books, reviews folks have made in the Atmosphere
-- An [ATProto feed generator][2] that aggregates user behavior for the purpose of discovery
+- An [ATProto AppView][1] that provides a means of finding information about
+  books, reviews folks have made in the Atmosphere
+- An [ATProto feed generator][2] that aggregates user behavior for the purpose
+  of discovery
+- A thin [ATProto PDS][3] whose records are about the books and authors it knows about.
 
 ## Setup
 
@@ -42,3 +45,4 @@ Dokku via `git push dokku main`; `app.json` healthcheck targets `/health`.
 
 [1]: https://atproto.com/guides/glossary#app-view
 [2]: https://atproto.com/guides/feeds
+[3]: https://atproto.com/specs/repository

@@ -18,3 +18,4 @@ db.sqlite*
 static/
 .cortexkit/
 .worktrees/
+data/

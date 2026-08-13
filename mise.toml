@@ -2,6 +2,10 @@
 node = "26.3.0"
 pnpm = "11.13.1"
 
+[env]
+_.file = ".env"
+DB_PATH = "data/bibliograph.sqlite"
+
 [tasks.dev-server]
 run = "pnpm run dev:server"
 
@@ -10,3 +14,6 @@ run = "pnpm run dev"
 
 [tasks.dev]
 run = "mise run dev-vite ::: dev-server"
+
+[tasks.migrate]
+run = "pnpm exec drizzle-kit migrate"

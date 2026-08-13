@@ -1,0 +1,103 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.review",
+  "description": "A review of a book.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "string",
+      "record": {
+        "type": "object",
+        "required": [
+          "book",
+          "rating",
+          "status"
+        ],
+        "properties": {
+          "book": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.book",
+            "strong": true,
+            "description": "The book being reviewed."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxGraphemes": 64
+            },
+            "description": "Tags associated with this review."
+          },
+          "rating": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Rating from 1 to 5."
+          },
+          "status": {
+            "type": "string",
+            "knownValues": [
+              "reading",
+              "to-read",
+              "dnf",
+              "read"
+            ],
+            "description": "Reading status for the book at the time of this review."
+          },
+          "progress": {
+            "type": "object",
+            "required": [
+              "format"
+            ],
+            "properties": {
+              "format": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.format",
+                "strong": true,
+                "description": "The format being read; its unit defines how progress is measured."
+              },
+              "progress": {
+                "type": "number",
+                "minimum": 0,
+                "description": "Progress value measured in the format's unit, e.g. 30 for 30 pages into a physical book."
+              },
+              "unit": {
+                "type": "string",
+                "knownValues": [
+                  "other",
+                  "pages",
+                  "seconds",
+                  "percent"
+                ],
+                "description": "Optional unit override; defaults to the format's unit."
+              }
+            },
+            "description": "Optional progress indicator."
+          },
+          "text": {
+            "type": "string",
+            "maxGraphemes": 65536,
+            "description": "The review prose."
+          },
+          "blobs": {
+            "type": "array",
+            "items": {
+              "type": "blob",
+              "accept": [
+                "image/*",
+                "video/*"
+              ],
+              "maxSize": 10000000
+            },
+            "description": "Optional image or video blobs attached to this review."
+          },
+          "createdAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp when this record was originally created."
+          }
+        }
+      }
+    }
+  }
+}

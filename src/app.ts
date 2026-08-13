@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
 import { requestTracing } from './middleware.js';
+import { didDocumentHandler } from './did.js';
+import { lexiconsStatic } from './lexicons.js';
 import { logger } from './logger.js';
 
 export function createApp(): Hono {
@@ -11,6 +13,8 @@ export function createApp(): Hono {
   app.use('*', requestTracing);
 
   app.get('/health', healthCheck);
+  app.get('/.well-known/did.json', didDocumentHandler);
+  app.use('/lexicons/*', lexiconsStatic);
   app.onError(handleServerError);
 
   return app;

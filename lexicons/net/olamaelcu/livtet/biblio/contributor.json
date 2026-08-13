@@ -1,0 +1,46 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.contributor",
+  "description": "A contributor to a book, such as an author, editor, or translator.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "string",
+      "record": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxGraphemes": 200,
+            "description": "Display name of the contributor."
+          },
+          "sortName": {
+            "type": "string",
+            "maxGraphemes": 200,
+            "description": "Name used for alphabetical sorting, e.g. 'Tolkien, J.R.R.'."
+          },
+          "identifiers": {
+            "type": "array",
+            "items": { "type": "ref", "ref": "net.olamaelcu.livtet.biblio.defs#identifier" }
+          },
+          "bio": {
+            "type": "string",
+            "maxGraphemes": 16384,
+            "description": "Short biography of the contributor."
+          },
+          "imageUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Portrait or avatar image of the contributor."
+          },
+          "createdAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp when this record was originally created."
+          }
+        }
+      }
+    }
+  }
+}

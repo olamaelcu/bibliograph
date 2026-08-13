@@ -1,0 +1,28 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.defs",
+  "defs": {
+    "identifier": {
+      "type": "object",
+      "description": "An external identifier for a record, such as an ISBN or Open Library key.",
+      "required": ["resource", "url"],
+      "properties": {
+        "resource": {
+          "type": "string",
+          "maxGraphemes": 128,
+          "description": "The identifier value issued by the external source."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL where the identifier can be resolved."
+        }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "datetime",
+      "description": "An ISO-8601 datetime (RFC 3339)."
+    }
+  }
+}

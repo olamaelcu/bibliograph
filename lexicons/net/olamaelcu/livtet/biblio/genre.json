@@ -1,0 +1,62 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.genre",
+  "description": "A literary genre or category for books.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "string",
+      "record": {
+        "type": "object",
+        "required": [
+          "name",
+          "emoji",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxGraphemes": 64,
+            "description": "Display name of the genre."
+          },
+          "emoji": {
+            "type": "string",
+            "maxGraphemes": 8,
+            "description": "Emoji representing the genre."
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 512,
+            "description": "What this genre covers."
+          },
+          "iconImageUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Small icon image for the genre."
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+            },
+            "description": "External identifiers for the genre."
+          },
+          "parent": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Optional parent genre for a hierarchical taxonomy."
+          },
+          "children": {
+            "type": "array",
+            "items": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.genre"
+            },
+            "description": "Direct child genres of this genre."
+          }
+        }
+      }
+    }
+  }
+}

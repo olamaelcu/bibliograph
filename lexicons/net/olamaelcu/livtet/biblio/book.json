@@ -1,0 +1,72 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.book",
+  "description": "An edition of a work (a book).",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "string",
+      "record": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxGraphemes": 300,
+            "description": "Title of the edition."
+          },
+          "work": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.work",
+            "strong": true,
+            "description": "The literary work this book is an edition of."
+          },
+          "format": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.format",
+            "strong": true,
+            "description": "The format of this edition."
+          },
+          "genres": {
+            "type": "array",
+            "items": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.genre"
+            },
+            "description": "Genres this book belongs to."
+          },
+          "identifiers": {
+            "type": "array",
+            "items": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+            },
+            "description": "External identifiers for this edition, such as ISBNs."
+          },
+          "publishDate": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Publication date of this edition."
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 8192,
+            "description": "Description or synopsis of the book."
+          },
+          "coverUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Cover image URL of the book."
+          },
+          "createdAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp when this record was originally created."
+          }
+        }
+      }
+    }
+  }
+}
