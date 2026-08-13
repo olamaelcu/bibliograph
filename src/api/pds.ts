@@ -1,6 +1,5 @@
 import type { Context } from 'hono';
 import { and, eq, gt, lt, sql } from 'drizzle-orm';
-import type { books as booksTable, contributors as contributorsTable, contributorTypes as contributorTypesTable } from '../db/schema.js';
 import { db, schema } from '../db/connection.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
 import {
@@ -15,9 +14,9 @@ import { cidForRecord } from '../pds/cid.js';
 import { getServiceDid, buildDidDocument } from '../did.js';
 import { logger } from '../logger.js';
 
-type BookRow = typeof booksTable.$inferSelect;
-type ContributorRow = typeof contributorsTable.$inferSelect;
-type ContributorTypeRow = typeof contributorTypesTable.$inferSelect;
+type BookRow = typeof schema.books.$inferSelect;
+type ContributorRow = typeof schema.contributors.$inferSelect;
+type ContributorTypeRow = typeof schema.contributorTypes.$inferSelect;
 type RowShape = BookRow | ContributorRow | ContributorTypeRow;
 
 /**
