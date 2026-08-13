@@ -26,7 +26,7 @@ import { clearSqliteTables } from '../test-utils/db.js';
 const _s = schema;
 const _d = db as any;
 
-import { setupFts, setupIdentifiersView, searchBooks, ftsSearchBooks } from './init.js';
+import { setupFts, setupIdentifiersView, searchBooks, ftsSearchBooks, ftsSearchBooksNumeric } from './init.js';
 
 function getSqlite() {
   return _d.$sqlite as InstanceType<typeof import('better-sqlite3')>;
@@ -224,6 +224,58 @@ describe('db/init', () => {
       const started = Date.now();
       ftsSearchBooks('__nonexistent_token_xyz_qq__', 20, 0);
       expect(Date.now() - started).toBeLessThan(50);
+    });
+  });
+
+  describe('ftsSearchBooksNumeric', () => {
+    function seedIsbnBook(uri: string, title: string, author: string, isbn: string | null): void {
+      db.insert(_s.books).values({
+        uri,
+        did: 'did:plc:author',
+        title,
+        author,
+        isbn,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
+    }
+
+    it('returns empty array on empty query without hitting FTS', () => {
+      expect(ftsSearchBooksNumeric('', 20, 0)).toEqual([]);
+      expect(ftsSearchBooksNumeric('   ', 20, 0)).toEqual([]);
+    });
+
+    it('strips non-numeric, non-dash characters from the query', () => {
+      expect(ftsSearchBooksNumeric('978abc', 20, 0)).toEqual([]);
+      expect(ftsSearchBooksNumeric('978"evil', 20, 0)).toEqual([]);
+    });
+
+    it('matches ISBN by anchored prefix', () => {
+      seedIsbnBook('at://did:plc:a/book/isbn-dashed', 'Dashed', 'Author', '978-0-12-345678-9');
+      seedIsbnBook('at://did:plc:a/book/isbn-plain', 'Plain', 'Author', '9780099528982');
+      seedIsbnBook('at://did:plc:a/book/isbn-other', 'Other', 'Author', '1234567890');
+
+      const results = ftsSearchBooksNumeric('978-0-12', 20, 0);
+      const uris = results.map(r => r.uri);
+      expect(uris).toContain('at://did:plc:a/book/isbn-dashed');
+      expect(uris).not.toContain('at://did:plc:a/book/isbn-other');
+    });
+
+    it('matches plain (dashless) ISBNs', () => {
+      seedIsbnBook('at://did:plc:a/book/isbn-plain-only', 'Plain', 'Author', '9780140449266');
+
+      const results = ftsSearchBooksNumeric('9780140', 20, 0);
+      const uris = results.map(r => r.uri);
+      expect(uris).toContain('at://did:plc:a/book/isbn-plain-only');
+    });
+
+    it('also matches numeric prefixes appearing in titles', () => {
+      seedIsbnBook('at://did:plc:a/book/isbn-in-title', 'Volume 978-0-12 Special', 'Author', '9999999999999');
+
+      const results = ftsSearchBooksNumeric('978-0-12', 20, 0);
+      const uris = results.map(r => r.uri);
+      expect(uris).toContain('at://did:plc:a/book/isbn-in-title');
     });
   });
 

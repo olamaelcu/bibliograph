@@ -1,13 +1,13 @@
 import type { Context } from 'hono';
-import { and, asc, eq, inArray, like, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import { db, schema } from '../db/connection.js';
 import { getLabels } from '../labeler.js';
-import { parsePagination, nextCursor } from '../pagination.js';
+import { parsePagination, nextCursor, parseKeysetPagination, nextKeysetCursor } from '../pagination.js';
 import { searchFallback, type FallbackResult, type FallbackSource } from './search-fallback.js';
 import { computeDeduplicationHash } from '../dedup.js';
 import { parseIdentifierInput, resolveBooksByIdentifier, type ResolvedBook } from './identifier-lookup.js';
 import { serializeContributor, serializeContributorType } from './contributor.js';
-import { ftsSearchBooks } from '../db/init.js';
+import { ftsSearchBooks, ftsSearchBooksNumeric } from '../db/init.js';
 import type { BookData } from '../providers/interface.js';
 import type {
   GetBookParams, GetBooksParams, GetReviewsParams, GetReviewParams,
@@ -375,11 +375,7 @@ export async function searchBooksHandler(c: Context): Promise<Response> {
 
   let results: Array<typeof books.$inferSelect>;
   if (sanitized.match(/^[0-9-]+$/)) {
-    results = await db.query.books.findMany({
-      where: or(like(books.isbn, `%${sanitized}%`), like(books.title, `%${sanitized}%`)),
-      limit: lim,
-      offset,
-    });
+    results = ftsSearchBooksNumeric(sanitized, lim, offset);
   } else {
     results = ftsSearchBooks(sanitized, lim, offset);
   }
@@ -419,19 +415,35 @@ export async function listBooksHandler(c: Context): Promise<Response> {
   const log = c.get('log') as import('pino').Logger;
   const { limit = '50', cursor, includeUnverified } = c.req.query();
 
-  const { limit: lim, offset } = parsePagination(limit, cursor, 50, 100);
+  const { limit: lim, cursor: keyset } = parseKeysetPagination(limit, cursor, 50, 100);
 
-  log.info({ limit: lim, offset, includeUnverified }, 'handling listBooksHandler');
+  log.info({ limit: lim, hasCursor: !!keyset, includeUnverified }, 'handling listBooksHandler');
 
   const statusFilter = includeUnverified === 'true'
     ? or(eq(books.status, 'active'), eq(books.status, 'pending'))
     : eq(books.status, 'active');
 
+  // Keyset pagination over (status, createdAt, uri). The composite index
+  // `books_status_created_uri_idx` covers this query: WHERE matches the
+  // leading status column, ORDER BY matches the next two columns, and uri
+  // disambiguates rows with identical createdAt timestamps.
+  const where = keyset
+    ? and(
+        statusFilter,
+        or(
+          gt(books.createdAt, keyset.c),
+          and(
+            eq(books.createdAt, keyset.c),
+            gt(books.uri, keyset.u),
+          ),
+        ),
+      )
+    : statusFilter;
+
   const rows = await db.select().from(books)
-    .where(statusFilter)
+    .where(where)
     .orderBy(asc(books.createdAt), asc(books.uri))
     .limit(lim)
-    .offset(offset)
     .all();
 
   const bookEntries: Array<{ uri: string; record: Record<string, unknown> }> = rows.map(book => ({
@@ -439,10 +451,12 @@ export async function listBooksHandler(c: Context): Promise<Response> {
     record: serializeBookRecord(book),
   }));
 
-  log.info({ found: bookEntries.length, nextOffset: offset + rows.length }, 'listBooksHandler complete');
+  const cursorOut = nextKeysetCursor(rows, lim);
+
+  log.info({ found: bookEntries.length, hasCursor: !!cursorOut }, 'listBooksHandler complete');
   return c.json({
     books: bookEntries,
-    cursor: nextCursor(bookEntries.length, offset, lim),
+    cursor: cursorOut,
   });
 }
 

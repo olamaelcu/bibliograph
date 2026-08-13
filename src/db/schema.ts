@@ -61,6 +61,11 @@ export const books = sqliteTable(
     statusIdx: index('books_status_idx').on(table.status),
     deduplicationHashIdx: index('books_deduplication_hash_idx').on(table.deduplicationHash),
     createdAtIdx: index('books_created_at_idx').on(table.createdAt),
+    statusCreatedUriIdx: index('books_status_created_uri_idx').on(
+      table.status,
+      table.createdAt,
+      table.uri,
+    ),
     statusCheck: check('books_status_check', sql`${table.status} IN ('pending', 'active', 'rejected')`),
   }),
 );

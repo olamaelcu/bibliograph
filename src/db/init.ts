@@ -136,6 +136,47 @@ export function ftsSearchBooks(
   ).all(sanitized, limit, offset) as Array<typeof books.$inferSelect>;
 }
 
+/**
+ * Anchor a numeric query on the FTS5 prefix index. Avoids the
+ * `WHERE isbn LIKE '%x%' OR title LIKE '%x%'` full table scan that
+ * `EXPLAIN QUERY PLAN` confirms on a multi-million-row books table.
+ *
+ * The match expression uses the FTS5 column-restricted prefix form:
+ * `isbn:Q* OR title:Q*`. Both columns are indexed in the `books_fts`
+ * virtual table, so the query plan is index-only.
+ *
+ * The original `LIKE '%Q%'` semantic accepted substring matches inside
+ * the title (e.g. "12345" matching "Volume 12345 Edition"). Anchoring
+ * on prefix is a deliberate trade-off — substring matches forced a
+ * SCAN; prefix matches stay index-only. Clients that want substring
+ * behavior should use the search-fallback path on miss.
+ */
+export function ftsSearchBooksNumeric(
+  query: string,
+  limit: number,
+  offset: number,
+): Array<typeof books.$inferSelect> {
+  const sanitized = query
+    .replace(/[^0-9-]+/g, '')
+    .trim();
+
+  if (!sanitized) return [];
+
+  // FTS5 special-codes `-` as a NOT operator unless the term is wrapped in
+  // double quotes. ISBN values contain dashes, so we quote the prefix
+  // expression: `"<sanitized>"*` means "match any token sequence starting
+  // with this phrase". This stays index-only — no full scan.
+  const match = `isbn:"${sanitized}"* OR title:"${sanitized}"*`;
+
+  return sqliteHandle.prepare(
+    `SELECT b.* FROM books_fts fts
+     JOIN books b ON b.rowid = fts.rowid
+     WHERE books_fts MATCH ?
+     ORDER BY rank
+     LIMIT ? OFFSET ?`,
+  ).all(match, limit, offset) as Array<typeof books.$inferSelect>;
+}
+
 export function bootstrapLibrarian(): void {
   const did = process.env.ATP_LIBRARIAN_DID;
   if (!did) return;

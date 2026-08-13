@@ -968,16 +968,18 @@ describe('api/get-book', () => {
         'at://did:plc:a/book/p0',
         'at://did:plc:a/book/p1',
       ]);
-      expect(page1.cursor).toBe('2');
+      expect(typeof page1.cursor).toBe('string');
+      const cursor1 = page1.cursor as string;
 
-      const page2 = await readJson(await listBooksHandler(mockContext({ query: { limit: '2', cursor: '2' } })));
+      const page2 = await readJson(await listBooksHandler(mockContext({ query: { limit: '2', cursor: cursor1 } })));
       expect(page2.books.map((b: { uri: string }) => b.uri)).toEqual([
         'at://did:plc:a/book/p2',
         'at://did:plc:a/book/p3',
       ]);
-      expect(page2.cursor).toBe('4');
+      expect(typeof page2.cursor).toBe('string');
+      const cursor2 = page2.cursor as string;
 
-      const page3 = await readJson(await listBooksHandler(mockContext({ query: { limit: '2', cursor: '4' } })));
+      const page3 = await readJson(await listBooksHandler(mockContext({ query: { limit: '2', cursor: cursor2 } })));
       expect(page3.books.map((b: { uri: string }) => b.uri)).toEqual([
         'at://did:plc:a/book/p4',
       ]);
@@ -1004,12 +1006,28 @@ describe('api/get-book', () => {
     it('returns an empty page with no cursor when there are no more rows', async () => {
       seedListBook('at://did:plc:a/book/single', { createdAt: '2024-01-01T00:00:00.000Z' });
 
-      const res = await listBooksHandler(mockContext({ query: { cursor: '50' } }));
+      // Keyset cursor pointing past the only book.
+      const cursor = Buffer.from(
+        JSON.stringify({ c: '2025-01-01T00:00:00.000Z', u: 'at://did:plc:a/book/zzz' }),
+        'utf-8',
+      ).toString('base64url');
+
+      const res = await listBooksHandler(mockContext({ query: { cursor } }));
       const body = await readJson(res);
 
       expect(res.status).toBe(200);
       expect(body.books).toEqual([]);
       expect(body.cursor).toBeUndefined();
+    });
+
+    it('ignores malformed cursors and returns the first page', async () => {
+      seedListBook('at://did:plc:a/book/x', { createdAt: '2024-01-01T00:00:00.000Z' });
+
+      const res = await listBooksHandler(mockContext({ query: { cursor: 'not-a-real-cursor' } }));
+      const body = await readJson(res);
+
+      expect(res.status).toBe(200);
+      expect(body.books.map((b: { uri: string }) => b.uri)).toEqual(['at://did:plc:a/book/x']);
     });
 
     it('clamps limit to the documented bounds via parsePagination', async () => {

@@ -141,6 +141,13 @@
       "when": 1786481591013,
       "tag": "0018_bookhive_user_discovery",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1786852000000,
+      "tag": "0020_books_status_created_uri_idx",
+      "breakpoints": false
     }
   ]
 }

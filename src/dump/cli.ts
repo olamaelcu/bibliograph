@@ -9,6 +9,7 @@ import { DumpStreamer } from './streamer.js';
 import { runEditionsDumpImport, prepareRun } from './index.js';
 import { runAuthorsCli } from './authors/cli.js';
 import { hydrateBookContributors } from './hydrate-book-contributors.js';
+import { releaseReservation, isReservationActive } from './reservation.js';
 
 interface ParsedCli {
   command: 'editions' | 'authors' | 'hydrate-book-contributors';
@@ -242,6 +243,17 @@ async function main(): Promise<void> {
     if (summary.errors > 0) {
       process.exit(1);
     }
+    return;
+  }
+  if (first === 'release-reservation') {
+    const stateName = argv[1];
+    if (!stateName) {
+      logger.error({ usage: 'tsx src/dump/cli.ts release-reservation <state-name>' }, 'missing state name');
+      process.exit(2);
+    }
+    const wasActive = isReservationActive(db, stateName);
+    releaseReservation(db, stateName);
+    logger.info({ stateName, wasActive }, 'release-reservation: cleared');
     return;
   }
   await runEditionsCli(argv);
