@@ -12,6 +12,8 @@
  *   3. Load the 'author' role and INSERT a book_contributors row keyed
  *      (bookUri, contributorUri, roleUri). `onConflictDoNothing` keeps the
  *      command idempotent.
+ *   4. Mirror the same contributor entry into `books.contributors` (the JSON
+ *      column the PDS read path serializes) so both stores stay in sync.
  *
  * Skips books with empty `author` (counted as skippedNoAuthor) and books
  * with no `openlibrary` identifier (counted as skippedNoOlKey). Books
@@ -35,6 +37,7 @@ const HYDRATE_STATE_NAME = 'book_contributors_hydrate';
 export interface HydrateSummary {
   booksWalked: number;
   joinRowsCreated: number;
+  booksContributorsUpdated: number;
   alreadyHadJoinRows: number;
   skippedNoAuthor: number;
   skippedNoOlKey: number;
@@ -103,6 +106,7 @@ export function hydrateBookContributors(
   const summary: HydrateSummary = {
     booksWalked: 0,
     joinRowsCreated: 0,
+    booksContributorsUpdated: 0,
     alreadyHadJoinRows: 0,
     skippedNoAuthor: 0,
     skippedNoOlKey: 0,
@@ -156,6 +160,7 @@ function hydrateWalk(
 
       if (dryRun) {
         summary.joinRowsCreated += 1;
+        summary.booksContributorsUpdated += 1;
         continue;
       }
 
@@ -174,9 +179,34 @@ function hydrateWalk(
           })
           .onConflictDoNothing()
           .run();
+        if (inserted.changes > 0) {
+          const current = Array.isArray(book.contributors) ? book.contributors : [];
+          const already = current.some(
+            (entry) =>
+              entry.contributor?.uri === contributor.uri && entry.role?.uri === role.uri,
+          );
+          if (!already) {
+            tx.update(schema.books)
+              .set({
+                contributors: [
+                  ...current,
+                  {
+                    contributor: { uri: contributor.uri, cid: contributor.cid },
+                    role: { uri: role.uri, cid: role.cid },
+                    order: 0,
+                  },
+                ],
+              })
+              .where(eq(schema.books.uri, book.uri))
+              .run();
+          }
+        }
         return inserted.changes;
       });
-      if (result > 0) summary.joinRowsCreated += 1;
+      if (result > 0) {
+        summary.joinRowsCreated += 1;
+        summary.booksContributorsUpdated += 1;
+      }
     } catch (err) {
       summary.errors += 1;
       logger.error({ err, uri: book.uri }, 'hydrate:book-contributors failed for book');

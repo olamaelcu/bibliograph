@@ -188,9 +188,18 @@ describe('hydrateBookContributors', () => {
     expect(contributors[0]!.identifiers).toEqual([
       { type: 'openlibrary', value: olKey },
     ]);
+
+    const updatedBook = bookRow(bookUri);
+    expect(updatedBook!.contributors).toEqual([
+      {
+        contributor: { uri: joins[0]!.contributorUri, cid: joins[0]!.contributorCid },
+        role: { uri: joins[0]!.roleUri, cid: joins[0]!.roleCid },
+        order: 0,
+      },
+    ]);
   });
 
-  it('reuses an existing contributor matched by OL key', () => {
+  it('reuses an existing contributor matched by OL key and still populates books.contributors', () => {
     const olKey = '/authors/OL99A';
     const existing = db.insert(schema.contributors)
       .values({
@@ -220,6 +229,14 @@ describe('hydrateBookContributors', () => {
     const joins = contributorRowsFor(bookUri);
     expect(joins).toHaveLength(1);
     expect(joins[0]!.contributorUri).toBe(existing!.uri);
+
+    expect(bookRow(bookUri)!.contributors).toEqual([
+      {
+        contributor: { uri: existing!.uri, cid: joins[0]!.contributorCid },
+        role: { uri: joins[0]!.roleUri, cid: joins[0]!.roleCid },
+        order: 0,
+      },
+    ]);
   });
 
   it('falls back to case-insensitive name match and merges the OL key', () => {
@@ -296,7 +313,7 @@ describe('hydrateBookContributors', () => {
     expect(db.select().from(schema.contributors).all()).toHaveLength(1);
   });
 
-  it('is idempotent (re-running produces no duplicate join rows)', () => {
+  it('is idempotent (re-running produces no duplicate join rows or contributor entries)', () => {
     const bookUri = seedBook({
       author: 'Frank Herbert',
       identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
@@ -304,12 +321,15 @@ describe('hydrateBookContributors', () => {
 
     const first = hydrateBookContributors(db, {});
     expect(first.joinRowsCreated).toBe(1);
+    expect(first.booksContributorsUpdated).toBe(1);
 
     const second = hydrateBookContributors(db, {});
     expect(second.joinRowsCreated).toBe(0);
+    expect(second.booksContributorsUpdated).toBe(0);
     expect(second.alreadyHadJoinRows).toBe(1);
 
     expect(contributorRowsFor(bookUri)).toHaveLength(1);
+    expect(bookRow(bookUri)!.contributors).toHaveLength(1);
     expect(db.select().from(schema.contributors).all()).toHaveLength(1);
   });
 
@@ -340,8 +360,8 @@ describe('hydrateBookContributors', () => {
     expect(contributorRowsFor(doHydrate)).toHaveLength(1);
   });
 
-  it('dry-run counts rows without writing join rows or contributors', () => {
-    seedBook({
+  it('dry-run counts rows without writing join rows, contributors, or books.contributors', () => {
+    const bookUri = seedBook({
       author: 'Frank Herbert',
       identifiers: [{ type: 'openlibrary', value: '/authors/OL1A' }],
     });
@@ -350,8 +370,10 @@ describe('hydrateBookContributors', () => {
 
     expect(summary.dryRun).toBe(true);
     expect(summary.joinRowsCreated).toBe(1);
+    expect(summary.booksContributorsUpdated).toBe(1);
     expect(db.select().from(schema.bookContributors).all()).toHaveLength(0);
     expect(db.select().from(schema.contributors).all()).toHaveLength(0);
+    expect(bookRow(bookUri)!.contributors).toEqual([]);
     expect(summary.errors).toBe(0);
   });
 
