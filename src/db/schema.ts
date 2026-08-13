@@ -47,6 +47,7 @@ export const books = sqliteTable(
     cover: text({ mode: 'json' }).$type<Cover>(),
     deduplicationHash: text('deduplication_hash'),
     status: text().notNull().default('pending'),
+    cid: text(),
     createdAt: text()
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
@@ -67,6 +68,7 @@ export const books = sqliteTable(
       table.uri,
     ),
     didIdx: index('books_did_idx').on(table.did),
+    cidIdx: index('books_cid_idx').on(table.cid),
     statusCheck: check('books_status_check', sql`${table.status} IN ('pending', 'active', 'rejected')`),
   }),
 );
@@ -369,6 +371,7 @@ export const contributors = sqliteTable(
       .default(sql`'[]'`),
     identifiers: text({ mode: 'json' }).$type<Identifier[]>().default(sql`'[]'`),
     bio: text(),
+    cid: text(),
     createdAt: text()
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
@@ -377,6 +380,7 @@ export const contributors = sqliteTable(
     nameIdx: index('contributors_name_idx').on(table.name),
     didIdx: index('contributors_did_idx').on(table.did),
     createdAtIdx: index('contributors_created_at_idx').on(table.createdAt),
+    cidIdx: index('contributors_cid_idx').on(table.cid),
   }),
 );
 
@@ -392,6 +396,7 @@ export const contributorTypes = sqliteTable(
     did: text().notNull(),
     name: text().notNull().unique(),
     description: text(),
+    cid: text(),
     createdAt: text()
       .notNull()
       .$defaultFn(() => new Date().toISOString()),
@@ -399,6 +404,7 @@ export const contributorTypes = sqliteTable(
   (table) => ({
     didIdx: index('contributor_types_did_idx').on(table.did),
     nameIdx: index('contributor_types_name_idx').on(table.name),
+    cidIdx: index('contributor_types_cid_idx').on(table.cid),
   }),
 );
 

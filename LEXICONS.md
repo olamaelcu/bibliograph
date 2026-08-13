@@ -13,7 +13,8 @@ or error variants, follow the links.
 | Codegen | `@atcute/lex-cli`, config in [`lex.config.js`](lex.config.js) |
 | Codegen output | `src/lexicons/` (runtime loaders; not currently emitted as checked-in TS) |
 | Service identity | `did:web:biblio.livtet.olamaelcu.net` (driven by `ATP_SERVICE_DID`, defaults to `did:web:localhost`) |
-| Service discovery | `GET /.well-known/did.json` returns the labeler service doc |
+| Service discovery | `GET /.well-known/did.json` returns the DID doc with both `AtprotoLabeler` and `AtprotoPersonalDataServer` service entries |
+| Read-only PDS shim | `GET /xrpc/com.atproto.repo.getRecord`, `listRecords`, `describeRepo` and `GET /xrpc/com.atproto.identity.resolveHandle` (see *Records authored by the AppView* below) |
 | Live lexicon JSON | `GET /lexicon/{nsid}` (raw schema, for client-side validation) |
 | Hash pinning | `GET /lexicon-hashes.json` (SHA-256 of every lexicon JSON) |
 
@@ -44,6 +45,16 @@ The service DID also publishes records under this namespace:
 - When the AppView mirrors `buzz.bookhive.catalogBook` records into
   Bibliograph-owned `book` records, it also creates matching
   `contributor` records under its own DID (deduped by lowercased name).
+
+These records are addressable as `at://did:web:biblio.livtet.olamaelcu.net/<collection>/<rkey>`.
+Resolvers fetch them via the read-only PDS shim mounted at
+`/xrpc/com.atproto.repo.getRecord` (CID + DAG-CBOR value returned). Each
+row stores its DAG-CBOR CID at write time; `npm run backfill:pds-cids`
+backfills CIDs for existing rows (idempotent — only NULL-cid rows are
+touched). The CID pipeline lives in `src/pds/cid.ts` (`@atcute/cid` +
+`@atcute/cbor`), and the lex-shaped value serializers in
+`src/pds/records.ts` are the single source of truth for both write-time
+and read-time.
 
 ## Shared defs
 
@@ -130,8 +141,16 @@ implementations live under `src/api/`:
 ## Discovery and validation
 
 ```
-# Service DID document (AtprotoLabeler service entry)
+# Service DID document (AtprotoLabeler + AtprotoPersonalDataServer)
 curl https://biblio.livtet.olamaelcu.net/.well-known/did.json
+
+# Handle→DID binding (the HTTPS path complement to the DNS `_atproto.<handle>` TXT)
+curl https://biblio.livtet.olamaelcu.net/.well-known/atproto-did
+
+# PDS XRPC read surface (resolve an AppView-owned record)
+curl 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.repo.describeRepo?repo=did:web:biblio.livtet.olamaelcu.net'
+curl 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.repo.listRecords?repo=did:web:biblio.livtet.olamaelcu.net&collection=community.lexicon.book.book&limit=10'
+curl 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.repo.getRecord?repo=did:web:biblio.livtet.olamaelcu.net&collection=community.lexicon.book.book&rkey=<rkey>'
 
 # Raw schema for any NSID (e.g. for client-side validation)
 curl https://biblio.livtet.olamaelcu.net/lexicon/community.lexicon.book.book

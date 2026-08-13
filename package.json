@@ -25,6 +25,7 @@
     "release": "tsx src/release.ts",
     "backfill": "tsx src/backfill.ts",
     "backfill:contributors": "tsx src/dump/cli.ts hydrate-book-contributors",
+    "backfill:pds-cids": "tsx src/dump/cli.ts backfill-pds-cids",
     "dedup": "tsx src/dedup-job.ts",
     "cover-worker": "tsx src/cover-worker.ts"
   },

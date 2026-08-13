@@ -111,7 +111,7 @@ async function runCatalog(): Promise<void> {
   }
 
   const { bootstrapContributorTypes } = await import('../db/init.js');
-  bootstrapContributorTypes();
+  await bootstrapContributorTypes();
 
   const resolver = createBookhiveResolver();
   const controller = new AbortController();

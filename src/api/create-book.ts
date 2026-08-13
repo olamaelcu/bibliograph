@@ -349,7 +349,7 @@ export async function createBook(c: Context): Promise<Response> {
   const { rkey, now } = makeId();
   const bookUri = makeRecordUri(did, COLLECTIONS.book, rkey);
 
-  await insertBook(db, {
+  const { cid } = await insertBook(db, {
     did,
     title: input.title,
     author: input.author,
@@ -378,8 +378,8 @@ export async function createBook(c: Context): Promise<Response> {
     throw err;
   });
 
-  log.info({ uri: bookUri }, 'createBook complete');
-  return c.json({ uri: bookUri, cid: `bafyrei-${rkey}` });
+  log.info({ uri: bookUri, cid }, 'createBook complete');
+  return c.json({ uri: bookUri, cid });
 }
 
 export async function createReview(c: Context): Promise<Response> {

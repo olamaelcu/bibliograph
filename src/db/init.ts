@@ -1,6 +1,8 @@
 import { db, sqliteHandle } from './connection.js';
 import { logger } from '../logger.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
+import { cidForRecord } from '../pds/cid.js';
+import { serializeContributorType } from '../pds/records.js';
 import { generateRkey } from '../rkey.js';
 import { books, contributorTypes } from './schema.js';
 import { eq } from 'drizzle-orm';
@@ -210,30 +212,64 @@ const SEED_CONTRIBUTOR_TYPES: Array<{ name: string; description?: string }> = [
  * Seed the canonical contributor types Bibliograph publishes under its service DID.
  * Idempotent: unique constraint on `name` ensures re-runs are safe.
  */
-export function bootstrapContributorTypes(): void {
+export async function bootstrapContributorTypes(): Promise<void> {
   const did = process.env.ATP_SERVICE_DID ?? 'did:web:localhost';
   const now = new Date().toISOString();
 
   let inserted = 0;
+  let backfilledCid = 0;
   for (const seed of SEED_CONTRIBUTOR_TYPES) {
     const existing = db
       .select()
       .from(contributorTypes)
       .where(eq(contributorTypes.name, seed.name))
       .all();
-    if (existing.length > 0) continue;
-
     const uri = makeRecordUri(did, COLLECTIONS.contributorType, generateRkey());
+
+    if (existing.length > 0) {
+      // Backfill any missing CIDs on existing rows. Idempotent.
+      const row = existing[0];
+      if (!row.cid) {
+        const cid = await cidForRecord(
+          serializeContributorType({
+            uri: row.uri,
+            did: row.did,
+            name: row.name,
+            description: row.description ?? null,
+            cid: null,
+            createdAt: row.createdAt,
+          }),
+        );
+        db.update(contributorTypes).set({ cid }).where(eq(contributorTypes.uri, row.uri)).run();
+        backfilledCid++;
+      }
+      continue;
+    }
+
+    const cid = await cidForRecord(
+      serializeContributorType({
+        uri,
+        did,
+        name: seed.name,
+        description: seed.description ?? null,
+        cid: null,
+        createdAt: now,
+      }),
+    );
     db.insert(contributorTypes)
       .values({
         uri,
         did,
         name: seed.name,
         description: seed.description,
+        cid,
         createdAt: now,
       })
       .run();
     inserted++;
   }
-  logger.info({ seeded: SEED_CONTRIBUTOR_TYPES.length, inserted }, 'bootstrapped contributor types');
+  logger.info(
+    { seeded: SEED_CONTRIBUTOR_TYPES.length, inserted, backfilledCid },
+    'bootstrapped contributor types',
+  );
 }

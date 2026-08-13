@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   setupCoverViews();
   bootstrapLibrarian();
   bootstrapFeatures();
-  bootstrapContributorTypes();
+  await bootstrapContributorTypes();
   logger.info('migrations complete');
 
   const app = createApp();

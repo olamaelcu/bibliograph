@@ -21,6 +21,13 @@ import { getServiceDid, buildDidDocument } from './did.js';
 import { db, schema } from './db/connection.js';
 import { logger } from './logger.js';
 import { serveCover } from './api/cover.js';
+import {
+  getRecord,
+  listRecords,
+  describeRepo,
+  resolveHandle,
+  serveAtprotoDid,
+} from './api/pds.js';
 
 export function createApp(): Hono {
   const app = new Hono();
@@ -72,6 +79,11 @@ export function createApp(): Hono {
     return c.json(buildDidDocument(did, `${proto}://${host}`));
   });
 
+  // /.well-known/atproto-did — the handle→DID binding document. We only
+  // serve our own DID; this endpoint exists so resolvers that prefer HTTPS
+  // over DNS TXT can find us.
+  app.get('/.well-known/atproto-did', serveAtprotoDid);
+
   // Lexicon serving endpoints for remote validation
   app.get('/lexicon/:nsid', serveLexicon);
   app.get('/lexicon-hashes.json', serveLexiconHashes);
@@ -120,6 +132,15 @@ export function createApp(): Hono {
   app.post('/xrpc/community.lexicon.book.contributor.create', createContributor);
   app.post('/xrpc/community.lexicon.book.contributor.update', updateContributor);
   app.post('/xrpc/community.lexicon.book.contributor.createType', createContributorType);
+
+  // com.atproto.repo.* / com.atproto.identity.* — read-only PDS shim.
+  // Lets resolvers (pdsls, atproto-browser, SDKs) fetch records Bibliograph
+  // authors under did:web:biblio.livtet.olamaelcu.net via the
+  // AtprotoPersonalDataServer service entry in /.well-known/did.json.
+  app.get('/xrpc/com.atproto.repo.getRecord', getRecord);
+  app.get('/xrpc/com.atproto.repo.listRecords', listRecords);
+  app.get('/xrpc/com.atproto.repo.describeRepo', describeRepo);
+  app.get('/xrpc/com.atproto.identity.resolveHandle', resolveHandle);
 
   // Live counts SSE endpoint
   app.get('/api/live-counts', async (c) => {

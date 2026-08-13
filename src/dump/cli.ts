@@ -9,6 +9,7 @@ import { DumpStreamer } from './streamer.js';
 import { runEditionsDumpImport, prepareRun } from './index.js';
 import { runAuthorsCli } from './authors/cli.js';
 import { hydrateBookContributors } from './hydrate-book-contributors.js';
+import { backfillPdsCids } from './backfill-pds-cids.js';
 import { releaseReservation, isReservationActive } from './reservation.js';
 
 interface ParsedCli {
@@ -245,6 +246,14 @@ async function main(): Promise<void> {
     }
     return;
   }
+  if (first === 'backfill-pds-cids') {
+    const opts = parseBackfillArgs(argv.slice(1));
+    const summary = await backfillPdsCids(opts);
+    if (summary.errors > 0) {
+      process.exit(1);
+    }
+    return;
+  }
   if (first === 'release-reservation') {
     const stateName = argv[1];
     if (!stateName) {
@@ -264,6 +273,14 @@ function parseHydrateArgs(rest: string[]): { dryRun: boolean; reset: boolean } {
   for (const arg of rest) {
     if (arg === '--dry-run') parsed.dryRun = true;
     else if (arg === '--reset') parsed.reset = true;
+  }
+  return parsed;
+}
+
+function parseBackfillArgs(rest: string[]): { dryRun: boolean } {
+  const parsed = { dryRun: false };
+  for (const arg of rest) {
+    if (arg === '--dry-run') parsed.dryRun = true;
   }
   return parsed;
 }

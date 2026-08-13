@@ -18,7 +18,7 @@ describe('getServiceDid', () => {
 });
 
 describe('buildDidDocument', () => {
-  it('returns a document id and atproto_labeler service', () => {
+  it('returns a document id with both atproto_labeler and atproto_pds services', () => {
     const doc = buildDidDocument(
       'did:web:biblio.livtet.olamaelcu.net',
       'https://biblio.livtet.olamaelcu.net',
@@ -30,6 +30,11 @@ describe('buildDidDocument', () => {
         {
           id: '#atproto_labeler',
           type: 'AtprotoLabeler',
+          serviceEndpoint: 'https://biblio.livtet.olamaelcu.net',
+        },
+        {
+          id: '#atproto_pds',
+          type: 'AtprotoPersonalDataServer',
           serviceEndpoint: 'https://biblio.livtet.olamaelcu.net',
         },
       ],

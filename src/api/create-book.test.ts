@@ -185,7 +185,7 @@ describe('api/create-book', () => {
       expect(res.status).toBe(200);
       const body = await readJson(res);
       expect(body.uri).toMatch(/^at:\/\/did:plc:test\/community\.lexicon\.book\.book\//);
-      expect(body.cid).toMatch(/^bafyrei-/);
+      expect(body.cid).toMatch(/^b[a-z2-7]+$/);
 
       const books = db.select().from(_s.books).all();
       expect(books).toHaveLength(1);

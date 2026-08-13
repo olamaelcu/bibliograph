@@ -8,6 +8,6 @@ setupFts();
 setupIdentifiersView();
 bootstrapLibrarian();
 bootstrapFeatures();
-bootstrapContributorTypes();
+await bootstrapContributorTypes();
 
 export default createApp();

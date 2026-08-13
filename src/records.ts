@@ -4,6 +4,12 @@ import * as schema from './db/schema.js';
 import { generateRkey } from './rkey.js';
 import { computeDeduplicationHash } from './dedup.js';
 import type { Cover } from './cover-types.js';
+import { cidForRecord } from './pds/cid.js';
+import {
+  serializeBook,
+  serializeContributor,
+  serializeContributorType,
+} from './pds/records.js';
 
 export const COLLECTIONS = {
   book: 'community.lexicon.book.book',
@@ -44,12 +50,35 @@ export async function insertBook(
   db: BetterSQLite3Database<typeof schema>,
   input: BookInput,
   opts: { status?: string; rkey?: string; createdAt?: string } = {},
-): Promise<{ uri: string; rkey: string }> {
+): Promise<{ uri: string; rkey: string; cid: string }> {
   const rkey = opts.rkey ?? generateRkey();
   const now = opts.createdAt ?? new Date().toISOString();
   const uri = makeRecordUri(input.did, COLLECTIONS.book, rkey);
 
   const dedupHash = computeDeduplicationHash(input.title, input.author, input.publishedDate);
+
+  const value = serializeBook({
+    uri,
+    did: input.did,
+    title: input.title,
+    author: input.author,
+    isbn: input.isbn ?? null,
+    publishedDate: input.publishedDate ?? null,
+    description: input.description ?? null,
+    pageCount: input.pageCount ?? null,
+    language: input.language ?? 'en',
+    categories: input.categories ?? [],
+    identifiers: input.identifiers,
+    contributors: [],
+    coverUrl: input.coverUrl ?? null,
+    cover: input.cover ?? null,
+    deduplicationHash: dedupHash,
+    status: opts.status ?? 'pending',
+    cid: null,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const cid = await cidForRecord(value);
 
   await db.insert(schema.books).values({
     uri,
@@ -67,11 +96,12 @@ export async function insertBook(
     cover: input.cover,
     deduplicationHash: dedupHash,
     status: opts.status ?? 'pending',
+    cid,
     createdAt: now,
     updatedAt: now,
   }).run();
 
-  return { uri, rkey };
+  return { uri, rkey, cid };
 }
 
 export interface ClaimInput {
@@ -132,10 +162,24 @@ export async function insertContributor(
   db: BetterSQLite3Database<typeof schema>,
   input: ContributorInput,
   opts: { rkey?: string; createdAt?: string } = {},
-): Promise<{ uri: string; rkey: string }> {
+): Promise<{ uri: string; rkey: string; cid: string }> {
   const rkey = opts.rkey ?? generateRkey();
   const now = opts.createdAt ?? new Date().toISOString();
   const uri = makeRecordUri(input.did, COLLECTIONS.contributor, rkey);
+
+  const cid = await cidForRecord(
+    serializeContributor({
+      uri,
+      did: input.did,
+      name: input.name,
+      altNames: input.altNames ?? [],
+      images: input.images ?? [],
+      identifiers: input.identifiers,
+      bio: input.bio ?? null,
+      cid: null,
+      createdAt: now,
+    }),
+  );
 
   await db
     .insert(schema.contributors)
@@ -147,11 +191,12 @@ export async function insertContributor(
       images: input.images ?? [],
       identifiers: input.identifiers,
       bio: input.bio,
+      cid,
       createdAt: now,
     })
     .run();
 
-  return { uri, rkey };
+  return { uri, rkey, cid };
 }
 
 export async function findContributorByIdentifier(
@@ -188,10 +233,21 @@ export async function insertContributorType(
   db: BetterSQLite3Database<typeof schema>,
   input: ContributorTypeInput,
   opts: { rkey?: string; createdAt?: string } = {},
-): Promise<{ uri: string; rkey: string }> {
+): Promise<{ uri: string; rkey: string; cid: string }> {
   const rkey = opts.rkey ?? generateRkey();
   const now = opts.createdAt ?? new Date().toISOString();
   const uri = makeRecordUri(input.did, COLLECTIONS.contributorType, rkey);
+
+  const cid = await cidForRecord(
+    serializeContributorType({
+      uri,
+      did: input.did,
+      name: input.name,
+      description: input.description ?? null,
+      cid: null,
+      createdAt: now,
+    }),
+  );
 
   await db
     .insert(schema.contributorTypes)
@@ -200,11 +256,12 @@ export async function insertContributorType(
       did: input.did,
       name: input.name,
       description: input.description,
+      cid,
       createdAt: now,
     })
     .run();
 
-  return { uri, rkey };
+  return { uri, rkey, cid };
 }
 
 export function findContributorTypeByName(

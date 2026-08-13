@@ -13,12 +13,15 @@ import {
   findContributorTypeByName,
   type ContributorImage,
 } from '../records.js';
+import { cidForRecord } from '../pds/cid.js';
+import {
+  serializeContributor,
+  serializeContributorType,
+} from '../pds/records.js';
 import type {
   CreateContributorInput,
   UpdateContributorInput,
   CreateContributorTypeInput,
-  ContributorRecord,
-  ContributorTypeRecord,
 } from '../types.js';
 
 const { contributors, contributorTypes } = schema;
@@ -70,31 +73,6 @@ function parseStringArray(value: unknown): string[] | null {
     out.push(entry);
   }
   return out;
-}
-
-function serializeContributor(row: typeof contributors.$inferSelect): ContributorRecord {
-  const record: ContributorRecord = {
-    $type: 'community.lexicon.book.contributor',
-    name: row.name,
-    createdAt: row.createdAt,
-  };
-  if (Array.isArray(row.altNames) && row.altNames.length > 0) record.altNames = row.altNames;
-  if (Array.isArray(row.images) && row.images.length > 0) record.images = row.images;
-  if (Array.isArray(row.identifiers) && row.identifiers.length > 0) {
-    record.identifiers = row.identifiers;
-  }
-  if (row.bio) record.bio = row.bio;
-  return record;
-}
-
-function serializeContributorType(row: typeof contributorTypes.$inferSelect): ContributorTypeRecord {
-  const record: ContributorTypeRecord = {
-    $type: 'community.lexicon.book.contributor.type',
-    name: row.name,
-    createdAt: row.createdAt,
-  };
-  if (row.description) record.description = row.description;
-  return record;
 }
 
 export async function createContributor(c: Context): Promise<Response> {
@@ -163,7 +141,7 @@ export async function createContributor(c: Context): Promise<Response> {
 
   log.info({ did, name: input.name, identCount: identifiers.length }, 'handling createContributor');
 
-  const { uri, rkey } = await insertContributor(db, {
+  const { uri } = await insertContributor(db, {
     did,
     name: input.name,
     altNames: altNames ?? [],
@@ -172,8 +150,13 @@ export async function createContributor(c: Context): Promise<Response> {
     bio: input.bio,
   });
 
-  log.info({ uri }, 'createContributor complete');
-  return c.json({ uri, cid: `bafyrei-${rkey}` });
+  const row = await findContributorByUri(db, uri);
+  const cid = await cidForRecord(serializeContributor(row!));
+
+  await db.update(contributors).set({ cid }).where(eq(contributors.uri, uri)).run();
+
+  log.info({ uri, cid }, 'createContributor complete');
+  return c.json({ uri, cid });
 }
 
 export async function updateContributor(c: Context): Promise<Response> {
@@ -348,8 +331,13 @@ export async function updateContributor(c: Context): Promise<Response> {
     .where(eq(contributors.uri, existing.uri))
     .run();
 
-  log.info({ uri: existing.uri }, 'updateContributor complete');
-  return c.json({ uri: existing.uri, cid: `bafyrei-${existing.uri.split('/').pop()}` });
+  const refreshed = await findContributorByUri(db, existing.uri);
+  const cid = await cidForRecord(serializeContributor(refreshed!));
+
+  await db.update(contributors).set({ cid }).where(eq(contributors.uri, existing.uri)).run();
+
+  log.info({ uri: existing.uri, cid }, 'updateContributor complete');
+  return c.json({ uri: existing.uri, cid });
 }
 
 export async function createContributorType(c: Context): Promise<Response> {
@@ -396,14 +384,19 @@ export async function createContributorType(c: Context): Promise<Response> {
 
   log.info({ did, name: input.name }, 'handling createContributorType');
 
-  const { uri, rkey } = await insertContributorType(db, {
+  const { uri } = await insertContributorType(db, {
     did,
     name: input.name,
     description: input.description,
   });
 
-  log.info({ uri }, 'createContributorType complete');
-  return c.json({ uri, cid: `bafyrei-${rkey}` });
+  const row = await db.query.contributorTypes.findFirst({ where: eq(contributorTypes.uri, uri) });
+  const cid = await cidForRecord(serializeContributorType(row!));
+
+  await db.update(contributorTypes).set({ cid }).where(eq(contributorTypes.uri, uri)).run();
+
+  log.info({ uri, cid }, 'createContributorType complete');
+  return c.json({ uri, cid });
 }
 
 export {
