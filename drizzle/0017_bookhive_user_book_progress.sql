@@ -1,1 +1,0 @@
-ALTER TABLE `reading_statuses` ADD `bookProgress` text;

@@ -1,26 +1,11 @@
 import { serve } from '@hono/node-server';
-import { WebSocketServer } from 'ws';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createApp } from './app.js';
-import { db, sqliteHandle } from './db/connection.js';
-import * as tableSchema from './db/schema.js';
-import { setupFts, setupIdentifiersView, setupCoverViews, bootstrapLibrarian, bootstrapFeatures, bootstrapContributorTypes } from './db/init.js';
+import { sqliteHandle } from './db/connection.js';
 import { logger } from './logger.js';
-import { startTapChannel, stopTapChannel, trackRepos } from './tap.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 async function main(): Promise<void> {
-  logger.info('running database migrations');
-  migrate(db, { migrationsFolder: './drizzle' });
-  setupFts();
-  setupIdentifiersView();
-  setupCoverViews();
-  bootstrapLibrarian();
-  bootstrapFeatures();
-  await bootstrapContributorTypes();
-  logger.info('migrations complete');
-
   const app = createApp();
 
   const safeFetch: typeof app.fetch = async (req: Request, ...args) => {
@@ -32,12 +17,8 @@ async function main(): Promise<void> {
     }
   };
 
-  serve({
-    fetch: safeFetch,
-    port: PORT,
-    websocket: { server: new WebSocketServer({ noServer: true }) },
-  });
-  logger.info({ port: PORT, serviceDid: process.env.ATP_SERVICE_DID || 'did:web:localhost' }, 'HTTP server running');
+  serve({ fetch: safeFetch, port: PORT });
+  logger.info({ port: PORT }, 'HTTP server running');
 
   const walCheckpointInterval = setInterval(() => {
     try {
@@ -61,29 +42,9 @@ async function main(): Promise<void> {
     process.exit(1);
   });
 
-  // Start Tap in background
-  startTapChannel().catch((err) => {
-    logger.error({ err }, 'Tap WebSocket error (reconnecting)');
-  });
-
-  // Load tracked repos after connection establishes
-  setTimeout(async () => {
-    try {
-      const rows = db.select({ did: tableSchema.books.did })
-        .from(tableSchema.books)
-        .groupBy(tableSchema.books.did)
-        .all();
-      const dids = rows.map(r => r.did);
-      if (dids.length > 0) await trackRepos(dids);
-    } catch (err) {
-      logger.error({ err }, 'failed to load initial repos');
-    }
-  }, 3000);
-
   const shutdown = async () => {
     logger.info('shutting down...');
     clearInterval(walCheckpointInterval);
-    await stopTapChannel();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

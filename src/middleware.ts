@@ -1,4 +1,4 @@
-import { v4 as uuid } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import type { Context, Next } from 'hono';
 import type pino from 'pino';
 import { logger } from './logger.js';
@@ -11,7 +11,7 @@ declare module 'hono' {
 }
 
 export async function requestTracing(c: Context, next: Next): Promise<void> {
-  const requestId = c.req.header('X-Request-Id') || uuid();
+  const requestId = c.req.header('X-Request-Id') || randomUUID();
   const child = logger.child({ requestId });
 
   c.set('requestId', requestId);

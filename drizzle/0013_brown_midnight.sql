@@ -1,1 +1,0 @@
-ALTER TABLE `books` ADD `contributors` text DEFAULT '[]';

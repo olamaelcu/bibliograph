@@ -1,1 +1,0 @@
-CREATE INDEX IF NOT EXISTS `books_status_created_uri_idx` ON `books` (`status`,`createdAt`,`uri`);

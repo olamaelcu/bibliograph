@@ -1,1 +1,0 @@
-ALTER TABLE `backfill_state` ADD `last_numeric_cursor` integer;

@@ -1,0 +1,4 @@
+allowBuilds:
+  esbuild: true
+  better-sqlite3: true
+  core-js: true

@@ -1,3 +1,0 @@
-#!/usr/bin/env sh
-ssh -t veve@lescayes.ts.olamaelcu.net \
-  "watch -n 60 'sudo sqlite3 -column -header /srv/data/bibliograph/data/bibliograph.db \"SELECT COUNT(*) AS books FROM books; SELECT last_byte_offset AS offset, total_processed AS inserted, last_key_cursor AS cursor FROM backfill_state;\"'"
