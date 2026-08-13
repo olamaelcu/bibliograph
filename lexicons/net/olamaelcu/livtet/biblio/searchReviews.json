@@ -1,0 +1,83 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.searchReviews",
+  "description": "Search review records by text, tag, rating, or reading status.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["q"],
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Search query string. Matches against review text and tags."
+          },
+          "book": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of a book; only return reviews for this book."
+          },
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Only return reviews with at least this rating."
+          },
+          "status": {
+            "type": "string",
+            "knownValues": [
+              "reading",
+              "to-read",
+              "dnf",
+              "read"
+            ],
+            "description": "Only return reviews with this reading status."
+          },
+          "tag": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxGraphemes": 64
+            },
+            "description": "Only return reviews with all of these tags."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "Maximum number of reviews to return."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["reviews"],
+          "properties": {
+            "reviews": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.defs#reviewView"
+              }
+            },
+            "hitsTotal": {
+              "type": "integer",
+              "description": "Total number of matching reviews. May be rounded or truncated."
+            },
+            "cursor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

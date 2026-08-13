@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "key": "string",
+      "key": "any",
       "record": {
         "type": "object",
         "required": ["name"],

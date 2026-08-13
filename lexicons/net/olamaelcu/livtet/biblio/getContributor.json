@@ -1,0 +1,40 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getContributor",
+  "description": "Get a hydrated view of a contributor record.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uri"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the contributor record."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["contributor"],
+          "properties": {
+            "contributor": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#contributorView"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "NotFound",
+          "description": "No contributor record exists at the given AT-URI."
+        }
+      ]
+    }
+  }
+}

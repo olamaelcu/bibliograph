@@ -23,6 +23,414 @@
       "type": "string",
       "format": "datetime",
       "description": "An ISO-8601 datetime (RFC 3339)."
+    },
+    "readingStatus": {
+      "type": "string",
+      "knownValues": [
+        "reading",
+        "to-read",
+        "dnf",
+        "read"
+      ],
+      "description": "Reading status for a book."
+    },
+    "progress": {
+      "type": "object",
+      "required": ["format"],
+      "properties": {
+        "format": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.format",
+          "strong": true,
+          "description": "The format being read; its unit defines how progress is measured."
+        },
+        "progress": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Progress value measured in the format's unit, e.g. 30 for 30 pages into a physical book."
+        },
+        "unit": {
+          "type": "string",
+          "knownValues": [
+            "other",
+            "pages",
+            "seconds",
+            "percent"
+          ],
+          "description": "Optional unit override; defaults to the format's unit."
+        }
+      },
+      "description": "Optional progress indicator."
+    },
+    "progressUnit": {
+      "type": "string",
+      "knownValues": [
+        "other",
+        "pages",
+        "seconds",
+        "percent"
+      ],
+      "description": "The unit a progress value is measured in."
+    },
+    "rating": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "Rating from 1 to 5."
+    },
+    "formatView": {
+      "type": "object",
+      "required": ["uri", "description", "emoji", "unit"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the format record."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 128,
+          "description": "Human-readable description of the format."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing the format."
+        },
+        "iconImageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Small icon image for the format."
+        },
+        "unit": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#progressUnit",
+          "description": "The unit a progress value for a book in this format is measured in."
+        }
+      }
+    },
+    "workView": {
+      "type": "object",
+      "required": ["uri", "title"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the work record."
+        },
+        "title": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "description": "Title of the work."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+          },
+          "description": "External identifiers for the work."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Description or synopsis of the work."
+        },
+        "originalPublishDate": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Date of first publication of the work."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
+    "genreView": {
+      "type": "object",
+      "required": ["uri", "name", "description", "emoji"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the genre record."
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "description": "Display name of the genre."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing the genre."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 512,
+          "description": "What this genre covers."
+        },
+        "iconImageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Small icon image for the genre."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+          },
+          "description": "External identifiers for the genre."
+        },
+        "parent": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the parent genre, if any."
+        }
+      }
+    },
+    "contributorView": {
+      "type": "object",
+      "required": ["uri", "name"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the contributor record."
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 200,
+          "description": "Display name of the contributor."
+        },
+        "sortName": {
+          "type": "string",
+          "maxGraphemes": 200,
+          "description": "Name used for alphabetical sorting."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+          },
+          "description": "External identifiers for the contributor."
+        },
+        "bio": {
+          "type": "string",
+          "maxGraphemes": 16384,
+          "description": "Short biography of the contributor."
+        },
+        "imageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Portrait or avatar image of the contributor."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
+    "bookContributorView": {
+      "type": "object",
+      "required": ["bookUri", "contributor", "role"],
+      "properties": {
+        "bookUri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the book record."
+        },
+        "contributor": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#contributorView",
+          "description": "The contributor."
+        },
+        "role": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the contributor role record."
+        }
+      }
+    },
+    "bookView": {
+      "type": "object",
+      "required": ["uri", "title"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the book record."
+        },
+        "title": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "description": "Title of the edition."
+        },
+        "work": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#workView",
+          "description": "The literary work this book is an edition of."
+        },
+        "format": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#formatView",
+          "description": "The format of this edition."
+        },
+        "genres": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#genreView"
+          },
+          "description": "Genres this book belongs to."
+        },
+        "contributors": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#bookContributorView"
+          },
+          "description": "Contributors to this edition and their roles."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+          },
+          "description": "External identifiers for this edition."
+        },
+        "publishDate": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Publication date of this edition."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Description or synopsis of the book."
+        },
+        "coverUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Cover image URL of the book."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
+    "shelfView": {
+      "type": "object",
+      "required": ["uri", "name"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the shelf record."
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 128,
+          "description": "Display name of the shelf."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Description of the shelf."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
+    "reviewView": {
+      "type": "object",
+      "required": ["uri", "book", "rating", "status"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the review record."
+        },
+        "book": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookView",
+          "description": "The book being reviewed."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the account that wrote the review."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxGraphemes": 64
+          },
+          "description": "Tags associated with this review."
+        },
+        "rating": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#rating",
+          "description": "Rating from 1 to 5."
+        },
+        "status": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#readingStatus",
+          "description": "Reading status for the book at the time of this review."
+        },
+        "progress": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#progress",
+          "description": "Progress indicator."
+        },
+        "text": {
+          "type": "string",
+          "maxGraphemes": 65536,
+          "description": "The review prose."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
     }
   }
 }

@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "key": "string",
+      "key": "any",
       "record": {
         "type": "object",
         "required": [
@@ -46,14 +46,6 @@
             "type": "string",
             "format": "at-uri",
             "description": "Optional parent genre for a hierarchical taxonomy."
-          },
-          "children": {
-            "type": "array",
-            "items": {
-              "type": "ref",
-              "ref": "net.olamaelcu.livtet.biblio.genre"
-            },
-            "description": "Direct child genres of this genre."
           }
         }
       }

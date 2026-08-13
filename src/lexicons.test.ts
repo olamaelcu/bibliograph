@@ -57,11 +57,12 @@ describe('biblio lexicons', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('every record lexicon defines a main record', () => {
+  it('every non-defs lexicon defines a main record or query', () => {
     for (const doc of docs) {
       if (doc.id.endsWith('.defs')) continue;
       const main = doc.defs.main as { type?: string } | undefined;
-      expect(main?.type, `${doc.id} missing main record`).toBe('record');
+      expect(main?.type, `${doc.id} missing main`).toBeDefined();
+      expect(['record', 'query'], `${doc.id} unexpected main type`).toContain(main?.type);
     }
   });
 

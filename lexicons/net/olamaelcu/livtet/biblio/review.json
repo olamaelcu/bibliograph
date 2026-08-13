@@ -5,7 +5,7 @@
   "defs": {
     "main": {
       "type": "record",
-      "key": "string",
+      "key": "any",
       "record": {
         "type": "object",
         "required": [
@@ -29,49 +29,19 @@
             "description": "Tags associated with this review."
           },
           "rating": {
-            "type": "number",
+            "type": "integer",
             "minimum": 1,
             "maximum": 5,
             "description": "Rating from 1 to 5."
           },
           "status": {
-            "type": "string",
-            "knownValues": [
-              "reading",
-              "to-read",
-              "dnf",
-              "read"
-            ],
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#readingStatus",
             "description": "Reading status for the book at the time of this review."
           },
           "progress": {
-            "type": "object",
-            "required": [
-              "format"
-            ],
-            "properties": {
-              "format": {
-                "type": "ref",
-                "ref": "net.olamaelcu.livtet.biblio.format",
-                "strong": true,
-                "description": "The format being read; its unit defines how progress is measured."
-              },
-              "progress": {
-                "type": "number",
-                "minimum": 0,
-                "description": "Progress value measured in the format's unit, e.g. 30 for 30 pages into a physical book."
-              },
-              "unit": {
-                "type": "string",
-                "knownValues": [
-                  "other",
-                  "pages",
-                  "seconds",
-                  "percent"
-                ],
-                "description": "Optional unit override; defaults to the format's unit."
-              }
-            },
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#progress",
             "description": "Optional progress indicator."
           },
           "text": {

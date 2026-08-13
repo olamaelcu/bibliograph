@@ -1,0 +1,49 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.listGenres",
+  "description": "List genre records, optionally restricted to top-level genres.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "topLevelOnly": {
+            "type": "boolean",
+            "description": "When true, only return genres without a parent."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Maximum number of genres to return."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["genres"],
+          "properties": {
+            "genres": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.defs#genreView"
+              }
+            },
+            "cursor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
