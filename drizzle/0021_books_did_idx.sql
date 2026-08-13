@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS `books_did_idx` ON `books` (`did`);

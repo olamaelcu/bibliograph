@@ -66,6 +66,7 @@ export const books = sqliteTable(
       table.createdAt,
       table.uri,
     ),
+    didIdx: index('books_did_idx').on(table.did),
     statusCheck: check('books_status_check', sql`${table.status} IN ('pending', 'active', 'rejected')`),
   }),
 );

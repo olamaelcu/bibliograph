@@ -148,6 +148,13 @@
       "when": 1786852000000,
       "tag": "0020_books_status_created_uri_idx",
       "breakpoints": false
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1786853000000,
+      "tag": "0021_books_did_idx",
+      "breakpoints": false
     }
   ]
 }
