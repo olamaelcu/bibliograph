@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { and, eq, gt, lt, sql } from 'drizzle-orm';
+import type { books, contributors, contributorTypes } from '../db/schema.js';
 import { db, schema } from '../db/connection.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
 import {
@@ -10,8 +11,14 @@ import {
   type ContributorRecordValue,
   type ContributorTypeRecordValue,
 } from '../pds/records.js';
+import { cidForRecord } from '../pds/cid.js';
 import { getServiceDid, buildDidDocument } from '../did.js';
 import { logger } from '../logger.js';
+
+type BookRow = typeof books.$inferSelect;
+type ContributorRow = typeof contributors.$inferSelect;
+type ContributorTypeRow = typeof contributorTypes.$inferSelect;
+type RowShape = BookRow | ContributorRow | ContributorTypeRow;
 
 /**
  * Minimal read-only PDS shim. The AppView's service DID
@@ -111,72 +118,49 @@ export async function getRecord(c: Context): Promise<Response> {
   }
 
   const uri = makeRecordUri(owningDid, collection, rkey);
-  const storedCid: string | null = await loadStoredCid(collection, uri);
+  const row = await loadRow(collection, uri);
 
-  if (storedCid === null) {
+  if (!row) {
     log?.warn({ uri }, 'pds.getRecord: RecordNotFound');
     return jsonError(c, 400, 'RecordNotFound', `record not found: ${uri}`);
   }
 
-  if (cidParam && cidParam !== storedCid) {
+  const value = serializeRow(collection, row);
+  // The stored `cid` column is a cache. Rows written before the CID column
+  // existed (or inserted through paths that don't set it) have `cid IS NULL`;
+  // compute on the fly so every resolvable record still works.
+  const cid = row.cid ?? (await cidForRecord(value));
+
+  if (cidParam && cidParam !== cid) {
     return jsonError(
       c,
       400,
       'InvalidRequest',
-      `cid mismatch: stored=${storedCid} requested=${cidParam}`,
+      `cid mismatch: stored=${cid} requested=${cidParam}`,
     );
   }
 
-  const value: SerializedRecord = await loadValue(collection, uri);
-  const body: GetRecordResponse = { uri, cid: storedCid, value };
+  const body: GetRecordResponse = { uri, cid, value };
   return c.json(body);
 }
 
-async function loadStoredCid(
+async function loadRow(
   collection: OwnedCollection,
   uri: string,
-): Promise<string | null> {
+): Promise<RowShape | null> {
   if (collection === COLLECTIONS.book) {
-    const row = await db
-      .select({ cid: books.cid })
-      .from(books)
-      .where(eq(books.uri, uri))
-      .get();
-    return row?.cid ?? null;
+    return (await db.query.books.findFirst({ where: eq(books.uri, uri) })) ?? null;
   }
   if (collection === COLLECTIONS.contributor) {
-    const row = await db
-      .select({ cid: contributors.cid })
-      .from(contributors)
-      .where(eq(contributors.uri, uri))
-      .get();
-    return row?.cid ?? null;
+    return (await db.query.contributors.findFirst({ where: eq(contributors.uri, uri) })) ?? null;
   }
-  const row = await db
-    .select({ cid: contributorTypes.cid })
-    .from(contributorTypes)
-    .where(eq(contributorTypes.uri, uri))
-    .get();
-  return row?.cid ?? null;
+  return (await db.query.contributorTypes.findFirst({ where: eq(contributorTypes.uri, uri) })) ?? null;
 }
 
-async function loadValue(
-  collection: OwnedCollection,
-  uri: string,
-): Promise<SerializedRecord> {
-  if (collection === COLLECTIONS.book) {
-    const row = await db.query.books.findFirst({ where: eq(books.uri, uri) });
-    if (!row) throw new Error(`book row vanished mid-request: ${uri}`);
-    return serializeBook(row);
-  }
-  if (collection === COLLECTIONS.contributor) {
-    const row = await db.query.contributors.findFirst({ where: eq(contributors.uri, uri) });
-    if (!row) throw new Error(`contributor row vanished mid-request: ${uri}`);
-    return serializeContributor(row);
-  }
-  const row = await db.query.contributorTypes.findFirst({ where: eq(contributorTypes.uri, uri) });
-  if (!row) throw new Error(`contributorType row vanished mid-request: ${uri}`);
-  return serializeContributorType(row);
+function serializeRow(collection: OwnedCollection, row: RowShape): SerializedRecord {
+  if (collection === COLLECTIONS.book) return serializeBook(row as BookRow);
+  if (collection === COLLECTIONS.contributor) return serializeContributor(row as ContributorRow);
+  return serializeContributorType(row as ContributorTypeRow);
 }
 
 // ─── listRecords ────────────────────────────────────────────────────────────
@@ -317,8 +301,11 @@ async function fetchPageFromTable<T extends { uri: string; cid: string | null; d
 
   const out: GetRecordResponse[] = [];
   for (const row of rows) {
-    if (!row.cid) continue;
-    out.push({ uri: row.uri, cid: row.cid, value: serialize(row) });
+    const value = serialize(row);
+    // Stored `cid` is a cache; compute on the fly for rows written before
+    // the column existed.
+    const cid = row.cid ?? (await cidForRecord(value));
+    out.push({ uri: row.uri, cid, value });
   }
   return out;
 }

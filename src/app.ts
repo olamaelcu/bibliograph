@@ -154,9 +154,11 @@ export function createApp(): Hono {
           try {
             const bookCount = db.select({ count: sql<number>`count(*)` }).from(schema.books).get();
             const statusCount = db.select({ count: sql<number>`count(*)` }).from(schema.readingStatuses).get();
+            const contributorCount = db.select({ count: sql<number>`count(*)` }).from(schema.contributors).get();
             const payload = JSON.stringify({
               books: bookCount?.count ?? 0,
               statuses: statusCount?.count ?? 0,
+              contributors: contributorCount?.count ?? 0,
             });
             controller.enqueue(new TextEncoder().encode(`data: ${payload}\n\n`));
           } catch {

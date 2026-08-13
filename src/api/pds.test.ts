@@ -320,20 +320,13 @@ describe('pds.listRecords', () => {
     expect(res.status).toBe(400);
   });
 
-  it('skips rows that have no CID (pre-backfill)', async () => {
+  it('serves rows that have no stored CID by computing on the fly', async () => {
     const app = makeApp();
     const did = SERVICE_DID;
-    await insertBook(db, {
-      did,
-      title: 'With CID',
-      author: 'A',
-      isbn: nextIsbn(),
-      identifiers: [],
-    });
     db.insert(schema.books).values({
       uri: 'at://did:web:test.local/community.lexicon.book.book/manual123',
       did,
-      title: 'Without CID',
+      title: 'No Stored CID',
       author: 'B',
       language: 'en',
       categories: [],
@@ -345,14 +338,31 @@ describe('pds.listRecords', () => {
       cid: null,
     }).run();
 
-    const res = await call(app, `/xrpc/com.atproto.repo.listRecords?repo=${did}&collection=${COLLECTIONS.book}&limit=100`);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    const titles = body.records.map((r: { value: { title: string } }) => r.value.title);
-    // The DB persists across tests, so we only check inclusion/exclusion
-    // rather than absolute counts.
-    expect(titles).toContain('With CID');
-    expect(titles).not.toContain('Without CID');
+    // listRecords includes the row, with a CID computed on the fly.
+    const listRes = await call(app, `/xrpc/com.atproto.repo.listRecords?repo=${did}&collection=${COLLECTIONS.book}&limit=100`);
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json();
+    const listed = listBody.records.find((r: { uri: string }) => r.uri.endsWith('manual123'));
+    expect(listed).toBeDefined();
+    expect(listed.cid).toMatch(/^b[a-z2-7]+$/);
+    expect(listed.value.title).toBe('No Stored CID');
+
+    // getRecord works too.
+    const getRes = await call(
+      app,
+      `/xrpc/com.atproto.repo.getRecord?repo=${did}&collection=${COLLECTIONS.book}&rkey=manual123`,
+    );
+    expect(getRes.status).toBe(200);
+    const getBody = await getRes.json();
+    expect(getBody.cid).toMatch(/^b[a-z2-7]+$/);
+    expect(getBody.value.title).toBe('No Stored CID');
+    // The computed CID is deterministic for the same value.
+    const { cidForRecord } = await import('../pds/cid.js');
+    const { serializeBook } = await import('../pds/records.js');
+    const row = await db.query.books.findFirst({
+      where: (b, { eq }) => eq(b.uri, 'at://did:web:test.local/community.lexicon.book.book/manual123'),
+    });
+    expect(getBody.cid).toBe(await cidForRecord(serializeBook(row!)));
   });
 });
 

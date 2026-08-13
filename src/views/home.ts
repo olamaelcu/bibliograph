@@ -46,6 +46,15 @@ export function HomePage(props: { host: string }) {
             </div>
           </div>
           <wa-divider vertical></wa-divider>
+          <wa-divider vertical></wa-divider>
+          <div class="wa-cluster wa-gap-m" style="align-items: center">
+            <wa-icon library="lucide" name="signature"></wa-icon>
+            <div class="wa-stack" style="gap: 0">
+              <span class="count-num" id="contributor-count">&mdash;</span>
+              <span class="wa-caption-m wa-color-text-quiet">Contributors</span>
+            </div>
+          </div>
+          <wa-divider vertical></wa-divider>
           <div class="wa-cluster wa-gap-m" style="align-items: center">
             <wa-icon library="lucide" name="bookmark-check"></wa-icon>
             <div class="wa-stack" style="gap: 0">
