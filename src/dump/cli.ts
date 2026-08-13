@@ -277,10 +277,15 @@ function parseHydrateArgs(rest: string[]): { dryRun: boolean; reset: boolean } {
   return parsed;
 }
 
-function parseBackfillArgs(rest: string[]): { dryRun: boolean } {
-  const parsed = { dryRun: false };
+function parseBackfillArgs(rest: string[]): { dryRun: boolean; batchSize?: number } {
+  const parsed: { dryRun: boolean; batchSize?: number } = { dryRun: false };
   for (const arg of rest) {
     if (arg === '--dry-run') parsed.dryRun = true;
+    else if (arg.startsWith('--batch-size=')) {
+      const n = Number(arg.slice('--batch-size='.length));
+      if (!Number.isFinite(n) || n <= 0) throw new Error(`invalid batch-size: ${arg}`);
+      parsed.batchSize = n;
+    }
   }
   return parsed;
 }

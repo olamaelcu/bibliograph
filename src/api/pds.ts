@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 import { and, eq, gt, lt, sql } from 'drizzle-orm';
-import type { books, contributors, contributorTypes } from '../db/schema.js';
+import type { books as booksTable, contributors as contributorsTable, contributorTypes as contributorTypesTable } from '../db/schema.js';
 import { db, schema } from '../db/connection.js';
 import { COLLECTIONS, makeRecordUri } from '../records.js';
 import {
@@ -15,9 +15,9 @@ import { cidForRecord } from '../pds/cid.js';
 import { getServiceDid, buildDidDocument } from '../did.js';
 import { logger } from '../logger.js';
 
-type BookRow = typeof books.$inferSelect;
-type ContributorRow = typeof contributors.$inferSelect;
-type ContributorTypeRow = typeof contributorTypes.$inferSelect;
+type BookRow = typeof booksTable.$inferSelect;
+type ContributorRow = typeof contributorsTable.$inferSelect;
+type ContributorTypeRow = typeof contributorTypesTable.$inferSelect;
 type RowShape = BookRow | ContributorRow | ContributorTypeRow;
 
 /**
@@ -235,7 +235,6 @@ async function fetchPage(args: {
       table: books,
       uriCol: books.uri,
       didCol: books.did,
-      cidCol: books.cid,
       serialize: serializeBook,
       did,
       prefix,
@@ -249,7 +248,6 @@ async function fetchPage(args: {
       table: contributors,
       uriCol: contributors.uri,
       didCol: contributors.did,
-      cidCol: contributors.cid,
       serialize: serializeContributor,
       did,
       prefix,
@@ -262,7 +260,6 @@ async function fetchPage(args: {
     table: contributorTypes,
     uriCol: contributorTypes.uri,
     didCol: contributorTypes.did,
-    cidCol: contributorTypes.cid,
     serialize: serializeContributorType,
     did,
     prefix,
@@ -276,7 +273,6 @@ async function fetchPageFromTable<T extends { uri: string; cid: string | null; d
   table: any;
   uriCol: any;
   didCol: any;
-  cidCol: any;
   serialize: (row: T) => SerializedRecord;
   did: string;
   prefix: string;
