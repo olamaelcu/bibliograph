@@ -1,3 +1,12 @@
 [tools]
 node = "26.3.0"
 pnpm = "11.13.1"
+
+[tasks.dev-server]
+run = "pnpm run dev:server"
+
+[tasks.dev-vite]
+run = "pnpm run dev"
+
+[tasks.dev]
+run = "mise run dev-vite ::: dev-server"

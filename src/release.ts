@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Dokku release task — placeholder. Runs before the web process starts;
-// will run database migrations once a schema exists again.
+// Dokku release task. Runs before the web process starts;
+// will run database migrations.
 
 import { logger } from './logger.js';
 
