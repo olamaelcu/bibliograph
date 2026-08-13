@@ -66,6 +66,10 @@ export function HomePage(props: { host: string }) {
         </div>
       </wa-card>
 
+      <p>Note that the data here is a <em>very rough</em> import from <a
+        href="https://openlibrary.org">OpenLibrary</a> and will most likely be
+        incomplete, broken or not yet organized. Dragons lurk!</p>
+
       <wa-card>
         <h2 slot="header" class="wa-cluster wa-gap-m">
           <wa-icon library="lucide" name="list"></wa-icon>
