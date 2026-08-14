@@ -19,9 +19,16 @@ async function fetchImageBytes(url: string): Promise<{ bytes: Uint8Array; mimeTy
 		signal: AbortSignal.timeout(15_000),
 	});
 	if (!res.ok) throw new Error(`image fetch failed: ${res.status}`);
-	const contentType = res.headers.get('content-type') ?? '';
-	if (!ALLOWED_TYPES.some((t) => contentType.includes(t))) {
+	// Strip parameters (e.g. "; charset=...") and require an exact match so a
+	// content-type like 'x-image/jpegx' cannot pass the gate.
+	const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim();
+	if (!ALLOWED_TYPES.includes(contentType)) {
 		throw new Error(`unexpected content-type: ${contentType}`);
+	}
+	// Reject by content-length before downloading the body when the header is present.
+	const contentLength = Number(res.headers.get('content-length'));
+	if (Number.isFinite(contentLength) && contentLength > MAX_BYTES) {
+		throw new Error(`image too large: ${contentLength}`);
 	}
 	const buf = new Uint8Array(await res.arrayBuffer());
 	if (buf.byteLength > MAX_BYTES) throw new Error(`image too large: ${buf.byteLength}`);

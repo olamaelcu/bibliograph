@@ -22,4 +22,25 @@ describe('BlobStore (memory scheme)', () => {
 		await store.delete('book', 'book-dune', 'cover');
 		await expect(store.get(blob.objectKey)).rejects.toThrow();
 	});
+
+	it('constructs without throwing when s3 scheme has no bucket (falls back to memory)', async () => {
+		const { db } = createTestDb();
+		const store = new BlobStore(db, { scheme: 's3' });
+		const bytes = new TextEncoder().encode('fake-cover-bytes');
+		const blob = await store.put({
+			entityType: 'book',
+			entityPk: 'book-dune',
+			kind: 'cover',
+			bytes,
+			mimeType: 'image/jpeg',
+			source: 'openlibrary',
+		});
+		const fetched = await store.get(blob.objectKey);
+		expect(new TextDecoder().decode(fetched)).toBe('fake-cover-bytes');
+	});
+
+	it('constructs without throwing when scheme is unset and no bucket is given', () => {
+		const { db } = createTestDb();
+		expect(() => new BlobStore(db, {})).not.toThrow();
+	});
 });

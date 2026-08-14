@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { catalogBlobs } from '../db/schema.js';
+import { logger } from '../logger.js';
 
 export interface BlobStoreConfig {
 	scheme?: 's3' | 'memory';
@@ -43,7 +44,15 @@ export class BlobStore {
 		private readonly db: BetterSQLite3Database,
 		private readonly cfg: BlobStoreConfig,
 	) {
-		if (cfg.scheme === 'memory') {
+		// The s3 operator throws ConfigInvalid at construction if the bucket is missing, so
+		// a dev env without AWS_BUCKET (scheme defaults to 's3' in blobStoreConfigFromEnv)
+		// would crash `new BlobStore(...)`. Fall back to the in-memory backend so local
+		// development works out of the box; set AWS_BUCKET to opt into S3.
+		const scheme = cfg.scheme ?? 's3';
+		if (scheme === 's3' && !cfg.bucket) {
+			logger.warn('BlobStore: s3 scheme selected but no bucket configured; falling back to memory. Set AWS_BUCKET to use S3.');
+			this.op = new Operator('memory');
+		} else if (scheme === 'memory') {
 			this.op = new Operator('memory');
 		} else {
 			const s3Options: Record<string, string> = { root: '/' };

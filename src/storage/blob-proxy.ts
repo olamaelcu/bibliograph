@@ -14,6 +14,11 @@ export function registerBlobProxy(
 		const row = db.select().from(catalogBlobs).where(eq(catalogBlobs.objectKey, key)).get();
 		if (!row) return c.json({ error: 'NotFound' }, 404);
 
+		// Only books and contributors own blobs; anything else is a 404.
+		if (row.entityType !== 'book' && row.entityType !== 'contributor') {
+			return c.json({ error: 'NotFound' }, 404);
+		}
+
 		// Release gate: entity must be released.
 		const entityTable = row.entityType === 'book' ? books : contributors;
 		const entity = db
