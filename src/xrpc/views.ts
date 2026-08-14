@@ -1,8 +1,9 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import * as Lexicons from '../lexicons/index.js';
 import type {
+	ActorView,
 	BookContributorView,
-	BookShelfMetadata,
 	BookShelfView,
 	BookView,
 	ContributorView,
@@ -21,16 +22,11 @@ import {
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
-	bookShelves,
 	books,
 	contributorRoles,
 	formats,
 	genreIdentifiers,
 	genres,
-	reviewBlobs,
-	reviews,
-	reviewTags,
-	shelves,
 	workIdentifiers,
 	works,
 } from '../db/schema.js';
@@ -46,12 +42,20 @@ export const COLLECTION = {
 	review: 'net.olamaelcu.livtet.biblio.review',
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
 	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
+	actor: 'net.olamaelcu.livtet.biblio.actor',
 } as const;
 
 type Db = BetterSQLite3Database;
 
 export interface ViewContext {
 	serviceDid: string;
+}
+
+/** A record returned by the user's PDS (`com.atproto.repo.*`). */
+export interface PdsRecord {
+	uri: string;
+	cid: string;
+	value: unknown;
 }
 
 function atUri(ctx: ViewContext, collection: string, pk: string): string {
@@ -68,9 +72,20 @@ function toUri(value: string): GenericUri {
 	return value as GenericUri;
 }
 
-/** Branded DID string produced by codegen for did-format strings. */
-function toDid(value: string): `did:${string}:${string}` {
-	return value as `did:${string}:${string}`;
+/**
+ * Extract the record key (rkey) from an at-uri of the form
+ * `at://<did>/<collection>/<rkey>`, validating the collection.
+ */
+export function rkeyFromAtUri(uri: string, collection: string): string | undefined {
+	if (!uri.startsWith('at://')) return undefined;
+	const parts = uri.slice('at://'.length).split('/');
+	if (parts.length !== 3 || parts[1] !== collection || parts[2] === '') return undefined;
+	return parts[2];
+}
+
+/** rkey of the canonical catalog book referenced by an `expandedBook.ref`. */
+export function bookRkeyFromRef(ref: string | undefined): string | undefined {
+	return ref ? rkeyFromAtUri(ref, COLLECTION.book) : undefined;
 }
 
 // ─── Identifiers ─────────────────────────────────────────────────────────────
@@ -274,150 +289,112 @@ export async function toBookView(
 	};
 }
 
-// ─── Shelves ─────────────────────────────────────────────────────────────────
+// ─── User PDS records → views ────────────────────────────────────────────────
 
-export function toShelfView(
-	ctx: ViewContext,
-	s: { pk: string; name: string; description: string | null; createdAt: number; updatedAt: number | null },
-): ShelfView {
-	return {
-		uri: atUri(ctx, COLLECTION.shelf, s.pk) as ShelfView['uri'],
-		name: s.name,
-		description: s.description ?? undefined,
-		createdAt: toIso(s.createdAt),
-		updatedAt: toIso(s.updatedAt),
-	};
-}
-
-// ─── Book Shelving ───────────────────────────────────────────────────────────
-
-export async function toBookShelfView(
+/**
+ * Hydrate the progress indicator of a PDS review record. The stored record
+ * references its format by at-uri (strong ref); the view embeds a format object
+ * hydrated from the local catalog. Returns undefined when the record has no
+ * progress or its format is not in the catalog.
+ */
+async function toProgressView(
 	db: Db,
 	ctx: ViewContext,
-	bs: {
-		pk: string;
-		did: string;
-		bookPk: string;
-		shelfPk: string;
-		position: number | null;
-		notes: string | null;
-		emoji: string | null;
-		status: string;
-		createdAt: number;
-		updatedAt: number | null;
-	},
-): Promise<BookShelfView | null> {
-	const [shelfRow, bookRow] = await Promise.all([
-		db.select().from(shelves).where(eq(shelves.pk, bs.shelfPk)).get(),
-		db.select().from(books).where(and(eq(books.pk, bs.bookPk), releasedFilter(books))).get(),
-	]);
-
-	if (!shelfRow) {
-		throw new Error(`bookShelving ${bs.pk} references missing shelf ${bs.shelfPk}`);
-	}
-	if (!bookRow) {
-		// Book missing or not yet released — the shelving record is not publicly visible.
-		return null;
-	}
-
-	const metadata: BookShelfMetadata = {
-		status: bs.status,
-		position: bs.position ?? undefined,
-		notes: bs.notes ?? undefined,
-		emoji: bs.emoji ?? undefined,
-	};
+	progress: unknown,
+): Promise<ReviewView['progress']> {
+	if (!progress || typeof progress !== 'object') return undefined;
+	const p = progress as { format?: unknown; progress?: number; unit?: string };
+	if (typeof p.format !== 'string') return undefined;
+	const formatPk = rkeyFromAtUri(p.format, COLLECTION.format);
+	const formatRow = formatPk ? db.select().from(formats).where(eq(formats.pk, formatPk)).get() : undefined;
+	if (!formatRow) return undefined;
 
 	return {
-		uri: atUri(ctx, COLLECTION.bookShelf, bs.pk) as BookShelfView['uri'],
-		shelf: toShelfView(ctx, shelfRow),
-		book: await toBookView(db, ctx, bookRow),
-		metadata,
-		did: toDid(bs.did),
-		createdAt: toIso(bs.createdAt),
-		updatedAt: toIso(bs.updatedAt),
+		format: {
+			$type: 'net.olamaelcu.livtet.biblio.format',
+			description: formatRow.description,
+			emoji: formatRow.emoji,
+			iconImageUrl: formatRow.iconImageUrl ? toUri(formatRow.iconImageUrl) : undefined,
+			unit: formatRow.unit as Progress['format']['unit'],
+		},
+		progress: p.progress,
+		unit: p.unit,
 	};
 }
 
-export async function toShelfWithBooksView(
-	db: Db,
-	ctx: ViewContext,
-	s: { pk: string; name: string; description: string | null; createdAt: number; updatedAt: number | null },
-): Promise<ShelfWithBooksView> {
-	const rows = db
-		.select()
-		.from(bookShelves)
-		.where(eq(bookShelves.shelfPk, s.pk))
-		.orderBy(sql`${bookShelves.position} is null, ${bookShelves.position} asc, ${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
-		.all();
-	const books: BookShelfView[] = [];
-	for (const row of rows) {
-		const view = await toBookShelfView(db, ctx, row);
-		if (view) books.push(view);
-	}
-	return { shelf: toShelfView(ctx, s), books };
+/** Build a shelfView from a user PDS shelf record. */
+export function toShelfView(rec: PdsRecord): ShelfView {
+	const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioShelf.Main;
+	return {
+		uri: rec.uri as ShelfView['uri'],
+		name: value.name,
+		description: value.description,
+		createdAt: value.createdAt,
+		updatedAt: value.updatedAt,
+	};
 }
 
-// ─── Reviews ─────────────────────────────────────────────────────────────────
-
+/**
+ * Build a reviewView from a user PDS review record. `book` is the catalog book
+ * view hydrated by the caller (which has already resolved the record's
+ * `book.ref`); callers must not render a review whose book could not be
+ * hydrated.
+ */
 export async function toReviewView(
 	db: Db,
 	ctx: ViewContext,
-	r: {
-		pk: string;
-		bookPk: string;
-		did: string;
-		rating: number;
-		status: string;
-		text: string | null;
-		progressFormatPk: string | null;
-		progressValue: number | null;
-		createdAt: number;
-		updatedAt: number | null;
-	},
+	rec: PdsRecord,
+	did: string,
+	book: BookView,
 ): Promise<ReviewView> {
-	const [bookRow, tags, _blobs, progressFormat] = await Promise.all([
-		db.select().from(books).where(eq(books.pk, r.bookPk)).get(),
-		db.select().from(reviewTags).where(eq(reviewTags.reviewPk, r.pk)).all(),
-		db.select().from(reviewBlobs).where(eq(reviewBlobs.reviewPk, r.pk)).all(),
-		r.progressFormatPk ? db.select().from(formats).where(eq(formats.pk, r.progressFormatPk)).get() : undefined,
-	]);
-
-	if (!bookRow) {
-		throw new Error(`review ${r.pk} references missing book ${r.bookPk}`);
-	}
-	const book = await toBookView(db, ctx, bookRow);
-
-	const progress: ReviewView['progress'] =
-		r.progressValue != null || progressFormat
-			? {
-					format: progressFormat
-						? {
-								$type: 'net.olamaelcu.livtet.biblio.format',
-								description: progressFormat.description,
-								emoji: progressFormat.emoji,
-								iconImageUrl: progressFormat.iconImageUrl
-									? toUri(progressFormat.iconImageUrl)
-									: undefined,
-								unit: progressFormat.unit as Progress['format']['unit'],
-							}
-						: (r.progressFormatPk as unknown as Progress['format']),
-					progress: r.progressValue ?? undefined,
-					unit: progressFormat?.unit as Progress['unit'],
-				}
-			: undefined;
-
-	void _blobs;
-
+	const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioReview.Main;
 	return {
-		uri: atUri(ctx, COLLECTION.review, r.pk) as ReviewView['uri'],
+		uri: rec.uri as ReviewView['uri'],
 		book,
-		did: toDid(r.did),
-		tags: tags.map((t) => t.tag),
-		rating: r.rating,
-		status: r.status,
-		progress,
-		text: r.text ?? undefined,
-		createdAt: toIso(r.createdAt),
-		updatedAt: toIso(r.updatedAt),
+		did: did as ReviewView['did'],
+		tags: value.tags ?? [],
+		rating: value.rating,
+		status: value.status,
+		progress: await toProgressView(db, ctx, value.progress),
+		text: value.text,
+		createdAt: value.createdAt,
+	};
+}
+
+/** Build a bookShelfView from a user PDS bookShelving record. */
+export function toBookShelfView(
+	rec: PdsRecord,
+	did: string,
+	shelf: ShelfView,
+	book: BookView,
+): BookShelfView {
+	const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main;
+	return {
+		uri: rec.uri as BookShelfView['uri'],
+		shelf,
+		book,
+		metadata: value.metadata,
+		did: did as BookShelfView['did'],
+		createdAt: value.createdAt,
+		updatedAt: value.updatedAt,
+	};
+}
+
+/** Build a shelfWithBooksView from a shelfView plus its hydrated books. */
+export function toShelfWithBooksView(shelf: ShelfView, books: BookShelfView[]): ShelfWithBooksView {
+	return { shelf, books };
+}
+
+/** Build an actorView from the authenticated session and the actor self record (if any). */
+export function toActorView(
+	rec: PdsRecord | undefined,
+	session: { did: string; handle?: string },
+): ActorView {
+	const value = rec?.value as Lexicons.NetOlamaelcuLivtetBiblioActor.Main | undefined;
+	return {
+		did: session.did as ActorView['did'],
+		handle: session.handle,
+		displayName: value?.displayName,
+		description: value?.description,
 	};
 }

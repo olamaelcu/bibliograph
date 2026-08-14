@@ -19,6 +19,33 @@
         }
       }
     },
+    "actorView": {
+      "type": "object",
+      "description": "A public profile view for the AppView actor.",
+      "required": ["did"],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the actor."
+        },
+        "handle": {
+          "type": "string",
+          "maxGraphemes": 253,
+          "description": "Handle of the actor, if resolvable."
+        },
+        "displayName": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "description": "Display name of the actor."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 256,
+          "description": "Short bio of the actor."
+        }
+      }
+    },
     "timestamp": {
       "type": "string",
       "format": "datetime",
