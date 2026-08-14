@@ -41,6 +41,9 @@ importers:
       hono:
         specifier: ^4.13.0
         version: 4.13.1
+      opendal:
+        specifier: ^0.49.6
+        version: 0.49.6
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -767,6 +770,58 @@ packages:
   '@oomfware/kempt@0.1.4':
     resolution: {integrity: sha512-7ik6b58VC17dMX2SZq0LUHaOYupavbtXFA3UxIsAPV2Gc8+HXv9BLJ9Di52zn/8RkDWhoLf0TAcfGYHlnHUiuw==}
 
+  '@opendal/lib-darwin-arm64@0.49.6':
+    resolution: {integrity: sha512-xZkn/o9Go/TqQD9edwLHod57BMIS0P+rDNwwSied2twPva8GKmrmj4xJ2bpU9gOlbZNdk+kEEuow7Z0u+wHkKg==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@opendal/lib-darwin-x64@0.49.6':
+    resolution: {integrity: sha512-WtIUDi4IgWCE+6CGhiAgWqsCQHL4U7paLQUlVepwWHuQgfn77Pv/OkXNI70KkEVCWNwvtmbv5aaq1paFQUwCFA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@opendal/lib-linux-arm64-gnu@0.49.6':
+    resolution: {integrity: sha512-xAhrMEcsQCp643GKwUHJ7qMvlgKXnAAtRHHSRKP5DWUgBYKhGQo5USdYGZyswsDUawKt/O0dtySu2OJ2MdbNcA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@opendal/lib-linux-arm64-musl@0.49.6':
+    resolution: {integrity: sha512-/uv639XbnCz2WhdWZxYBDjKHvU7k93ARqgnqVsfr1xE2S/aTpG2vkKVYb4sC7u6rAGImgPm62KRKfw71JirNFA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@opendal/lib-linux-x64-gnu@0.49.6':
+    resolution: {integrity: sha512-MmY8rv4JJhraUnn+9ZjPmyQGUUaqYjm9jbZRVp9VK2Eebj8uppxg8EOB89AEu/pzSV6euSbd34pm53F4Xi0kWg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@opendal/lib-linux-x64-musl@0.49.6':
+    resolution: {integrity: sha512-PsYMtl4Ji/gI6zjzoi0YqrUPRNjJ1N6yLa/1QIKuNICF3oJZjQLkMsSId8//RYZezPIsV37X7wQvpjj+HYzXrw==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@opendal/lib-win32-arm64-msvc@0.49.6':
+    resolution: {integrity: sha512-9WO2vPrHvwVTl0vWGvigwKnNoA89SsdZfL3ibx/yG5dBg2WokYBOZb9r5syNST/IpfYSvnt3jzwnCdpmqdWi3w==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@opendal/lib-win32-x64-msvc@0.49.6':
+    resolution: {integrity: sha512-W5uEMSnvCPNlxx4DBj5cdmVliHEph6C2P2/EoEIQRjTjCRxseMunjC4vJMXdQjfdcWQt6ld46ONqVVCqYNHOyA==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
   '@optique/core@1.2.0':
     resolution: {integrity: sha512-h3gHGe8BCo5iVpOt4CcWCmTnPDYdyys0XqOCCc5ZPA2A2S+GmupMkqYNeI57+SildteuGEgBrGP+MlwRlWdzPA==}
     engines: {bun: '>=1.2.0', deno: '>=2.3.0', node: '>=20.0.0'}
@@ -1484,6 +1539,10 @@ packages:
 
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
+
+  opendal@0.49.6:
+    resolution: {integrity: sha512-ALXh1IMppWb3Voc3HhmCRSC20Tkal0vZNQi/A7U1iSZhxcdVXuriJj567Oq8Py22k+qdrvfJ0j4r+Rl+6WlEnQ==}
+    engines: {node: '>= 10'}
 
   parse5@7.3.0:
     resolution: {integrity: sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw==}
@@ -2250,6 +2309,30 @@ snapshots:
 
   '@oomfware/kempt@0.1.4': {}
 
+  '@opendal/lib-darwin-arm64@0.49.6':
+    optional: true
+
+  '@opendal/lib-darwin-x64@0.49.6':
+    optional: true
+
+  '@opendal/lib-linux-arm64-gnu@0.49.6':
+    optional: true
+
+  '@opendal/lib-linux-arm64-musl@0.49.6':
+    optional: true
+
+  '@opendal/lib-linux-x64-gnu@0.49.6':
+    optional: true
+
+  '@opendal/lib-linux-x64-musl@0.49.6':
+    optional: true
+
+  '@opendal/lib-win32-arm64-msvc@0.49.6':
+    optional: true
+
+  '@opendal/lib-win32-x64-msvc@0.49.6':
+    optional: true
+
   '@optique/core@1.2.0': {}
 
   '@optique/run@1.2.0':
@@ -2790,6 +2873,17 @@ snapshots:
   once@1.4.0:
     dependencies:
       wrappy: 1.0.2
+
+  opendal@0.49.6:
+    optionalDependencies:
+      '@opendal/lib-darwin-arm64': 0.49.6
+      '@opendal/lib-darwin-x64': 0.49.6
+      '@opendal/lib-linux-arm64-gnu': 0.49.6
+      '@opendal/lib-linux-arm64-musl': 0.49.6
+      '@opendal/lib-linux-x64-gnu': 0.49.6
+      '@opendal/lib-linux-x64-musl': 0.49.6
+      '@opendal/lib-win32-arm64-msvc': 0.49.6
+      '@opendal/lib-win32-x64-msvc': 0.49.6
 
   parse5@7.3.0:
     dependencies:
