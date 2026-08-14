@@ -7,15 +7,11 @@ import {
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
-	bookShelves,
 	books,
 	contributorRoles,
 	formats,
 	genreIdentifiers,
 	genres,
-	reviews,
-	reviewTags,
-	shelves,
 	workIdentifiers,
 	works,
 } from '../db/schema.js';
@@ -79,27 +75,12 @@ function seed(db: ReturnType<typeof drizzle>) {
 		{ pk: 'book-dune', title: 'Dune (40th Anniversary)', workPk: 'work-dune', formatPk: 'paperback', publishDate: 1119484800, description: 'The classic', coverUrl: 'https://cdn.example.com/dune.jpg', createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
 		{ pk: 'book-flowers', title: 'Flowers for Algernon', workPk: null, formatPk: 'ebook', publishDate: 1119484800, description: 'A touching story', coverUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
 	];
-	const shelfRows = [
-		{ pk: 'shelf-favorites', name: 'Favorites', description: 'Books I loved', iconImageCid: null, headerImageCid: null, createdAt: now, updatedAt: null },
-	];
-	const reviewRows = [
-		{ pk: 'review-1', bookPk: 'book-dune', did: 'did:plc:reader1', rating: 5, status: 'read', text: 'A masterpiece of worldbuilding', progressFormatPk: 'paperback', progressValue: 412, createdAt: now, updatedAt: null },
-		{ pk: 'review-2', bookPk: 'book-flowers', did: 'did:plc:reader2', rating: 4, status: 'reading', text: 'Heartbreaking so far', progressFormatPk: null, progressValue: null, createdAt: now, updatedAt: null },
-	];
-	const bookShelfRows = [
-		{ pk: 'shelving-1', did: 'did:plc:reader1', bookPk: 'book-dune', shelfPk: 'shelf-favorites', position: 1, notes: 'Rereading this winter', emoji: '🐛', status: 'reading', createdAt: now, updatedAt: null },
-		{ pk: 'shelving-2', did: 'did:plc:reader2', bookPk: 'book-flowers', shelfPk: 'shelf-favorites', position: null, notes: null, emoji: null, status: 'to-read', createdAt: now, updatedAt: null },
-	];
-
 	db.insert(formats).values(formatRows).run();
 	db.insert(genres).values(genreRows).run();
 	db.insert(contributorRoles).values(roleRows).run();
 	db.insert(works).values(workRows).run();
 	db.insert(contributors).values(contributorRows).run();
 	db.insert(books).values(bookRows).run();
-	db.insert(shelves).values(shelfRows).run();
-	db.insert(reviews).values(reviewRows).run();
-	db.insert(bookShelves).values(bookShelfRows).run();
 
 	db.insert(bookGenres).values([
 		{ bookPk: 'book-dune', genrePk: 'fiction' },
@@ -120,10 +101,6 @@ function seed(db: ReturnType<typeof drizzle>) {
 	]).run();
 	db.insert(genreIdentifiers).values([
 		{ genrePk: 'scifi', resource: 'babelio:science-fiction', url: 'https://babelio.example.com/science-fiction' },
-	]).run();
-	db.insert(reviewTags).values([
-		{ reviewPk: 'review-1', tag: 'favorite', createdAt: now },
-		{ reviewPk: 'review-1', tag: 'worldbuilding', createdAt: now },
 	]).run();
 }
 

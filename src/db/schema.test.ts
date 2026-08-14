@@ -128,7 +128,7 @@ describe('staged-release schema', () => {
 				cpSync(`drizzle/${tag}.sql`, join(trimDir, `${tag}.sql`));
 			}
 			const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8'));
-			journal.entries = journal.entries.filter((e: { tag: string }) => e.tag !== '0004_noisy_raza');
+			journal.entries = journal.entries.filter((e: { tag: string }) => e.tag !== '0004_noisy_raza' && e.tag !== '0005_awesome_doctor_doom');
 			writeFileSync(join(trimDir, 'meta/_journal.json'), JSON.stringify(journal));
 
 			const sqlite = new Database(':memory:');
@@ -146,7 +146,6 @@ describe('staged-release schema', () => {
 				INSERT INTO book_identifiers (book_pk, resource, url) VALUES ('book-dune', 'isbn:0441172717', 'u');
 				INSERT INTO book_contributors (book_pk, contributor_pk, role_pk, created_at) VALUES ('book-dune', 'author-herbert', 'author', 0);
 				INSERT INTO book_genres (book_pk, genre_pk) VALUES ('book-dune', 'fiction');
-				INSERT INTO reviews (pk, book_pk, did, rating, status, created_at) VALUES ('review-1', 'book-dune', 'did:plc:r1', 5, 'read', 0);
 			`);
 
 			migrate(db, { migrationsFolder: 'drizzle' });
@@ -157,7 +156,6 @@ describe('staged-release schema', () => {
 			expect(count('book_identifiers')).toBe(1);
 			expect(count('book_contributors')).toBe(1);
 			expect(count('book_genres')).toBe(1);
-			expect(count('reviews')).toBe(1);
 			expect(count('works')).toBe(1);
 			expect(count('genres')).toBe(1);
 			expect(count('contributors')).toBe(1);
