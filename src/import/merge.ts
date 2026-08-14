@@ -1,5 +1,5 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
 	books,
 	contributors,
@@ -28,7 +28,7 @@ export interface MergeCandidate {
 	/** Human key fields used for the title/name fallback match. */
 	matchName: string | null;
 	identifiers: IdentifierSpec[];
-	/** Field values to merge/conflict-check. Values are strings for text, ISO for dates. */
+	/** Field values to merge/conflict-check. Values are strings for text, unix-second strings for date columns. */
 	fields: Record<string, string | null>;
 }
 
@@ -60,6 +60,7 @@ export interface MergeResult {
 export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate): MergeResult {
 	const table = tableFor[candidate.entityType];
 	const adapter = adapterFor[candidate.entityType];
+	const nameCol = candidate.entityType === 'book' || candidate.entityType === 'work' ? 'title' : 'name';
 
 	// 1. Identifier match (unique resource index guarantees ≤1)
 	let pk: string | null = null;
@@ -72,21 +73,24 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 	}
 
 	// 2. Title/name fallback (case-insensitive)
-	if (pk === null && candidate.matchName) {
-		const nameCol = candidate.entityType === 'book' || candidate.entityType === 'work' ? 'title' : 'name';
+	let foundViaNameFallback = false;
+	const matchName = candidate.matchName;
+	if (pk === null && matchName) {
 		const rows = db
 			.select()
 			.from(table)
-			.where(eq(table[nameCol as keyof typeof table] as never, candidate.matchName as never))
+			.where(sql`lower(${table[nameCol as keyof typeof table] as never}) = lower(${matchName})`)
 			.all();
-		if (rows.length === 1) pk = (rows[0] as unknown as { pk: string }).pk;
-		else if (rows.length > 1) {
+		if (rows.length === 1) {
+			pk = (rows[0] as unknown as { pk: string }).pk;
+			foundViaNameFallback = true;
+		} else if (rows.length > 1) {
 			// Ambiguous — leave staged with an issue rather than guessing.
 			flagIssue(db, {
 				entityType: candidate.entityType,
 				entityPk: candidate.pk,
 				field: 'matchName',
-				incomingValue: candidate.matchName,
+				incomingValue: matchName,
 				storedValue: `${rows.length} existing records share this name`,
 				source: candidate.source,
 			});
@@ -96,12 +100,19 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 	const existed = pk !== null;
 	const effectivePk = pk ?? candidate.pk;
 	const conflictFields: string[] = [];
+	const existingRow = existed
+		? db.select().from(table).where(eq(table.pk as never, effectivePk as never)).get()
+		: undefined;
 
 	if (existed) {
 		// Merge fields: stored value wins; differences become open issues.
 		for (const [field, incoming] of Object.entries(candidate.fields)) {
 			if (incoming === null || incoming === undefined) continue;
-			const existingRow = db.select().from(table).where(eq(table.pk as never, effectivePk as never)).get();
+			// The name fallback matched this record; an incoming value for that same
+			// column equal to matchName is the source of the match, not a conflict.
+			if (foundViaNameFallback && field === nameCol && matchName !== null && incoming.toLowerCase() === matchName.toLowerCase()) {
+				continue;
+			}
 			const stored = existingRow ? (existingRow as unknown as Record<string, unknown>)[field] : undefined;
 			const storedStr = stored == null ? null : String(stored);
 			if (storedStr !== incoming) {
@@ -116,18 +127,41 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 				conflictFields.push(field);
 			}
 		}
-		upsertIdentifiers(db, adapter, effectivePk, candidate.identifiers);
 	} else {
 		// New row, staged.
 		const now = Math.floor(Date.now() / 1000);
 		const insertValues: Record<string, unknown> = {
+			// Candidate fields first so the invariants below can never be overridden.
+			...candidate.fields,
 			pk: effectivePk,
 			createdAt: now,
 			releaseStatus: 'staged',
-			...candidate.fields,
 		};
-		db.insert(table).values(insertValues as never).onConflictDoNothing().run();
-		upsertIdentifiers(db, adapter, effectivePk, candidate.identifiers);
+		const insertResult = db.insert(table).values(insertValues as never).onConflictDoNothing().run();
+		if (insertResult.changes === 0) {
+			// The pk already exists but nothing above matched it (slug collision); the
+			// insert silently no-op'd, so surface the collision as an issue.
+			flagIssue(db, {
+				entityType: candidate.entityType,
+				entityPk: effectivePk,
+				field: 'pk',
+				incomingValue: candidate.pk,
+				storedValue: candidate.pk,
+				source: candidate.source,
+			});
+		}
+	}
+
+	const { conflicts } = upsertIdentifiers(db, adapter, effectivePk, candidate.identifiers);
+	for (const conflict of conflicts) {
+		flagIssue(db, {
+			entityType: candidate.entityType,
+			entityPk: effectivePk,
+			field: 'identifier',
+			incomingValue: conflict.resource,
+			storedValue: conflict.ownerPk,
+			source: candidate.source,
+		});
 	}
 
 	return { pk: effectivePk, existed, conflictFields };

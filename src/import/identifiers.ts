@@ -43,20 +43,29 @@ export const workIdentifiersAdapter = makeAdapter(workIdentifiers, { pk: 'workPk
 export const contributorIdentifiersAdapter = makeAdapter(contributorIdentifiers, { pk: 'contributorPk' });
 export const genreIdentifiersAdapter = makeAdapter(genreIdentifiers, { pk: 'genrePk' });
 
-/** Upsert a set of identifier specs onto an entity, returning how many were new. */
+/** Result of an identifier upsert: newly claimed resources plus any resources already owned by a different entity. */
+export interface IdentifierUpsertResult {
+	added: number;
+	conflicts: Array<{ resource: string; ownerPk: string }>;
+}
+
+/** Upsert identifier specs onto an entity, returning new claims and conflicting claims. */
 export function upsertIdentifiers(
 	db: BetterSQLite3Database,
 	adapter: PkAdapter,
 	pk: string,
 	specs: IdentifierSpec[],
-): number {
+): IdentifierUpsertResult {
 	let added = 0;
+	const conflicts: IdentifierUpsertResult['conflicts'] = [];
 	for (const spec of specs) {
 		const existing = adapter.findByResource(db, spec.resource);
 		if (existing === null) {
 			adapter.upsert(db, pk, spec);
 			added += 1;
+		} else if (existing !== pk) {
+			conflicts.push({ resource: spec.resource, ownerPk: existing });
 		}
 	}
-	return added;
+	return { added, conflicts };
 }
