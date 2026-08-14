@@ -1,0 +1,56 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.actor",
+  "description": "A user's public profile on the bibliograph AppView.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxGraphemes": 64,
+            "description": "Display name of the user."
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 256,
+            "description": "Short bio."
+          },
+          "avatar": {
+            "type": "blob",
+            "accept": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ],
+            "maxSize": 1000000,
+            "description": "Profile avatar image."
+          },
+          "banner": {
+            "type": "blob",
+            "accept": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ],
+            "maxSize": 3000000,
+            "description": "Profile banner image."
+          },
+          "createdAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp when this record was originally created."
+          },
+          "updatedAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp of the last update to this record."
+          }
+        }
+      }
+    }
+  }
+}
