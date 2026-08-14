@@ -18,6 +18,7 @@ import {
 } from './records.js';
 import { buildDidDocument } from '../did.js';
 import { contributors, contributorRoles, formats, genres, works, books } from '../db/schema.js';
+import { releasedFilter } from '../xrpc/gate.js';
 import type { ViewContext } from '../xrpc/views.js';
 
 type Db = BetterSQLite3Database;
@@ -191,6 +192,9 @@ async function listPage(
 	const conds: any[] = [];
 	if (cursorRkey) {
 		conds.push(reverse ? sql`${t.pk} < ${cursorRkey}` : sql`${t.pk} > ${cursorRkey}`);
+	}
+	if ('releaseStatus' in t) {
+		conds.push(releasedFilter(t));
 	}
 	const rows = base
 		.where(conds.length ? and(...conds) : undefined)

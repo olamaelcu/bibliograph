@@ -4,6 +4,7 @@ import { XRPCRouter, json, InvalidRequestError, XRPCError } from '@atcute/xrpc-s
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
+import { releasedFilter } from './gate.js';
 import {
 	COLLECTION,
 	toBookShelfView,
@@ -73,7 +74,11 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
 		async handler({ params }) {
 			const rkey = rkeyFromUri(ctx, COLLECTION.book, params.uri);
-			const row = db.select().from(books).where(eq(books.pk, rkey)).get();
+			const row = db
+				.select()
+				.from(books)
+				.where(and(eq(books.pk, rkey), releasedFilter(books)))
+				.get();
 			if (!row) notFound();
 			return json({ book: await toBookView(db, ctx, row!) });
 		},
@@ -82,7 +87,11 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetWork.mainSchema, {
 		async handler({ params }) {
 			const rkey = rkeyFromUri(ctx, COLLECTION.work, params.uri);
-			const row = db.select().from(works).where(eq(works.pk, rkey)).get();
+			const row = db
+				.select()
+				.from(works)
+				.where(and(eq(works.pk, rkey), releasedFilter(works)))
+				.get();
 			if (!row) notFound();
 			const identifiers = db
 				.select()
@@ -96,7 +105,11 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetContributor.mainSchema, {
 		async handler({ params }) {
 			const rkey = rkeyFromUri(ctx, COLLECTION.contributor, params.uri);
-			const row = db.select().from(contributors).where(eq(contributors.pk, rkey)).get();
+			const row = db
+				.select()
+				.from(contributors)
+				.where(and(eq(contributors.pk, rkey), releasedFilter(contributors)))
+				.get();
 			if (!row) notFound();
 			const identifiers = db
 				.select()
@@ -112,6 +125,12 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rkey = rkeyFromUri(ctx, COLLECTION.review, params.uri);
 			const row = db.select().from(reviews).where(eq(reviews.pk, rkey)).get();
 			if (!row) notFound();
+			const bookRow = db
+				.select()
+				.from(books)
+				.where(and(eq(books.pk, row!.bookPk), releasedFilter(books)))
+				.get();
+			if (!bookRow) notFound();
 			return json({ review: await toReviewView(db, ctx, row!) });
 		},
 	});
@@ -128,7 +147,11 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetGenre.mainSchema, {
 		async handler({ params }) {
 			const rkey = rkeyFromUri(ctx, COLLECTION.genre, params.uri);
-			const row = db.select().from(genres).where(eq(genres.pk, rkey)).get();
+			const row = db
+				.select()
+				.from(genres)
+				.where(and(eq(genres.pk, rkey), releasedFilter(genres)))
+				.get();
 			if (!row) notFound();
 			const identifiers = db
 				.select()
@@ -142,7 +165,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooks.mainSchema, {
 		async handler({ params }) {
 			const limit = clampLimit(params.limit);
-			const filters = [];
+			const filters = [releasedFilter(books)];
 			if (params.genre) {
 				const genrePk = rkeyFromUri(ctx, COLLECTION.genre, params.genre);
 				const sub = db
@@ -189,7 +212,11 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListReviewsByBook.mainSchema, {
 		async handler({ params }) {
 			const bookPk = rkeyFromUri(ctx, COLLECTION.book, params.book);
-			const bookExists = db.select().from(books).where(eq(books.pk, bookPk)).get();
+			const bookExists = db
+				.select()
+				.from(books)
+				.where(and(eq(books.pk, bookPk), releasedFilter(books)))
+				.get();
 			if (!bookExists) notFound();
 			const limit = clampLimit(params.limit);
 			const rows = db
@@ -315,7 +342,8 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListGenres.mainSchema, {
 		async handler({ params }) {
 			const limit = clampLimit(params.limit);
-			const conds = params.topLevelOnly ? [sql`${genres.parentPk} is null`] : [];
+			const conds = [releasedFilter(genres)];
+			if (params.topLevelOnly) conds.push(sql`${genres.parentPk} is null`);
 			const rows = db
 				.select()
 				.from(genres)
@@ -356,10 +384,13 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 				.select({ bookPk: bookIdentifiers.bookPk })
 				.from(bookIdentifiers)
 				.where(like(bookIdentifiers.resource, term));
-			const where = or(
-				like(books.title, term),
-				like(books.description, term),
-				sql`${books.pk} in (${idSub})`,
+			const where = and(
+				releasedFilter(books),
+				or(
+					like(books.title, term),
+					like(books.description, term),
+					sql`${books.pk} in (${idSub})`,
+				),
 			);
 			const rows = db
 				.select()
@@ -388,6 +419,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const limit = clampLimit(params.limit);
 			const term = `%${q}%`;
 			const filters = [
+				releasedFilter(contributors),
 				or(like(contributors.name, term), like(contributors.sortName, term), like(contributors.bio, term)),
 			];
 			if (params.role) {
@@ -395,7 +427,8 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 				const sub = db
 					.select({ contributorPk: bookContributors.contributorPk })
 					.from(bookContributors)
-					.where(eq(bookContributors.rolePk, rolePk));
+					.innerJoin(books, eq(bookContributors.bookPk, books.pk))
+					.where(and(eq(bookContributors.rolePk, rolePk), releasedFilter(books)));
 				filters.push(sql`${contributors.pk} in (${sub})`);
 			}
 			const where = and(...filters);
@@ -459,10 +492,11 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 					.where(inArray(reviewTags.tag, params.tag));
 				filters.push(sql`${reviews.pk} in (${sub})`);
 			}
-			const where = and(...filters);
+			const where = and(...filters, releasedFilter(books));
 			const rows = db
 				.select()
 				.from(reviews)
+				.innerJoin(books, eq(reviews.bookPk, books.pk))
 				.where(where)
 				.orderBy(sql`${reviews.createdAt} asc, ${reviews.pk} asc`)
 				.limit(limit + 1)
@@ -470,14 +504,21 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const hasMore = rows.length > limit;
 			const page = hasMore ? rows.slice(0, limit) : rows;
 			const views = [];
-			for (const row of page) views.push(await toReviewView(db, ctx, row));
-			const hitsTotal = db.select({ count: sql`count(*)` }).from(reviews).where(where).get();
+			for (const { reviews: r } of page) views.push(await toReviewView(db, ctx, r));
+			const hitsTotal = db
+				.select({ count: sql`count(*)` })
+				.from(reviews)
+				.innerJoin(books, eq(reviews.bookPk, books.pk))
+				.where(where)
+				.get();
 			const last = page.at(-1);
 			return json({
 				reviews: views,
 				hitsTotal: Number(hitsTotal?.count ?? 0),
 				cursor:
-					hasMore && last ? encodeCursor({ key: String(last.createdAt), pk: last.pk }) : undefined,
+					hasMore && last
+						? encodeCursor({ key: String(last.reviews.createdAt), pk: last.reviews.pk })
+						: undefined,
 			});
 		},
 	});
@@ -491,10 +532,13 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 				.select({ workPk: workIdentifiers.workPk })
 				.from(workIdentifiers)
 				.where(like(workIdentifiers.resource, term));
-			const where = or(
-				like(works.title, term),
-				like(works.description, term),
-				sql`${works.pk} in (${idSub})`,
+			const where = and(
+				releasedFilter(works),
+				or(
+					like(works.title, term),
+					like(works.description, term),
+					sql`${works.pk} in (${idSub})`,
+				),
 			);
 			const rows = db
 				.select()
