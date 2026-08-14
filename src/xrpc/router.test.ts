@@ -138,6 +138,13 @@ describe('listBooks', () => {
 		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
 	});
 
+	it('filters by work', async () => {
+		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooks?work=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
+		const body = await res.json();
+		expect(body.books).toHaveLength(1);
+		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
+	});
+
 	it('filters by status', async () => {
 		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooks?status=read`);
 		const body = await res.json();

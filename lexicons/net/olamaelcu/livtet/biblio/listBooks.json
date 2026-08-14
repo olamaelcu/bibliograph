@@ -13,6 +13,11 @@
             "format": "at-uri",
             "description": "Only include books in the given genre."
           },
+          "work": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Only include books that are editions of the given work."
+          },
           "format": {
             "type": "string",
             "format": "at-uri",

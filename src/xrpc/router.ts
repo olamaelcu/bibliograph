@@ -151,6 +151,10 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 					.where(eq(bookGenres.genrePk, genrePk));
 				filters.push(sql`${books.pk} in (${sub})`);
 			}
+			if (params.work) {
+				const workPk = rkeyFromUri(ctx, COLLECTION.work, params.work);
+				filters.push(eq(books.workPk, workPk));
+			}
 			if (params.format) {
 				const formatPk = rkeyFromUri(ctx, COLLECTION.format, params.format);
 				filters.push(eq(books.formatPk, formatPk));
