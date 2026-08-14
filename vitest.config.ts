@@ -7,6 +7,9 @@ export default defineConfig({
     environment: 'node',
     passWithNoTests: true,
     include: ['src/**/*.{test,spec}.ts'],
+    env: {
+      DB_PATH: "data/test.sqlite"
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
