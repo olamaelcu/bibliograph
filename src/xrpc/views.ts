@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type {
 	BookContributorView,
@@ -34,6 +34,7 @@ import {
 	workIdentifiers,
 	works,
 } from '../db/schema.js';
+import { releasedFilter } from './gate.js';
 
 export const COLLECTION = {
 	book: 'net.olamaelcu.livtet.biblio.book',
@@ -193,7 +194,9 @@ export async function toBookView(
 	},
 ): Promise<BookView> {
 	const [workRow, formatRow, genreRows, contributorRows, identifierRows] = await Promise.all([
-		b.workPk ? db.select().from(works).where(eq(works.pk, b.workPk)).get() : undefined,
+		b.workPk
+			? db.select().from(works).where(and(eq(works.pk, b.workPk), releasedFilter(works))).get()
+			: undefined,
 		b.formatPk ? db.select().from(formats).where(eq(formats.pk, b.formatPk)).get() : undefined,
 		(async () => {
 			if (!b.workPk) return [];
@@ -201,7 +204,7 @@ export async function toBookView(
 				.select({ genre: genres })
 				.from(bookGenres)
 				.innerJoin(genres, eq(bookGenres.genrePk, genres.pk))
-				.where(eq(bookGenres.bookPk, b.pk))
+				.where(and(eq(bookGenres.bookPk, b.pk), releasedFilter(genres)))
 				.all();
 			return joins.map((j) => j.genre);
 		})(),
@@ -211,7 +214,7 @@ export async function toBookView(
 				.from(bookContributors)
 				.innerJoin(contributors, eq(bookContributors.contributorPk, contributors.pk))
 				.innerJoin(contributorRoles, eq(bookContributors.rolePk, contributorRoles.pk))
-				.where(eq(bookContributors.bookPk, b.pk))
+				.where(and(eq(bookContributors.bookPk, b.pk), releasedFilter(contributors as never)))
 				.all();
 			return joins;
 		})(),

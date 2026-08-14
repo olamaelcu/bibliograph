@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type * as Lexicons from '../lexicons/index.js';
 
@@ -22,6 +22,7 @@ import {
 	workIdentifiers,
 	works,
 } from '../db/schema.js';
+import { releasedFilter } from '../xrpc/gate.js';
 
 export const COLLECTIONS = {
 	work: 'net.olamaelcu.livtet.biblio.work',
@@ -254,7 +255,7 @@ export async function hydrateFormat(db: Db, pk: string) {
 }
 
 export async function hydrateWork(db: Db, pk: string): Promise<Work | undefined> {
-	const row = db.select().from(works).where(eq(works.pk, pk)).get();
+	const row = db.select().from(works).where(and(eq(works.pk, pk), releasedFilter(works))).get();
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, workIdentifiers, workIdentifiers.workPk, pk);
 	return serializeWork(row, identifiers);
@@ -265,7 +266,7 @@ export async function hydrateGenre(
 	ctx: PdsContext,
 	pk: string,
 ): Promise<Genre | undefined> {
-	const row = db.select().from(genres).where(eq(genres.pk, pk)).get();
+	const row = db.select().from(genres).where(and(eq(genres.pk, pk), releasedFilter(genres))).get();
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, genreIdentifiers, genreIdentifiers.genrePk, pk);
 	return serializeGenre(ctx, row, identifiers);
@@ -275,19 +276,19 @@ export async function hydrateContributor(
 	db: Db,
 	pk: string,
 ): Promise<Contributor | undefined> {
-	const row = db.select().from(contributors).where(eq(contributors.pk, pk)).get();
+	const row = db.select().from(contributors).where(and(eq(contributors.pk, pk), releasedFilter(contributors))).get();
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, contributorIdentifiers, contributorIdentifiers.contributorPk, pk);
 	return serializeContributor(row, identifiers);
 }
 
 export async function hydrateContributorRole(db: Db, pk: string) {
-	const row = db.select().from(contributorRoles).where(eq(contributorRoles.pk, pk)).get();
+	const row = db.select().from(contributorRoles).where(and(eq(contributorRoles.pk, pk), releasedFilter(contributorRoles))).get();
 	return row ? serializeContributorRole(row) : undefined;
 }
 
 export async function hydrateBook(db: Db, ctx: PdsContext, pk: string): Promise<Book | undefined> {
-	const row = db.select().from(books).where(eq(books.pk, pk)).get();
+	const row = db.select().from(books).where(and(eq(books.pk, pk), releasedFilter(books))).get();
 	if (!row) return undefined;
 
 	const [genreRows, identifierRows] = await Promise.all([
