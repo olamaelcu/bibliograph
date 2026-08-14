@@ -6,11 +6,13 @@ import { registerPdsHandlers } from '../pds/router.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import {
 	COLLECTION,
+	toBookShelfView,
 	toBookView,
 	toContributorView,
 	toGenreView,
 	toReviewView,
 	toShelfView,
+	toShelfWithBooksView,
 	toWorkView,
 	type ViewContext,
 } from './views.js';
@@ -20,6 +22,7 @@ import {
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
+	bookShelves,
 	books,
 	contributorRoles,
 	formats,
@@ -224,6 +227,87 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 		},
 	});
 
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
+		async handler({ params }) {
+			const rkey = rkeyFromUri(ctx, COLLECTION.bookShelf, params.uri);
+			const row = db.select().from(bookShelves).where(eq(bookShelves.pk, rkey)).get();
+			if (!row) notFound();
+			return json({ bookShelf: await toBookShelfView(db, ctx, row!) });
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
+		async handler({ params }) {
+			const bookPk = rkeyFromUri(ctx, COLLECTION.book, params.book);
+			const bookExists = db.select().from(books).where(eq(books.pk, bookPk)).get();
+			if (!bookExists) notFound();
+			const limit = clampLimit(params.limit);
+			const rows = db
+				.select()
+				.from(bookShelves)
+				.where(eq(bookShelves.bookPk, bookPk))
+				.orderBy(sql`${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
+				.limit(limit + 1)
+				.all();
+			const hasMore = rows.length > limit;
+			const page = hasMore ? rows.slice(0, limit) : rows;
+			const views = [];
+			for (const row of page) views.push(await toBookShelfView(db, ctx, row));
+			const last = page.at(-1);
+			return json({
+				bookShelves: views,
+				cursor:
+					hasMore && last ? encodeCursor({ key: String(last.createdAt), pk: last.pk }) : undefined,
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
+		async handler({ params }) {
+			const shelfPk = rkeyFromUri(ctx, COLLECTION.shelf, params.shelf);
+			const shelfExists = db.select().from(shelves).where(eq(shelves.pk, shelfPk)).get();
+			if (!shelfExists) notFound();
+			const limit = clampLimit(params.limit);
+			const rows = db
+				.select()
+				.from(bookShelves)
+				.where(eq(bookShelves.shelfPk, shelfPk))
+				.orderBy(sql`${bookShelves.position} is null, ${bookShelves.position} asc, ${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
+				.limit(limit + 1)
+				.all();
+			const hasMore = rows.length > limit;
+			const page = hasMore ? rows.slice(0, limit) : rows;
+			const views = [];
+			for (const row of page) views.push(await toBookShelfView(db, ctx, row));
+			const last = page.at(-1);
+			return json({
+				bookShelves: views,
+				cursor:
+					hasMore && last ? encodeCursor({ key: String(last.createdAt), pk: last.pk }) : undefined,
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
+		async handler({ params }) {
+			const limit = clampLimit(params.limit);
+			const rows = db
+				.select()
+				.from(shelves)
+				.orderBy(sql`${shelves.name} asc, ${shelves.pk} asc`)
+				.limit(limit + 1)
+				.all();
+			const hasMore = rows.length > limit;
+			const page = hasMore ? rows.slice(0, limit) : rows;
+			const views = [];
+			for (const row of page) views.push(await toShelfWithBooksView(db, ctx, row));
+			const last = page.at(-1);
+			return json({
+				shelves: views,
+				cursor: hasMore && last ? encodeCursor({ key: last.name, pk: last.pk }) : undefined,
+			});		},
+	});
+
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListGenres.mainSchema, {
 		async handler({ params }) {
 			const limit = clampLimit(params.limit);
@@ -390,6 +474,53 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 				hitsTotal: Number(hitsTotal?.count ?? 0),
 				cursor:
 					hasMore && last ? encodeCursor({ key: String(last.createdAt), pk: last.pk }) : undefined,
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchWorks.mainSchema, {
+		async handler({ params }) {
+			const q = params.q.trim();
+			const limit = clampLimit(params.limit);
+			const term = `%${q}%`;
+			const idSub = db
+				.select({ workPk: workIdentifiers.workPk })
+				.from(workIdentifiers)
+				.where(like(workIdentifiers.resource, term));
+			const where = or(
+				like(works.title, term),
+				like(works.description, term),
+				sql`${works.pk} in (${idSub})`,
+			);
+			const rows = db
+				.select()
+				.from(works)
+				.where(where)
+				.orderBy(sql`${works.title} asc, ${works.pk} asc`)
+				.limit(limit + 1)
+				.all();
+			const hasMore = rows.length > limit;
+			const page = hasMore ? rows.slice(0, limit) : rows;
+			const pks = page.map((w) => w.pk);
+			const idRows: { workPk: string; resource: string; url: string }[] = pks.length
+				? db
+						.select()
+						.from(workIdentifiers)
+						.where(inArray(workIdentifiers.workPk, pks))
+						.all()
+				: [];
+			const idByWork = new Map<string, { workPk: string; resource: string; url: string }[]>();
+			for (const row of idRows) {
+				const list = idByWork.get(row.workPk) ?? [];
+				list.push(row);
+				idByWork.set(row.workPk, list);
+			}
+			const hitsTotal = db.select({ count: sql`count(*)` }).from(works).where(where).get();
+			const last = page.at(-1);
+			return json({
+				works: page.map((w) => toWorkView(ctx, w, idByWork.get(w.pk) ?? [])),
+				hitsTotal: Number(hitsTotal?.count ?? 0),
+				cursor: hasMore && last ? encodeCursor({ key: last.title, pk: last.pk }) : undefined,
 			});
 		},
 	});

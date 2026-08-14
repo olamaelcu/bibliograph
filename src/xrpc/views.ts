@@ -1,7 +1,9 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type {
 	BookContributorView,
+	BookShelfMetadata,
+	BookShelfView,
 	BookView,
 	ContributorView,
 	FormatView,
@@ -10,6 +12,7 @@ import type {
 	Progress,
 	ReviewView,
 	ShelfView,
+	ShelfWithBooksView,
 	WorkView,
 } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
 import {
@@ -18,6 +21,7 @@ import {
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
+	bookShelves,
 	books,
 	contributorRoles,
 	formats,
@@ -40,6 +44,7 @@ export const COLLECTION = {
 	genre: 'net.olamaelcu.livtet.biblio.genre',
 	review: 'net.olamaelcu.livtet.biblio.review',
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
+	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
 } as const;
 
 type Db = BetterSQLite3Database;
@@ -63,8 +68,8 @@ function toUri(value: string): GenericUri {
 }
 
 /** Branded DID string produced by codegen for did-format strings. */
-function toDid(value: string): ReviewView['did'] {
-	return value as ReviewView['did'];
+function toDid(value: string): `did:${string}:${string}` {
+	return value as `did:${string}:${string}`;
 }
 
 // ─── Identifiers ─────────────────────────────────────────────────────────────
@@ -279,6 +284,70 @@ export function toShelfView(
 		createdAt: toIso(s.createdAt),
 		updatedAt: toIso(s.updatedAt),
 	};
+}
+
+// ─── Book Shelving ───────────────────────────────────────────────────────────
+
+export async function toBookShelfView(
+	db: Db,
+	ctx: ViewContext,
+	bs: {
+		pk: string;
+		did: string;
+		bookPk: string;
+		shelfPk: string;
+		position: number | null;
+		notes: string | null;
+		emoji: string | null;
+		status: string;
+		createdAt: number;
+		updatedAt: number | null;
+	},
+): Promise<BookShelfView> {
+	const [shelfRow, bookRow] = await Promise.all([
+		db.select().from(shelves).where(eq(shelves.pk, bs.shelfPk)).get(),
+		db.select().from(books).where(eq(books.pk, bs.bookPk)).get(),
+	]);
+
+	if (!shelfRow) {
+		throw new Error(`bookShelving ${bs.pk} references missing shelf ${bs.shelfPk}`);
+	}
+	if (!bookRow) {
+		throw new Error(`bookShelving ${bs.pk} references missing book ${bs.bookPk}`);
+	}
+
+	const metadata: BookShelfMetadata = {
+		status: bs.status,
+		position: bs.position ?? undefined,
+		notes: bs.notes ?? undefined,
+		emoji: bs.emoji ?? undefined,
+	};
+
+	return {
+		uri: atUri(ctx, COLLECTION.bookShelf, bs.pk) as BookShelfView['uri'],
+		shelf: toShelfView(ctx, shelfRow),
+		book: await toBookView(db, ctx, bookRow),
+		metadata,
+		did: toDid(bs.did),
+		createdAt: toIso(bs.createdAt),
+		updatedAt: toIso(bs.updatedAt),
+	};
+}
+
+export async function toShelfWithBooksView(
+	db: Db,
+	ctx: ViewContext,
+	s: { pk: string; name: string; description: string | null; createdAt: number; updatedAt: number | null },
+): Promise<ShelfWithBooksView> {
+	const rows = db
+		.select()
+		.from(bookShelves)
+		.where(eq(bookShelves.shelfPk, s.pk))
+		.orderBy(sql`${bookShelves.position} is null, ${bookShelves.position} asc, ${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
+		.all();
+	const books: BookShelfView[] = [];
+	for (const row of rows) books.push(await toBookShelfView(db, ctx, row));
+	return { shelf: toShelfView(ctx, s), books };
 }
 
 // ─── Reviews ─────────────────────────────────────────────────────────────────

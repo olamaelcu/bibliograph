@@ -177,6 +177,70 @@ describe('listShelves', () => {
 	});
 });
 
+describe('getBookOnShelf', () => {
+	it('returns a bookShelving view with hydrated book and shelf', async () => {
+		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.bookShelving', 'shelving-1'))}`);
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.bookShelf.shelf.name).toBe('Favorites');
+		expect(body.bookShelf.book.title).toBe('Dune (40th Anniversary)');
+		expect(body.bookShelf.metadata.status).toBe('reading');
+		expect(body.bookShelf.metadata.position).toBe(1);
+		expect(body.bookShelf.metadata.emoji).toBe('🐛');
+		expect(body.bookShelf.did).toBe('did:plc:reader1');
+	});
+
+	it('returns NotFound for a missing bookShelving record', async () => {
+		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.bookShelving', 'nope'))}`);
+		expect(res.status).toBe(404);
+	});
+});
+
+describe('getShelvingOfBook', () => {
+	it('lists the shelves a book is on', async () => {
+		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getShelvingOfBook?book=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.book', 'book-dune'))}`);
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.bookShelves).toHaveLength(1);
+		expect(body.bookShelves[0].shelf.name).toBe('Favorites');
+		expect(body.bookShelves[0].book.title).toBe('Dune (40th Anniversary)');
+	});
+
+	it('returns NotFound for a missing book', async () => {
+		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getShelvingOfBook?book=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.book', 'nope'))}`);
+		expect(res.status).toBe(404);
+	});
+});
+
+describe('listBooksOnShelf', () => {
+	it('lists the books on a shelf ordered by position', async () => {
+		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.shelf', 'shelf-favorites'))}`);
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.bookShelves).toHaveLength(2);
+		expect(body.bookShelves[0].book.title).toBe('Dune (40th Anniversary)');
+		expect(body.bookShelves[0].metadata.status).toBe('reading');
+		expect(body.bookShelves[1].book.title).toBe('Flowers for Algernon');
+	});
+
+	it('returns NotFound for a missing shelf', async () => {
+		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.shelf', 'nope'))}`);
+		expect(res.status).toBe(404);
+	});
+});
+
+describe('listShelvesWithBooks', () => {
+	it('returns shelves each hydrated with their books', async () => {
+		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.listShelvesWithBooks');
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.shelves).toHaveLength(1);
+		expect(body.shelves[0].shelf.name).toBe('Favorites');
+		expect(body.shelves[0].books).toHaveLength(2);
+		expect(body.shelves[0].books[0].book.title).toBe('Dune (40th Anniversary)');
+	});
+});
+
 describe('listGenres', () => {
 	it('returns all genres', async () => {
 		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.listGenres');
@@ -241,5 +305,28 @@ describe('searchReviews', () => {
     const body = await res.json();
     expect(body.reviews).toHaveLength(1);
     expect(body.reviews[0].rating).toBe(5);
+  });
+});
+
+describe('searchWorks', () => {
+  it('finds works by title', async () => {
+    const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('Dune'));
+    const body = await res.json();
+    expect(body.hitsTotal).toBe(1);
+    expect(body.works[0].title).toBe('Dune');
+  });
+
+  it('finds works by identifier', async () => {
+    const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('openlibrary:OL893423W'));
+    const body = await res.json();
+    expect(body.hitsTotal).toBe(1);
+    expect(body.works[0].identifiers[0].resource).toBe('openlibrary:OL893423W');
+  });
+
+  it('returns empty results for no match', async () => {
+    const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('nonexistent'));
+    const body = await res.json();
+    expect(body.hitsTotal).toBe(0);
+    expect(body.works).toHaveLength(0);
   });
 });

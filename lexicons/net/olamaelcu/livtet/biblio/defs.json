@@ -431,6 +431,168 @@
           "description": "Timestamp of the last update to the record."
         }
       }
+    },
+    "expandedContributor": {
+      "type": "object",
+      "required": ["name", "role"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxGraphemes": 200,
+          "description": "Display name of the contributor."
+        },
+        "role": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the contributor role record."
+        },
+        "sortName": {
+          "type": "string",
+          "maxGraphemes": 200,
+          "description": "Name used for alphabetical sorting."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+          },
+          "description": "External identifiers for the contributor."
+        },
+        "bio": {
+          "type": "string",
+          "maxGraphemes": 16384,
+          "description": "Short biography of the contributor."
+        },
+        "imageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Portrait or avatar image of the contributor."
+        }
+      }
+    },
+    "expandedBook": {
+      "type": "object",
+      "required": ["ref", "title"],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "Strong reference to the canonical book record."
+        },
+        "title": {
+          "type": "string",
+          "maxGraphemes": 300,
+          "description": "Title of the edition."
+        },
+        "coverImageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Cover image URL of the book."
+        },
+        "contributors": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#expandedContributor"
+          },
+          "description": "Contributors to this edition and their roles."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+          },
+          "description": "External identifiers for this edition."
+        }
+      }
+    },
+    "bookShelfMetadata": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#readingStatus",
+          "description": "Reading status for this book."
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Position of the book within the shelf (1-indexed)."
+        },
+        "notes": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Personal notes about this book on the shelf."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing this book on the shelf."
+        }
+      }
+    },
+    "bookShelfView": {
+      "type": "object",
+      "required": ["uri", "shelf", "book", "metadata", "did"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the bookShelf record."
+        },
+        "shelf": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfView",
+          "description": "The shelf the book is on."
+        },
+        "book": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookView",
+          "description": "The book on the shelf."
+        },
+        "metadata": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfMetadata",
+          "description": "Shelf-specific metadata for this book."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the account that shelved the book."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
+    "shelfWithBooksView": {
+      "type": "object",
+      "required": ["shelf", "books"],
+      "properties": {
+        "shelf": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfView",
+          "description": "The shelf."
+        },
+        "books": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfView"
+          },
+          "description": "Books on the shelf, in order."
+        }
+      }
     }
   }
 }

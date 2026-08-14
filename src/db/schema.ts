@@ -7,6 +7,7 @@ import {
 	primaryKey,
 	sqliteTable,
 	text,
+	uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
 /**
@@ -311,3 +312,43 @@ export const reviewBlobs = sqliteTable(
 
 export type ReviewBlob = typeof reviewBlobs.$inferSelect;
 export type NewReviewBlob = typeof reviewBlobs.$inferInsert;
+
+// ─── Book Shelving ───────────────────────────────────────────────────────────
+
+export const bookShelves = sqliteTable(
+	'book_shelves',
+	{
+		pk: text('pk').primaryKey(),
+		did: text('did').notNull(),
+		bookPk: text('book_pk')
+			.notNull()
+			.references(() => books.pk, { onDelete: 'cascade' }),
+		shelfPk: text('shelf_pk')
+			.notNull()
+			.references(() => shelves.pk, { onDelete: 'cascade' }),
+		position: integer('position'),
+		notes: text('notes'),
+		emoji: text('emoji'),
+		status: text('status').notNull(),
+		createdAt: integer('created_at').notNull(),
+		updatedAt: integer('updated_at'),
+	},
+	(t) => ({
+		didIdx: index('book_shelves_did_idx').on(t.did),
+		bookPkIdx: index('book_shelves_book_pk_idx').on(t.bookPk),
+		shelfPkIdx: index('book_shelves_shelf_pk_idx').on(t.shelfPk),
+		statusIdx: index('book_shelves_status_idx').on(t.status),
+		uniqueBookShelf: uniqueIndex('book_shelves_unique_idx').on(t.bookPk, t.shelfPk),
+		positionCheck: check(
+			'book_shelves_position_check',
+			sql`${t.position} IS NULL OR ${t.position} >= 1`,
+		),
+		statusCheck: check(
+			'book_shelves_status_check',
+			sql`${t.status} IN ('reading', 'to-read', 'dnf', 'read')`,
+		),
+	}),
+);
+
+export type BookShelf = typeof bookShelves.$inferSelect;
+export type NewBookShelf = typeof bookShelves.$inferInsert;

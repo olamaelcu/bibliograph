@@ -7,6 +7,7 @@ import {
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
+	bookShelves,
 	books,
 	contributorRoles,
 	formats,
@@ -31,6 +32,7 @@ const COLLECTION = {
 	genre: 'net.olamaelcu.livtet.biblio.genre',
 	review: 'net.olamaelcu.livtet.biblio.review',
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
+	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
 } as const;
 
 export function uri(collection: string, pk: string): string {
@@ -83,6 +85,10 @@ function seed(db: ReturnType<typeof drizzle>) {
 		{ pk: 'review-1', bookPk: 'book-dune', did: 'did:plc:reader1', rating: 5, status: 'read', text: 'A masterpiece of worldbuilding', progressFormatPk: 'paperback', progressValue: 412, createdAt: now, updatedAt: null },
 		{ pk: 'review-2', bookPk: 'book-flowers', did: 'did:plc:reader2', rating: 4, status: 'reading', text: 'Heartbreaking so far', progressFormatPk: null, progressValue: null, createdAt: now, updatedAt: null },
 	];
+	const bookShelfRows = [
+		{ pk: 'shelving-1', did: 'did:plc:reader1', bookPk: 'book-dune', shelfPk: 'shelf-favorites', position: 1, notes: 'Rereading this winter', emoji: '🐛', status: 'reading', createdAt: now, updatedAt: null },
+		{ pk: 'shelving-2', did: 'did:plc:reader2', bookPk: 'book-flowers', shelfPk: 'shelf-favorites', position: null, notes: null, emoji: null, status: 'to-read', createdAt: now, updatedAt: null },
+	];
 
 	db.insert(formats).values(formatRows).run();
 	db.insert(genres).values(genreRows).run();
@@ -92,6 +98,7 @@ function seed(db: ReturnType<typeof drizzle>) {
 	db.insert(books).values(bookRows).run();
 	db.insert(shelves).values(shelfRows).run();
 	db.insert(reviews).values(reviewRows).run();
+	db.insert(bookShelves).values(bookShelfRows).run();
 
 	db.insert(bookGenres).values([
 		{ bookPk: 'book-dune', genrePk: 'fiction' },

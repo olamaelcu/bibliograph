@@ -16,9 +16,8 @@
         "properties": {
           "book": {
             "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.book",
-            "strong": true,
-            "description": "The book being reviewed."
+            "ref": "net.olamaelcu.livtet.biblio.defs#expandedBook",
+            "description": "The book being reviewed, with embedded metadata (title, contributors, identifiers)."
           },
           "tags": {
             "type": "array",

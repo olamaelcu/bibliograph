@@ -5,6 +5,7 @@ const app = createApp();
 
 const LEXICON_NSIDS = [
   'book',
+  'bookShelving',
   'bookContributor',
   'contributor',
   'contributorRole',
