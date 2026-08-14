@@ -12,6 +12,7 @@ import { db } from './db/connection.js';
 import { BlobStore, blobStoreConfigFromEnv } from './storage/store.js';
 import { registerBlobProxy } from './storage/blob-proxy.js';
 import { createXrpcRouter } from './xrpc/router.js';
+import { registerUploadBlobRoute } from './pds/router.js';
 import { landingPageHtml } from './pages/landing.js';
 import type { ViewContext } from './xrpc/views.js';
 
@@ -51,6 +52,7 @@ export function createApp(): Hono {
 	app.get('/.well-known/did.json', didDocumentHandler);
 	app.get('/.well-known/atproto-did', serveAtprotoDid);
 	app.use('/lexicons/*', lexiconsStatic);
+	registerUploadBlobRoute(app);
 	app.all('/xrpc/*', (ctx) => xrpcRouter.fetch(ctx.req.raw));
 	app.onError(handleServerError);
 
