@@ -18,24 +18,40 @@ export interface BookhiveImportOptions {
 
 const STATE_NAME = 'bookhive-catalog';
 
-export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promise<{ processed: number }> {
+export interface BookhiveImportResult {
+  processed: number;
+  failed: number;
+}
+
+export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promise<BookhiveImportResult> {
   const lockPath = opts.lockPath ?? 'data/bookhive-catalog.lock';
   if (!acquireLock(lockPath)) {
     logger.warn('bookhive catalog lock held; aborting');
-    process.exit(1);
+    throw new Error('bookhive catalog lock held');
   }
   const reservation = new Reservation(opts.db, STATE_NAME);
-  reservation.acquire();
-
+  let acquired = false;
   try {
-    if (opts.reset) new DumpState(opts.db, STATE_NAME).clear();
+    acquired = reservation.acquire();
+    if (!acquired) {
+      logger.warn('bookhive catalog reservation held by another run; aborting');
+      throw new Error('bookhive catalog reservation held');
+    }
+
     const state = new DumpState(opts.db, STATE_NAME);
-    const cursor = state.get()?.cursor ?? null;
+    if (opts.reset) state.clear();
+    const existing = state.get();
+    if (existing?.complete) {
+      logger.info('bookhive catalog already complete; use --reset to re-import');
+      return { processed: 0, failed: 0 };
+    }
+    const cursor = existing?.cursor ?? null;
 
     const rpc = new Client({ handler: simpleFetchHandler({ service: bookhivePdsUrl() }) });
     const did = bookhiveCatalogDid();
 
     let processed = 0;
+    let failed = 0;
     let nextCursor: string | null = cursor;
     do {
       const res = await rpc.get('com.atproto.repo.listRecords', {
@@ -52,8 +68,13 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
       }
       const body = res.data;
       for (const record of body.records) {
-        const cands = mapCatalogBook(record.value as BookhiveCatalogBook);
-        for (const c of cands) mergeEntity(opts.db, c);
+        try {
+          const cands = mapCatalogBook(record.value as BookhiveCatalogBook);
+          for (const c of cands) mergeEntity(opts.db, c);
+        } catch (err) {
+          failed += 1;
+          logger.warn({ err: (err as Error).message, uri: record.uri }, 'bookhive record failed');
+        }
         processed += 1;
       }
 
@@ -62,10 +83,10 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
     } while (nextCursor);
 
     state.markComplete();
-    logger.info({ processed }, 'bookhive catalog import complete');
-    return { processed };
+    logger.info({ processed, failed }, 'bookhive catalog import complete');
+    return { processed, failed };
   } finally {
-    reservation.release();
+    if (acquired) reservation.release();
     releaseLock(lockPath);
   }
 }
