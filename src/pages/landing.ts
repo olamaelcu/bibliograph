@@ -100,7 +100,7 @@ function endpointCard(endpoint: LexiconEndpoint): string {
 		${desc}
 		<div class="wa-stack wa-gap-xs">${sections.join('\n')}</div>
 		<div slot="footer" class="card-footer">
-			<a href="/l${esc(endpoint.lexiconPath)}" target="_blank" rel="noopener">View lexicon JSON</a>
+			<a href="/${esc(endpoint.lexiconPath)}" target="_blank" rel="noopener">View lexicon JSON</a>
 		</div>
 	</wa-card>`;
 }
@@ -130,9 +130,9 @@ function buildPage(): string {
 			.hero h1 { margin: 0 0 0.25rem; }
 			.hero .subtitle { margin: 0 0 0.5rem; color: var(--wa-color-neutral-500); }
 			.hero .stats { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
-			.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; padding-bottom: 2rem; }
+			.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(35vw, 1fr)); gap: 1rem; padding-bottom: 2rem; }
 			.card-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-			.endpoint-id { font-weight: 600; }
+			.endpoint-id { font-weight: 600; flex: 1 1; }
 			.endpoint-desc { margin: 0 0 0.75rem; }
 			.muted { color: var(--wa-color-neutral-500); }
 			.row-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
