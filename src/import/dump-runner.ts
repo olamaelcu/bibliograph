@@ -63,9 +63,13 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
         batchSize: opts.batchSize ?? 500,
         upsert: (item) => {
           const cands = opts.parse(item.fields);
-          for (const c of cands) mergeEntity(opts.db, c);
+          let inserted = false;
+          for (const c of cands) {
+            const res = mergeEntity(opts.db, c);
+            if (!res.existed) inserted = true;
+          }
           opts.hydrate?.(item.fields);
-          return { action: 'inserted' };
+          return { action: inserted ? 'inserted' : 'skipped' };
         },
       });
       return s;

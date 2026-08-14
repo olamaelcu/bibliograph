@@ -23,5 +23,10 @@ describe('hydrateBookContributorsFromEdition', () => {
     const rows = db.select().from(bookContributors).where(eq(bookContributors.bookPk, 'books/ol123m')).all();
     expect(rows).toHaveLength(1);
     expect(rows[0].contributorPk).toBe('authors/ol123a');
+
+    const relinked = hydrateBookContributorsFromEdition(db, '/books/OL123M', [{ key: '/authors/OL123A' }]);
+    expect(relinked).toBe(1);
+    const after = db.select().from(bookContributors).where(eq(bookContributors.bookPk, 'books/ol123m')).all();
+    expect(after).toHaveLength(1);
   });
 });

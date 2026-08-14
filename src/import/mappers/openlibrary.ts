@@ -37,6 +37,13 @@ function text(v: string | { value?: string } | undefined): string | null {
   return typeof v === 'string' ? v : (v.value ?? null);
 }
 
+function unixSecondsOrNull(date: string | undefined): string | null {
+  if (!date) return null;
+  const ms = new Date(date).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return String(Math.floor(ms / 1000));
+}
+
 function olIsbn(ed: OlEdition): Array<{ resource: string; url: string }> {
   const out: Array<{ resource: string; url: string }> = [];
   for (const isbn of [...(ed.isbn_13 ?? []), ...(ed.isbn_10 ?? [])]) {
@@ -64,7 +71,7 @@ export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
       fields: {
         title: ed.title ?? null,
         description: text(ed.description),
-        originalPublishDate: ed.publish_date ? String(new Date(ed.publish_date).getTime() / 1000) : null,
+        originalPublishDate: unixSecondsOrNull(ed.publish_date),
       },
     });
   }
@@ -93,7 +100,7 @@ export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
     fields: {
       title: ed.title ?? null,
       description: text(ed.description),
-      publishDate: ed.publish_date ? String(new Date(ed.publish_date).getTime() / 1000) : null,
+      publishDate: unixSecondsOrNull(ed.publish_date),
       workPk: workKey ? sourceKeySlug(workKey) : null,
     },
   });
@@ -111,7 +118,7 @@ export function mapWorkToCandidate(w: OlWork): MergeCandidate {
     fields: {
       title: w.title ?? null,
       description: text(w.description),
-      originalPublishDate: w.first_publish_date ? String(new Date(w.first_publish_date).getTime() / 1000) : null,
+      originalPublishDate: unixSecondsOrNull(w.first_publish_date),
     },
   };
 }

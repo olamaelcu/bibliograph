@@ -30,4 +30,17 @@ describe('OL mappers', () => {
     expect(a.pk).toBe('authors/ol123a');
     expect(a.fields.bio).toBe('Author');
   });
+
+  it('nulls unparseable edition publish dates instead of writing NaN', () => {
+    const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', publish_date: 'Not specified', works: [{ key: '/works/OL1W' }] });
+    const work = cands.find((c) => c.entityType === 'work');
+    const book = cands.find((c) => c.entityType === 'book');
+    expect(work?.fields.originalPublishDate).toBeNull();
+    expect(book?.fields.publishDate).toBeNull();
+  });
+
+  it('nulls unparseable work publish dates instead of writing NaN', () => {
+    const w = mapWorkToCandidate({ key: '/works/OL1W', title: 'X', first_publish_date: '19--' });
+    expect(w.fields.originalPublishDate).toBeNull();
+  });
 });
