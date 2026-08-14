@@ -1,6 +1,7 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { importIssues } from '../db/schema.js';
+import { importIssues, type ReleaseStatus } from '../db/schema.js';
+import { resolveIssuesForField } from '../import/issues.js';
 import { entityTable, entityViewName, type ReviewEntityType } from './views.js';
 import { coerceValue, editableFields } from './fields.js';
 
@@ -14,7 +15,7 @@ export interface ReviewListRow {
 export function listForReview(
 	db: BetterSQLite3Database,
 	entity: ReviewEntityType,
-	opts: { status?: string } = {},
+	opts: { status?: ReleaseStatus } = {},
 ): ReviewListRow[] {
 	const view = entityTable[entity];
 	const statusCol = view.releaseStatus as never;
@@ -35,18 +36,36 @@ export function listForReview(
 		.orderBy(sql`${nameCol} asc`)
 		.all() as Array<Record<string, unknown>>;
 
+	const pks = rows.map((r) => String(r.pk));
+	const counts = new Map<string, number>();
+	if (pks.length > 0) {
+		const counted = db
+			.select({ entityPk: importIssues.entityPk, c: sql<number>`count(*)` })
+			.from(importIssues)
+			.where(
+				and(
+					eq(importIssues.entityType, entity),
+					eq(importIssues.status, 'open'),
+					inArray(importIssues.entityPk, pks),
+				),
+			)
+			.groupBy(importIssues.entityPk)
+			.all();
+		for (const row of counted) counts.set(row.entityPk, Number(row.c));
+	}
+
 	return rows.map((r) => ({
 		pk: String(r.pk),
 		status: String(r.releaseStatus ?? 'staged'),
 		name: String(r[nameKey] ?? r.pk),
-		openIssues: 0,
+		openIssues: counts.get(String(r.pk)) ?? 0,
 	}));
 }
 
 /** Rows with ≥1 open issue, via the per-entity review view. */
 export function listWithIssues(db: BetterSQLite3Database, entity: ReviewEntityType): ReviewListRow[] {
 	const viewName = entityViewName[entity];
-	const rows = db.all(sql`SELECT * FROM ${sql.raw(viewName)}`) as Array<Record<string, unknown>>;
+	const rows = db.all(sql`SELECT * FROM ${sql.raw(viewName)} ORDER BY pk`) as Array<Record<string, unknown>>;
 	return rows.map((r) => ({
 		pk: String(r.pk),
 		status: String(r.release_status ?? r.releaseStatus ?? 'staged'),
@@ -92,26 +111,14 @@ export function editField(
 	}
 	const value = coerceValue(entity, field, rawValue);
 	const view = entityTable[entity];
-	db.update(view)
+	const res = db
+		.update(view)
 		.set({ [field]: value } as never)
 		.where(eq(view.pk as never, pk as never))
 		.run();
+	if (res.changes === 0) throw new Error(`no ${entity} row with pk '${pk}'`);
 	resolveIssuesForField(db, entity, pk, field);
 	return { field, value };
-}
-
-function resolveIssuesForField(db: BetterSQLite3Database, entity: ReviewEntityType, pk: string, field: string): void {
-	db.update(importIssues)
-		.set({ status: 'resolved', resolvedAt: Math.floor(Date.now() / 1000) })
-		.where(
-			and(
-				eq(importIssues.entityType, entity),
-				eq(importIssues.entityPk, pk),
-				eq(importIssues.field, field),
-				eq(importIssues.status, 'open'),
-			),
-		)
-		.run();
 }
 
 export function openIssueCount(db: BetterSQLite3Database, entity: ReviewEntityType, pk: string): number {
@@ -168,25 +175,31 @@ export function setStatus(
 ): void {
 	const view = entityTable[entity];
 	const now = Math.floor(Date.now() / 1000);
-	db.update(view)
+	const res = db
+		.update(view)
 		.set({
 			releaseStatus: status,
 			releasedAt: status === 'released' ? now : null,
 		} as never)
 		.where(eq(view.pk as never, pk as never))
 		.run();
+	if (res.changes === 0) throw new Error(`no ${entity} row with pk '${pk}'`);
 }
 
 export function resolveIssue(db: BetterSQLite3Database, issuePk: number): void {
-	db.update(importIssues)
+	const res = db
+		.update(importIssues)
 		.set({ status: 'resolved', resolvedAt: Math.floor(Date.now() / 1000) })
 		.where(eq(importIssues.pk, issuePk))
 		.run();
+	if (res.changes === 0) throw new Error(`no issue with pk '${issuePk}'`);
 }
 
 export function dismissIssue(db: BetterSQLite3Database, issuePk: number): void {
-	db.update(importIssues)
+	const res = db
+		.update(importIssues)
 		.set({ status: 'dismissed', resolvedAt: Math.floor(Date.now() / 1000) })
 		.where(eq(importIssues.pk, issuePk))
 		.run();
+	if (res.changes === 0) throw new Error(`no issue with pk '${issuePk}'`);
 }
