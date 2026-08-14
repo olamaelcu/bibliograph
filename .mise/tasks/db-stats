@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Show stats about the catalog database (counts, release status, backfill state)"
+exec ./node_modules/.bin/tsx src/db/stats.ts
