@@ -1,0 +1,75 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.putReview",
+  "description": "Create or update the caller's review of a book, writing the record to their own PDS via this AppView. Exactly one review per book per account.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["book", "rating", "status"],
+          "properties": {
+            "book": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the catalog book being reviewed."
+            },
+            "rating": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#rating",
+              "description": "Rating from 1 to 5."
+            },
+            "status": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#readingStatus",
+              "description": "Reading status for the book at the time of this review."
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxGraphemes": 64
+              },
+              "description": "Tags associated with this review."
+            },
+            "text": {
+              "type": "string",
+              "maxGraphemes": 65536,
+              "description": "The review prose."
+            },
+            "progress": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#progress",
+              "description": "Optional progress indicator."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "cid"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri"
+            },
+            "cid": {
+              "type": "string",
+              "format": "cid"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "NotFound",
+          "description": "The book is not in the released catalog."
+        }
+      ]
+    }
+  }
+}

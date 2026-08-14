@@ -3,6 +3,7 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { XRPCRouter, json, InvalidRequestError, XRPCError } from '@atcute/xrpc-server';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
+import { registerBiblioWrites } from './writes.js';
 import { authenticate, authenticateOptional, type PdsSession } from '../pds/auth.js';
 import { createPdsClient, type PdsClient } from '../pds/client.js';
 import { decodeCursor, encodeCursor, type CursorValue } from './cursor.js';
@@ -212,6 +213,7 @@ function paginate<T>(
 export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	const router = new XRPCRouter();
 	registerPdsHandlers(router, db, ctx);
+	registerBiblioWrites(router, db, ctx);
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
 		async handler({ params, request }) {

@@ -1,0 +1,37 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.deleteReview",
+  "description": "Delete the caller's review of a book from their own PDS via this AppView.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["book"],
+          "properties": {
+            "book": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the catalog book whose review should be deleted."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      "errors": [
+        {
+          "name": "NotFound",
+          "description": "The book is not in the released catalog."
+        }
+      ]
+    }
+  }
+}

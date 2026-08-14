@@ -6,10 +6,30 @@ describe('lexicon catalog', () => {
   it('extracts every query and procedure lexicon', () => {
     expect(lexiconEndpoints.length).toBeGreaterThanOrEqual(12);
     expect(queryCount).toBeGreaterThan(0);
-    expect(procedureCount).toBe(0);
     for (const endpoint of lexiconEndpoints) {
       expect(endpoint.type === 'query' || endpoint.type === 'procedure').toBe(true);
       expect(endpoint.id).toMatch(/^net\.olamaelcu\.livtet\.biblio\./);
+    }
+  });
+
+  it('catalogs the biblio write procedures', () => {
+    const writeIds = lexiconEndpoints
+      .filter((e) => /^(put|delete)/.test(e.name))
+      .map((e) => e.id)
+      .sort();
+    expect(writeIds).toEqual([
+      'net.olamaelcu.livtet.biblio.deleteActor',
+      'net.olamaelcu.livtet.biblio.deleteBookShelving',
+      'net.olamaelcu.livtet.biblio.deleteReview',
+      'net.olamaelcu.livtet.biblio.deleteShelf',
+      'net.olamaelcu.livtet.biblio.putActor',
+      'net.olamaelcu.livtet.biblio.putBookShelving',
+      'net.olamaelcu.livtet.biblio.putReview',
+      'net.olamaelcu.livtet.biblio.putShelf',
+    ]);
+    expect(procedureCount).toBeGreaterThanOrEqual(8);
+    for (const endpoint of lexiconEndpoints) {
+      expect(endpoint.lexiconPath).toBeDefined();
     }
   });
 

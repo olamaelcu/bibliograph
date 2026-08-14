@@ -126,7 +126,8 @@ function buildPage(): string {
 			/* Avoid a flash of unstyled content for elements that weren't server-rendered. */
 			:not([did-ssr]):not(:defined) { visibility: hidden; }
 			wa-page { --wa-page-width: 1100px; }
-			.hero { padding: 2rem 0 1rem; flex-direction: column; }
+			.hero { padding: 2rem; flex-direction: column; }
+      .hero p { max-width: 50rem; margin: 0 auto; }
 			.hero h1 { margin: 0 0 0.25rem; }
 			.hero .subtitle { margin: 0 0 0.5rem; color: var(--wa-color-neutral-500); }
 			.hero .stats { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
@@ -149,7 +150,7 @@ function buildPage(): string {
 			<header class="hero" slot="header">
 				<h1><wa-icon name="circle-star"></wa-icon> Bibliograph</h1>
 				<p class="subtitle"><code>${esc(SERVICE_NSID)}</code> &mdash; a literary-centric <a href="https://atproto.com/guides/glossary#app-view">AT Protocol AppView</a></p>
-				<p>Every query and procedure exposed by this service following standards (<code>/xrpc</code>), documented from the lexicon files.</p>
+				<p>Every query and procedure exposed by this service following standards (<code>/xrpc</code>), documented from the lexicon files. User-owned records (reviews, shelves, shelvings, profiles) are written through the <code>put*</code>/<code>delete*</code> procedures, which proxy each write to the reader&rsquo;s own PDS.</p>
 				<div class="stats">${stats}</div>
 			</header>
 			<main class="grid">${cards}</main>

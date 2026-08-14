@@ -7,6 +7,8 @@ import type {
 	BookShelfView,
 	BookView,
 	ContributorView,
+	ExpandedBook,
+	ExpandedContributor,
 	FormatView,
 	GenreView,
 	Identifier,
@@ -287,6 +289,74 @@ export async function toBookView(
 		createdAt: toIso(b.createdAt),
 		updatedAt: toIso(b.updatedAt),
 	};
+}
+
+/**
+ * Build the `expandedBook` snapshot embedded in user records (review,
+ * bookShelving) from a released catalog book. The snapshot is taken at write
+ * time so records are self-contained on the user's PDS.
+ */
+export async function toExpandedBook(
+	db: Db,
+	ctx: ViewContext,
+	row: {
+		pk: string;
+		title: string;
+		coverUrl: string | null;
+		workPk: string | null;
+	},
+): Promise<ExpandedBook> {
+	const [contributorRows, identifierRows] = await Promise.all([
+		(async () => {
+			if (!row.workPk) return [];
+			return db
+				.select({ contributor: contributors, role: contributorRoles })
+				.from(bookContributors)
+				.innerJoin(contributors, eq(bookContributors.contributorPk, contributors.pk))
+				.innerJoin(contributorRoles, eq(bookContributors.rolePk, contributorRoles.pk))
+				.where(and(eq(bookContributors.bookPk, row.pk), releasedFilter(contributors as never)))
+				.all();
+		})(),
+		db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, row.pk)).all(),
+	]);
+
+	const contributorIds = contributorRows.length
+		? db
+				.select()
+				.from(contributorIdentifiers)
+				.where(inArray(contributorIdentifiers.contributorPk, contributorRows.map((c) => c.contributor.pk)))
+				.all()
+		: [];
+	const idByContributor = new Map<string, IdentifierRow[]>();
+	for (const id of contributorIds) {
+		const list = idByContributor.get(id.contributorPk) ?? [];
+		list.push(id);
+		idByContributor.set(id.contributorPk, list);
+	}
+
+	const value: ExpandedBook = {
+		ref: atUri(ctx, COLLECTION.book, row.pk) as ExpandedBook['ref'],
+		title: row.title,
+	};
+	if (row.coverUrl) value.coverImageUrl = toUri(row.coverUrl);
+	if (contributorRows.length) {
+		value.contributors = contributorRows.map(({ contributor, role }) => {
+			const entry: ExpandedContributor = {
+				name: contributor.name,
+				role: atUri(ctx, COLLECTION.contributorRole, role.pk) as ExpandedContributor['role'],
+			};
+			const ids = idByContributor.get(contributor.pk) ?? [];
+			if (ids.length) entry.identifiers = ids.map((i) => ({ resource: i.resource, url: toUri(i.url) }));
+			if (contributor.sortName) entry.sortName = contributor.sortName;
+			if (contributor.bio) entry.bio = contributor.bio;
+			if (contributor.imageUrl) entry.imageUrl = toUri(contributor.imageUrl);
+			return entry;
+		});
+	}
+	if (identifierRows.length) {
+		value.identifiers = identifierRows.map((i) => ({ resource: i.resource, url: toUri(i.url) }));
+	}
+	return value;
 }
 
 // ─── User PDS records → views ────────────────────────────────────────────────
