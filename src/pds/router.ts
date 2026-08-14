@@ -6,7 +6,19 @@ import {
 	InvalidRequestError,
 	XRPCError,
 } from '@atcute/xrpc-server';
-import { ComAtprotoIdentityResolveHandle, ComAtprotoRepoDescribeRepo, ComAtprotoRepoGetRecord, ComAtprotoRepoListRecords } from '@atcute/atproto';
+import {
+	ComAtprotoIdentityResolveHandle,
+	ComAtprotoRepoApplyWrites,
+	ComAtprotoRepoCreateRecord,
+	ComAtprotoRepoDeleteRecord,
+	ComAtprotoRepoDescribeRepo,
+	ComAtprotoRepoGetRecord,
+	ComAtprotoRepoListRecords,
+	ComAtprotoRepoPutRecord,
+} from '@atcute/atproto';
+import type { Hono } from 'hono';
+import { authenticate, type PdsSession } from './auth.js';
+import { createPdsClient, type PdsWrite } from './client.js';
 import { cidForRecord } from './cid.js';
 import {
 	COLLECTIONS,
@@ -60,6 +72,36 @@ function errorInvalidRequest(message: string): never {
 
 function errorRecordNotFound(message: string): never {
 	throw new XRPCError({ status: 400, error: 'RecordNotFound', message });
+}
+
+/**
+ * Collections users may write through this AppView. Reviews, shelves, book
+ * shelvings, and actor profiles are records in the user's own PDS; everything
+ * else (the catalog) is read-only service data and must never be written by
+ * clients.
+ */
+const USER_COLLECTIONS = [
+	'net.olamaelcu.livtet.biblio.review',
+	'net.olamaelcu.livtet.biblio.shelf',
+	'net.olamaelcu.livtet.biblio.bookShelving',
+	'net.olamaelcu.livtet.biblio.actor',
+] as const;
+
+type UserCollection = (typeof USER_COLLECTIONS)[number];
+
+function isUserCollection(value: string): value is UserCollection {
+	return (USER_COLLECTIONS as readonly string[]).includes(value);
+}
+
+function requireUserCollection(collection: string): void {
+	if (!isUserCollection(collection)) {
+		errorInvalidRequest(`collection not writable through this service: ${collection}`);
+	}
+}
+
+/** Build a per-request PDS client bound to the authenticated user's repo. */
+function clientForSession(session: PdsSession) {
+	return createPdsClient({ pdsUrl: session.pdsUrl, token: session.token, repo: session.did });
 }
 
 export function registerPdsHandlers(router: XRPCRouter, db: Db, ctx: ViewContext): void {
@@ -177,6 +219,62 @@ export function registerPdsHandlers(router: XRPCRouter, db: Db, ctx: ViewContext
 			return json({ did: ctx.serviceDid as ComAtprotoIdentityResolveHandle.$output['did'] });
 		},
 	});
+
+	// ─── createRecord (proxy) ─────────────────────────────────────────────
+	router.addProcedure(ComAtprotoRepoCreateRecord.mainSchema, {
+		async handler({ request, input }) {
+			const session = await authenticate(request);
+			requireUserCollection(input.collection);
+			const ref = await clientForSession(session).createRecord(input.collection, input.record, {
+				rkey: input.rkey,
+			});
+			return json({
+				uri: ref.uri as ComAtprotoRepoCreateRecord.$output['uri'],
+				cid: ref.cid as ComAtprotoRepoCreateRecord.$output['cid'],
+			});
+		},
+	});
+
+	// ─── putRecord (proxy) ────────────────────────────────────────────────
+	router.addProcedure(ComAtprotoRepoPutRecord.mainSchema, {
+		async handler({ request, input }) {
+			const session = await authenticate(request);
+			requireUserCollection(input.collection);
+			const ref = await clientForSession(session).putRecord(input.collection, input.rkey, input.record, {
+				validate: input.validate,
+				swapRecord: input.swapRecord ?? undefined,
+			});
+			return json({
+				uri: ref.uri as ComAtprotoRepoPutRecord.$output['uri'],
+				cid: ref.cid as ComAtprotoRepoPutRecord.$output['cid'],
+			});
+		},
+	});
+
+	// ─── deleteRecord (proxy) ─────────────────────────────────────────────
+	router.addProcedure(ComAtprotoRepoDeleteRecord.mainSchema, {
+		async handler({ request, input }) {
+			const session = await authenticate(request);
+			requireUserCollection(input.collection);
+			await clientForSession(session).deleteRecord(input.collection, input.rkey, {
+				swapRecord: input.swapRecord,
+			});
+			return json({});
+		},
+	});
+
+	// ─── applyWrites (proxy) ──────────────────────────────────────────────
+	router.addProcedure(ComAtprotoRepoApplyWrites.mainSchema, {
+		async handler({ request, input }) {
+			const session = await authenticate(request);
+			const writes = input.writes.map((write) => {
+				requireUserCollection(write.collection);
+				return toClientWrite(write);
+			});
+			await clientForSession(session).applyWrites(writes);
+			return json({});
+		},
+	});
 }
 
 // ─── page loading ────────────────────────────────────────────────────────────
@@ -231,4 +329,45 @@ function decodeCursor(cursor: string): string {
 	} catch {
 		errorInvalidRequest('invalid cursor');
 	}
+}
+
+/** Map an atproto lexicon `applyWrites#*` write onto the client's write shape. */
+function toClientWrite(
+	write: ComAtprotoRepoApplyWrites.$input['writes'][number],
+): PdsWrite {
+	switch (write.$type) {
+		case 'com.atproto.repo.applyWrites#create':
+			return {
+				action: 'create',
+				collection: write.collection,
+				...(write.rkey !== undefined ? { rkey: write.rkey } : {}),
+				value: write.value,
+			};
+		case 'com.atproto.repo.applyWrites#update':
+			return { action: 'update', collection: write.collection, rkey: write.rkey, value: write.value };
+		case 'com.atproto.repo.applyWrites#delete':
+			return { action: 'delete', collection: write.collection, rkey: write.rkey };
+		default:
+			return errorInvalidRequest('unsupported write action');
+	}
+}
+
+/**
+ * Mount `com.atproto.repo.uploadBlob` as a raw-body route. Uploads can't go
+ * through the JSON XRPC router (the request body is an arbitrary media type,
+ * not JSON), so the AppView serves the endpoint directly and proxies the bytes
+ * to the caller's PDS with their token.
+ *
+ * NOTE: the wiring task must call this BEFORE mounting the `/xrpc/*` catch-all
+ * so the specific POST route wins over the generic pass-through.
+ */
+export function registerUploadBlobRoute(app: Hono): void {
+	app.post('/xrpc/com.atproto.repo.uploadBlob', async (c) => {
+		const session = await authenticate(c.req.raw);
+		const body = new Uint8Array(await c.req.arrayBuffer());
+		const contentType = c.req.header('content-type') ?? undefined;
+		const client = createPdsClient({ pdsUrl: session.pdsUrl, token: session.token, repo: session.did });
+		const result = await client.uploadBlob(body, contentType);
+		return c.json(result);
+	});
 }

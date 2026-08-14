@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Hono } from 'hono';
+import { getServiceDid } from '../did.js';
+import { makeDidDoc, makeJwt } from '../test-utils/fake-auth.js';
+import { createFakePds, serveFakePds } from '../test-utils/fake-pds.js';
 import { createXrpcRouter } from '../xrpc/router.js';
 import { createTestDb, SERVICE_DID } from '../test-utils/db.js';
 import type { ViewContext } from '../xrpc/views.js';
+import { registerUploadBlobRoute } from './router.js';
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 
@@ -213,5 +218,339 @@ describe('com.atproto.identity.resolveHandle', () => {
 		const params = new URLSearchParams({ handle: 'someone.example.net' });
 		const res = await fetch(`/xrpc/com.atproto.identity.resolveHandle?${params}`);
 		expect(res.status).toBe(400);
+	});
+});
+
+// ─── write-proxy helpers ─────────────────────────────────────────────────────
+
+const USER_DID = 'did:web:alice.example.com';
+const USER_COLLS = {
+	review: 'net.olamaelcu.livtet.biblio.review',
+	shelf: 'net.olamaelcu.livtet.biblio.shelf',
+	bookShelving: 'net.olamaelcu.livtet.biblio.bookShelving',
+	actor: 'net.olamaelcu.livtet.biblio.actor',
+} as const;
+
+interface OutboundCall {
+	pathname: string;
+	body?: unknown;
+}
+
+interface WriteHarness {
+	fetch: (path: string, init?: RequestInit) => Promise<Response>;
+	fake: ReturnType<typeof createFakePds>;
+	token: string;
+	calls: OutboundCall[];
+}
+
+const openServers: Array<() => void> = [];
+
+afterEach(() => {
+	while (openServers.length) openServers.pop()!();
+	vi.unstubAllGlobals();
+});
+
+/**
+ * fetch stub that answers DID-document lookups from the fixture, lets every
+ * other request hit the real network (the fake PDS), and records the JSON
+ * bodies of outbound xrpc POSTs so tests can assert on the forwarded request.
+ */
+function routingFetch(didDoc: Record<string, unknown>, calls: OutboundCall[]): typeof fetch {
+	const realFetch = globalThis.fetch;
+	return (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = new URL(String(input));
+		if (url.pathname.endsWith('/.well-known/did.json')) {
+			return new Response(JSON.stringify(didDoc), { status: 200 });
+		}
+		if (url.pathname.startsWith('/xrpc/') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
+			const req = new Request(input, init);
+			calls.push({ pathname: url.pathname, body: await req.json().catch(() => undefined) });
+		}
+		return realFetch(input, init);
+	}) as typeof fetch;
+}
+
+async function writeApp(): Promise<WriteHarness> {
+	const { db, seed } = createTestDb();
+	seed();
+	const fake = createFakePds({ repo: USER_DID });
+	const server = await serveFakePds(fake);
+	openServers.push(server.close);
+	const didDoc = makeDidDoc({ serviceEndpoint: server.baseUrl, alsoKnownAs: ['at://alice.example.com'] });
+	const calls: OutboundCall[] = [];
+	vi.stubGlobal('fetch', routingFetch(didDoc, calls));
+
+	const router = createXrpcRouter(db, { serviceDid: SERVICE_DID });
+	const app = new Hono();
+	registerUploadBlobRoute(app);
+	app.all('/xrpc/*', (c) => router.fetch(c.req.raw));
+	app.onError((err, c) => {
+		if (typeof err === 'object' && err !== null && 'status' in err) {
+			const e = err as { status: number; error: string; message: string };
+			return c.json(
+				{ error: e.error || 'UnexpectedError', message: e.message || 'An error occurred' },
+				e.status as never,
+			);
+		}
+		return c.json({ error: 'InternalServerError', message: 'An unexpected error occurred' }, 500);
+	});
+
+	const token = makeJwt({ sub: USER_DID, aud: getServiceDid() });
+	return {
+		fetch: (path, init) => app.fetch(new Request(`https://books.example.com${path}`, init)),
+		fake,
+		token,
+		calls,
+	};
+}
+
+function post(token: string, body: unknown, contentType = 'application/json'): RequestInit {
+	const headers: Record<string, string> = { 'content-type': contentType };
+	if (token) headers.authorization = `Bearer ${token}`;
+	return { method: 'POST', headers, body: JSON.stringify(body) };
+}
+
+describe('com.atproto.repo.createRecord (proxy)', () => {
+	it('creates a record in the caller PDS and returns {uri, cid}', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.createRecord',
+			post(w.token, {
+				repo: USER_DID,
+				collection: USER_COLLS.review,
+				rkey: 'rev-1',
+				record: { $type: USER_COLLS.review, text: 'great book' },
+			}),
+		);
+		expect(res.status).toBe(200);
+		const out = await res.json();
+		expect(out.uri).toBe(`at://${USER_DID}/${USER_COLLS.review}/rev-1`);
+		expect(out.cid).toMatch(/^baf/);
+		expect(w.fake.records.get(`${USER_COLLS.review}/rev-1`)?.value).toEqual({
+			$type: USER_COLLS.review,
+			text: 'great book',
+		});
+	});
+
+	it('forwards the caller bearer token to the user PDS', async () => {
+		const w = await writeApp();
+		await w.fetch(
+			'/xrpc/com.atproto.repo.createRecord',
+			post(w.token, {
+				repo: USER_DID,
+				collection: USER_COLLS.review,
+				record: { $type: USER_COLLS.review },
+			}),
+		);
+		expect(w.fake.requests.length).toBeGreaterThan(0);
+		for (const req of w.fake.requests) {
+			expect(req.headers['authorization']).toBe(`Bearer ${w.token}`);
+		}
+	});
+
+	it('forces repo to the caller DID, ignoring a client-supplied repo', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.createRecord',
+			post(w.token, {
+				repo: 'did:web:evil.example.net',
+				collection: USER_COLLS.review,
+				rkey: 'rev-2',
+				record: { $type: USER_COLLS.review },
+			}),
+		);
+		expect(res.status).toBe(200);
+		const out = await res.json();
+		expect(out.uri).toBe(`at://${USER_DID}/${USER_COLLS.review}/rev-2`);
+		const createCall = w.calls.find((c) => c.pathname.endsWith('com.atproto.repo.createRecord'));
+		expect(createCall).toBeDefined();
+		expect((createCall!.body as { repo?: string }).repo).toBe(USER_DID);
+	});
+
+	it('rejects a write with no bearer token', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.createRecord',
+			post('', { repo: USER_DID, collection: USER_COLLS.review, record: { $type: USER_COLLS.review } }),
+		);
+		expect(res.status).toBe(401);
+		const out = await res.json();
+		expect(out.error).toBe('AuthRequired');
+		expect(w.fake.requests).toHaveLength(0);
+	});
+
+	it('rejects a write with a malformed token', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.createRecord',
+			post('not-a-jwt', { repo: USER_DID, collection: USER_COLLS.review, record: { $type: USER_COLLS.review } }),
+		);
+		expect(res.status).toBe(401);
+	});
+
+	it('rejects writes to a catalog collection', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.createRecord',
+			post(w.token, { repo: USER_DID, collection: COLL.book, record: { $type: COLL.book, title: 'hax' } }),
+		);
+		expect(res.status).toBe(400);
+		const out = await res.json();
+		expect(out.error).toBe('InvalidRequest');
+		expect(w.fake.requests).toHaveLength(0);
+	});
+
+	it('rejects writes to an unknown collection', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.createRecord',
+			post(w.token, {
+				repo: USER_DID,
+				collection: 'net.olamaelcu.livtet.biblio.nope',
+				record: { $type: 'net.olamaelcu.livtet.biblio.nope' },
+			}),
+		);
+		expect(res.status).toBe(400);
+		const out = await res.json();
+		expect(out.error).toBe('InvalidRequest');
+		expect(w.fake.requests).toHaveLength(0);
+	});
+});
+
+describe('com.atproto.repo.putRecord (proxy)', () => {
+	it('upserts a record in the caller PDS', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.putRecord',
+			post(w.token, {
+				repo: USER_DID,
+				collection: USER_COLLS.shelf,
+				rkey: 'shelf-1',
+				record: { $type: USER_COLLS.shelf, name: 'Favorites' },
+			}),
+		);
+		expect(res.status).toBe(200);
+		const out = await res.json();
+		expect(out.uri).toBe(`at://${USER_DID}/${USER_COLLS.shelf}/shelf-1`);
+		expect(out.cid).toMatch(/^baf/);
+		expect(w.fake.records.get(`${USER_COLLS.shelf}/shelf-1`)?.value).toEqual({
+			$type: USER_COLLS.shelf,
+			name: 'Favorites',
+		});
+
+		const res2 = await w.fetch(
+			'/xrpc/com.atproto.repo.putRecord',
+			post(w.token, {
+				repo: USER_DID,
+				collection: USER_COLLS.shelf,
+				rkey: 'shelf-1',
+				record: { $type: USER_COLLS.shelf, name: 'Favorites v2' },
+			}),
+		);
+		expect(res2.status).toBe(200);
+		expect(w.fake.records.get(`${USER_COLLS.shelf}/shelf-1`)?.value).toEqual({
+			$type: USER_COLLS.shelf,
+			name: 'Favorites v2',
+		});
+	});
+});
+
+describe('com.atproto.repo.deleteRecord (proxy)', () => {
+	it('deletes a record from the caller PDS', async () => {
+		const w = await writeApp();
+		w.fake.records.set(`${USER_COLLS.review}/rev-del`, {
+			value: { $type: USER_COLLS.review, text: 'delete me' },
+			cid: 'bafyreideltest',
+		});
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.deleteRecord',
+			post(w.token, { repo: USER_DID, collection: USER_COLLS.review, rkey: 'rev-del' }),
+		);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({});
+		expect(w.fake.records.has(`${USER_COLLS.review}/rev-del`)).toBe(false);
+	});
+});
+
+describe('com.atproto.repo.applyWrites (proxy)', () => {
+	it('applies a mixed batch of writes to the caller PDS', async () => {
+		const w = await writeApp();
+		w.fake.records.set(`${USER_COLLS.review}/del`, {
+			value: { $type: USER_COLLS.review, text: 'x' },
+			cid: 'bafyreidel',
+		});
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.applyWrites',
+			post(w.token, {
+				repo: USER_DID,
+				writes: [
+					{
+						$type: 'com.atproto.repo.applyWrites#create',
+						collection: USER_COLLS.review,
+						rkey: 'a',
+						value: { $type: USER_COLLS.review, text: 'A' },
+					},
+					{
+						$type: 'com.atproto.repo.applyWrites#update',
+						collection: USER_COLLS.review,
+						rkey: 'b',
+						value: { $type: USER_COLLS.review, text: 'B' },
+					},
+					{ $type: 'com.atproto.repo.applyWrites#delete', collection: USER_COLLS.review, rkey: 'del' },
+				],
+			}),
+		);
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({});
+		expect(w.fake.records.get(`${USER_COLLS.review}/a`)?.value).toEqual({ $type: USER_COLLS.review, text: 'A' });
+		expect(w.fake.records.get(`${USER_COLLS.review}/b`)?.value).toEqual({ $type: USER_COLLS.review, text: 'B' });
+		expect(w.fake.records.has(`${USER_COLLS.review}/del`)).toBe(false);
+	});
+
+	it('rejects a batch that writes to a catalog collection', async () => {
+		const w = await writeApp();
+		const res = await w.fetch(
+			'/xrpc/com.atproto.repo.applyWrites',
+			post(w.token, {
+				repo: USER_DID,
+				writes: [
+					{ $type: 'com.atproto.repo.applyWrites#create', collection: USER_COLLS.review, rkey: 'ok', value: { $type: USER_COLLS.review } },
+					{ $type: 'com.atproto.repo.applyWrites#create', collection: COLL.book, rkey: 'evil', value: { $type: COLL.book } },
+				],
+			}),
+		);
+		expect(res.status).toBe(400);
+		const out = await res.json();
+		expect(out.error).toBe('InvalidRequest');
+		expect(w.fake.requests).toHaveLength(0);
+	});
+});
+
+describe('com.atproto.repo.uploadBlob (proxy, Hono route)', () => {
+	it('forwards a raw blob body and returns {blob}', async () => {
+		const w = await writeApp();
+		const bytes = new TextEncoder().encode('fake-cover-bytes');
+		const res = await w.fetch('/xrpc/com.atproto.repo.uploadBlob', {
+			method: 'POST',
+			headers: { authorization: `Bearer ${w.token}`, 'content-type': 'image/png' },
+			body: bytes,
+		});
+		expect(res.status).toBe(200);
+		const out = await res.json();
+		expect(out.blob.$type).toBe('blob');
+		expect(out.blob.ref.$link).toMatch(/^baf/);
+		expect(out.blob.mimeType).toBe('image/png');
+		expect(out.blob.size).toBe(bytes.byteLength);
+	});
+
+	it('rejects an upload without a bearer token', async () => {
+		const w = await writeApp();
+		const res = await w.fetch('/xrpc/com.atproto.repo.uploadBlob', {
+			method: 'POST',
+			headers: { 'content-type': 'image/png' },
+			body: new TextEncoder().encode('nope'),
+		});
+		expect(res.status).toBe(401);
+		expect(w.fake.requests).toHaveLength(0);
 	});
 });
