@@ -26,6 +26,7 @@ export const works = sqliteTable(
 		title: text('title').notNull(),
 		description: text('description'),
 		originalPublishDate: integer('original_publish_date'),
+		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
 	},
@@ -42,6 +43,7 @@ export const authors = sqliteTable(
 		sortName: text('sort_name'),
 		bio: text('bio'),
 		imageUrl: text('image_url'),
+		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
 	},
@@ -56,6 +58,7 @@ export const formats = sqliteTable('formats', {
 	emoji: text('emoji').notNull(),
 	iconImageUrl: text('icon_image_url'),
 	unit: text('unit').notNull(),
+	cid: text('cid').notNull().default(''),
 });
 
 export const genres = sqliteTable(
@@ -67,6 +70,7 @@ export const genres = sqliteTable(
 		emoji: text('emoji').notNull(),
 		iconImageUrl: text('icon_image_url'),
 		parentPk: text('parent_pk'),
+		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 	},
 	(t) => ({
@@ -81,6 +85,7 @@ export const contributorRoles = sqliteTable('contributor_roles', {
 	name: text('name').notNull(),
 	description: text('description').notNull(),
 	iconImageUrl: text('icon_image_url'),
+	cid: text('cid').notNull().default(''),
 	createdAt: integer('created_at').notNull(),
 });
 
@@ -94,6 +99,7 @@ export const books = sqliteTable(
 		publishDate: integer('publish_date'),
 		description: text('description'),
 		coverUrl: text('cover_url'),
+		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
 	},

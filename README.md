@@ -21,6 +21,10 @@ mise dev
 
 Check it's alive: `curl http://localhost:3000/health`.
 
+The landing page at `http://localhost:3000/` lists every XRPC query and
+procedure, documented from the lexicon files. It is server-side rendered with
+[Web Awesome](https://webawesome.com) components and hydrated on the client.
+
 ## Environment
 
 | Variable   | Default               | Description                         |

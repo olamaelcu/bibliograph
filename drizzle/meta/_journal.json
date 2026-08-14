@@ -15,6 +15,13 @@
       "when": 1786661418594,
       "tag": "0001_parallel_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786665863162,
+      "tag": "0002_perfect_charles_xavier",
+      "breakpoints": true
     }
   ]
 }

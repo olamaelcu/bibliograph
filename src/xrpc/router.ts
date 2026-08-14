@@ -2,6 +2,7 @@ import { and, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { XRPCRouter, json, InvalidRequestError, XRPCError } from '@atcute/xrpc-server';
 import * as Lexicons from '../lexicons/index.js';
+import { registerPdsHandlers } from '../pds/router.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import {
 	COLLECTION,
@@ -64,6 +65,7 @@ function rkeyFromUri(ctx: ViewContext, collection: string, uri: string): string 
 
 export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	const router = new XRPCRouter();
+	registerPdsHandlers(router, db, ctx);
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
 		async handler({ params }) {

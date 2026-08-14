@@ -5,6 +5,10 @@ const PLACEHOLDER_KEY_MULTIBASE = 'z6MkplaceholderDidWebOnlyKeyNotFunctional'
 
 let warnedMissingKey = false
 
+export function getServiceDid(): string {
+  return process.env.ATP_SERVICE_DID || `did:web:${process.env.ATP_SERVICE_HOST || 'localhost'}`
+}
+
 export function buildDidDocument(host: string, proto: string) {
   const did = `did:web:${host}`
   const publicKeyMultibase = process.env.ATP_SERVICE_KEY_MULTIBASE

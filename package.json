@@ -20,9 +20,14 @@
     "lex:check": "atprotolex check lexicons/net/olamaelcu/livtet/biblio/*.json"
   },
   "dependencies": {
+    "@atcute/atproto": "^4.0.4",
+    "@atcute/cbor": "^2.3.6",
+    "@atcute/cid": "^2.4.2",
     "@atcute/lexicons": "^2.0.3",
     "@atcute/xrpc-server": "^2.0.2",
+    "@awesome.me/webawesome": "^3.11.0",
     "@hono/node-server": "^2.0.12",
+    "@lit-labs/ssr": "^4.1.0",
     "better-sqlite3": "^13.0.2",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.0",

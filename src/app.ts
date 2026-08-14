@@ -1,12 +1,16 @@
+import { dirname } from 'node:path';
+import { createRequire } from 'node:module';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { requestTracing } from './middleware.js';
-import { didDocumentHandler } from './did.js';
+import { didDocumentHandler, getServiceDid } from './did.js';
 import { lexiconsStatic } from './lexicons.js';
 import { logger } from './logger.js';
 import { db } from './db/connection.js';
 import { createXrpcRouter } from './xrpc/router.js';
+import { landingPageHtml } from './pages/landing.js';
 import type { ViewContext } from './xrpc/views.js';
 
 export function createApp(): Hono {
@@ -16,12 +20,26 @@ export function createApp(): Hono {
 	app.use('*', requestTracing);
 
 	const viewCtx: ViewContext = {
-		serviceDid: process.env.ATP_SERVICE_DID || `did:web:${defaultHost()}`,
+		serviceDid: getServiceDid(),
 	};
 	const xrpcRouter = createXrpcRouter(db, viewCtx);
 
+	const webAwesomeRoot = dirname(
+		createRequire(import.meta.url).resolve('@awesome.me/webawesome/package.json'),
+	);
+
+	app.use(
+		'/webawesome/*',
+		serveStatic({
+			root: webAwesomeRoot,
+			// serveStatic joins the full URL path onto root; strip the mount prefix.
+			rewriteRequestPath: (path) => path.replace(/^\/webawesome/, ''),
+		}),
+	);
+	app.get('/', (ctx) => ctx.html(landingPageHtml));
 	app.get('/health', healthCheck);
 	app.get('/.well-known/did.json', didDocumentHandler);
+	app.get('/.well-known/atproto-did', serveAtprotoDid);
 	app.use('/lexicons/*', lexiconsStatic);
 	app.all('/xrpc/*', (ctx) => xrpcRouter.fetch(ctx.req.raw));
 	app.onError(handleServerError);
@@ -35,6 +53,10 @@ function defaultHost(): string {
 
 function healthCheck(ctx: Context) {
 	return ctx.json({ status: 'ok', version: '0.0.1' });
+}
+
+function serveAtprotoDid(ctx: Context) {
+	return ctx.text(getServiceDid(), 200, { 'content-type': 'text/plain; charset=utf-8' });
 }
 
 function handleServerError(err: unknown, ctx: Context) {

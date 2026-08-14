@@ -16,6 +16,29 @@ const LEXICON_NSIDS = [
   'work',
 ];
 
+describe('landing page', () => {
+  it('serves the landing page at /', async () => {
+    const res = await app.request('/');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const body = await res.text();
+    expect(body).toContain('net.olamaelcu.livtet.biblio');
+    expect(body).toContain('did-ssr');
+  });
+
+  it('serves webawesome theme assets', async () => {
+    const res = await app.request('/webawesome/dist-cdn/styles/webawesome.css');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/css');
+  });
+
+  it('serves the ssr loader script', async () => {
+    const res = await app.request('/webawesome/dist-cdn/webawesome.ssr-loader.js');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('javascript');
+  });
+});
+
 describe('health', () => {
   it('returns ok with version', async () => {
     const res = await app.request('/health');
@@ -50,5 +73,15 @@ describe('cors', () => {
   it('adds access-control-allow-origin', async () => {
     const res = await app.request('/health');
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  });
+});
+
+describe('.well-known/atproto-did', () => {
+  it('serves the service did as text', async () => {
+    const res = await app.request('/.well-known/atproto-did');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/plain');
+    const body = await res.text();
+    expect(body).toMatch(/^did:web:/);
   });
 });
