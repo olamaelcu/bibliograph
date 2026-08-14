@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream';
 import { createReadStream, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { createGunzip } from 'node:zlib';
+import { logger } from '../logger.js';
 
 export interface StreamerItem {
   byteOffset: number;
@@ -52,6 +53,8 @@ export class DumpStreamer {
       opts.startByteOffset > 0
         ? createReadStream(this.gzPath, { start: opts.startByteOffset })
         : createReadStream(this.gzPath);
+
+    logger.debug({ gzPath: this.gzPath, startByteOffset: opts.startByteOffset, cursor: opts.lastKeyCursor }, 'streaming dump');
 
     const gunzip = createGunzip();
     const lines = createInterface({ input: source.pipe(gunzip), crlfDelay: Infinity });

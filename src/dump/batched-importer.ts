@@ -29,6 +29,7 @@ export function importInBatches<T>(
   const startedAt = Date.now();
 
   return (async () => {
+    logger.info({ batchSize, logInterval }, 'import started');
     let batch: T[] = [];
     for await (const item of items) {
       batch.push(item);
@@ -42,6 +43,7 @@ export function importInBatches<T>(
       }
     }
     if (batch.length) flushBatch(batch);
+    logger.debug({ ...summary, elapsedMs: Date.now() - startedAt }, 'import final batch flushed');
     return summary;
 
     function flushBatch(b: T[]): void {

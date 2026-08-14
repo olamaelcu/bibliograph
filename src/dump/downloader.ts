@@ -45,7 +45,17 @@ export class HttpDownloader {
     let lastErr: unknown;
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
-        return await this.download(destPath);
+        const meta = await this.download(destPath);
+        logger.info(
+          {
+            url: this._url,
+            destPath,
+            bytes: meta.contentLength,
+            sizeMb: meta.contentLength ? (meta.contentLength / 1024 / 1024).toFixed(1) : null,
+          },
+          'dump download complete',
+        );
+        return meta;
       } catch (err) {
         lastErr = err;
         logger.warn({ url: this._url, attempt: attempt + 1, err: (err as Error).message }, 'dump download failed; retrying');

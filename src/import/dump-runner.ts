@@ -46,9 +46,12 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
 
     // Download unless asked to reuse the local file.
     if (!opts.noDownload || !existsSync(gzPath)) {
+      logger.info({ stateName: opts.stateName, url: opts.url, gzPath }, 'downloading dump');
       const downloader = new HttpDownloader(opts.url);
       const meta = await downloader.downloadWithRetry(gzPath);
       state.set({ url: meta.url, lastModified: meta.lastModified, fileSize: meta.contentLength });
+    } else {
+      logger.info({ stateName: opts.stateName, gzPath }, 'reusing existing dump file');
     }
 
     // Resume is cursor-based: gzip cannot be seeked safely, so we always start
