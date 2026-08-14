@@ -159,6 +159,21 @@ describe('biblio write procedures (proxy to user PDS)', () => {
 		expect((rec!.value as { text: string }).text).toBe('Better on reread');
 	});
 
+	it('putReview accepts a review without a rating', async () => {
+		const res = await h.post('/xrpc/net.olamaelcu.livtet.biblio.putReview', {
+			book: BOOK_URI('book-dune'),
+			status: 'reading',
+			text: 'No stars yet',
+		});
+		expect(res.status).toBe(200);
+		const rec = h.fake.records.get(`${COLLECTION.review}/book-dune`);
+		expect(rec).toBeDefined();
+		const value = rec!.value as Record<string, unknown>;
+		expect(value.rating).toBeUndefined();
+		expect(value.status).toBe('reading');
+		expect(value.text).toBe('No stars yet');
+	});
+
 	it('putReview rejects a book outside the catalog', async () => {
 		const res = await h.post('/xrpc/net.olamaelcu.livtet.biblio.putReview', {
 			book: BOOK_URI('nope'),

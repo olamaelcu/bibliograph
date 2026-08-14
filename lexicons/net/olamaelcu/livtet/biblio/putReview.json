@@ -9,7 +9,7 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["book", "rating", "status"],
+          "required": ["book", "status"],
           "properties": {
             "book": {
               "type": "string",
@@ -19,7 +19,7 @@
             "rating": {
               "type": "ref",
               "ref": "net.olamaelcu.livtet.biblio.defs#rating",
-              "description": "Rating from 1 to 5."
+              "description": "Optional rating from 1 to 5."
             },
             "status": {
               "type": "ref",

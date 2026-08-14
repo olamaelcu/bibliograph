@@ -70,10 +70,10 @@ export function registerBiblioWrites(router: XRPCRouter, db: Db, ctx: ViewContex
 			const value: Lexicons.NetOlamaelcuLivtetBiblioReview.Main = {
 				$type: COLLECTION.review,
 				book: await toExpandedBook(db, ctx, book),
-				rating: input.rating,
 				status: input.status,
 				createdAt: now,
 			};
+			if (input.rating != null) value.rating = input.rating;
 			if (input.tags?.length) value.tags = input.tags;
 			if (input.text) value.text = input.text;
 			if (input.progress) value.progress = input.progress;

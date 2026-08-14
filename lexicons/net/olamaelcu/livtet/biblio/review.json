@@ -10,7 +10,6 @@
         "type": "object",
         "required": [
           "book",
-          "rating",
           "status"
         ],
         "properties": {
@@ -31,7 +30,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 5,
-            "description": "Rating from 1 to 5."
+            "description": "Optional rating from 1 to 5."
           },
           "status": {
             "type": "ref",
