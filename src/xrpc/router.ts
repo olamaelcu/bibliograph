@@ -1,12 +1,16 @@
-import { and, eq, gte, inArray, like, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
+import { and, eq, inArray, like, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { XRPCRouter, json, InvalidRequestError, XRPCError } from '@atcute/xrpc-server';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
+import { authenticate, authenticateOptional, type PdsSession } from '../pds/auth.js';
+import { createPdsClient, type PdsClient } from '../pds/client.js';
 import { decodeCursor, encodeCursor, type CursorValue } from './cursor.js';
 import { releasedFilter } from './gate.js';
 import {
 	COLLECTION,
+	bookRkeyFromRef,
+	toActorView,
 	toBookShelfView,
 	toBookView,
 	toContributorView,
@@ -15,6 +19,8 @@ import {
 	toShelfView,
 	toShelfWithBooksView,
 	toWorkView,
+	rkeyFromAtUri,
+	type PdsRecord,
 	type ViewContext,
 } from './views.js';
 import {
@@ -23,18 +29,21 @@ import {
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
-	bookShelves,
 	books,
 	contributorRoles,
 	formats,
 	genreIdentifiers,
 	genres,
-	reviews,
-	reviewTags,
-	shelves,
 	workIdentifiers,
 	works,
 } from '../db/schema.js';
+import type {
+	BookShelfView,
+	BookView,
+	ReviewView,
+	ShelfView,
+	ShelfWithBooksView,
+} from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
 
 type Db = BetterSQLite3Database;
 
@@ -71,23 +80,6 @@ function cursorAfter(col: SQLWrapper, pk: SQLWrapper, cursor: string | undefined
 	return sql`((${col} > ${key}) OR (${col} = ${key} AND ${pk} > ${cursorPk}))`;
 }
 
-/**
- * Keyset predicate for the `listBooksOnShelf` ordering
- * `position is null, position asc, createdAt asc, pk asc`. Cursor key is
- * encoded `posIsNull|position|createdAt`.
- */
-function bookShelfCursorAfter(cursor: string | undefined): SQL | undefined {
-	const decoded = decodeCursorParam(cursor);
-	if (!decoded) return undefined;
-	const { key, pk } = decoded;
-	const [posIsNull, pos, created] = key.split('|');
-	const createdCond = sql`(${bookShelves.createdAt} > ${created} OR (${bookShelves.createdAt} = ${created} AND ${bookShelves.pk} > ${pk}))`;
-	if (posIsNull === '1') {
-		return sql`(${bookShelves.position} is null AND ${createdCond})`;
-	}
-	return sql`(${bookShelves.position} is null OR ${bookShelves.position} > ${pos} OR (${bookShelves.position} = ${pos} AND ${createdCond}))`;
-}
-
 function notFound(): never {
 	throw new XRPCError({ status: 404, error: 'NotFound', message: 'record not found' });
 }
@@ -108,12 +100,123 @@ function rkeyFromUri(ctx: ViewContext, collection: string, uri: string): string 
 	return rkey;
 }
 
+/** Parse a user record at-uri (`at://<did>/<collection>/<rkey>`). */
+function parseRecordUri(uri: string): { did: string; collection: string; rkey: string } {
+	const match = /^at:\/\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(uri);
+	if (!match || !match[1].startsWith('did:')) {
+		throw new InvalidRequestError({ status: 400, error: 'InvalidRequest', message: 'invalid record uri' });
+	}
+	return { did: match[1], collection: match[2], rkey: match[3] };
+}
+
+function requireCollection(parsed: { collection: string }, expected: string): void {
+	if (parsed.collection !== expected) {
+		throw new InvalidRequestError({
+			status: 400,
+			error: 'InvalidRequest',
+			message: `uri must reference a ${expected} record`,
+		});
+	}
+}
+
+/** Authenticate the request and build a PDS client scoped to the user's repo. */
+async function requirePds(request: Request): Promise<{ session: PdsSession; client: PdsClient }> {
+	const session = await authenticate(request);
+	const client = createPdsClient({ pdsUrl: session.pdsUrl, token: session.token, repo: session.did });
+	return { session, client };
+}
+
+/** Fetch every record in a collection, following PDS cursors. */
+async function listAll(client: PdsClient, collection: string): Promise<PdsRecord[]> {
+	const records: PdsRecord[] = [];
+	let cursor: string | undefined;
+	do {
+		const page = await client.listRecords(collection, { limit: MAX_LIMIT, cursor });
+		records.push(...page.records);
+		cursor = page.cursor;
+	} while (cursor);
+	return records;
+}
+
+/** Hydrate a catalog bookView from an `expandedBook.ref`, or undefined if unknown/unreleased. */
+async function hydrateBook(
+	db: Db,
+	ctx: ViewContext,
+	ref: string | undefined,
+): Promise<BookView | undefined> {
+	const rkey = bookRkeyFromRef(ref);
+	if (!rkey) return undefined;
+	const row = db
+		.select()
+		.from(books)
+		.where(and(eq(books.pk, rkey), releasedFilter(books)))
+		.get();
+	return row ? toBookView(db, ctx, row) : undefined;
+}
+
+/** Fetch a record from the user's PDS, mapping failures to 404 NotFound. */
+async function fetchRecordOr404(
+	client: PdsClient,
+	collection: string,
+	rkey: string,
+): Promise<PdsRecord> {
+	try {
+		return await client.getRecord(collection, rkey);
+	} catch {
+		return notFound();
+	}
+}
+
+/** Index shelf records by their at-uri. */
+function shelfIndex(records: PdsRecord[]): Map<string, ShelfView> {
+	return new Map(records.map((rec) => [rec.uri, toShelfView(rec)]));
+}
+
+/** Order bookShelving records by `position` (null positions last), then record order. */
+function sortByPosition(a: PdsRecord, b: PdsRecord): number {
+	const pa = (a.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main).metadata?.position;
+	const pb = (b.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main).metadata?.position;
+	if (pa == null && pb == null) return 0;
+	if (pa == null) return 1;
+	if (pb == null) return -1;
+	return pa - pb;
+}
+
+// In-memory pagination over already-fetched lists; the cursor encodes the
+// offset into the (filtered) list.
+function encodeOffsetCursor(offset: number): string {
+	return encodeCursor({ key: 'offset', pk: String(offset) });
+}
+
+function decodeOffsetCursor(cursor: string | undefined): number {
+	if (cursor == null) return 0;
+	const decoded = decodeCursorParam(cursor);
+	const offset = Number(decoded!.pk);
+	if (!Number.isFinite(offset) || offset < 0) {
+		throw new InvalidRequestError({ status: 400, error: 'InvalidRequest', message: 'invalid cursor' });
+	}
+	return offset;
+}
+
+function paginate<T>(
+	items: T[],
+	limit: number,
+	cursor: string | undefined,
+): { page: T[]; cursor: string | undefined } {
+	const offset = decodeOffsetCursor(cursor);
+	const page = items.slice(offset, offset + limit);
+	const hasMore = offset + page.length < items.length;
+	return { page, cursor: hasMore ? encodeOffsetCursor(offset + page.length) : undefined };
+}
+
 export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	const router = new XRPCRouter();
 	registerPdsHandlers(router, db, ctx);
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const rkey = rkeyFromUri(ctx, COLLECTION.book, params.uri);
 			const row = db
 				.select()
@@ -126,7 +229,9 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetWork.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const rkey = rkeyFromUri(ctx, COLLECTION.work, params.uri);
 			const row = db
 				.select()
@@ -144,7 +249,9 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetContributor.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const rkey = rkeyFromUri(ctx, COLLECTION.contributor, params.uri);
 			const row = db
 				.select()
@@ -162,31 +269,34 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetReview.mainSchema, {
-		async handler({ params }) {
-			const rkey = rkeyFromUri(ctx, COLLECTION.review, params.uri);
-			const row = db.select().from(reviews).where(eq(reviews.pk, rkey)).get();
-			if (!row) notFound();
-			const bookRow = db
-				.select()
-				.from(books)
-				.where(and(eq(books.pk, row!.bookPk), releasedFilter(books)))
-				.get();
-			if (!bookRow) notFound();
-			return json({ review: await toReviewView(db, ctx, row!) });
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
+			const parsed = parseRecordUri(params.uri);
+			requireCollection(parsed, COLLECTION.review);
+			if (parsed.did !== session.did) notFound();
+			const rec = await fetchRecordOr404(client, COLLECTION.review, parsed.rkey);
+			const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioReview.Main;
+			const book = await hydrateBook(db, ctx, value.book?.ref);
+			if (!book) notFound();
+			return json({ review: await toReviewView(db, ctx, rec, session.did, book) });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
-		async handler({ params }) {
-			const rkey = rkeyFromUri(ctx, COLLECTION.shelf, params.uri);
-			const row = db.select().from(shelves).where(eq(shelves.pk, rkey)).get();
-			if (!row) notFound();
-			return json({ shelf: toShelfView(ctx, row!) });
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
+			const parsed = parseRecordUri(params.uri);
+			requireCollection(parsed, COLLECTION.shelf);
+			if (parsed.did !== session.did) notFound();
+			const rec = await fetchRecordOr404(client, COLLECTION.shelf, parsed.rkey);
+			return json({ shelf: toShelfView(rec) });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetGenre.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const rkey = rkeyFromUri(ctx, COLLECTION.genre, params.uri);
 			const row = db
 				.select()
@@ -204,7 +314,9 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooks.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const limit = clampLimit(params.limit);
 			const filters = [releasedFilter(books)];
 			if (params.genre) {
@@ -222,13 +334,6 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			if (params.format) {
 				const formatPk = rkeyFromUri(ctx, COLLECTION.format, params.format);
 				filters.push(eq(books.formatPk, formatPk));
-			}
-			if (params.status) {
-				const sub = db
-					.select({ bookPk: reviews.bookPk })
-					.from(reviews)
-					.where(eq(reviews.status, params.status));
-				filters.push(sql`${books.pk} in (${sub})`);
 			}
 			const where = filters.length ? and(...filters) : undefined;
 			const rows = db
@@ -251,159 +356,147 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListReviewsByBook.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
 			const bookPk = rkeyFromUri(ctx, COLLECTION.book, params.book);
-			const bookExists = db
+			const bookRow = db
 				.select()
 				.from(books)
 				.where(and(eq(books.pk, bookPk), releasedFilter(books)))
 				.get();
-			if (!bookExists) notFound();
+			if (!bookRow) notFound();
 			const limit = clampLimit(params.limit);
-			const rows = db
-				.select()
-				.from(reviews)
-				.where(and(eq(reviews.bookPk, bookPk), cursorAfter(reviews.createdAt, reviews.pk, params.cursor)))
-				.orderBy(sql`${reviews.createdAt} asc, ${reviews.pk} asc`)
-				.limit(limit + 1)
-				.all();
-			const hasMore = rows.length > limit;
-			const page = hasMore ? rows.slice(0, limit) : rows;
-			const views = [];
-			for (const row of page) views.push(await toReviewView(db, ctx, row));
-			const last = page.at(-1);
-			return json({
-				reviews: views,
-				cursor:
-					hasMore && last ? encodeCursor({ key: String(last.createdAt), pk: last.pk }) : undefined,
-			});
+			const records = await listAll(client, COLLECTION.review);
+			const book = await toBookView(db, ctx, bookRow);
+			const reviews: ReviewView[] = [];
+			for (const rec of records) {
+				const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioReview.Main;
+				if (value.book?.ref !== params.book) continue;
+				reviews.push(await toReviewView(db, ctx, rec, session.did, book));
+			}
+			const { page, cursor } = paginate(reviews, limit, params.cursor);
+			return json({ reviews: page, cursor });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
+			void session;
 			const limit = clampLimit(params.limit);
-			const rows = db
-				.select()
-				.from(shelves)
-				.where(cursorAfter(shelves.name, shelves.pk, params.cursor))
-				.orderBy(sql`${shelves.name} asc, ${shelves.pk} asc`)
-				.limit(limit + 1)
-				.all();
-			const hasMore = rows.length > limit;
-			const page = hasMore ? rows.slice(0, limit) : rows;
-			const last = page.at(-1);
-			return json({
-				shelves: page.map((row) => toShelfView(ctx, row)),
-				cursor: hasMore && last ? encodeCursor({ key: last.name, pk: last.pk }) : undefined,
-			});
+			const records = await listAll(client, COLLECTION.shelf);
+			const shelves = records.map((rec) => toShelfView(rec));
+			const { page, cursor } = paginate(shelves, limit, params.cursor);
+			return json({ shelves: page, cursor });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
-		async handler({ params }) {
-			const rkey = rkeyFromUri(ctx, COLLECTION.bookShelf, params.uri);
-			const row = db.select().from(bookShelves).where(eq(bookShelves.pk, rkey)).get();
-			if (!row) notFound();
-			const view = await toBookShelfView(db, ctx, row!);
-			if (!view) notFound();
-			return json({ bookShelf: view });
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
+			const parsed = parseRecordUri(params.uri);
+			requireCollection(parsed, COLLECTION.bookShelf);
+			if (parsed.did !== session.did) notFound();
+			const rec = await fetchRecordOr404(client, COLLECTION.bookShelf, parsed.rkey);
+			const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main;
+			const book = await hydrateBook(db, ctx, value.book?.ref);
+			if (!book) notFound();
+			const shelfRkey = rkeyFromAtUri(String(value.shelf), COLLECTION.shelf);
+			if (!shelfRkey) notFound();
+			const shelfRec = await fetchRecordOr404(client, COLLECTION.shelf, shelfRkey);
+			return json({ bookShelf: toBookShelfView(rec, session.did, toShelfView(shelfRec), book) });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
-		async handler({ params }) {
-			const bookPk = rkeyFromUri(ctx, COLLECTION.book, params.book);
-			const bookExists = db
-				.select()
-				.from(books)
-				.where(and(eq(books.pk, bookPk), releasedFilter(books)))
-				.get();
-			if (!bookExists) notFound();
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
 			const limit = clampLimit(params.limit);
-			const rows = db
-				.select()
-				.from(bookShelves)
-				.where(
-					and(eq(bookShelves.bookPk, bookPk), cursorAfter(bookShelves.createdAt, bookShelves.pk, params.cursor)),
-				)
-				.orderBy(sql`${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
-				.limit(limit + 1)
-				.all();
-			const hasMore = rows.length > limit;
-			const page = hasMore ? rows.slice(0, limit) : rows;
-			const views = [];
-			for (const row of page) {
-				const view = await toBookShelfView(db, ctx, row);
-				if (view) views.push(view);
+			const [shelfRecords, shelvingRecords] = await Promise.all([
+				listAll(client, COLLECTION.shelf),
+				listAll(client, COLLECTION.bookShelf),
+			]);
+			const shelves = shelfIndex(shelfRecords);
+			const views: BookShelfView[] = [];
+			for (const rec of shelvingRecords) {
+				const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main;
+				if (value.book?.ref !== params.book) continue;
+				const shelf = shelves.get(String(value.shelf));
+				if (!shelf) continue;
+				const book = await hydrateBook(db, ctx, value.book.ref);
+				if (!book) continue;
+				views.push(toBookShelfView(rec, session.did, shelf, book));
 			}
-			const last = page.at(-1);
-			return json({
-				bookShelves: views,
-				cursor:
-					hasMore && last ? encodeCursor({ key: String(last.createdAt), pk: last.pk }) : undefined,
-			});
+			const { page, cursor } = paginate(views, limit, params.cursor);
+			return json({ bookShelves: page, cursor });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
-		async handler({ params }) {
-			const shelfPk = rkeyFromUri(ctx, COLLECTION.shelf, params.shelf);
-			const shelfExists = db.select().from(shelves).where(eq(shelves.pk, shelfPk)).get();
-			if (!shelfExists) notFound();
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
 			const limit = clampLimit(params.limit);
-			const rows = db
-				.select({ row: bookShelves })
-				.from(bookShelves)
-				.innerJoin(books, and(eq(bookShelves.bookPk, books.pk), releasedFilter(books)))
-				.where(and(eq(bookShelves.shelfPk, shelfPk), bookShelfCursorAfter(params.cursor)))
-				.orderBy(sql`${bookShelves.position} is null, ${bookShelves.position} asc, ${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
-				.limit(limit + 1)
-				.all();
-			const hasMore = rows.length > limit;
-			const page = hasMore ? rows.slice(0, limit) : rows;
-			const views = [];
-			for (const { row } of page) {
-				const view = await toBookShelfView(db, ctx, row);
-				if (view) views.push(view);
+			const [shelfRecords, shelvingRecords] = await Promise.all([
+				listAll(client, COLLECTION.shelf),
+				listAll(client, COLLECTION.bookShelf),
+			]);
+			const shelves = shelfIndex(shelfRecords);
+			const filtered = shelvingRecords
+				.filter((rec) => String((rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main).shelf) === params.shelf)
+				.sort(sortByPosition);
+			const views: BookShelfView[] = [];
+			for (const rec of filtered) {
+				const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main;
+				const shelf = shelves.get(String(value.shelf));
+				if (!shelf) continue;
+				const book = await hydrateBook(db, ctx, value.book?.ref);
+				if (!book) continue;
+				views.push(toBookShelfView(rec, session.did, shelf, book));
 			}
-			const last = page.at(-1)?.row;
-			return json({
-				bookShelves: views,
-				cursor:
-					hasMore && last
-						? encodeCursor({
-								key: `${last.position == null ? '1' : '0'}|${last.position ?? ''}|${String(last.createdAt)}`,
-								pk: last.pk,
-							})
-						: undefined,
-			});
+			const { page, cursor } = paginate(views, limit, params.cursor);
+			return json({ bookShelves: page, cursor });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
+			void session;
 			const limit = clampLimit(params.limit);
-			const rows = db
-				.select()
-				.from(shelves)
-				.where(cursorAfter(shelves.name, shelves.pk, params.cursor))
-				.orderBy(sql`${shelves.name} asc, ${shelves.pk} asc`)
-				.limit(limit + 1)
-				.all();
-			const hasMore = rows.length > limit;
-			const page = hasMore ? rows.slice(0, limit) : rows;
-			const views = [];
-			for (const row of page) views.push(await toShelfWithBooksView(db, ctx, row));
-			const last = page.at(-1);
-			return json({
-				shelves: views,
-				cursor: hasMore && last ? encodeCursor({ key: last.name, pk: last.pk }) : undefined,
-			});		},
+			const [shelfRecords, shelvingRecords] = await Promise.all([
+				listAll(client, COLLECTION.shelf),
+				listAll(client, COLLECTION.bookShelf),
+			]);
+			const shelves = shelfIndex(shelfRecords);
+			const shelvingsByShelf = new Map<string, PdsRecord[]>();
+			for (const rec of shelvingRecords) {
+				const shelfUri = String((rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main).shelf);
+				const list = shelvingsByShelf.get(shelfUri) ?? [];
+				list.push(rec);
+				shelvingsByShelf.set(shelfUri, list);
+			}
+			const views: ShelfWithBooksView[] = [];
+			for (const rec of shelfRecords) {
+				const shelfView = shelves.get(rec.uri)!;
+				const shelvings = (shelvingsByShelf.get(rec.uri) ?? []).sort(sortByPosition);
+				const books: BookShelfView[] = [];
+				for (const shelving of shelvings) {
+					const value = shelving.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main;
+					const book = await hydrateBook(db, ctx, value.book?.ref);
+					if (!book) continue;
+					books.push(toBookShelfView(shelving, session.did, shelfView, book));
+				}
+				views.push(toShelfWithBooksView(shelfView, books));
+			}
+			const { page, cursor } = paginate(views, limit, params.cursor);
+			return json({ shelves: page, cursor });
+		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListGenres.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const limit = clampLimit(params.limit);
 			const conds = [releasedFilter(genres)];
 			if (params.topLevelOnly) conds.push(sql`${genres.parentPk} is null`);
@@ -439,7 +532,9 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchBooks.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const q = params.q.trim();
 			const limit = clampLimit(params.limit);
 			const term = `%${q}%`;
@@ -477,7 +572,9 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchContributors.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const q = params.q.trim();
 			const limit = clampLimit(params.limit);
 			const term = `%${q}%`;
@@ -529,65 +626,33 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchReviews.mainSchema, {
-		async handler({ params }) {
-			const q = params.q.trim();
+		async handler({ params, request }) {
+			const { session, client } = await requirePds(request);
+			const q = (params.q ?? '').trim();
+			const term = q.toLowerCase();
 			const limit = clampLimit(params.limit);
-			const term = `%${q}%`;
-			const tagSub = db
-				.select({ reviewPk: reviewTags.reviewPk })
-				.from(reviewTags)
-				.where(like(reviewTags.tag, term));
-			const filters = [or(like(reviews.text, term), sql`${reviews.pk} in (${tagSub})`)];
-			if (params.book) {
-				const bookPk = rkeyFromUri(ctx, COLLECTION.book, params.book);
-				filters.push(eq(reviews.bookPk, bookPk));
+			const records = await listAll(client, COLLECTION.review);
+			const matched: ReviewView[] = [];
+			for (const rec of records) {
+				const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioReview.Main;
+				if (q && !(value.text ?? '').toLowerCase().includes(term)) continue;
+				if (params.book && value.book?.ref !== params.book) continue;
+				if (params.rating != null && (value.rating ?? 0) < params.rating) continue;
+				if (params.status && value.status !== params.status) continue;
+				if (params.tag?.length && !params.tag.some((t) => (value.tags ?? []).includes(t))) continue;
+				const book = await hydrateBook(db, ctx, value.book?.ref);
+				if (!book) continue;
+				matched.push(await toReviewView(db, ctx, rec, session.did, book));
 			}
-			if (params.rating != null) {
-				filters.push(gte(reviews.rating, params.rating));
-			}
-			if (params.status) {
-				filters.push(eq(reviews.status, params.status));
-			}
-			if (params.tag?.length) {
-				const sub = db
-					.select({ reviewPk: reviewTags.reviewPk })
-					.from(reviewTags)
-					.where(inArray(reviewTags.tag, params.tag));
-				filters.push(sql`${reviews.pk} in (${sub})`);
-			}
-			const where = and(...filters, releasedFilter(books));
-			const rows = db
-				.select()
-				.from(reviews)
-				.innerJoin(books, eq(reviews.bookPk, books.pk))
-				.where(and(where, cursorAfter(reviews.createdAt, reviews.pk, params.cursor)))
-				.orderBy(sql`${reviews.createdAt} asc, ${reviews.pk} asc`)
-				.limit(limit + 1)
-				.all();
-			const hasMore = rows.length > limit;
-			const page = hasMore ? rows.slice(0, limit) : rows;
-			const views = [];
-			for (const { reviews: r } of page) views.push(await toReviewView(db, ctx, r));
-			const hitsTotal = db
-				.select({ count: sql`count(*)` })
-				.from(reviews)
-				.innerJoin(books, eq(reviews.bookPk, books.pk))
-				.where(where)
-				.get();
-			const last = page.at(-1);
-			return json({
-				reviews: views,
-				hitsTotal: Number(hitsTotal?.count ?? 0),
-				cursor:
-					hasMore && last
-						? encodeCursor({ key: String(last.reviews.createdAt), pk: last.reviews.pk })
-						: undefined,
-			});
+			const { page, cursor } = paginate(matched, limit, params.cursor);
+			return json({ reviews: page, hitsTotal: matched.length, cursor });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchWorks.mainSchema, {
-		async handler({ params }) {
+		async handler({ params, request }) {
+			const session = await authenticateOptional(request);
+			void session;
 			const q = params.q.trim();
 			const limit = clampLimit(params.limit);
 			const term = `%${q}%`;
@@ -633,6 +698,21 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 				hitsTotal: Number(hitsTotal?.count ?? 0),
 				cursor: hasMore && last ? encodeCursor({ key: last.title, pk: last.pk }) : undefined,
 			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetActor.mainSchema, {
+		async handler({ params, request }) {
+			const session = await authenticate(request);
+			if (params.actor !== session.did) notFound();
+			const client = createPdsClient({ pdsUrl: session.pdsUrl, token: session.token, repo: session.did });
+			let rec: PdsRecord | undefined;
+			try {
+				rec = await client.getRecord(COLLECTION.actor, 'self');
+			} catch {
+				rec = undefined;
+			}
+			return json({ actor: toActorView(rec, session) });
 		},
 	});
 
