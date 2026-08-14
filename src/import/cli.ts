@@ -16,29 +16,44 @@ const OL_EDITIONS_URL = process.env.OL_EDITIONS_DUMP_URL ?? 'https://openlibrary
 const OL_WORKS_URL = process.env.OL_WORKS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_works_latest.txt.gz';
 const OL_AUTHORS_URL = process.env.OL_AUTHORS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_authors_latest.txt.gz';
 
+const USAGE =
+  'usage: tsx src/import/cli.ts openlibrary:dump|works:dump|contributors:dump|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--path=DIR] [--batch-size=N]';
+
 interface Flags {
   noDownload: boolean;
   reset: boolean;
   keepDump: boolean;
   dumpPath?: string;
   batchSize?: number;
+  unknown: string[];
 }
 
 function parseFlags(rest: string[]): Flags {
-  const f: Flags = { noDownload: false, reset: false, keepDump: false };
+  const f: Flags = { noDownload: false, reset: false, keepDump: false, unknown: [] };
   for (const arg of rest) {
     if (arg === '--no-download') f.noDownload = true;
     else if (arg === '--reset') f.reset = true;
     else if (arg === '--keep-dump') f.keepDump = true;
     else if (arg.startsWith('--path=')) f.dumpPath = arg.slice('--path='.length);
-    else if (arg.startsWith('--batch-size=')) f.batchSize = Number(arg.slice('--batch-size='.length));
+    else if (arg.startsWith('--batch-size=')) {
+      f.batchSize = Number(arg.slice('--batch-size='.length));
+      if (Number.isNaN(f.batchSize)) {
+        throw new Error(`invalid --batch-size value: ${arg.slice('--batch-size='.length)}`);
+      }
+    } else f.unknown.push(arg);
   }
   return f;
 }
 
 async function main(): Promise<void> {
-  const [cmd, ...rest] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+  const [cmd, ...rest] = args;
   const flags = parseFlags(rest);
+  if (flags.unknown.length > 0) logger.warn({ unknown: flags.unknown }, 'ignoring unknown flags');
 
   if (cmd === 'openlibrary:dump') {
     const s = await runDumpImport({
@@ -78,36 +93,50 @@ async function main(): Promise<void> {
   } else if (cmd === 'images:refresh') {
     const { BlobStore, blobStoreConfigFromEnv } = await import('../storage/store.js');
     const { fetchBookCover, fetchContributorPortrait } = await import('../images/fetch.js');
-    const { eq } = await import('drizzle-orm');
-    const { books, contributors } = await import('../db/schema.js');
+    const { and, eq, isNull } = await import('drizzle-orm');
+    const { bookIdentifiers, books, contributors } = await import('../db/schema.js');
 
     const store = new BlobStore(db, blobStoreConfigFromEnv());
     const limit = flags.batchSize ?? 100;
 
     const bookRows = db.select().from(books)
-      .where(eq(books.releaseStatus as never, 'released' as never))
+      .where(and(eq(books.releaseStatus as never, 'released' as never), isNull(books.coverUrl)))
+      .orderBy(books.pk)
       .limit(limit)
       .all() as Array<{ pk: string; coverUrl: string | null }>;
     for (const b of bookRows) {
-      if (b.coverUrl) continue;
-      const res = await fetchBookCover(db, store, b.pk, undefined);
-      if (res.fetched) db.update(books).set({ coverUrl: res.url }).where(eq(books.pk, b.pk)).run();
+      const coverSource = db.select().from(bookIdentifiers)
+        .where(eq(bookIdentifiers.bookPk, b.pk))
+        .all() as Array<{ resource: string }>;
+      let coverUrl: string | undefined;
+      for (const id of coverSource) {
+        if (id.resource.startsWith('openlibrary:')) {
+          coverUrl = `https://covers.openlibrary.org/b/olid/${id.resource.slice('openlibrary:books/'.length)}-L.jpg`;
+          break;
+        }
+      }
+      if (!coverUrl) {
+        const isbn = coverSource.find((i) => i.resource.startsWith('isbn:'));
+        if (isbn) coverUrl = `https://covers.openlibrary.org/b/isbn/${isbn.resource.slice('isbn:'.length)}-L.jpg`;
+      }
+      if (coverUrl) {
+        const res = await fetchBookCover(db, store, b.pk, coverUrl);
+        if (res.fetched) db.update(books).set({ coverUrl: res.url }).where(eq(books.pk, b.pk)).run();
+      }
     }
 
     const contributorRows = db.select().from(contributors)
-      .where(eq(contributors.releaseStatus as never, 'released' as never))
+      .where(and(eq(contributors.releaseStatus as never, 'released' as never), isNull(contributors.imageUrl)))
+      .orderBy(contributors.pk)
       .limit(limit)
       .all() as Array<{ pk: string; name: string; imageUrl: string | null }>;
     for (const c of contributorRows) {
-      if (c.imageUrl) continue;
       const res = await fetchContributorPortrait(db, store, c.pk, c.name, undefined);
       if (res.fetched) db.update(contributors).set({ imageUrl: res.url }).where(eq(contributors.pk, c.pk)).run();
     }
     logger.info({ books: bookRows.length, contributors: contributorRows.length }, 'images refresh done');
   } else {
-    console.error(
-      'usage: tsx src/import/cli.ts openlibrary:dump|works:dump|contributors:dump|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--path=DIR] [--batch-size=N]',
-    );
+    console.error(USAGE);
     process.exit(1);
   }
 }
@@ -118,7 +147,7 @@ export { main };
 // module without triggering a usage-exit.
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
-    logger.fatal({ err }, 'import failed');
+    logger.fatal({ err: (err as Error).message }, 'import failed');
     process.exit(1);
   });
 }

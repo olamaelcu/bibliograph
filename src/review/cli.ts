@@ -11,6 +11,8 @@ import { reviewEntityTypes, type ReviewEntityType } from './views.js';
 import { importIssues, type ReleaseStatus } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
+const USAGE = 'usage: tsx src/review/cli.ts list|show|edit|approve|reject|issue [args]';
+
 function parseEntity(v: string): ReviewEntityType {
   if (!(reviewEntityTypes as string[]).includes(v)) {
     throw new Error(`unknown entity '${v}'; expected ${reviewEntityTypes.join('|')}`);
@@ -25,7 +27,12 @@ function printTable(rows: Array<Record<string, unknown>>): void {
 }
 
 async function main(): Promise<void> {
-  const [cmd, ...rest] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+  const [cmd, ...rest] = args;
 
   if (cmd === 'list') {
     const args = new Map<string, string>();
@@ -109,7 +116,7 @@ async function main(): Promise<void> {
       printTable(rows as unknown as Array<Record<string, unknown>>);
     }
   } else {
-    console.error(`usage: tsx src/review/cli.ts list|show|edit|approve|reject|issue [args]`);
+    console.error(USAGE);
     process.exit(1);
   }
 }

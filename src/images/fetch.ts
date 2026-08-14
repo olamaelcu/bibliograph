@@ -35,15 +35,21 @@ async function fetchImageBytes(url: string): Promise<{ bytes: Uint8Array; mimeTy
 	return { bytes: buf, mimeType: contentType };
 }
 
-/** Fetch a book cover from OpenLibrary. */
+/**
+ * Fetch a book cover from OpenLibrary. `coverRef` is either a numeric OL cover
+ * id (`/b/id/<n>-L.jpg`) or a fully derived covers URL (`/b/olid/...` or
+ * `/b/isbn/...`). When it is null/undefined nothing is fetched.
+ */
 export async function fetchBookCover(
 	db: BetterSQLite3Database,
 	store: BlobStore,
 	bookPk: string,
-	olCoverId: number | undefined,
+	coverRef: number | string | undefined,
 ): Promise<ImageFetchResult> {
-	if (olCoverId == null) return { kind: 'cover', fetched: false, url: null };
-	const url = `https://covers.openlibrary.org/b/id/${olCoverId}-L.jpg`;
+	if (coverRef == null) return { kind: 'cover', fetched: false, url: null };
+	const url = typeof coverRef === 'number'
+		? `https://covers.openlibrary.org/b/id/${coverRef}-L.jpg`
+		: coverRef;
 	try {
 		const { bytes, mimeType } = await fetchImageBytes(url);
 		const blob = await store.put({ entityType: 'book', entityPk: bookPk, kind: 'cover', bytes, mimeType, source: 'openlibrary' });
