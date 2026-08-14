@@ -16,6 +16,34 @@ const OL_EDITIONS_URL = process.env.OL_EDITIONS_DUMP_URL ?? 'https://openlibrary
 const OL_WORKS_URL = process.env.OL_WORKS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_works_latest.txt.gz';
 const OL_AUTHORS_URL = process.env.OL_AUTHORS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_authors_latest.txt.gz';
 
+/**
+ * Progress reporter for the dump download. Renders a single-line \r progress
+ * bar on a TTY (throttled to ~4/s); on a pipe it falls back to one pino log
+ * line per percent tick so redirected output still shows progress.
+ */
+function downloadProgress(stateName: string): (received: number, total: number | null) => void {
+  const isTTY = Boolean(process.stdout.isTTY);
+  let lastRender = 0;
+  let lastPct = -1;
+  return (received, total) => {
+    const now = Date.now();
+    if (isTTY) {
+      if (now - lastRender < 250) return;
+      lastRender = now;
+      const pct = total ? ` ${((received / total) * 100).toFixed(1)}%` : '';
+      const mb = (received / 1024 / 1024).toFixed(1);
+      const totalMb = total ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ' MB';
+      process.stdout.write(`\r${stateName}: ${mb}${totalMb}${pct}   `);
+      return;
+    }
+    const pct = total ? Math.floor((received / total) * 100) : -1;
+    if (pct !== lastPct) {
+      lastPct = pct;
+      logger.info({ stateName, receivedMb: (received / 1024 / 1024).toFixed(1), totalMb: total ? (total / 1024 / 1024).toFixed(1) : null, pct }, 'download progress');
+    }
+  };
+}
+
 const USAGE =
   'usage: tsx src/import/cli.ts openlibrary:dump|works:dump|contributors:dump|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--path=DIR] [--batch-size=N]';
 
@@ -60,6 +88,7 @@ async function main(): Promise<void> {
       db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
       noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
       dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+      onProgress: downloadProgress('ol-editions'),
       keyOf: olKeyOf,
       parse: (fields) => mapEditionToCandidates(JSON.parse(fields[4])),
       hydrate: (fields) => {
@@ -73,6 +102,7 @@ async function main(): Promise<void> {
       db, stateName: 'ol-works', url: OL_WORKS_URL,
       noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
       dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+      onProgress: downloadProgress('ol-works'),
       keyOf: olKeyOf,
       parse: (fields) => [mapWorkToCandidate(JSON.parse(fields[4]))],
     });
@@ -82,6 +112,7 @@ async function main(): Promise<void> {
       db, stateName: 'ol-authors', url: OL_AUTHORS_URL,
       noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
       dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+      onProgress: downloadProgress('ol-authors'),
       keyOf: olKeyOf,
       parse: (fields) => [mapAuthorToCandidate(JSON.parse(fields[4]))],
     });

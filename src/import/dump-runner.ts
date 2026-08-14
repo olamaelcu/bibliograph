@@ -19,6 +19,8 @@ export interface DumpRunOptions {
   reset?: boolean;
   keepDump?: boolean;
   batchSize?: number;
+  /** Called as download body bytes stream in: (received, total|null). */
+  onProgress?: (received: number, total: number | null) => void;
   keyOf: (fields: string[]) => string | null;
   parse: (fields: string[]) => MergeCandidate[];
   /** Optional per-record post-merge hook (e.g. hydrate book_contributors). */
@@ -54,10 +56,15 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     if (opts.reset) state.clear();
     const existing = state.get();
 
-    // Download unless asked to reuse the local file.
+    // Download unless asked to reuse the local file. The downloader resumes a
+    // partial file on disk via HTTP Range (206) instead of restarting.
     if (!opts.noDownload || !existsSync(gzPath)) {
-      logger.info({ stateName: opts.stateName, url: opts.url, gzPath }, 'downloading dump');
-      const downloader = new HttpDownloader(opts.url);
+      if (!opts.noDownload && existsSync(gzPath)) {
+        logger.info({ stateName: opts.stateName, gzPath }, 'resuming existing dump file');
+      } else {
+        logger.info({ stateName: opts.stateName, url: opts.url, gzPath }, 'downloading dump');
+      }
+      const downloader = new HttpDownloader(opts.url, { onProgress: opts.onProgress });
       const meta = await downloader.downloadWithRetry(gzPath);
       state.set({ url: meta.url, lastModified: meta.lastModified, fileSize: meta.contentLength });
     } else {

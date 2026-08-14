@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HttpDownloader } from './downloader.js';
@@ -129,6 +129,122 @@ describe('HttpDownloader', () => {
       const downloader = new HttpDownloader('https://example.test/a/b/dump.gz', { maxRedirects: 3 });
       await downloader.download(join(dir, 'out.gz'));
       expect(mockFetch).toHaveBeenNthCalledWith(2, 'https://example.test/a/b/next.gz', expect.anything());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('sends a Range header and appends when resuming a partial file (206)', async () => {
+    const dir = makeTempDir();
+    try {
+      const dest = join(dir, 'out.gz');
+      writeFileSync(dest, 'hello'); // 5 bytes already on disk
+
+      const mockFetch = vi.fn().mockResolvedValue(new Response(' world', {
+        status: 206,
+        headers: { 'content-range': 'bytes 5-10/11', 'content-length': '6' },
+      }));
+      vi.stubGlobal('fetch', mockFetch);
+
+      const downloader = new HttpDownloader('https://example.test/dump.gz');
+      const meta = await downloader.download(dest);
+
+      expect(mockFetch).toHaveBeenCalledWith('https://example.test/dump.gz', expect.objectContaining({
+        headers: expect.objectContaining({ Range: 'bytes=5-' }),
+      }));
+      expect(readFileSync(dest, 'utf8')).toBe('hello world');
+      expect(meta.contentLength).toBe(11); // total from Content-Range
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('restarts from scratch when the server ignores Range (200)', async () => {
+    const dir = makeTempDir();
+    try {
+      const dest = join(dir, 'out.gz');
+      writeFileSync(dest, 'stale-bytes');
+
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('fresh', {
+        status: 200,
+        headers: { 'content-length': '5' },
+      })));
+
+      const downloader = new HttpDownloader('https://example.test/dump.gz');
+      const meta = await downloader.download(dest);
+
+      expect(readFileSync(dest, 'utf8')).toBe('fresh'); // truncated, not appended
+      expect(meta.contentLength).toBe(5);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reuses an already-complete file when the server returns 416', async () => {
+    const dir = makeTempDir();
+    try {
+      const dest = join(dir, 'out.gz');
+      writeFileSync(dest, 'hello world'); // 11 bytes
+
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', {
+        status: 416,
+        headers: { 'content-range': 'bytes */11' },
+      })));
+
+      const downloader = new HttpDownloader('https://example.test/dump.gz');
+      const meta = await downloader.download(dest);
+
+      expect(readFileSync(dest, 'utf8')).toBe('hello world');
+      expect(meta.contentLength).toBe(11);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a partial file when a resumed download aborts', async () => {
+    const dir = makeTempDir();
+    try {
+      const dest = join(dir, 'out.gz');
+      writeFileSync(dest, 'hello'); // 5 bytes on disk
+
+      const neverEnding = new ReadableStream<Uint8Array>();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(neverEnding, {
+        status: 206,
+        headers: { 'content-range': 'bytes 5-100/101', 'content-length': '96' },
+      })));
+
+      const downloader = new HttpDownloader('https://example.test/dump.gz', { timeoutMs: 50 });
+      await expect(downloader.download(dest)).rejects.toThrow(/abort/i);
+      expect(readFileSync(dest, 'utf8')).toBe('hello'); // partial preserved for resume
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports progress as body bytes stream in', async () => {
+    const dir = makeTempDir();
+    try {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('hello '));
+          controller.enqueue(new TextEncoder().encode('world'));
+          controller.close();
+        },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, {
+        status: 200,
+        headers: { 'content-length': '11' },
+      })));
+
+      const events: Array<{ received: number; total: number | null }> = [];
+      const downloader = new HttpDownloader('https://example.test/dump.gz', {
+        onProgress: (received, total) => events.push({ received, total }),
+      });
+      await downloader.download(join(dir, 'out.gz'));
+
+      expect(events.length).toBeGreaterThanOrEqual(2);
+      expect(events[events.length - 1].received).toBe(11);
+      expect(events[events.length - 1].total).toBe(11);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
