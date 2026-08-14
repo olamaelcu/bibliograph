@@ -30,9 +30,16 @@ export const works = sqliteTable(
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
+		releaseStatus: text('release_status').notNull().default('staged'),
+		releasedAt: integer('released_at'),
 	},
 	(t) => ({
 		titleIdx: index('works_title_idx').on(t.title),
+		releaseStatusIdx: index('works_release_status_idx').on(t.releaseStatus),
+		releaseStatusCheck: check(
+			'works_release_status_check',
+			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
+		),
 	}),
 );
 
@@ -47,9 +54,16 @@ export const contributors = sqliteTable(
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
+		releaseStatus: text('release_status').notNull().default('staged'),
+		releasedAt: integer('released_at'),
 	},
 	(t) => ({
 		nameIdx: index('contributors_name_idx').on(t.name),
+		releaseStatusIdx: index('contributors_release_status_idx').on(t.releaseStatus),
+		releaseStatusCheck: check(
+			'contributors_release_status_check',
+			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
+		),
 	}),
 );
 
@@ -73,22 +87,41 @@ export const genres = sqliteTable(
 		parentPk: text('parent_pk'),
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
+		releaseStatus: text('release_status').notNull().default('staged'),
+		releasedAt: integer('released_at'),
 	},
 	(t) => ({
 		parentFk: foreignKey({ columns: [t.parentPk], foreignColumns: [t.pk] }).onDelete('set null'),
 		nameIdx: index('genres_name_idx').on(t.name),
 		parentPkIdx: index('genres_parent_pk_idx').on(t.parentPk),
+		releaseStatusIdx: index('genres_release_status_idx').on(t.releaseStatus),
+		releaseStatusCheck: check(
+			'genres_release_status_check',
+			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
+		),
 	}),
 );
 
-export const contributorRoles = sqliteTable('contributor_roles', {
-	pk: text('pk').primaryKey(),
-	name: text('name').notNull(),
-	description: text('description').notNull(),
-	iconImageUrl: text('icon_image_url'),
-	cid: text('cid').notNull().default(''),
-	createdAt: integer('created_at').notNull(),
-});
+export const contributorRoles = sqliteTable(
+	'contributor_roles',
+	{
+		pk: text('pk').primaryKey(),
+		name: text('name').notNull(),
+		description: text('description').notNull(),
+		iconImageUrl: text('icon_image_url'),
+		cid: text('cid').notNull().default(''),
+		createdAt: integer('created_at').notNull(),
+		releaseStatus: text('release_status').notNull().default('staged'),
+		releasedAt: integer('released_at'),
+	},
+	(t) => ({
+		releaseStatusIdx: index('contributor_roles_release_status_idx').on(t.releaseStatus),
+		releaseStatusCheck: check(
+			'contributor_roles_release_status_check',
+			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
+		),
+	}),
+);
 
 export const books = sqliteTable(
 	'books',
@@ -103,10 +136,17 @@ export const books = sqliteTable(
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
+		releaseStatus: text('release_status').notNull().default('staged'),
+		releasedAt: integer('released_at'),
 	},
 	(t) => ({
 		workPkIdx: index('books_work_pk_idx').on(t.workPk),
 		formatPkIdx: index('books_format_pk_idx').on(t.formatPk),
+		releaseStatusIdx: index('books_release_status_idx').on(t.releaseStatus),
+		releaseStatusCheck: check(
+			'books_release_status_check',
+			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
+		),
 	}),
 );
 
@@ -181,6 +221,7 @@ export const bookIdentifiers = sqliteTable(
 		pk: primaryKey({ columns: [t.bookPk, t.resource] }),
 		bookFk: foreignKey({ columns: [t.bookPk], foreignColumns: [books.pk] }).onDelete('cascade'),
 		urlIdx: index('book_identifiers_url_idx').on(t.url),
+		resourceUnique: uniqueIndex('book_identifiers_resource_unique').on(t.resource),
 	}),
 );
 
@@ -195,6 +236,7 @@ export const workIdentifiers = sqliteTable(
 		pk: primaryKey({ columns: [t.workPk, t.resource] }),
 		workFk: foreignKey({ columns: [t.workPk], foreignColumns: [works.pk] }).onDelete('cascade'),
 		urlIdx: index('work_identifiers_url_idx').on(t.url),
+		resourceUnique: uniqueIndex('work_identifiers_resource_unique').on(t.resource),
 	}),
 );
 
@@ -212,6 +254,7 @@ export const contributorIdentifiers = sqliteTable(
 			foreignColumns: [contributors.pk],
 		}).onDelete('cascade'),
 		urlIdx: index('contributor_identifiers_url_idx').on(t.url),
+		resourceUnique: uniqueIndex('contributor_identifiers_resource_unique').on(t.resource),
 	}),
 );
 
@@ -226,6 +269,7 @@ export const genreIdentifiers = sqliteTable(
 		pk: primaryKey({ columns: [t.genrePk, t.resource] }),
 		genreFk: foreignKey({ columns: [t.genrePk], foreignColumns: [genres.pk] }).onDelete('cascade'),
 		urlIdx: index('genre_identifiers_url_idx').on(t.url),
+		resourceUnique: uniqueIndex('genre_identifiers_resource_unique').on(t.resource),
 	}),
 );
 
@@ -355,3 +399,90 @@ export const bookShelves = sqliteTable(
 
 export type BookShelf = typeof bookShelves.$inferSelect;
 export type NewBookShelf = typeof bookShelves.$inferInsert;
+
+// ─── Staged-release lifecycle ────────────────────────────────────────────────
+
+export const releaseStatuses = ['staged', 'released', 'rejected'] as const;
+export type ReleaseStatus = (typeof releaseStatuses)[number];
+
+export const importIssueEntityTypes = ['book', 'work', 'contributor', 'genre', 'contributorRole'] as const;
+export type ImportIssueEntityType = (typeof importIssueEntityTypes)[number];
+
+export const importIssueStatuses = ['open', 'resolved', 'dismissed'] as const;
+export type ImportIssueStatus = (typeof importIssueStatuses)[number];
+
+export const importIssues = sqliteTable(
+	'import_issues',
+	{
+		pk: integer('pk').primaryKey({ autoIncrement: true }),
+		entityType: text('entity_type').notNull(),
+		entityPk: text('entity_pk').notNull(),
+		field: text('field').notNull(),
+		incomingValue: text('incoming_value'),
+		storedValue: text('stored_value'),
+		source: text('source').notNull(),
+		status: text('status').notNull().default('open'),
+		createdAt: integer('created_at').notNull(),
+		resolvedAt: integer('resolved_at'),
+	},
+	(t) => ({
+		entityIdx: index('import_issues_entity_idx').on(t.entityType, t.entityPk),
+		statusIdx: index('import_issues_status_idx').on(t.status),
+		entityTypeCheck: check(
+			'import_issues_entity_type_check',
+			sql`${t.entityType} IN ('book', 'work', 'contributor', 'genre', 'contributorRole')`,
+		),
+		statusCheck: check(
+			'import_issues_status_check',
+			sql`${t.status} IN ('open', 'resolved', 'dismissed')`,
+		),
+	}),
+);
+
+export type ImportIssue = typeof importIssues.$inferSelect;
+export type NewImportIssue = typeof importIssues.$inferInsert;
+
+export const backfillState = sqliteTable('backfill_state', {
+	name: text('name').primaryKey(),
+	url: text('url'),
+	filePath: text('file_path'),
+	lastModified: text('last_modified'),
+	fileSize: integer('file_size'),
+	lastByteOffset: integer('last_byte_offset'),
+	cursor: text('cursor'),
+	totalProcessed: integer('total_processed'),
+	complete: integer('complete').notNull().default(0),
+	updatedAt: integer('updated_at').notNull(),
+});
+
+export type BackfillState = typeof backfillState.$inferSelect;
+
+export const backfillReservation = sqliteTable('backfill_reservation', {
+	stateName: text('state_name').primaryKey(),
+	pid: integer('pid').notNull(),
+	startedAt: integer('started_at').notNull(),
+});
+
+export type BackfillReservation = typeof backfillReservation.$inferSelect;
+
+export const catalogBlobs = sqliteTable(
+	'catalog_blobs',
+	{
+		pk: text('pk').primaryKey(),
+		entityType: text('entity_type').notNull(),
+		entityPk: text('entity_pk').notNull(),
+		kind: text('kind').notNull(),
+		cid: text('cid').notNull(),
+		mimeType: text('mime_type'),
+		size: integer('size'),
+		objectKey: text('object_key').notNull(),
+		source: text('source').notNull(),
+		createdAt: integer('created_at').notNull(),
+	},
+	(t) => ({
+		entityIdx: index('catalog_blobs_entity_idx').on(t.entityType, t.entityPk),
+	}),
+);
+
+export type CatalogBlob = typeof catalogBlobs.$inferSelect;
+export type NewCatalogBlob = typeof catalogBlobs.$inferInsert;
