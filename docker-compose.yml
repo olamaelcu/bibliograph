@@ -1,0 +1,14 @@
+services:
+  storage:
+    image: rustfs/rustfs:latest
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Console
+    volumes:
+      - rustfs-data:/data
+    environment:
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
+    command: --address :9000 --access-key rustfsadmin --secret-key rustfsadmin /data
+volumes:
+  rustfs-data:
