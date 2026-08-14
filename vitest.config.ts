@@ -10,6 +10,7 @@ export default defineConfig({
     env: {
       DB_PATH: "data/test.sqlite"
     },
+    globalSetup: ['./src/test-utils/global-setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

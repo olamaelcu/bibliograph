@@ -13,7 +13,9 @@ import { BlobStore, blobStoreConfigFromEnv } from './storage/store.js';
 import { registerBlobProxy } from './storage/blob-proxy.js';
 import { createXrpcRouter } from './xrpc/router.js';
 import { registerUploadBlobRoute } from './pds/router.js';
-import { landingPageHtml } from './pages/landing.js';
+import { renderPage } from './pages/render.js';
+import { renderStatsPage } from './pages/stats.js';
+import { lexiconEndpoints, procedureCount, queryCount } from './lexicon-catalog.js';
 import type { ViewContext } from './xrpc/views.js';
 
 export function createApp(): Hono {
@@ -47,7 +49,35 @@ export function createApp(): Hono {
 			rewriteRequestPath: (path) => path.replace(/^\/webawesome/, ''),
 		}),
 	);
-	app.get('/', (ctx) => ctx.html(landingPageHtml));
+	app.get('/', (ctx) =>
+		ctx.html(
+			renderPage('home', {
+				title: 'Overview',
+				description: 'Bibliograph AT Protocol AppView: procedures and queries served by the net.olamaelcu.livtet.biblio lexicon.',
+				queryCount,
+				procedureCount,
+			}),
+		),
+	);
+	app.get('/queries', (ctx) =>
+		ctx.html(
+			renderPage('queries', {
+				title: 'Queries',
+				description: 'Read-only queries served by the Bibliograph AppView.',
+				endpoints: lexiconEndpoints.filter((e) => e.type === 'query'),
+			}),
+		),
+	);
+	app.get('/procedures', (ctx) =>
+		ctx.html(
+			renderPage('procedures', {
+				title: 'Procedures',
+				description: 'Mutating procedures served by the Bibliograph AppView.',
+				endpoints: lexiconEndpoints.filter((e) => e.type === 'procedure'),
+			}),
+		),
+	);
+	app.get('/stats', (ctx) => ctx.html(renderStatsPage()));
 	app.get('/health', healthCheck);
 	app.get('/.well-known/did.json', didDocumentHandler);
 	app.get('/.well-known/atproto-did', serveAtprotoDid);

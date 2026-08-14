@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bibliograph — <%= it.title %>
+  </title>
+  <meta name="description" content="<%= it.description %>" />
+  <link rel="stylesheet" href="/webawesome/dist-cdn/styles/webawesome.css" />
+  <script type="module" src="/webawesome/dist-cdn/webawesome.ssr-loader.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+
+    /* Avoid a flash of unstyled content for elements that weren't server-rendered. */
+    :not([did-ssr]):not(:defined) {
+      visibility: hidden;
+    }
+
+    wa-page {
+      --wa-page-width: 1100px;
+    }
+
+    .hero {
+      padding: 2rem;
+      flex-direction: column;
+    }
+
+    .hero p {
+      max-width: 50rem;
+      margin: 0 auto;
+    }
+
+    .hero h1 {
+      margin: 0 0 0.25rem;
+    }
+
+    .hero .subtitle {
+      margin: 0 0 0.5rem;
+      color: var(--wa-color-neutral-500);
+    }
+
+    .nav {
+      display: flex;
+      gap: 1.25rem;
+      margin-top: 1rem;
+    }
+
+    .nav a {
+      color: var(--wa-color-primary-600);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .nav a:hover {
+      text-decoration: underline;
+    }
+
+    .home {
+      max-width: 50rem;
+      margin: 0 auto;
+      padding: 1.5rem 2rem 2rem;
+    }
+
+    .home .stats {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    .home .stats a {
+      text-decoration: none;
+    }
+
+    .page-intro {
+      max-width: 50rem;
+      margin: 1rem auto 0;
+      padding: 0 2rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(35vw, 1fr));
+      gap: 1rem;
+      padding: 1rem 0 2rem;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .endpoint-card {
+      width: 45vw;
+      margin: 0 auto;
+    }
+
+    .endpoint-id {
+      font-weight: 600;
+      flex: 1 1;
+    }
+
+    .endpoint-desc {
+      margin: 0 0 0.75rem;
+    }
+
+    .muted {
+      color: var(--wa-color-neutral-500);
+    }
+
+    .row-head {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .param-type {
+      color: var(--wa-color-neutral-500);
+      font-size: 0.875rem;
+    }
+
+    .param-meta {
+      color: var(--wa-color-neutral-500);
+      font-size: 0.875rem;
+      margin-top: 0.25rem;
+    }
+
+    ul.spec {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    ul.spec li {
+      margin-bottom: 0.5rem;
+    }
+
+    .card-footer {
+      text-align: right;
+    }
+
+    .footer {
+      max-width: 50rem;
+      text-align: center;
+      padding: var(--wa-space-m);
+    }
+
+    .stats-page {
+      max-width: 60rem;
+      margin: 0 auto;
+      padding: 1.5rem 2rem 2rem;
+    }
+
+    .stats-page h2 {
+      margin: 1.5rem 0 0.5rem;
+    }
+
+    .stats-page table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    .stats-page th,
+    .stats-page td {
+      text-align: left;
+      padding: 0.4rem 0.75rem;
+      border-bottom: 1px solid var(--wa-color-neutral-300);
+    }
+
+    .stats-page th {
+      color: var(--wa-color-neutral-500);
+      font-weight: 600;
+    }
+  </style>
+</head>
+
+<body>
+  <wa-page mobile-breakpoint="920" view="desktop">
+    <header class="hero" slot="header">
+      <h1><wa-icon name="circle-star"></wa-icon> Bibliograph</h1>
+      <p class="subtitle"><code>net.olamaelcu.livtet.biblio</code> &mdash; a literary-centric <a
+          href="https://atproto.com/guides/glossary#app-view">AT Protocol AppView</a></p>
+      <nav class="nav">
+        <a href="/">Home</a>
+        <a href="/queries">Queries</a>
+        <a href="/procedures">Procedures</a>
+        <a href="/stats">Stats</a>
+      </nav>
+    </header>
+    <%~ it.body %>
+      <div class="footer">
+        Built by <a href="https://www.olamaelcu.net">Olamaelcu</a>
+      </div>
+  </wa-page>
+</body>
+
+</html>

@@ -1,0 +1,35 @@
+<main class="stats-page">
+	<h2>Catalog</h2>
+	<table>
+		<tr><th>Table</th><th>Total</th><th>Staged</th><th>Released</th><th>Rejected</th></tr>
+		<% for (const row of it.stats.catalog) { %>
+			<tr>
+				<td><code><%= row.label %></code></td>
+				<td><%= row.total.toLocaleString() %></td>
+				<% if (row.byStatus) { %>
+					<td><%= row.byStatus.staged ?? 0 %></td>
+					<td><%= row.byStatus.released ?? 0 %></td>
+					<td><%= row.byStatus.rejected ?? 0 %></td>
+				<% } else { %>
+					<td colspan="3" class="muted">&mdash;</td>
+				<% } %>
+			</tr>
+		<% } %>
+	</table>
+	<h2>Import issues</h2>
+	<p class="muted">Open issues: <code><%= it.stats.openIssues.toLocaleString() %></code> &mdash; flagged rows awaiting review before release.</p>
+	<h2>Backfill state</h2>
+	<% if (it.stats.backfill.length === 0) { %>
+		<p class="muted">No backfill state recorded.</p>
+	<% } else { %>
+		<ul class="spec">
+			<% for (const b of it.stats.backfill) { %>
+				<li>
+					<code><%= b.name %></code> &mdash; <%= b.complete ? 'complete' : 'in progress' %>
+					· <%= b.totalProcessed.toLocaleString() %> processed
+					<% if (b.fileSize) { %> · <%= Math.round(b.fileSize / 1024 / 1024) %> MB dump<% } %>
+				</li>
+			<% } %>
+		</ul>
+	<% } %>
+</main>

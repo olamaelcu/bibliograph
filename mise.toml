@@ -6,14 +6,8 @@ pnpm = "11.13.1"
 _.file = ".env"
 DB_PATH = "data/bibliograph.sqlite"
 
-[tasks.dev-server]
-run = "pnpm run dev:server"
-
-[tasks.dev-vite]
-run = "pnpm run dev"
-
 [tasks.dev]
-run = "mise run dev-vite ::: dev-server"
+run = "pnpm run dev"
 
 [tasks.migrate]
 run = "pnpm exec drizzle-kit migrate"

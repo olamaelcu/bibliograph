@@ -186,6 +186,79 @@ export function setStatus(
 	if (res.changes === 0) throw new Error(`no ${entity} row with pk '${pk}'`);
 }
 
+export interface ApproveAllOptions {
+	/** Release records that have open issues instead of skipping them. */
+	keepIssues?: boolean;
+	/** Cap the number of records released per entity. */
+	limit?: number;
+	/** Report what would be released without writing anything. */
+	dryRun?: boolean;
+}
+
+export interface ApproveAllResult {
+	entity: ReviewEntityType;
+	approved: number;
+	skippedWithIssues: number;
+}
+
+/**
+ * Mass-approve: release every `staged` record of an entity, skipping any with
+ * open issues unless `keepIssues`. Returns per-entity counts. Bypasses the
+ * per-record dependency guard on purpose — the point is bulk release.
+ */
+export function approveAll(
+	db: BetterSQLite3Database,
+	entity: ReviewEntityType,
+	opts: ApproveAllOptions = {},
+): ApproveAllResult {
+	const view = entityTable[entity];
+	const now = Math.floor(Date.now() / 1000);
+
+	const staged = (db
+		.select({ pk: view.pk })
+		.from(view)
+		.where(eq(view.releaseStatus as never, 'staged' as never))
+		.all() as Array<{ pk: string }>)
+		.slice(0, opts.limit);
+	const pks = staged.map((r) => String(r.pk));
+
+	const result: ApproveAllResult = { entity, approved: 0, skippedWithIssues: 0 };
+	if (pks.length === 0) return result;
+
+	const counts = new Map<string, number>();
+	if (!opts.keepIssues) {
+		const counted = db
+			.select({ entityPk: importIssues.entityPk, c: sql<number>`count(*)` })
+			.from(importIssues)
+			.where(
+				and(
+					eq(importIssues.entityType, entity),
+					eq(importIssues.status, 'open'),
+					inArray(importIssues.entityPk, pks),
+				),
+			)
+			.groupBy(importIssues.entityPk)
+			.all();
+		for (const row of counted) counts.set(row.entityPk, Number(row.c));
+	}
+
+	const toRelease = pks.filter((pk) => opts.keepIssues || (counts.get(pk) ?? 0) === 0);
+	result.skippedWithIssues = pks.length - toRelease.length;
+
+	if (!opts.dryRun && toRelease.length > 0) {
+		db.transaction((tx) => {
+			for (const pk of toRelease) {
+				tx.update(view)
+					.set({ releaseStatus: 'released', releasedAt: now } as never)
+					.where(eq(view.pk as never, pk as never))
+					.run();
+			}
+		});
+	}
+	result.approved = toRelease.length;
+	return result;
+}
+
 export function resolveIssue(db: BetterSQLite3Database, issuePk: number): void {
 	const res = db
 		.update(importIssues)

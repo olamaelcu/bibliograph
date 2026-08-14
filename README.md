@@ -12,17 +12,18 @@ A collection of tools in one:
 
 ```bash
 pnpm install
-pnpm run dev:server   # HTTP server on http://localhost:3000
-pnpm run dev          # Vite dev server with Hono as middleware
+pnpm run dev   # Vite dev server with Hono as middleware on http://localhost:5176
 
 # Or use `mise`
 mise dev
 ```
 
-Check it's alive: `curl http://localhost:3000/health`.
+Check it's alive: `curl http://localhost:5176/health`.
 
-The landing page at `http://localhost:3000/` lists every XRPC query and
-procedure, documented from the lexicon files. It is server-side rendered with
+The web UI is served from Eta templates on disk (`src/pages/templates/`):
+`/` lists the service overview with counts, `/queries` documents every XRPC
+query, `/procedures` every procedure, and `/stats` shows live catalog counts,
+open import issues, and backfill state. Pages are server-side rendered with
 [Web Awesome](https://webawesome.com) components and hydrated on the client.
 
 ## Environment
@@ -48,7 +49,7 @@ procedure, documented from the lexicon files. It is server-side rendered with
 
 ## Scripts
 
-- `pnpm run dev` / `dev:server` — development
+- `pnpm run dev` — development (Vite + Hono dev server)
 - `pnpm run check` — typecheck
 - `pnpm run test` — vitest
 - `pnpm run build` — compile server to `dist/`

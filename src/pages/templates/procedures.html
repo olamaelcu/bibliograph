@@ -1,0 +1,6 @@
+<p class="page-intro muted">Mutating procedures served over <code>/xrpc</code>, documented from the lexicon files. User-owned records (reviews, shelves, shelvings, profiles) are written through the <code>put*</code>/<code>delete*</code> procedures, which proxy each write to the reader&rsquo;s own PDS.</p>
+<main class="grid">
+	<% for (const e of it.endpoints) { %>
+		<%~ include('partials/endpoint-card.html', { ...e }) %>
+	<% } %>
+</main>

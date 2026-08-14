@@ -4,14 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { db } from '../db/connection.js';
 import { logger } from '../logger.js';
 import {
-  dismissIssue, editField, listForReview, listWithIssues, openIssueCount,
+  approveAll, dismissIssue, editField, listForReview, listWithIssues, openIssueCount,
   resolveIssue, setStatus, showRecord, stagedDependents,
 } from './service.js';
 import { reviewEntityTypes, type ReviewEntityType } from './views.js';
 import { importIssues, type ReleaseStatus } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
-const USAGE = 'usage: tsx src/review/cli.ts list|show|edit|approve|reject|issue [args]';
+const USAGE = 'usage: tsx src/review/cli.ts list|show|edit|approve|approve-all|reject|issue [args]';
 
 function parseEntity(v: string): ReviewEntityType {
   if (!(reviewEntityTypes as string[]).includes(v)) {
@@ -85,6 +85,28 @@ async function main(): Promise<void> {
     }
     setStatus(db, entity, pk, 'released');
     logger.info({ entity, pk }, 'released');
+  } else if (cmd === 'approve-all') {
+    const keepIssues = rest.includes('--keep-issues');
+    const yes = rest.includes('--yes');
+    const limitArg = rest.find((a) => a.startsWith('--limit='));
+    const limit = limitArg ? Number(limitArg.slice('--limit='.length)) : undefined;
+    if (limitArg && Number.isNaN(limit)) throw new Error(`invalid --limit value`);
+    const entities = (rest.filter((a) => !a.startsWith('--')) as string[])
+      .map(parseEntity);
+    if (entities.length === 0) entities.push('book', 'contributor');
+
+    const results = entities.map((entity) =>
+      approveAll(db, entity, { keepIssues, limit, dryRun: !yes }),
+    );
+    for (const r of results) {
+      logger.info(
+        { entity: r.entity, approved: r.approved, skippedWithIssues: r.skippedWithIssues, dryRun: !yes },
+        yes ? 'mass-approved' : 'would approve (dry-run; use --yes to apply)',
+      );
+    }
+    if (!yes) {
+      throw new Error('dry-run: pass --yes to actually release');
+    }
   } else if (cmd === 'reject') {
     const entity = parseEntity(rest[0]);
     const pk = rest[1];

@@ -1,0 +1,8 @@
+<main class="home">
+	<p>Every query and procedure exposed by this service following standards (<code>/xrpc</code>), documented from the lexicon files. User-owned records (reviews, shelves, shelvings, profiles) are written through the <code>put*</code>/<code>delete*</code> procedures, which proxy each write to the reader&rsquo;s own PDS.</p>
+	<div class="stats">
+		<a href="/queries"><wa-badge variant="brand" appearance="filled"><%= it.queryCount %> queries</wa-badge></a>
+		<a href="/procedures"><wa-badge variant="success" appearance="filled"><%= it.procedureCount %> procedures</wa-badge></a>
+	</div>
+	<p class="muted">Browse the <a href="/queries">queries</a> and <a href="/procedures">procedures</a>, or view <a href="/stats">live catalog stats</a>.</p>
+</main>

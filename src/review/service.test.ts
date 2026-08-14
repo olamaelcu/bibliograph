@@ -3,6 +3,7 @@ import { createTestDb } from '../test-utils/db.js';
 import { eq, sql } from 'drizzle-orm';
 import { bookContributors, bookGenres, books, contributors, genres, importIssues } from '../db/schema.js';
 import {
+	approveAll,
 	dismissIssue,
 	editField,
 	listForReview,
@@ -196,5 +197,72 @@ describe('review service', () => {
 		seed();
 		expect(() => resolveIssue(db, 999999)).toThrow();
 		expect(() => dismissIssue(db, 999999)).toThrow();
+	});
+
+	it('approveAll releases staged books and skips ones with open issues', () => {
+		const { db, seed } = createTestDb();
+		seed();
+		db.run(sql`UPDATE books SET release_status = 'staged'`); // seed books are released by default
+		const now = Math.floor(Date.now() / 1000);
+		db.insert(books)
+			.values({ pk: 'book-extra', title: 'Extra', workPk: null, formatPk: null, createdAt: now, releaseStatus: 'staged', releasedAt: null })
+			.run();
+		flagIssue(db, {
+			entityType: 'book',
+			entityPk: 'book-extra',
+			field: 'title',
+			incomingValue: 'Extra Alt',
+			storedValue: 'Extra',
+			source: 'openlibrary',
+		});
+
+		const res = approveAll(db, 'book');
+		expect(res.approved).toBe(2); // book-dune + book-flowers
+		expect(res.skippedWithIssues).toBe(1); // book-extra
+
+		const dune = db.select().from(books).where(eq(books.pk, 'book-dune')).get();
+		expect(dune?.releaseStatus).toBe('released');
+		const extra = db.select().from(books).where(eq(books.pk, 'book-extra')).get();
+		expect(extra?.releaseStatus).toBe('staged');
+	});
+
+	it('approveAll with keepIssues releases everything; dryRun writes nothing', () => {
+		const { db, seed } = createTestDb();
+		seed();
+		db.run(sql`UPDATE books SET release_status = 'staged'`);
+		const now = Math.floor(Date.now() / 1000);
+		db.insert(books)
+			.values({ pk: 'book-extra', title: 'Extra', workPk: null, formatPk: null, createdAt: now, releaseStatus: 'staged', releasedAt: null })
+			.run();
+		flagIssue(db, {
+			entityType: 'book',
+			entityPk: 'book-extra',
+			field: 'title',
+			incomingValue: 'Extra Alt',
+			storedValue: 'Extra',
+			source: 'openlibrary',
+		});
+
+		const dry = approveAll(db, 'book', { dryRun: true });
+		expect(dry.approved).toBe(2);
+		expect(db.select().from(books).where(eq(books.pk, 'book-dune')).get()?.releaseStatus).toBe('staged'); // untouched
+
+		const res = approveAll(db, 'book', { keepIssues: true });
+		expect(res.approved).toBe(3);
+		expect(res.skippedWithIssues).toBe(0);
+		expect(db.select().from(books).where(eq(books.pk, 'book-extra')).get()?.releaseStatus).toBe('released');
+	});
+
+	it('approveAll respects limit and reports empty entities', () => {
+		const { db, seed } = createTestDb();
+		seed();
+		db.run(sql`UPDATE books SET release_status = 'staged'`);
+		const res = approveAll(db, 'book', { limit: 1 });
+		expect(res.approved).toBe(1);
+		expect(res.skippedWithIssues).toBe(0);
+
+		const none = approveAll(db, 'genre', { limit: 5 });
+		expect(none.approved).toBe(0);
+		expect(none.skippedWithIssues).toBe(0);
 	});
 });

@@ -1,0 +1,6 @@
+<p class="page-intro muted">Read-only queries served over <code>/xrpc</code>, documented from the lexicon files.</p>
+<main class="grid">
+	<% for (const e of it.endpoints) { %>
+		<%~ include('partials/endpoint-card.html', { ...e }) %>
+	<% } %>
+</main>

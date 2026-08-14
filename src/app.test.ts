@@ -17,14 +17,45 @@ const LEXICON_NSIDS = [
   'work',
 ];
 
-describe('landing page', () => {
-  it('serves the landing page at /', async () => {
+describe('pages', () => {
+  it('serves the home page at /', async () => {
     const res = await app.request('/');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const body = await res.text();
     expect(body).toContain('net.olamaelcu.livtet.biblio');
     expect(body).toContain('did-ssr');
+  });
+
+  it('serves the queries page with no procedures', async () => {
+    const res = await app.request('/queries');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const body = await res.text();
+    expect(body).toContain('net.olamaelcu.livtet.biblio.searchBooks');
+    expect(body).toContain('did-ssr');
+    expect(body).not.toContain('net.olamaelcu.livtet.biblio.putReview');
+  });
+
+  it('serves the procedures page with no queries', async () => {
+    const res = await app.request('/procedures');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const body = await res.text();
+    expect(body).toContain('net.olamaelcu.livtet.biblio.putReview');
+    expect(body).toContain('did-ssr');
+    expect(body).not.toContain('net.olamaelcu.livtet.biblio.searchBooks');
+  });
+
+  it('serves the live stats page', async () => {
+    const res = await app.request('/stats');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const body = await res.text();
+    expect(body).toContain('did-ssr');
+    expect(body).toContain('books');
+    expect(body).toContain('works');
+    expect(body).toContain('contributors');
   });
 
   it('serves webawesome theme assets', async () => {
