@@ -17,6 +17,9 @@ importers:
       '@atcute/cid':
         specifier: ^2.4.2
         version: 2.4.2
+      '@atcute/client':
+        specifier: ^5.1.1
+        version: 5.1.1(@atcute/lexicons@2.0.3)(typescript@7.0.2)
       '@atcute/lexicons':
         specifier: ^2.0.3
         version: 2.0.3
@@ -51,9 +54,6 @@ importers:
         specifier: ^4.23.1
         version: 4.23.12
     devDependencies:
-      '@atcute/client':
-        specifier: ^5.1.1
-        version: 5.1.1(@atcute/lexicons@2.0.3)(typescript@7.0.2)
       '@atcute/lex-cli':
         specifier: ^3.2.1
         version: 3.2.1(@atcute/cbor@2.3.6(@atcute/cid@2.4.2))(@atcute/cid@2.4.2)(typescript@7.0.2)

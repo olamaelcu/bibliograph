@@ -1,12 +1,12 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { backfillReservation } from '../db/schema.js';
+import { isPidAlive } from './lock.js';
 
 /**
  * Serialize long-running backfill work against live web writes. Web write
- * paths call `withWriteRetry` (added in a later task) which observes
- * reservations and retries on SQLITE_BUSY. Acquiring a reservation means
- * "a long import is running".
+ * paths call `withWriteRetry` which observes reservations and retries on
+ * SQLITE_BUSY. Acquiring a reservation means "a long import is running".
  */
 export class Reservation {
   constructor(
@@ -23,7 +23,12 @@ export class Reservation {
         .from(backfillReservation)
         .where(eq(backfillReservation.stateName, this.stateName))
         .get();
-      if (held) return held.pid === this.pid;
+      if (held) {
+        // Take over reservations left by a dead process (crashed/interrupted
+        // run); otherwise only the owning pid may re-acquire.
+        if (this.isPidAlive(held.pid)) return held.pid === this.pid;
+        this.db.delete(backfillReservation).where(eq(backfillReservation.stateName, this.stateName)).run();
+      }
       const res = this.db
         .insert(backfillReservation)
         .values({ stateName: this.stateName, pid: this.pid, startedAt: now })
@@ -43,6 +48,11 @@ export class Reservation {
         .where(eq(backfillReservation.stateName, this.stateName))
         .get() != null
     );
+  }
+
+  /** True if `pid` is a live process on this host. */
+  isPidAlive(pid: number): boolean {
+    return isPidAlive(pid);
   }
 
   release(): void {

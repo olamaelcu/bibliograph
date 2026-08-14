@@ -38,7 +38,17 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
 
   const state = new DumpState(opts.db, opts.stateName);
   const reservation = new Reservation(opts.db, opts.stateName);
-  reservation.acquire();
+  if (!reservation.acquire()) {
+    // Either another live run holds the reservation, or the DB is mid-write
+    // (SQLITE_BUSY). Distinguish so the operator knows what actually happened.
+    if (reservation.isHeld()) {
+      logger.warn({ stateName: opts.stateName }, 'reservation held by another run; aborting');
+      throw new Error(`reservation held for state '${opts.stateName}'`);
+    }
+    logger.warn({ stateName: opts.stateName }, 'database busy; another import appears to be writing');
+    throw new Error(`database busy; is another import running for state '${opts.stateName}'?`);
+  }
+  let acquired = true;
 
   try {
     if (opts.reset) state.clear();
@@ -108,7 +118,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     logger.info({ ...summary }, 'dump import complete');
     return summary;
   } finally {
-    reservation.release();
+    if (acquired) reservation.release();
     releaseLock(lockPath);
   }
 }

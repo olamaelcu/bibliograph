@@ -34,8 +34,11 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
   try {
     acquired = reservation.acquire();
     if (!acquired) {
-      logger.warn('bookhive catalog reservation held by another run; aborting');
-      throw new Error('bookhive catalog reservation held');
+      const msg = reservation.isHeld()
+        ? 'bookhive catalog reservation held by another run'
+        : 'database busy; is another import running?';
+      logger.warn(msg);
+      throw new Error(msg);
     }
 
     const state = new DumpState(opts.db, STATE_NAME);

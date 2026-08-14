@@ -4,9 +4,9 @@ import { mapCatalogBook } from './mapper.js';
 describe('mapCatalogBook', () => {
   it('maps a catalog book to contributor + book candidates', () => {
     const cands = mapCatalogBook({
-      hiveId: 'hive-1',
+      identifiers: { hiveId: 'hive-1' },
       title: 'Dune',
-      author: [{ name: 'Frank Herbert' }],
+      authors: [{ name: 'Frank Herbert' }],
       isbn: '9780441172719',
     });
     expect(cands.map((c) => c.entityType)).toEqual(['contributor', 'book']);
@@ -23,8 +23,20 @@ describe('mapCatalogBook', () => {
   });
 
   it('normalizes hyphenated ISBNs into a bare isbn resource', () => {
-    const cands = mapCatalogBook({ hiveId: 'hive-2', title: 'Dune', isbn: '978-0-441-17271-9' });
+    const cands = mapCatalogBook({ identifiers: { hiveId: 'hive-2' }, title: 'Dune', isbn: '978-0-441-17271-9' });
     const book = cands.find((c) => c.entityType === 'book');
     expect(book?.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
+  });
+
+  it('derives a deterministic hash pk for non-ASCII author names', () => {
+    const cands = mapCatalogBook({
+      identifiers: { hiveId: 'hive-3' },
+      title: 'CJK Book',
+      authors: '岡田 斗司夫',
+    });
+    const contributor = cands.find((c) => c.entityType === 'contributor');
+    expect(contributor).toBeDefined();
+    expect(contributor?.pk.startsWith('c-')).toBe(true);
+    expect(contributor?.matchName).toBe('岡田 斗司夫');
   });
 });
