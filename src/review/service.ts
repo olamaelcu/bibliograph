@@ -1,7 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { importIssues } from '../db/schema.js';
-import { entityTable, type ReviewEntityType } from './views.js';
+import { entityTable, entityViewName, type ReviewEntityType } from './views.js';
 import { coerceValue, editableFields } from './fields.js';
 
 export interface ReviewListRow {
@@ -14,7 +14,7 @@ export interface ReviewListRow {
 export function listForReview(
 	db: BetterSQLite3Database,
 	entity: ReviewEntityType,
-	opts: { status?: string },
+	opts: { status?: string } = {},
 ): ReviewListRow[] {
 	const view = entityTable[entity];
 	const statusCol = view.releaseStatus as never;
@@ -23,6 +23,7 @@ export function listForReview(
 			? (view as { title: unknown }).title
 			: (view as { name: unknown }).name
 	) as never;
+	const nameKey = (nameCol as { name: string }).name;
 
 	const conds: ReturnType<typeof eq>[] = [];
 	if (opts.status) conds.push(eq(statusCol, opts.status as never));
@@ -37,18 +38,18 @@ export function listForReview(
 	return rows.map((r) => ({
 		pk: String(r.pk),
 		status: String(r.releaseStatus ?? 'staged'),
-		name: String(r[String(nameCol)] ?? r.pk),
+		name: String(r[nameKey] ?? r.pk),
 		openIssues: 0,
 	}));
 }
 
 /** Rows with ≥1 open issue, via the per-entity review view. */
 export function listWithIssues(db: BetterSQLite3Database, entity: ReviewEntityType): ReviewListRow[] {
-	const viewName = entityViewNameOf(entity);
+	const viewName = entityViewName[entity];
 	const rows = db.all(sql`SELECT * FROM ${sql.raw(viewName)}`) as Array<Record<string, unknown>>;
 	return rows.map((r) => ({
 		pk: String(r.pk),
-		status: String(r.releaseStatus ?? 'staged'),
+		status: String(r.release_status ?? r.releaseStatus ?? 'staged'),
 		name: String(r.title ?? r.name ?? r.pk),
 		openIssues: countOpenIssues(r.open_issues),
 	}));
@@ -66,17 +67,6 @@ function countOpenIssues(raw: unknown): number {
 	}
 	if (Array.isArray(raw)) return raw.length;
 	return Number(raw ?? 0);
-}
-
-function entityViewNameOf(entity: ReviewEntityType): string {
-	const map = {
-		book: 'book_import_issues',
-		work: 'work_import_issues',
-		contributor: 'contributor_import_issues',
-		genre: 'genre_import_issues',
-		contributorRole: 'contributor_role_import_issues',
-	} as const;
-	return map[entity];
 }
 
 export function showRecord(

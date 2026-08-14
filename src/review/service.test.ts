@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { books } from '../db/schema.js';
 import {
 	editField,
+	listForReview,
 	listWithIssues,
 	openIssueCount,
 	setStatus,
@@ -27,6 +28,16 @@ describe('review service', () => {
 		expect(rows).toHaveLength(1);
 		expect(rows[0].pk).toBe('book-dune');
 		expect(rows[0].openIssues).toBe(1);
+		expect(rows[0].status).toBe('released');
+		expect(rows[0].name).toBe('Dune (40th Anniversary)');
+	});
+
+	it('lists records for review with pk and name', () => {
+		const { db, seed } = createTestDb();
+		seed();
+		const rows = listForReview(db, 'book');
+		expect(rows[0].pk).toBe('book-dune');
+		expect(rows[0].name).toBe('Dune (40th Anniversary)');
 	});
 
 	it('edits a field and resolves its issue', () => {
