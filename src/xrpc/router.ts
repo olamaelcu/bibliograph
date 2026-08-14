@@ -17,8 +17,8 @@ import {
 	type ViewContext,
 } from './views.js';
 import {
-	authors,
-	authorIdentifiers,
+	contributors,
+	contributorIdentifiers,
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
@@ -96,12 +96,12 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetContributor.mainSchema, {
 		async handler({ params }) {
 			const rkey = rkeyFromUri(ctx, COLLECTION.contributor, params.uri);
-			const row = db.select().from(authors).where(eq(authors.pk, rkey)).get();
+			const row = db.select().from(contributors).where(eq(contributors.pk, rkey)).get();
 			if (!row) notFound();
 			const identifiers = db
 				.select()
-				.from(authorIdentifiers)
-				.where(eq(authorIdentifiers.authorPk, rkey))
+				.from(contributorIdentifiers)
+				.where(eq(contributorIdentifiers.contributorPk, rkey))
 				.all();
 			return json({ contributor: toContributorView(ctx, row!, identifiers) });
 		},
@@ -384,7 +384,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const limit = clampLimit(params.limit);
 			const term = `%${q}%`;
 			const filters = [
-				or(like(authors.name, term), like(authors.sortName, term), like(authors.bio, term)),
+				or(like(contributors.name, term), like(contributors.sortName, term), like(contributors.bio, term)),
 			];
 			if (params.role) {
 				const rolePk = rkeyFromUri(ctx, COLLECTION.contributorRole, params.role);
@@ -392,36 +392,36 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 					.select({ contributorPk: bookContributors.contributorPk })
 					.from(bookContributors)
 					.where(eq(bookContributors.rolePk, rolePk));
-				filters.push(sql`${authors.pk} in (${sub})`);
+				filters.push(sql`${contributors.pk} in (${sub})`);
 			}
 			const where = and(...filters);
 			const rows = db
 				.select()
-				.from(authors)
+				.from(contributors)
 				.where(where)
-				.orderBy(sql`${authors.name} asc, ${authors.pk} asc`)
+				.orderBy(sql`${contributors.name} asc, ${contributors.pk} asc`)
 				.limit(limit + 1)
 				.all();
 			const hasMore = rows.length > limit;
 			const page = hasMore ? rows.slice(0, limit) : rows;
 			const pks = page.map((a) => a.pk);
-			const idRows: { authorPk: string; resource: string; url: string }[] = pks.length
+			const idRows: { contributorPk: string; resource: string; url: string }[] = pks.length
 				? db
 						.select()
-						.from(authorIdentifiers)
-						.where(inArray(authorIdentifiers.authorPk, pks))
+						.from(contributorIdentifiers)
+						.where(inArray(contributorIdentifiers.contributorPk, pks))
 						.all()
 				: [];
-			const idByAuthor = new Map<string, { authorPk: string; resource: string; url: string }[]>();
+			const idByContributor = new Map<string, { contributorPk: string; resource: string; url: string }[]>();
 			for (const row of idRows) {
-				const list = idByAuthor.get(row.authorPk) ?? [];
+				const list = idByContributor.get(row.contributorPk) ?? [];
 				list.push(row);
-				idByAuthor.set(row.authorPk, list);
+				idByContributor.set(row.contributorPk, list);
 			}
-			const hitsTotal = db.select({ count: sql`count(*)` }).from(authors).where(where).get();
+			const hitsTotal = db.select({ count: sql`count(*)` }).from(contributors).where(where).get();
 			const last = page.at(-1);
 			return json({
-				contributors: page.map((a) => toContributorView(ctx, a, idByAuthor.get(a.pk) ?? [])),
+				contributors: page.map((a) => toContributorView(ctx, a, idByContributor.get(a.pk) ?? [])),
 				hitsTotal: Number(hitsTotal?.count ?? 0),
 				cursor: hasMore && last ? encodeCursor({ key: last.name, pk: last.pk }) : undefined,
 			});

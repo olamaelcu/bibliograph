@@ -2,8 +2,8 @@ import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import {
-	authors,
-	authorIdentifiers,
+	contributors,
+	contributorIdentifiers,
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
@@ -70,7 +70,7 @@ function seed(db: ReturnType<typeof drizzle>) {
 	const workRows = [
 		{ pk: 'work-dune', title: 'Dune', description: 'A desert planet saga', originalPublishDate: 1119484800, createdAt: now, updatedAt: null },
 	];
-	const authorRows = [
+	const contributorRows = [
 		{ pk: 'author-herbert', name: 'Frank Herbert', sortName: 'Herbert, Frank', bio: 'American author', imageUrl: null, createdAt: now, updatedAt: null },
 		{ pk: 'author-algernon', name: 'Daniel Keyes', sortName: 'Keyes, Daniel', bio: 'American writer', imageUrl: null, createdAt: now, updatedAt: null },
 	];
@@ -94,7 +94,7 @@ function seed(db: ReturnType<typeof drizzle>) {
 	db.insert(genres).values(genreRows).run();
 	db.insert(contributorRoles).values(roleRows).run();
 	db.insert(works).values(workRows).run();
-	db.insert(authors).values(authorRows).run();
+	db.insert(contributors).values(contributorRows).run();
 	db.insert(books).values(bookRows).run();
 	db.insert(shelves).values(shelfRows).run();
 	db.insert(reviews).values(reviewRows).run();
@@ -114,8 +114,8 @@ function seed(db: ReturnType<typeof drizzle>) {
 	db.insert(workIdentifiers).values([
 		{ workPk: 'work-dune', resource: 'openlibrary:OL893423W', url: 'https://openlibrary.example.com/OL893423W' },
 	]).run();
-	db.insert(authorIdentifiers).values([
-		{ authorPk: 'author-herbert', resource: 'viaf:59083797', url: 'https://viaf.example.com/59083797' },
+	db.insert(contributorIdentifiers).values([
+		{ contributorPk: 'author-herbert', resource: 'viaf:59083797', url: 'https://viaf.example.com/59083797' },
 	]).run();
 	db.insert(genreIdentifiers).values([
 		{ genrePk: 'scifi', resource: 'babelio:science-fiction', url: 'https://babelio.example.com/science-fiction' },

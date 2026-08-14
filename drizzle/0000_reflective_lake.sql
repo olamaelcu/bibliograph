@@ -1,13 +1,13 @@
-CREATE TABLE `author_identifiers` (
-	`author_pk` text NOT NULL,
+CREATE TABLE `contributor_identifiers` (
+	`contributor_pk` text NOT NULL,
 	`resource` text NOT NULL,
 	`url` text NOT NULL,
-	PRIMARY KEY(`author_pk`, `resource`),
-	FOREIGN KEY (`author_pk`) REFERENCES `authors`(`pk`) ON UPDATE no action ON DELETE cascade
+	PRIMARY KEY(`contributor_pk`, `resource`),
+	FOREIGN KEY (`contributor_pk`) REFERENCES `contributors`(`pk`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `author_identifiers_url_idx` ON `author_identifiers` (`url`);--> statement-breakpoint
-CREATE TABLE `authors` (
+CREATE INDEX `contributor_identifiers_url_idx` ON `contributor_identifiers` (`url`);--> statement-breakpoint
+CREATE TABLE `contributors` (
 	`pk` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`sort_name` text,
@@ -17,7 +17,7 @@ CREATE TABLE `authors` (
 	`updated_at` integer
 );
 --> statement-breakpoint
-CREATE INDEX `authors_name_idx` ON `authors` (`name`);--> statement-breakpoint
+CREATE INDEX `contributors_name_idx` ON `contributors` (`name`);--> statement-breakpoint
 CREATE TABLE `book_contributors` (
 	`book_pk` text NOT NULL,
 	`contributor_pk` text NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE `book_contributors` (
 	`created_at` integer,
 	PRIMARY KEY(`book_pk`, `contributor_pk`),
 	FOREIGN KEY (`book_pk`) REFERENCES `books`(`pk`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`contributor_pk`) REFERENCES `authors`(`pk`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`contributor_pk`) REFERENCES `contributors`(`pk`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`role_pk`) REFERENCES `contributor_roles`(`pk`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint

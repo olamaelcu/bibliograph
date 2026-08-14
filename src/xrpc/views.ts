@@ -16,8 +16,8 @@ import type {
 	WorkView,
 } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
 import {
-	authors,
-	authorIdentifiers,
+	contributors,
+	contributorIdentifiers,
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
@@ -207,9 +207,9 @@ export async function toBookView(
 		})(),
 		(async () => {
 			const joins = db
-				.select({ contributor: authors, role: contributorRoles })
+				.select({ contributor: contributors, role: contributorRoles })
 				.from(bookContributors)
-				.innerJoin(authors, eq(bookContributors.contributorPk, authors.pk))
+				.innerJoin(contributors, eq(bookContributors.contributorPk, contributors.pk))
 				.innerJoin(contributorRoles, eq(bookContributors.rolePk, contributorRoles.pk))
 				.where(eq(bookContributors.bookPk, b.pk))
 				.all();
@@ -232,8 +232,8 @@ export async function toBookView(
 		contributorRows.length
 			? db
 					.select()
-					.from(authorIdentifiers)
-					.where(inArray(authorIdentifiers.authorPk, contributorRows.map((c) => c.contributor.pk)))
+					.from(contributorIdentifiers)
+					.where(inArray(contributorIdentifiers.contributorPk, contributorRows.map((c) => c.contributor.pk)))
 					.all()
 			: Promise.resolve([]),
 	]);
@@ -246,9 +246,9 @@ export async function toBookView(
 	}
 	const idByContributor = new Map<string, IdentifierRow[]>();
 	for (const row of contributorIds) {
-		const list = idByContributor.get(row.authorPk) ?? [];
+		const list = idByContributor.get(row.contributorPk) ?? [];
 		list.push(row);
-		idByContributor.set(row.authorPk, list);
+		idByContributor.set(row.contributorPk, list);
 	}
 
 	return {

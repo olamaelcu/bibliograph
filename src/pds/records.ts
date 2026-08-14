@@ -9,8 +9,8 @@ type ContributorRole = Lexicons.NetOlamaelcuLivtetBiblioContributorRole.Main;
 type Format = Lexicons.NetOlamaelcuLivtetBiblioFormat.Main;
 type Genre = Lexicons.NetOlamaelcuLivtetBiblioGenre.Main;
 import {
-	authors,
-	authorIdentifiers,
+	contributors,
+	contributorIdentifiers,
 	bookContributors,
 	bookGenres,
 	bookIdentifiers,
@@ -275,9 +275,9 @@ export async function hydrateContributor(
 	db: Db,
 	pk: string,
 ): Promise<Contributor | undefined> {
-	const row = db.select().from(authors).where(eq(authors.pk, pk)).get();
+	const row = db.select().from(contributors).where(eq(contributors.pk, pk)).get();
 	if (!row) return undefined;
-	const identifiers = await loadIdentifiers(db, authorIdentifiers, authorIdentifiers.authorPk, pk);
+	const identifiers = await loadIdentifiers(db, contributorIdentifiers, contributorIdentifiers.contributorPk, pk);
 	return serializeContributor(row, identifiers);
 }
 
@@ -359,7 +359,7 @@ function tableFor(collection: OwnedCollection) {
 		case COLLECTIONS.work:
 			return works;
 		case COLLECTIONS.contributor:
-			return authors;
+			return contributors;
 		case COLLECTIONS.contributorRole:
 			return contributorRoles;
 		case COLLECTIONS.format:

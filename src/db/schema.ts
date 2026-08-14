@@ -36,8 +36,8 @@ export const works = sqliteTable(
 	}),
 );
 
-export const authors = sqliteTable(
-	'authors',
+export const contributors = sqliteTable(
+	'contributors',
 	{
 		pk: text('pk').primaryKey(),
 		name: text('name').notNull(),
@@ -49,7 +49,7 @@ export const authors = sqliteTable(
 		updatedAt: integer('updated_at'),
 	},
 	(t) => ({
-		nameIdx: index('authors_name_idx').on(t.name),
+		nameIdx: index('contributors_name_idx').on(t.name),
 	}),
 );
 
@@ -133,7 +133,7 @@ export const bookContributors = sqliteTable(
 		bookFk: foreignKey({ columns: [t.bookPk], foreignColumns: [books.pk] }).onDelete('cascade'),
 		contributorFk: foreignKey({
 			columns: [t.contributorPk],
-			foreignColumns: [authors.pk],
+			foreignColumns: [contributors.pk],
 		}).onDelete('cascade'),
 		roleFk: foreignKey({
 			columns: [t.rolePk],
@@ -198,17 +198,20 @@ export const workIdentifiers = sqliteTable(
 	}),
 );
 
-export const authorIdentifiers = sqliteTable(
-	'author_identifiers',
+export const contributorIdentifiers = sqliteTable(
+	'contributor_identifiers',
 	{
-		authorPk: text('author_pk').notNull(),
+		contributorPk: text('contributor_pk').notNull(),
 		resource: text('resource').notNull(),
 		url: text('url').notNull(),
 	},
 	(t) => ({
-		pk: primaryKey({ columns: [t.authorPk, t.resource] }),
-		authorFk: foreignKey({ columns: [t.authorPk], foreignColumns: [authors.pk] }).onDelete('cascade'),
-		urlIdx: index('author_identifiers_url_idx').on(t.url),
+		pk: primaryKey({ columns: [t.contributorPk, t.resource] }),
+		contributorFk: foreignKey({
+			columns: [t.contributorPk],
+			foreignColumns: [contributors.pk],
+		}).onDelete('cascade'),
+		urlIdx: index('contributor_identifiers_url_idx').on(t.url),
 	}),
 );
 
