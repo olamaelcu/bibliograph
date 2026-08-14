@@ -4,11 +4,11 @@
   "id": "b2b54138-e14b-46d0-8893-d9e6e6d9e267",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "author_identifiers": {
-      "name": "author_identifiers",
+    "contributor_identifiers": {
+      "name": "contributor_identifiers",
       "columns": {
-        "author_pk": {
-          "name": "author_pk",
+        "contributor_pk": {
+          "name": "contributor_pk",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -30,8 +30,8 @@
         }
       },
       "indexes": {
-        "author_identifiers_url_idx": {
-          "name": "author_identifiers_url_idx",
+        "contributor_identifiers_url_idx": {
+          "name": "contributor_identifiers_url_idx",
           "columns": [
             "url"
           ],
@@ -39,12 +39,12 @@
         }
       },
       "foreignKeys": {
-        "author_identifiers_author_pk_authors_pk_fk": {
-          "name": "author_identifiers_author_pk_authors_pk_fk",
-          "tableFrom": "author_identifiers",
-          "tableTo": "authors",
+        "contributor_identifiers_contributor_pk_contributors_pk_fk": {
+          "name": "contributor_identifiers_contributor_pk_contributors_pk_fk",
+          "tableFrom": "contributor_identifiers",
+          "tableTo": "contributors",
           "columnsFrom": [
-            "author_pk"
+            "contributor_pk"
           ],
           "columnsTo": [
             "pk"
@@ -54,19 +54,19 @@
         }
       },
       "compositePrimaryKeys": {
-        "author_identifiers_author_pk_resource_pk": {
+        "contributor_identifiers_contributor_pk_resource_pk": {
           "columns": [
-            "author_pk",
+            "contributor_pk",
             "resource"
           ],
-          "name": "author_identifiers_author_pk_resource_pk"
+          "name": "contributor_identifiers_contributor_pk_resource_pk"
         }
       },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "authors": {
-      "name": "authors",
+    "contributors": {
+      "name": "contributors",
       "columns": {
         "pk": {
           "name": "pk",
@@ -119,8 +119,8 @@
         }
       },
       "indexes": {
-        "authors_name_idx": {
-          "name": "authors_name_idx",
+        "contributors_name_idx": {
+          "name": "contributors_name_idx",
           "columns": [
             "name"
           ],
@@ -179,10 +179,10 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "book_contributors_contributor_pk_authors_pk_fk": {
-          "name": "book_contributors_contributor_pk_authors_pk_fk",
+        "book_contributors_contributor_pk_contributors_pk_fk": {
+          "name": "book_contributors_contributor_pk_contributors_pk_fk",
           "tableFrom": "book_contributors",
-          "tableTo": "authors",
+          "tableTo": "contributors",
           "columnsFrom": [
             "contributor_pk"
           ],

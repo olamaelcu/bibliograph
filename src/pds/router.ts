@@ -17,7 +17,7 @@ import {
 	type OwnedCollection,
 } from './records.js';
 import { buildDidDocument } from '../did.js';
-import { authors, contributorRoles, formats, genres, works, books } from '../db/schema.js';
+import { contributors, contributorRoles, formats, genres, works, books } from '../db/schema.js';
 import type { ViewContext } from '../xrpc/views.js';
 
 type Db = BetterSQLite3Database;
@@ -207,7 +207,7 @@ function tableFor(collection: OwnedCollection) {
 		case COLLECTIONS.work:
 			return works;
 		case COLLECTIONS.contributor:
-			return authors;
+			return contributors;
 		case COLLECTIONS.contributorRole:
 			return contributorRoles;
 		case COLLECTIONS.format:
