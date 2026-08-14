@@ -76,17 +76,17 @@ export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
     });
   }
 
-  for (const author of ed.authors ?? []) {
-    if (!author.key) continue;
-    candidates.push({
-      entityType: 'contributor',
-      pk: sourceKeySlug(author.key),
-      source: 'openlibrary',
-      matchName: author.name ?? null,
-      identifiers: [{ resource: identifierResource('openlibrary', author.key.replace(/^\//, '')), url: `https://openlibrary.org${author.key}` }],
-      fields: { name: author.name ?? null },
-    });
-  }
+	for (const author of ed.authors ?? []) {
+		if (!author.key || !author.name) continue; // authoritative contributor comes from the authors dump
+		candidates.push({
+			entityType: 'contributor',
+			pk: sourceKeySlug(author.key),
+			source: 'openlibrary',
+			matchName: author.name,
+			identifiers: [{ resource: identifierResource('openlibrary', author.key.replace(/^\//, '')), url: `https://openlibrary.org${author.key}` }],
+			fields: { name: author.name },
+		});
+	}
 
   candidates.push({
     entityType: 'book',

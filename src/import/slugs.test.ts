@@ -3,8 +3,8 @@ import { identifierResource, olKey, sourceKeySlug } from './slugs.js';
 
 describe('sourceKeySlug', () => {
 	it('slugifies OL keys', () => {
-		expect(sourceKeySlug('/books/OL123M')).toBe('books/ol123m');
-		expect(sourceKeySlug('/works/OL893423W')).toBe('works/ol893423w');
+		expect(sourceKeySlug('/books/OL123M')).toBe('books-ol123m');
+		expect(sourceKeySlug('/works/OL893423W')).toBe('works-ol893423w');
 	});
 
 	it('keeps hiveId rkeys stable', () => {

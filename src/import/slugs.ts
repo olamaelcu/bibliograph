@@ -2,7 +2,7 @@
 export function sourceKeySlug(key: string): string {
 	const cleaned = key
 		.replace(/^\/+/, '')
-		.replace(/[^a-zA-Z0-9._/-]+/g, '-')
+		.replace(/[^a-zA-Z0-9._-]+/g, '-')
 		.replace(/^-+|-+$/g, '')
 		.toLowerCase();
 	if (!cleaned) throw new Error(`cannot derive slug from source key: ${key}`);
@@ -10,7 +10,7 @@ export function sourceKeySlug(key: string): string {
 }
 
 export const olKey = {
-	book: (key: string) => sourceKeySlug(key), // /books/OL123M -> books/ol123m
+	book: (key: string) => sourceKeySlug(key), // /books/OL123M -> books-ol123m
 	work: (key: string) => sourceKeySlug(key),
 	author: (key: string) => sourceKeySlug(key),
 };

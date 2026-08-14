@@ -17,21 +17,26 @@ describe('OL mappers', () => {
     const cands = mapEditionToCandidates(edition);
     expect(cands.map((c) => c.entityType)).toEqual(['work', 'contributor', 'book']);
     const book = cands[2];
-    expect(book.pk).toBe('books/ol123m');
+		expect(book.pk).toBe('books-ol123m');
     expect(book.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
     expect(book.identifiers.some((i) => i.resource === 'openlibrary:books/OL123M')).toBe(true);
-    expect(book.fields.workPk).toBe('works/ol893423w');
+		expect(book.fields.workPk).toBe('works-ol893423w');
   });
 
   it('maps work and author', () => {
     const w = mapWorkToCandidate({ key: '/works/OL893423W', title: 'Dune' });
-    expect(w.pk).toBe('works/ol893423w');
+		expect(w.pk).toBe('works-ol893423w');
     const a = mapAuthorToCandidate({ key: '/authors/OL123A', name: 'Frank Herbert', bio: 'Author' });
-    expect(a.pk).toBe('authors/ol123a');
+		expect(a.pk).toBe('authors-ol123a');
     expect(a.fields.bio).toBe('Author');
   });
 
-  it('nulls unparseable edition publish dates instead of writing NaN', () => {
+	it('skips contributor candidates for edition author entries without a name', () => {
+		const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', authors: [{ key: '/authors/OL1A' }] });
+		expect(cands.map((c) => c.entityType)).toEqual(['book']);
+	});
+
+	it('nulls unparseable edition publish dates instead of writing NaN', () => {
     const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', publish_date: 'Not specified', works: [{ key: '/works/OL1W' }] });
     const work = cands.find((c) => c.entityType === 'work');
     const book = cands.find((c) => c.entityType === 'book');

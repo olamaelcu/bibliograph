@@ -10,23 +10,23 @@ describe('hydrateBookContributorsFromEdition', () => {
     seed(); // provides the 'author' contributor_role row
     const now = Math.floor(Date.now() / 1000);
     db.insert(books)
-      .values({ pk: 'books/ol123m', title: 'Dune', createdAt: now, releaseStatus: 'staged' })
+      .values({ pk: 'books-ol123m', title: 'Dune', createdAt: now, releaseStatus: 'staged' })
       .run();
     db.insert(contributors)
-      .values({ pk: 'authors/ol123a', name: 'Frank Herbert', createdAt: now, releaseStatus: 'staged' })
+      .values({ pk: 'authors-ol123a', name: 'Frank Herbert', createdAt: now, releaseStatus: 'staged' })
       .run();
     const linked = hydrateBookContributorsFromEdition(db, '/books/OL123M', [
       { key: '/authors/OL999A' },
       { key: '/authors/OL123A' },
     ]);
     expect(linked).toBe(1);
-    const rows = db.select().from(bookContributors).where(eq(bookContributors.bookPk, 'books/ol123m')).all();
+    const rows = db.select().from(bookContributors).where(eq(bookContributors.bookPk, 'books-ol123m')).all();
     expect(rows).toHaveLength(1);
-    expect(rows[0].contributorPk).toBe('authors/ol123a');
+    expect(rows[0].contributorPk).toBe('authors-ol123a');
 
     const relinked = hydrateBookContributorsFromEdition(db, '/books/OL123M', [{ key: '/authors/OL123A' }]);
     expect(relinked).toBe(1);
-    const after = db.select().from(bookContributors).where(eq(bookContributors.bookPk, 'books/ol123m')).all();
+    const after = db.select().from(bookContributors).where(eq(bookContributors.bookPk, 'books-ol123m')).all();
     expect(after).toHaveLength(1);
   });
 });
