@@ -38,7 +38,9 @@ export class HttpDownloader {
   }
 
   private get timeoutMs(): number {
-    return this.opts.timeoutMs ?? 60_000;
+    if (this.opts.timeoutMs != null) return this.opts.timeoutMs;
+    const env = Number(process.env.DUMP_DOWNLOAD_TIMEOUT_MS);
+    return Number.isFinite(env) && env > 0 ? env : 60_000;
   }
 
   async downloadWithRetry(destPath: string, attempts = 2): Promise<DownloadMetadata> {
@@ -80,8 +82,15 @@ export class HttpDownloader {
   }
 
   async download(destPath: string): Promise<DownloadMetadata> {
+    // Idle timeout: aborts only when no data arrives for `timeoutMs`, so a
+    // slow-but-flowing multi-GB download is never killed by a wall-clock cap.
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let timer: NodeJS.Timeout | undefined;
+    const arm = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    };
+    arm();
     try {
       let currentUrl = this._url;
       for (let i = 0; i < this.maxRedirects; i += 1) {
@@ -89,13 +98,14 @@ export class HttpDownloader {
           method: 'GET',
           redirect: 'manual',
           headers: { 'User-Agent': this.userAgent },
-          signal: AbortSignal.timeout(this.timeoutMs),
+          signal: controller.signal,
         });
 
         if (res.status >= 300 && res.status < 400) {
           const location = res.headers.get('location');
           if (!location) throw new Error('redirect without Location header');
           currentUrl = new URL(location, currentUrl).toString();
+          arm();
           continue;
         }
         if (!res.ok) throw new Error(`GET failed: ${res.status} ${res.statusText}`);
@@ -103,12 +113,10 @@ export class HttpDownloader {
 
         // Convert the web ReadableStream to a Node stream so the pipeline's
         // AbortSignal actually destroys it (pipeline does not propagate abort
-        // to a web stream source).
-        await pipeline(
-          Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>),
-          createWriteStream(destPath),
-          { signal: controller.signal },
-        );
+        // to a web stream source). Each chunk re-arms the idle timer.
+        const nodeBody = Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>);
+        nodeBody.on('data', arm);
+        await pipeline(nodeBody, createWriteStream(destPath), { signal: controller.signal });
         return {
           url: res.url,
           lastModified: res.headers.get('last-modified'),
@@ -126,7 +134,7 @@ export class HttpDownloader {
       }
       throw err;
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     }
   }
 
