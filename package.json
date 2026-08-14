@@ -14,6 +14,7 @@
     "dev": "vite",
     "dev:server": "tsx watch src/index.ts",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/migrate.ts",
     "lex:gen": "lex-cli generate",
     "key:generate": "node scripts/generate-atproto-key.mjs",
     "release": "tsx src/release.ts",
