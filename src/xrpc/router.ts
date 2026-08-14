@@ -1,9 +1,9 @@
-import { and, eq, gte, inArray, like, or, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, like, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { XRPCRouter, json, InvalidRequestError, XRPCError } from '@atcute/xrpc-server';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
-import { decodeCursor, encodeCursor } from './cursor.js';
+import { decodeCursor, encodeCursor, type CursorValue } from './cursor.js';
 import { releasedFilter } from './gate.js';
 import {
 	COLLECTION,
@@ -46,10 +46,51 @@ function clampLimit(limit: number | undefined): number {
 	return Math.max(1, Math.min(MAX_LIMIT, limit));
 }
 
-function notFound() {
-	throw new XRPCError({ status: 404, error: 'NotFound', message: 'record not found' });
+/** Decode a cursor, rejecting malformed values as a client error (400). */
+function decodeCursorParam(cursor: string | undefined): CursorValue | undefined {
+	if (cursor == null) return undefined;
+	try {
+		return decodeCursor(cursor);
+	} catch {
+		throw new InvalidRequestError({
+			status: 400,
+			error: 'InvalidRequest',
+			message: 'invalid cursor',
+		});
+	}
 }
 
+/**
+ * Keyset predicate for `ORDER BY col asc, pk asc`: strictly after the cursor
+ * row. `key` is the last row's sort value; `pk` is the deterministic tiebreak.
+ */
+function cursorAfter(col: SQLWrapper, pk: SQLWrapper, cursor: string | undefined): SQL | undefined {
+	const decoded = decodeCursorParam(cursor);
+	if (!decoded) return undefined;
+	const { key, pk: cursorPk } = decoded;
+	return sql`((${col} > ${key}) OR (${col} = ${key} AND ${pk} > ${cursorPk}))`;
+}
+
+/**
+ * Keyset predicate for the `listBooksOnShelf` ordering
+ * `position is null, position asc, createdAt asc, pk asc`. Cursor key is
+ * encoded `posIsNull|position|createdAt`.
+ */
+function bookShelfCursorAfter(cursor: string | undefined): SQL | undefined {
+	const decoded = decodeCursorParam(cursor);
+	if (!decoded) return undefined;
+	const { key, pk } = decoded;
+	const [posIsNull, pos, created] = key.split('|');
+	const createdCond = sql`(${bookShelves.createdAt} > ${created} OR (${bookShelves.createdAt} = ${created} AND ${bookShelves.pk} > ${pk}))`;
+	if (posIsNull === '1') {
+		return sql`(${bookShelves.position} is null AND ${createdCond})`;
+	}
+	return sql`(${bookShelves.position} is null OR ${bookShelves.position} > ${pos} OR (${bookShelves.position} = ${pos} AND ${createdCond}))`;
+}
+
+function notFound(): never {
+	throw new XRPCError({ status: 404, error: 'NotFound', message: 'record not found' });
+}
 /** Extract the record key (rkey) segment from an at-uri for our own collection. */
 function rkeyFromUri(ctx: ViewContext, collection: string, uri: string): string {
 	const prefix = `at://${ctx.serviceDid}/${collection}/`;
@@ -193,7 +234,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(books)
-				.where(where)
+				.where(and(where, cursorAfter(books.title, books.pk, params.cursor)))
 				.orderBy(sql`${books.title} asc, ${books.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -222,7 +263,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(reviews)
-				.where(eq(reviews.bookPk, bookPk))
+				.where(and(eq(reviews.bookPk, bookPk), cursorAfter(reviews.createdAt, reviews.pk, params.cursor)))
 				.orderBy(sql`${reviews.createdAt} asc, ${reviews.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -245,6 +286,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(shelves)
+				.where(cursorAfter(shelves.name, shelves.pk, params.cursor))
 				.orderBy(sql`${shelves.name} asc, ${shelves.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -263,27 +305,38 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rkey = rkeyFromUri(ctx, COLLECTION.bookShelf, params.uri);
 			const row = db.select().from(bookShelves).where(eq(bookShelves.pk, rkey)).get();
 			if (!row) notFound();
-			return json({ bookShelf: await toBookShelfView(db, ctx, row!) });
+			const view = await toBookShelfView(db, ctx, row!);
+			if (!view) notFound();
+			return json({ bookShelf: view });
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
 		async handler({ params }) {
 			const bookPk = rkeyFromUri(ctx, COLLECTION.book, params.book);
-			const bookExists = db.select().from(books).where(eq(books.pk, bookPk)).get();
+			const bookExists = db
+				.select()
+				.from(books)
+				.where(and(eq(books.pk, bookPk), releasedFilter(books)))
+				.get();
 			if (!bookExists) notFound();
 			const limit = clampLimit(params.limit);
 			const rows = db
 				.select()
 				.from(bookShelves)
-				.where(eq(bookShelves.bookPk, bookPk))
+				.where(
+					and(eq(bookShelves.bookPk, bookPk), cursorAfter(bookShelves.createdAt, bookShelves.pk, params.cursor)),
+				)
 				.orderBy(sql`${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
 				.limit(limit + 1)
 				.all();
 			const hasMore = rows.length > limit;
 			const page = hasMore ? rows.slice(0, limit) : rows;
 			const views = [];
-			for (const row of page) views.push(await toBookShelfView(db, ctx, row));
+			for (const row of page) {
+				const view = await toBookShelfView(db, ctx, row);
+				if (view) views.push(view);
+			}
 			const last = page.at(-1);
 			return json({
 				bookShelves: views,
@@ -300,21 +353,30 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			if (!shelfExists) notFound();
 			const limit = clampLimit(params.limit);
 			const rows = db
-				.select()
+				.select({ row: bookShelves })
 				.from(bookShelves)
-				.where(eq(bookShelves.shelfPk, shelfPk))
+				.innerJoin(books, and(eq(bookShelves.bookPk, books.pk), releasedFilter(books)))
+				.where(and(eq(bookShelves.shelfPk, shelfPk), bookShelfCursorAfter(params.cursor)))
 				.orderBy(sql`${bookShelves.position} is null, ${bookShelves.position} asc, ${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
 				.limit(limit + 1)
 				.all();
 			const hasMore = rows.length > limit;
 			const page = hasMore ? rows.slice(0, limit) : rows;
 			const views = [];
-			for (const row of page) views.push(await toBookShelfView(db, ctx, row));
-			const last = page.at(-1);
+			for (const { row } of page) {
+				const view = await toBookShelfView(db, ctx, row);
+				if (view) views.push(view);
+			}
+			const last = page.at(-1)?.row;
 			return json({
 				bookShelves: views,
 				cursor:
-					hasMore && last ? encodeCursor({ key: String(last.createdAt), pk: last.pk }) : undefined,
+					hasMore && last
+						? encodeCursor({
+								key: `${last.position == null ? '1' : '0'}|${last.position ?? ''}|${String(last.createdAt)}`,
+								pk: last.pk,
+							})
+						: undefined,
 			});
 		},
 	});
@@ -325,6 +387,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(shelves)
+				.where(cursorAfter(shelves.name, shelves.pk, params.cursor))
 				.orderBy(sql`${shelves.name} asc, ${shelves.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -347,7 +410,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(genres)
-				.where(conds.length ? and(...conds) : undefined)
+				.where(and(...conds, cursorAfter(genres.name, genres.pk, params.cursor)))
 				.orderBy(sql`${genres.name} asc, ${genres.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -395,7 +458,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(books)
-				.where(where)
+				.where(and(where, cursorAfter(books.title, books.pk, params.cursor)))
 				.orderBy(sql`${books.title} asc, ${books.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -435,7 +498,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(contributors)
-				.where(where)
+				.where(and(where, cursorAfter(contributors.name, contributors.pk, params.cursor)))
 				.orderBy(sql`${contributors.name} asc, ${contributors.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -497,7 +560,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 				.select()
 				.from(reviews)
 				.innerJoin(books, eq(reviews.bookPk, books.pk))
-				.where(where)
+				.where(and(where, cursorAfter(reviews.createdAt, reviews.pk, params.cursor)))
 				.orderBy(sql`${reviews.createdAt} asc, ${reviews.pk} asc`)
 				.limit(limit + 1)
 				.all();
@@ -543,7 +606,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
 			const rows = db
 				.select()
 				.from(works)
-				.where(where)
+				.where(and(where, cursorAfter(works.title, works.pk, params.cursor)))
 				.orderBy(sql`${works.title} asc, ${works.pk} asc`)
 				.limit(limit + 1)
 				.all();

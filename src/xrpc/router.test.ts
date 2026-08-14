@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createXrpcRouter } from './router.js';
 import { createTestDb, SERVICE_DID, uri } from '../test-utils/db.js';
+import { books } from '../db/schema.js';
 import type { ViewContext } from './views.js';
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
@@ -10,8 +11,26 @@ function app() {
 	seed();
 	const router = createXrpcRouter(db, ctx);
 	return {
+		db,
 		fetch: (path: string) => router.fetch(new Request(`https://books.example.com${path}`)),
 	};
+}
+
+function releasedBooks() {
+	const a = app();
+	const now = Math.floor(Date.now() / 1000);
+	for (let i = 0; i < 5; i++) {
+		a.db
+			.insert(books)
+			.values({
+				pk: `book-page-${i}`,
+				title: `Paged Book ${String(i).padStart(2, '0')}`,
+				createdAt: now + i,
+				releaseStatus: 'released',
+			})
+			.run();
+	}
+	return a;
 }
 
 describe('getBook', () => {
@@ -45,7 +64,7 @@ describe('getWork', () => {
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.work.title).toBe('Dune');
-		expect(body.work.identifiers[0].resource).toBe('openlibrary:OL893423W');
+		expect(body.work.identifiers[0].resource).toBe('openlibrary:works/OL893423W');
 	});
 
 	it('returns NotFound', async () => {
@@ -158,6 +177,50 @@ describe('listBooks', () => {
 		expect(body.books).toHaveLength(1);
 		expect(body.cursor).toBeDefined();
 	});
+
+	it('follows the cursor to the next page without overlap', async () => {
+		const { fetch } = releasedBooks();
+		const first = await (await fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?limit=2')).json();
+		expect(first.books).toHaveLength(2);
+		expect(first.cursor).toBeDefined();
+		const firstTitles = first.books.map((b: { title: string }) => b.title);
+
+		const second = await (
+			await fetch(
+				'/xrpc/net.olamaelcu.livtet.biblio.listBooks?limit=2&cursor=' + encodeURIComponent(first.cursor),
+			)
+		).json();
+		expect(second.books).toHaveLength(2);
+		const secondTitles = second.books.map((b: { title: string }) => b.title);
+		expect(secondTitles).not.toEqual(firstTitles);
+		expect(firstTitles.filter((t: string) => secondTitles.includes(t))).toHaveLength(0);
+	});
+
+	it('follows a searchBooks cursor to the next page without overlap', async () => {
+		const { fetch } = releasedBooks();
+		const q = encodeURIComponent('Paged');
+		const first = await (await fetch(`/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=${q}&limit=2`)).json();
+		expect(first.books).toHaveLength(2);
+		expect(first.cursor).toBeDefined();
+		const firstTitles = first.books.map((b: { title: string }) => b.title);
+
+		const second = await (
+			await fetch(
+				`/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=${q}&limit=2&cursor=` + encodeURIComponent(first.cursor),
+			)
+		).json();
+		expect(second.books).toHaveLength(2);
+		const secondTitles = second.books.map((b: { title: string }) => b.title);
+		expect(secondTitles).not.toEqual(firstTitles);
+		expect(firstTitles.filter((t: string) => secondTitles.includes(t))).toHaveLength(0);
+	});
+
+	it('rejects a malformed cursor with 400', async () => {
+		const res = await app().fetch(
+			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?cursor=' + encodeURIComponent('not-a-cursor'),
+		);
+		expect(res.status).toBe(400);
+	});
 });
 
 describe('listReviewsByBook', () => {
@@ -233,6 +296,46 @@ describe('listBooksOnShelf', () => {
 	it('returns NotFound for a missing shelf', async () => {
 		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.shelf', 'nope'))}`);
 		expect(res.status).toBe(404);
+	});
+
+	it('follows a listBooksOnShelf cursor to the next page without overlap', async () => {
+		const { db, fetch } = releasedBooks();
+		const now = Math.floor(Date.now() / 1000);
+		db.insert(books).values([
+			{ pk: 'book-shelf-page-a', title: 'Shelf Page A', createdAt: now + 100, releaseStatus: 'released' },
+			{ pk: 'book-shelf-page-b', title: 'Shelf Page B', createdAt: now + 101, releaseStatus: 'released' },
+			{ pk: 'book-shelf-page-c', title: 'Shelf Page C', createdAt: now + 102, releaseStatus: 'released' },
+			{ pk: 'book-shelf-page-d', title: 'Shelf Page D', createdAt: now + 103, releaseStatus: 'released' },
+		]).run();
+		const { bookShelves } = await import('../db/schema.js');
+		db.insert(bookShelves)
+			.values(
+				['a', 'b', 'c', 'd'].map((s, i) => ({
+					pk: `shelf-page-${s}`,
+					did: SERVICE_DID,
+					bookPk: `book-shelf-page-${s}`,
+					shelfPk: 'shelf-favorites',
+					position: i + 5,
+					status: 'to-read',
+					createdAt: now + i,
+				})),
+			)
+			.run();
+		const shelfParam = encodeURIComponent(uri('net.olamaelcu.livtet.biblio.shelf', 'shelf-favorites'));
+		const first = await (await fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${shelfParam}&limit=2`)).json();
+		expect(first.bookShelves).toHaveLength(2);
+		expect(first.cursor).toBeDefined();
+		const firstPks = first.bookShelves.map((b: { book: { uri: string } }) => b.book.uri);
+		const second = await (
+			await fetch(
+				`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${shelfParam}&limit=2&cursor=` +
+					encodeURIComponent(first.cursor),
+			)
+		).json();
+		expect(second.bookShelves).toHaveLength(2);
+		const secondPks = second.bookShelves.map((b: { book: { uri: string } }) => b.book.uri);
+		expect(secondPks).not.toEqual(firstPks);
+		expect(firstPks.filter((u: string) => secondPks.includes(u))).toHaveLength(0);
 	});
 });
 
@@ -324,10 +427,10 @@ describe('searchWorks', () => {
   });
 
   it('finds works by identifier', async () => {
-    const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('openlibrary:OL893423W'));
+    const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('openlibrary:works/OL893423W'));
     const body = await res.json();
     expect(body.hitsTotal).toBe(1);
-    expect(body.works[0].identifiers[0].resource).toBe('openlibrary:OL893423W');
+    expect(body.works[0].identifiers[0].resource).toBe('openlibrary:works/OL893423W');
   });
 
   it('returns empty results for no match', async () => {

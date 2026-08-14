@@ -7,7 +7,7 @@ import { createTestDb, SERVICE_DID, uri } from '../test-utils/db.js';
 import { runDumpImport } from '../import/dump-runner.js';
 import { mapEditionToCandidates, mapWorkToCandidate, mapAuthorToCandidate, olKeyOf } from '../import/mappers/openlibrary.js';
 import { listWithIssues, setStatus } from '../review/service.js';
-import { books } from '../db/schema.js';
+import { books, shelves, bookShelves } from '../db/schema.js';
 
 const FIXTURES = join(process.cwd(), 'fixtures');
 const STATE_FILES = [
@@ -88,6 +88,50 @@ describe('backfill E2E (committed OL fixtures)', () => {
         const stagedBook = db.select().from(books).where(sql`release_status = 'staged'`).limit(1).get() as unknown as { pk: string };
         const stagedRes = await fetchUri('net.olamaelcu.livtet.biblio.book', stagedBook.pk);
         expect(stagedRes.status).toBe(404);
+
+        // 6. Shelf endpoints honor the released gate: a shelf listing both books
+        //    shows only the released one, and staged book shelvings 404.
+        const now = Math.floor(Date.now() / 1000);
+        db.insert(shelves).values({ pk: 'shelf-e2e', name: 'E2E Shelf', description: null, createdAt: now, updatedAt: null }).run();
+        db.insert(bookShelves).values([
+          { pk: 'shelving-released', did: SERVICE_DID, bookPk: releasedBook.pk, shelfPk: 'shelf-e2e', position: 1, status: 'reading', createdAt: now, updatedAt: null },
+          { pk: 'shelving-staged', did: SERVICE_DID, bookPk: stagedBook.pk, shelfPk: 'shelf-e2e', position: null, status: 'to-read', createdAt: now, updatedAt: null },
+        ]).run();
+
+        const shelfFetch = (path: string) =>
+          router.fetch(new Request(`https://books.example.com/xrpc${path}`));
+        const listOnShelf = await shelfFetch(
+          `/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.shelf', 'shelf-e2e'))}`,
+        );
+        expect(listOnShelf.status).toBe(200);
+        const listOnShelfBody = await listOnShelf.json();
+        expect(listOnShelfBody.bookShelves).toHaveLength(1);
+        expect(listOnShelfBody.bookShelves[0].book.uri).toContain(`/${releasedBook.pk}`);
+
+        const getStagedShelving = await shelfFetch(
+          `/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.bookShelving', 'shelving-staged'))}`,
+        );
+        expect(getStagedShelving.status).toBe(404);
+
+        const getReleasedShelving = await shelfFetch(
+          `/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.bookShelving', 'shelving-released'))}`,
+        );
+        expect(getReleasedShelving.status).toBe(200);
+
+        const getShelvingStaged = await shelfFetch(
+          `/net.olamaelcu.livtet.biblio.getShelvingOfBook?book=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.book', stagedBook.pk))}`,
+        );
+        expect(getShelvingStaged.status).toBe(404);
+
+        const shelvesWithBooks = await shelfFetch('/net.olamaelcu.livtet.biblio.listShelvesWithBooks');
+        expect(shelvesWithBooks.status).toBe(200);
+        const shelvesBody = await shelvesWithBooks.json();
+        const e2eShelf = shelvesBody.shelves.find((s: { shelf: { uri: string } }) =>
+          s.shelf.uri.endsWith('/shelf-e2e'),
+        );
+        expect(e2eShelf).toBeDefined();
+        expect(e2eShelf.books).toHaveLength(1);
+        expect(e2eShelf.books[0].book.uri).toContain(`/${releasedBook.pk}`);
       } finally {
         cleanup();
       }

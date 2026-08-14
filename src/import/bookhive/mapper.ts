@@ -1,5 +1,6 @@
 import type { MergeCandidate } from '../merge.js';
 import { identifierResource, sourceKeySlug } from '../slugs.js';
+import { normalizeIsbn } from '../isbn.js';
 
 export interface BookhiveCatalogBook {
   $type?: string;
@@ -24,10 +25,15 @@ function isbns(record: BookhiveCatalogBook): Array<{ resource: string; url: stri
   const list = Array.isArray(record.isbn) ? record.isbn : record.isbn ? [record.isbn] : [];
   return list
     .filter((i): i is string => typeof i === 'string' && i.trim().length > 0)
-    .map((i) => ({
-      resource: identifierResource('isbn', i),
-      url: `https://openlibrary.org/isbn/${i}`,
-    }));
+    .map((i) => {
+      const normalized = normalizeIsbn(i);
+      if (!normalized) return null;
+      return {
+        resource: identifierResource('isbn', normalized),
+        url: `https://openlibrary.org/isbn/${normalized}`,
+      };
+    })
+    .filter((i): i is { resource: string; url: string } => i !== null);
 }
 
 export function mapCatalogBook(record: BookhiveCatalogBook): MergeCandidate[] {

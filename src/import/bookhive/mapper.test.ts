@@ -21,4 +21,10 @@ describe('mapCatalogBook', () => {
     expect(cands[0].entityType).toBe('book');
     expect(cands[0].matchName).toBe('Untitled');
   });
+
+  it('normalizes hyphenated ISBNs into a bare isbn resource', () => {
+    const cands = mapCatalogBook({ hiveId: 'hive-2', title: 'Dune', isbn: '978-0-441-17271-9' });
+    const book = cands.find((c) => c.entityType === 'book');
+    expect(book?.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
+  });
 });

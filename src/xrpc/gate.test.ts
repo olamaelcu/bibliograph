@@ -82,3 +82,51 @@ describe('release gating', () => {
 		expect(body.hitsTotal).toBe(0);
 	});
 });
+
+describe('shelf release gating', () => {
+	const BOOK_SHELVING_URI = (pk: string) =>
+		encodeURIComponent(uri('net.olamaelcu.livtet.biblio.bookShelving', pk));
+	const SHELF_URI = (pk: string) =>
+		encodeURIComponent(uri('net.olamaelcu.livtet.biblio.shelf', pk));
+
+	it('404s a staged book from getBookOnShelf', async () => {
+		const db = testDb();
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
+		const res = await app(db).fetch(
+			`/xrpc/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${BOOK_SHELVING_URI('shelving-1')}`,
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it('404s a staged book from getShelvingOfBook', async () => {
+		const db = testDb();
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
+		const res = await app(db).fetch(
+			`/xrpc/net.olamaelcu.livtet.biblio.getShelvingOfBook?book=${BOOK_URI('book-dune')}`,
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it('omits a staged book from listBooksOnShelf', async () => {
+		const db = testDb();
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-flowers'`);
+		const res = await app(db).fetch(
+			`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${SHELF_URI('shelf-favorites')}`,
+		);
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.bookShelves).toHaveLength(1);
+		expect(body.bookShelves[0].book.title).toBe('Dune (40th Anniversary)');
+	});
+
+	it('omits a staged book from listShelvesWithBooks', async () => {
+		const db = testDb();
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-flowers'`);
+		const res = await app(db).fetch('/xrpc/net.olamaelcu.livtet.biblio.listShelvesWithBooks');
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.shelves).toHaveLength(1);
+		expect(body.shelves[0].books).toHaveLength(1);
+		expect(body.shelves[0].books[0].book.title).toBe('Dune (40th Anniversary)');
+	});
+});

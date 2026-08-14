@@ -48,4 +48,10 @@ describe('OL mappers', () => {
     const w = mapWorkToCandidate({ key: '/works/OL1W', title: 'X', first_publish_date: '19--' });
     expect(w.fields.originalPublishDate).toBeNull();
   });
+
+  it('normalizes hyphenated ISBNs into a bare isbn resource', () => {
+    const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', isbn_13: ['978-0-441-17271-9'] });
+    const book = cands.find((c) => c.entityType === 'book');
+    expect(book?.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
+  });
 });

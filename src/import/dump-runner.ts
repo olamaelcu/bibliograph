@@ -33,7 +33,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
 
   if (!acquireLock(lockPath)) {
     logger.warn({ stateName: opts.stateName }, 'lock held by another run; aborting');
-    process.exit(1);
+    throw new Error(`lock held for state '${opts.stateName}'; another import is running`);
   }
 
   const state = new DumpState(opts.db, opts.stateName);
@@ -55,7 +55,10 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     // at byte 0 and skip records whose key <= the persisted cursor.
     const lastKeyCursor = existing?.cursor ?? null;
 
-    let summary: BatchSummary | null = null;
+    // NOTE: byte-seek resume is intentionally unused. `runOnce` is always called
+    // with offset 0, so `SeekError` below is unreachable in practice; the branch
+    // is kept only as a defensive replay path if a future caller ever passes a
+    // non-zero offset.
     const runOnce = async (offset: number, cursor: string | null): Promise<BatchSummary> => {
       const streamer = new DumpStreamer(gzPath);
       const items = streamer.iter({ startByteOffset: offset, lastKeyCursor: cursor, keyOf: opts.keyOf });
@@ -75,6 +78,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       return s;
     };
 
+    let summary: BatchSummary | null = null;
     try {
       summary = await runOnce(0, lastKeyCursor);
     } catch (err) {

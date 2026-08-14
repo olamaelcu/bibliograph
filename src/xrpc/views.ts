@@ -306,17 +306,18 @@ export async function toBookShelfView(
 		createdAt: number;
 		updatedAt: number | null;
 	},
-): Promise<BookShelfView> {
+): Promise<BookShelfView | null> {
 	const [shelfRow, bookRow] = await Promise.all([
 		db.select().from(shelves).where(eq(shelves.pk, bs.shelfPk)).get(),
-		db.select().from(books).where(eq(books.pk, bs.bookPk)).get(),
+		db.select().from(books).where(and(eq(books.pk, bs.bookPk), releasedFilter(books))).get(),
 	]);
 
 	if (!shelfRow) {
 		throw new Error(`bookShelving ${bs.pk} references missing shelf ${bs.shelfPk}`);
 	}
 	if (!bookRow) {
-		throw new Error(`bookShelving ${bs.pk} references missing book ${bs.bookPk}`);
+		// Book missing or not yet released — the shelving record is not publicly visible.
+		return null;
 	}
 
 	const metadata: BookShelfMetadata = {
@@ -349,7 +350,10 @@ export async function toShelfWithBooksView(
 		.orderBy(sql`${bookShelves.position} is null, ${bookShelves.position} asc, ${bookShelves.createdAt} asc, ${bookShelves.pk} asc`)
 		.all();
 	const books: BookShelfView[] = [];
-	for (const row of rows) books.push(await toBookShelfView(db, ctx, row));
+	for (const row of rows) {
+		const view = await toBookShelfView(db, ctx, row);
+		if (view) books.push(view);
+	}
 	return { shelf: toShelfView(ctx, s), books };
 }
 

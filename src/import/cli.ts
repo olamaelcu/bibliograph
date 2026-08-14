@@ -110,7 +110,7 @@ async function main(): Promise<void> {
         .all() as Array<{ resource: string }>;
       let coverUrl: string | undefined;
       for (const id of coverSource) {
-        if (id.resource.startsWith('openlibrary:')) {
+        if (id.resource.startsWith('openlibrary:books/')) {
           coverUrl = `https://covers.openlibrary.org/b/olid/${id.resource.slice('openlibrary:books/'.length)}-L.jpg`;
           break;
         }

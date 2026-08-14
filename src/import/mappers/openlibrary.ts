@@ -1,5 +1,6 @@
 import type { MergeCandidate } from '../merge.js';
 import { identifierResource, sourceKeySlug } from '../slugs.js';
+import { normalizeIsbn } from '../isbn.js';
 
 export interface OlEdition {
   key: string;
@@ -48,9 +49,11 @@ function olIsbn(ed: OlEdition): Array<{ resource: string; url: string }> {
   const out: Array<{ resource: string; url: string }> = [];
   for (const isbn of [...(ed.isbn_13 ?? []), ...(ed.isbn_10 ?? [])]) {
     if (!isbn) continue;
+    const normalized = normalizeIsbn(isbn);
+    if (!normalized) continue;
     out.push({
-      resource: identifierResource('isbn', isbn),
-      url: `https://openlibrary.org/isbn/${isbn}`,
+      resource: identifierResource('isbn', normalized),
+      url: `https://openlibrary.org/isbn/${normalized}`,
     });
   }
   return out;
@@ -59,6 +62,9 @@ function olIsbn(ed: OlEdition): Array<{ resource: string; url: string }> {
 export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
   const candidates: MergeCandidate[] = [];
   const isbnIds = olIsbn(ed);
+  // A tiny fraction of OL editions reference multiple works; only the first is
+  // linked here, so such editions merge onto the first work and the others stay
+  // unlinked. Emitting a candidate per work would duplicate the book candidate.
   const workKey = ed.works?.[0]?.key;
 
   if (workKey) {

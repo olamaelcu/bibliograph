@@ -47,6 +47,7 @@ export interface TestDb {
 
 export function createTestDb(): TestDb {
 	const sqlite = new Database(':memory:');
+	sqlite.pragma('foreign_keys = ON');
 	const db = drizzle(sqlite);
 	migrate(db, { migrationsFolder: 'drizzle' });
 	return { db, sqlite, seed: () => seed(db) };
@@ -112,7 +113,7 @@ function seed(db: ReturnType<typeof drizzle>) {
 		{ bookPk: 'book-dune', resource: 'isbn:0441172717', url: 'https://isbn.example.com/0441172717' },
 	]).run();
 	db.insert(workIdentifiers).values([
-		{ workPk: 'work-dune', resource: 'openlibrary:OL893423W', url: 'https://openlibrary.example.com/OL893423W' },
+		{ workPk: 'work-dune', resource: 'openlibrary:works/OL893423W', url: 'https://openlibrary.example.com/works/OL893423W' },
 	]).run();
 	db.insert(contributorIdentifiers).values([
 		{ contributorPk: 'author-herbert', resource: 'viaf:59083797', url: 'https://viaf.example.com/59083797' },
