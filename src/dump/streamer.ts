@@ -1,0 +1,79 @@
+import type { Readable } from 'node:stream';
+import { createReadStream, statSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+import { createGunzip } from 'node:zlib';
+
+export interface StreamerItem {
+  byteOffset: number;
+  line: string;
+  fields: string[];
+}
+
+export interface StreamerOptions {
+  startByteOffset: number;
+  lastKeyCursor: string | null;
+  /** Key extraction for resume-skip: return the sortable key or null to always yield. */
+  keyOf: (fields: string[]) => string | null;
+}
+
+const MIN_FIELDS = 5;
+
+export class SeekError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SeekError';
+  }
+}
+
+/**
+ * Yields one item per line of a gzipped TSV dump. Resuming from a mid-file
+ * byte offset may fail because gzip streams are not randomly seekable — when
+ * that happens we throw SeekError and the caller replays from byte 0, skipping
+ * records whose key <= lastKeyCursor.
+ */
+export class DumpStreamer {
+  constructor(private readonly gzPath: string) {}
+
+  async *iter(opts: StreamerOptions): AsyncGenerator<StreamerItem, void, void> {
+    const source: Readable =
+      opts.startByteOffset > 0
+        ? createReadStream(this.gzPath, { start: opts.startByteOffset })
+        : createReadStream(this.gzPath);
+
+    const gunzip = createGunzip();
+    const lines = createInterface({ input: source.pipe(gunzip), crlfDelay: Infinity });
+
+    let runningOffset = opts.startByteOffset;
+
+    try {
+      for await (const line of lines) {
+        const lineByteLen = Buffer.byteLength(line, 'utf8') + 1; // +1 for \n
+        const lineStart = runningOffset;
+        runningOffset += lineByteLen;
+
+        const fields = line.split('\t');
+        if (fields.length < MIN_FIELDS) continue;
+
+        const key = opts.keyOf(fields);
+        if (key !== null && opts.lastKeyCursor !== null && key <= opts.lastKeyCursor) {
+          continue;
+        }
+
+        yield { byteOffset: lineStart, line, fields };
+      }
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (opts.startByteOffset > 0 && /invalid|incorrect/i.test(msg)) {
+        const totalSize = statSync(this.gzPath).size;
+        throw new SeekError(
+          `gunzip failed at byte offset ${opts.startByteOffset}; replay from 0 (file size ${totalSize})`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  fileSize(): number {
+    return statSync(this.gzPath).size;
+  }
+}
