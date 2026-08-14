@@ -15,6 +15,26 @@ describe('DumpState', () => {
     expect(state.get()?.cursor).toBe('OL200M');
   });
 
+  it('markComplete sets the complete flag to 1', () => {
+    const { db } = createTestDb();
+    const state = new DumpState(db, 'ol-editions');
+    state.set({ url: 'https://dump.example/ol.gz' });
+    expect(state.get()?.complete).toBe(0);
+    state.markComplete();
+    expect(state.get()?.complete).toBe(1);
+  });
+
+  it('partial updates preserve existing fields', () => {
+    const { db } = createTestDb();
+    const state = new DumpState(db, 'ol-editions');
+    state.set({ url: 'https://dump.example/ol.gz', lastKeyCursor: 'OL100M' });
+    state.set({ totalProcessed: 42 });
+    const row = state.get();
+    expect(row?.url).toBe('https://dump.example/ol.gz');
+    expect(row?.cursor).toBe('OL100M');
+    expect(row?.totalProcessed).toBe(42);
+  });
+
   it('clears state', () => {
     const { db } = createTestDb();
     const state = new DumpState(db, 'ol-editions');

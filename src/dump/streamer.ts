@@ -10,6 +10,10 @@ export interface StreamerItem {
 }
 
 export interface StreamerOptions {
+  /**
+   * Informational only: resuming replays from byte 0 and skips via `lastKeyCursor`.
+   * Not used as a seek target (gzip is not randomly seekable).
+   */
   startByteOffset: number;
   lastKeyCursor: string | null;
   /** Key extraction for resume-skip: return the sortable key or null to always yield. */
@@ -34,6 +38,15 @@ export class SeekError extends Error {
 export class DumpStreamer {
   constructor(private readonly gzPath: string) {}
 
+  /**
+   * Streams one item per line of the dump.
+   *
+   * Resuming ALWAYS replays from byte 0 and skips records whose key <= lastKeyCursor.
+   * `startByteOffset` is retained for API compatibility, but a mid-file start lands
+   * inside the gzip DEFLATE payload (gzip is not randomly seekable) and throws
+   * `SeekError`; callers must fall back to byte 0 on `SeekError` and rely on the
+   * key-cursor skip for resumption.
+   */
   async *iter(opts: StreamerOptions): AsyncGenerator<StreamerItem, void, void> {
     const source: Readable =
       opts.startByteOffset > 0

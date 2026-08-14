@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { books } from '../db/schema.js';
 import { createTestDb } from '../test-utils/db.js';
 import { importInBatches } from './batched-importer.js';
 
@@ -17,6 +18,27 @@ describe('importInBatches', () => {
       },
     });
     expect(summary.processed).toBe(3);
+    expect(summary.inserted).toBe(2);
+    expect(summary.failed).toBe(1);
+  });
+
+  it('is atomic per record at the DB level: failing record absent, batch siblings present', async () => {
+    const { db } = createTestDb();
+    const now = Math.floor(Date.now() / 1000);
+
+    const summary = await importInBatches(db, gen([{ pk: 'book-good' }, { pk: 'book-bad' }, { pk: 'book-good2' }]), {
+      batchSize: 3,
+      upsert: ({ pk }) => {
+        if (pk === 'book-bad') throw new Error('boom');
+        db.insert(books).values({ pk, title: pk, createdAt: now, releaseStatus: 'staged' }).run();
+        return { action: 'inserted' };
+      },
+    });
+
+    const pks = db.select().from(books).all().map((r) => r.pk);
+    expect(pks).toContain('book-good');
+    expect(pks).toContain('book-good2');
+    expect(pks).not.toContain('book-bad');
     expect(summary.inserted).toBe(2);
     expect(summary.failed).toBe(1);
   });

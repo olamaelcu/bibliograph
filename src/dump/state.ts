@@ -7,6 +7,7 @@ export interface DumpStateFields {
   filePath?: string;
   lastModified?: string | null;
   fileSize?: number | null;
+  /** Informational only; not used as a seek target (gzip dumps are not randomly seekable). */
   lastByteOffset?: number;
   lastKeyCursor?: string | null;
   totalProcessed?: number;

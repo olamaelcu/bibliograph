@@ -1,5 +1,8 @@
 import { createWriteStream } from 'node:fs';
+import { unlink } from 'node:fs/promises';
+import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { logger } from '../logger.js';
 
 export interface DownloadMetadata {
@@ -67,31 +70,54 @@ export class HttpDownloader {
   }
 
   async download(destPath: string): Promise<DownloadMetadata> {
-    let currentUrl = this._url;
-    for (let i = 0; i < this.maxRedirects; i += 1) {
-      const res = await fetch(currentUrl, {
-        method: 'GET',
-        redirect: 'manual',
-        headers: { 'User-Agent': this.userAgent },
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      let currentUrl = this._url;
+      for (let i = 0; i < this.maxRedirects; i += 1) {
+        const res = await fetch(currentUrl, {
+          method: 'GET',
+          redirect: 'manual',
+          headers: { 'User-Agent': this.userAgent },
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
 
-      if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get('location');
-        if (!location) throw new Error('redirect without Location header');
-        currentUrl = new URL(location, currentUrl).toString();
-        continue;
+        if (res.status >= 300 && res.status < 400) {
+          const location = res.headers.get('location');
+          if (!location) throw new Error('redirect without Location header');
+          currentUrl = new URL(location, currentUrl).toString();
+          continue;
+        }
+        if (!res.ok) throw new Error(`GET failed: ${res.status} ${res.statusText}`);
+        if (!res.body) throw new Error('response has no body');
+
+        // Convert the web ReadableStream to a Node stream so the pipeline's
+        // AbortSignal actually destroys it (pipeline does not propagate abort
+        // to a web stream source).
+        await pipeline(
+          Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>),
+          createWriteStream(destPath),
+          { signal: controller.signal },
+        );
+        return {
+          url: res.url,
+          lastModified: res.headers.get('last-modified'),
+          contentLength: this.parseContentLength(res.headers.get('content-length')),
+        };
       }
-      if (!res.ok) throw new Error(`GET failed: ${res.status} ${res.statusText}`);
-
-      await pipeline(res.body as unknown as NodeJS.ReadableStream, createWriteStream(destPath));
-      return {
-        url: res.url,
-        lastModified: res.headers.get('last-modified'),
-        contentLength: this.parseContentLength(res.headers.get('content-length')),
-      };
+      throw new Error(`too many redirects (${this.maxRedirects})`);
+    } catch (err) {
+      try {
+        await unlink(destPath);
+      } catch (cleanupErr) {
+        if ((cleanupErr as NodeJS.ErrnoException).code !== 'ENOENT') {
+          logger.warn({ err: (cleanupErr as Error).message, destPath }, 'failed to remove partial download');
+        }
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
     }
-    throw new Error(`too many redirects (${this.maxRedirects})`);
   }
 
   private parseContentLength(v: string | null): number | null {
