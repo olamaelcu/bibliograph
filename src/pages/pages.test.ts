@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderPage } from './render.js';
 import { renderStatsPage } from './stats.js';
-import { lexiconEndpoints, procedureCount, queryCount } from '../lexicon-catalog.js';
+import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from '../lexicon-catalog.js';
 
 const queries = lexiconEndpoints.filter((e) => e.type === 'query');
 const procedures = lexiconEndpoints.filter((e) => e.type === 'procedure');
@@ -41,6 +41,46 @@ describe('lexicon catalog', () => {
 			expect.objectContaining({ name: 'uri', type: 'string', required: true }),
 		]);
 		expect(getBook?.description).toMatch(/hydrated view/);
+	});
+
+	describe('record lexicons', () => {
+		it('extracts every record-type lexicon', () => {
+			expect(recordLexicons.length).toBeGreaterThanOrEqual(11);
+			for (const record of recordLexicons) {
+				expect(record.type).toBe('record');
+				expect(record.id).toMatch(/^net\.olamaelcu\.livtet\.biblio\./);
+			}
+		});
+
+		it('classifies the catalog records by ownership', () => {
+			const catalog = recordLexicons.filter((r) => catalogRecordNsids.has(r.id));
+			const users = recordLexicons.filter((r) => !catalogRecordNsids.has(r.id));
+		expect(catalog.map((r) => r.name).sort()).toEqual([
+			'book',
+			'bookContributor',
+			'contributor',
+			'contributorRole',
+			'format',
+			'genre',
+			'work',
+		]);
+		expect(users.map((r) => r.name).sort()).toEqual([
+			'actor',
+			'bookShelving',
+			'review',
+			'shelf',
+		]);
+		});
+
+		it('captures schema constraints on record properties', () => {
+			const review = recordLexicons.find((r) => r.name === 'review');
+			expect(review).toBeDefined();
+			const blobs = review?.properties.find((p) => p.name === 'blobs');
+			expect(blobs).toMatchObject({ type: 'array<blob>', required: false });
+			expect(blobs?.constraints.join(' ')).toMatch(/accept image\/\*/);
+			const text = review?.properties.find((p) => p.name === 'text');
+			expect(text?.constraints.join(' ')).toMatch(/max 65536 graphemes/);
+		});
 	});
 });
 
@@ -110,5 +150,22 @@ describe('page templates', () => {
 		expect(html).toContain('id="backfill-container"');
 		expect(html).toContain("fetch('/stats.json'");
 		expect(html).toContain('setInterval(refresh, POLL_MS)');
+	});
+
+	it('lists every record lexicon on the records page, grouped by ownership', () => {
+		const catalog = recordLexicons.filter((r) => catalogRecordNsids.has(r.id));
+		const users = recordLexicons.filter((r) => !catalogRecordNsids.has(r.id));
+		const html = renderPage('records', {
+			title: 'Records',
+			description: 'd',
+			catalog,
+			users,
+		});
+		expect(html).toContain('AppView catalog records');
+		expect(html).toContain('User-owned records');
+		for (const r of recordLexicons) {
+			expect(html).toContain(r.id);
+			expect(html).toContain(r.lexiconPath);
+		}
 	});
 });

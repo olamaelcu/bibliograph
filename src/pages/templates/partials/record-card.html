@@ -1,0 +1,36 @@
+<wa-card with-footer class="endpoint-card">
+	<div slot="header" class="card-header">
+		<wa-badge variant="brand" appearance="filled">record</wa-badge>
+		<code class="endpoint-id"><%= it.id %></code>
+		<wa-copy-button value="<%= it.id %>" copy-label="Copy NSID"></wa-copy-button>
+	</div>
+	<% if (it.description) { %>
+		<p class="endpoint-desc"><%= it.description %></p>
+	<% } %>
+	<div class="wa-stack wa-gap-xs">
+		<wa-details summary="Fields">
+			<% if (it.properties.length === 0) { %>
+				<p class="muted">This record has no documented fields.</p>
+			<% } else { %>
+				<ul class="spec">
+					<% for (const p of it.properties) { %>
+						<li>
+							<div class="row-head">
+								<code><%= p.name %></code>
+								<% if (p.required) { %><wa-badge variant="danger" appearance="filled">required</wa-badge><% } %>
+								<span class="param-type"><%= p.type %></span>
+							</div>
+							<% if (p.constraints && p.constraints.length) { %>
+								<div class="param-meta"><code><%= p.constraints.join(' · ') %></code></div>
+							<% } %>
+							<% if (p.description) { %><div class="param-meta"><%= p.description %></div><% } %>
+						</li>
+					<% } %>
+				</ul>
+			<% } %>
+		</wa-details>
+	</div>
+	<div slot="footer" class="card-footer">
+		<a href="/<%= it.lexiconPath %>" target="_blank" rel="noopener">View lexicon JSON</a>
+	</div>
+</wa-card>

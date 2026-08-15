@@ -15,7 +15,7 @@ import { createXrpcRouter } from './xrpc/router.js';
 import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
 import { renderStatsPage, getCatalogStats } from './pages/stats.js';
-import { lexiconEndpoints, procedureCount, queryCount } from './lexicon-catalog.js';
+import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from './lexicon-catalog.js';
 import type { ViewContext } from './xrpc/views.js';
 
 export function createApp(): Hono {
@@ -75,6 +75,16 @@ export function createApp(): Hono {
 				title: 'Procedures',
 				description: 'Bibliograph is a read-only AppView and serves no mutating procedures.',
 				endpoints: lexiconEndpoints.filter((e) => e.type === 'procedure'),
+			}),
+		),
+	);
+	app.get('/records', (ctx) =>
+		ctx.html(
+			renderPage('records', {
+				title: 'Records',
+				description: 'Record types indexed from the Jetstream firehose, mirroring the catalog and user-owned records.',
+				catalog: recordLexicons.filter((r) => catalogRecordNsids.has(r.id)),
+				users: recordLexicons.filter((r) => !catalogRecordNsids.has(r.id)),
 			}),
 		),
 	);

@@ -32,6 +32,30 @@ export interface LexiconError {
   description?: string;
 }
 
+export interface LexiconRecordProperty {
+  name: string;
+  /** Resolved type, e.g. `string`, `integer`, `ref expandedBook`, `array<ref genre>`, `blob`. */
+  type: string;
+  required: boolean;
+  description?: string;
+  /** Human-readable constraints, e.g. `max 300 graphemes`, `min 1`, `values: reading, to-read`. */
+  constraints: string[];
+}
+
+export interface LexiconRecord {
+  /** Full lexicon NSID, e.g. `net.olamaelcu.livtet.biblio.review`. */
+  id: string;
+  /** Last segment of the NSID, e.g. `review`. */
+  name: string;
+  type: 'record';
+  description?: string;
+  /** Record key constraint, e.g. `any`, `tid`. */
+  key: string;
+  properties: LexiconRecordProperty[];
+  /** Path relative to the project root, e.g. `lexicons/net/.../review.json`. */
+  lexiconPath: string;
+}
+
 export interface LexiconEndpoint {
   /** Full lexicon NSID, e.g. `net.olamaelcu.livtet.biblio.getBook`. */
   id: string;
@@ -68,17 +92,6 @@ function describeType(prop: JsonObject): string {
   return type;
 }
 
-function collectJsonFiles(dir: string, out: string[]): void {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      collectJsonFiles(full, out);
-    } else if (entry.isFile() && entry.name.endsWith('.json')) {
-      out.push(full);
-    }
-  }
-}
-
 function extractProperties(
   props: unknown,
   requiredList: unknown,
@@ -97,6 +110,19 @@ function extractProperties(
   }
   return result;
 }
+
+function collectJsonFiles(dir: string, out: string[]): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectJsonFiles(full, out);
+    } else if (entry.isFile() && entry.name.endsWith('.json')) {
+      out.push(full);
+    }
+  }
+}
+
+
 
 function parseLexicon(file: string): LexiconEndpoint | null {
   const raw = JSON.parse(readFileSync(file, 'utf8')) as JsonObject;
@@ -166,6 +192,107 @@ function parseLexicon(file: string): LexiconEndpoint | null {
   };
 }
 
+/**
+ * Resolve a record/param property to a display type plus human-readable
+ * constraints (grapheme limits, ranges, known values, blob accept rules).
+ */
+function describeRecordProp(
+  prop: JsonObject,
+): { type: string; constraints: string[] } {
+  const type = typeof prop.type === 'string' ? prop.type : 'unknown';
+  const constraints: string[] = [];
+
+  const format = typeof prop.format === 'string' ? prop.format : undefined;
+  const maxGraphemes = typeof prop.maxGraphemes === 'number' ? prop.maxGraphemes : undefined;
+  const minimum = typeof prop.minimum === 'number' ? prop.minimum : undefined;
+  const maximum = typeof prop.maximum === 'number' ? prop.maximum : undefined;
+  const knownValues = asStringArray(prop.knownValues);
+  const accept = asStringArray(prop.accept);
+  const maxSize = typeof prop.maxSize === 'number' ? prop.maxSize : undefined;
+
+  if (format) constraints.push(`format ${format}`);
+  if (maxGraphemes != null) constraints.push(`max ${maxGraphemes} graphemes`);
+  if (minimum != null) constraints.push(`min ${minimum}`);
+  if (maximum != null) constraints.push(`max ${maximum}`);
+  if (knownValues.length) constraints.push(`values: ${knownValues.join(', ')}`);
+  if (accept.length) constraints.push(`accept ${accept.join(', ')}`);
+  if (maxSize != null) constraints.push(`max ${Math.round(maxSize / 1_000_000)}MB`);
+
+  if (type === 'ref' && typeof prop.ref === 'string') {
+    return { type: `ref ${richerRefName(prop.ref)}`, constraints };
+  }
+  if (type === 'array' && isObject(prop.items)) {
+    const items = describeRecordProp(prop.items);
+    return { type: `array<${items.type}>`, constraints: [...constraints, ...items.constraints] };
+  }
+  return { type, constraints };
+}
+
+/**
+ * A short, human-friendly name for a lexicon ref: `defs#readingStatus` →
+ * `readingStatus`, `net.olamaelcu.livtet.biblio.work` → `work`.
+ */
+function richerRefName(ref: string): string {
+  const hash = ref.split('#');
+  if (hash.length > 1 && hash[1]) return hash[1];
+  const seg = hash[0].split('.').pop();
+  return seg || ref;
+}
+
+function parseLexiconRecord(file: string): LexiconRecord | null {
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as JsonObject;
+  if (!isObject(raw.defs) || !isObject(raw.defs.main)) return null;
+  const main = raw.defs.main;
+  if (main.type !== 'record') return null;
+
+  const id = typeof raw.id === 'string' ? raw.id : '';
+  const name = id.split('.').pop() ?? id;
+
+  const record = isObject(main.record) ? main.record : undefined;
+  const required = new Set(asStringArray(record?.required));
+  const properties: LexiconRecordProperty[] = [];
+  const propDefs = record && isObject(record.properties) ? record.properties : undefined;
+  if (propDefs) {
+    for (const [pname, pvalue] of Object.entries(propDefs)) {
+      if (!isObject(pvalue)) continue;
+      const { type, constraints } = describeRecordProp(pvalue);
+      properties.push({
+        name: pname,
+        type,
+        required: required.has(pname),
+        description: typeof pvalue.description === 'string' ? pvalue.description : undefined,
+        constraints,
+      });
+    }
+  }
+
+  return {
+    id,
+    name,
+    type: 'record',
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    key: typeof main.key === 'string' ? main.key : 'any',
+    properties,
+    lexiconPath: file.slice(PROJECT_ROOT.length),
+  };
+}
+
+/**
+ * Record collections written by the AppView itself: the catalog proper plus
+ * the book↔contributor join, all populated from the backfill dumps. Everything
+ * else (`review`, `shelf`, `actor`, `bookShelving`) is written by clients to
+ * the user's own PDS.
+ */
+export const catalogRecordNsids: ReadonlySet<string> = new Set([
+  'net.olamaelcu.livtet.biblio.book',
+  'net.olamaelcu.livtet.biblio.bookContributor',
+  'net.olamaelcu.livtet.biblio.contributor',
+  'net.olamaelcu.livtet.biblio.contributorRole',
+  'net.olamaelcu.livtet.biblio.format',
+  'net.olamaelcu.livtet.biblio.genre',
+  'net.olamaelcu.livtet.biblio.work',
+]);
+
 /** All xrpc `query`/`procedure` endpoints, sorted by NSID. Built once at module load. */
 export const lexiconEndpoints: LexiconEndpoint[] = (() => {
   const files: string[] = [];
@@ -179,3 +306,14 @@ export const lexiconEndpoints: LexiconEndpoint[] = (() => {
 
 export const queryCount = lexiconEndpoints.filter((e) => e.type === 'query').length;
 export const procedureCount = lexiconEndpoints.filter((e) => e.type === 'procedure').length;
+
+/** All `record`-type lexicons (firehose-eligible), sorted by NSID. Built once at module load. */
+export const recordLexicons: LexiconRecord[] = (() => {
+  const files: string[] = [];
+  collectJsonFiles(LEXICONS_DIR, files);
+  const records = files
+    .map(parseLexiconRecord)
+    .filter((r): r is LexiconRecord => r !== null);
+  records.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return records;
+})();
