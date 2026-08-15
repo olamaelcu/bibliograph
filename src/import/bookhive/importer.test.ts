@@ -91,4 +91,43 @@ describe('importBookhiveCatalog', () => {
     expect(reservationFor(db)).toBeUndefined();
     rmSync(lockDir, { recursive: true, force: true });
   });
+
+  it('retries a transient fetch failure and continues the import', async () => {
+    listRecordsMock
+      .mockRejectedValueOnce(
+        new TypeError('fetch failed', {
+          cause: Object.assign(new Error('connect ECONNREFUSED 1.2.3.4:443'), { code: 'ECONNREFUSED' }),
+        }),
+      )
+      .mockResolvedValueOnce({
+        ok: true,
+        data: {
+          records: [
+            { uri: 'at://did:web:test/buzz.bookhive.catalogBook/c', value: { hiveId: 'h3', title: 'Gamma', author: 'Cara' } },
+          ],
+          cursor: undefined,
+        },
+      });
+
+    const { db } = createTestDb();
+    const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
+    const lockPath = join(lockDir, 'lock');
+    const res = await importBookhiveCatalog({ db, lockPath });
+    expect(res.processed).toBe(1);
+    expect(listRecordsMock).toHaveBeenCalledTimes(2);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(reservationFor(db)).toBeUndefined();
+    rmSync(lockDir, { recursive: true, force: true });
+  });
+
+  it('rejects on a non-transient fetch failure and releases the lock and reservation', async () => {
+    listRecordsMock.mockRejectedValueOnce(new TypeError('fetch failed', { cause: new Error('boom') }));
+    const { db } = createTestDb();
+    const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
+    const lockPath = join(lockDir, 'lock');
+    await expect(importBookhiveCatalog({ db, lockPath })).rejects.toThrow('fetch failed');
+    expect(existsSync(lockPath)).toBe(false);
+    expect(reservationFor(db)).toBeUndefined();
+    rmSync(lockDir, { recursive: true, force: true });
+  });
 });

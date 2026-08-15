@@ -1,3 +1,13 @@
+<style>
+  .stats-page tr td:nth-child(n + 2),
+  .stats-page tr th:nth-child(n + 2) {
+    text-align: right;
+  }
+
+  .stats-page tr td:nth-child(n + 2) {
+    font-family: var(--wa-font-family-code), monospace;
+  }
+</style>
 <main class="stats-page">
   <h2>Catalog</h2>
   <table>
@@ -9,21 +19,21 @@
       <th>Rejected</th>
     </tr>
     <% for (const row of it.stats.catalog) { %>
-      <tr>
+      <tr data-catalog="<%= row.label %>">
         <td><code>
             <%= row.label %>
           </code></td>
-        <td>
+        <td data-stat="total">
           <%= row.total.toLocaleString() %>
         </td>
         <% if (row.byStatus) { %>
-          <td>
+          <td data-stat="staged">
             <%= row.byStatus.staged.toLocaleString() ?? 0 %>
           </td>
-          <td>
+          <td data-stat="released">
             <%= row.byStatus.released.toLocaleString() ?? 0 %>
           </td>
-          <td>
+          <td data-stat="rejected">
             <%= row.byStatus.rejected.toLocaleString() ?? 0 %>
           </td>
           <% } else { %>
@@ -34,27 +44,79 @@
   </table>
   <h2>Import issues</h2>
   <p class="muted">
-    There's currently <code>
+    There's currently <code data-stat="openIssues">
       <%= it.stats.openIssues -%>
     </code>
     open issues
     &mdash; flagged rows awaiting review before release.
   </p>
   <h2>Backfill state</h2>
-  <% if (it.stats.backfill.length===0) { %>
-    <p class="muted">No backfill state recorded.</p>
-    <% } else { %>
-      <ul class="spec">
-        <% for (const b of it.stats.backfill) { %>
-          <li>
-            <code>
-              <%= b.name %>
-            </code> &mdash; <%= b.complete ? 'complete' : 'in progress' %>
-              · <%= b.totalProcessed.toLocaleString() %> processed
-                <% if (b.totalRecords) { %> of <%= b.totalRecords.toLocaleString() %> (<%= Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString() %>%)<% } %>
-                <% if (b.fileSize) { %> · <%= Math.round(b.fileSize / 1024 / 1024).toLocaleString() %> MB dump<% } %>
-          </li>
-          <% } %>
-      </ul>
-      <% } %>
+  <div id="backfill-container">
+    <% if (it.stats.backfill.length===0) { %>
+      <p class="muted">No backfill state recorded.</p>
+      <% } else { %>
+        <ul class="spec">
+          <% for (const b of it.stats.backfill) { %>
+            <li>
+              <code>
+                <%= b.name %>
+              </code> &mdash; <%= b.complete ? 'complete' : 'in progress' %>
+                · <%= b.totalProcessed.toLocaleString() %> processed
+                  <% if (b.totalRecords) { %> of <%= b.totalRecords.toLocaleString() %> (<%=
+                        Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString() %>%)<% } %>
+                          <% if (b.fileSize) { %> · <%= Math.round(b.fileSize / 1024 / 1024).toLocaleString() %> MB dump
+                              <% } %>
+            </li>
+            <% } %>
+        </ul>
+        <% } %>
+  </div>
 </main>
+<script type="module">
+  const POLL_MS = 1000;
+
+  function setStat(el, name, value) {
+    const cell = el.querySelector(`[data-stat="${name}"]`);
+    if (cell) cell.textContent = value;
+  }
+
+  function renderBackfill(backfill) {
+    const container = document.getElementById('backfill-container');
+    if (!container) return;
+    if (backfill.length === 0) {
+      container.innerHTML = '<p class="muted">No backfill state recorded.</p>';
+      return;
+    }
+    const lis = backfill.map((b) => {
+      const total = b.totalProcessed.toLocaleString();
+      const of = b.totalRecords ? ` of ${b.totalRecords.toLocaleString()} (${Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString()}%)` : '';
+      const size = b.fileSize ? ` · ${Math.round(b.fileSize / 1024 / 1024).toLocaleString()} MB dump` : '';
+      return `<li><code>${b.name}</code> &mdash; ${b.complete ? 'complete' : 'in progress'} · ${total} processed${of}${size}</li>`;
+    });
+    container.innerHTML = `<ul class="spec">${lis.join('')}</ul>`;
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch('/stats.json', {cache: 'no-store'});
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const row of data.catalog) {
+        const tr = document.querySelector(`tr[data-catalog="${CSS.escape(row.label)}"]`);
+        if (!tr) continue;
+        setStat(tr, 'total', row.total.toLocaleString());
+        if (row.byStatus) {
+          setStat(tr, 'staged', (row.byStatus.staged ?? 0).toLocaleString());
+          setStat(tr, 'released', (row.byStatus.released ?? 0).toLocaleString());
+          setStat(tr, 'rejected', (row.byStatus.rejected ?? 0).toLocaleString());
+        }
+      }
+      setStat(document, 'openIssues', data.openIssues.toLocaleString());
+      renderBackfill(data.backfill);
+    } catch {
+      // Keep last values; retry on the next tick.
+    }
+  }
+
+  setInterval(refresh, POLL_MS);
+</script>

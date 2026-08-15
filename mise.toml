@@ -11,3 +11,11 @@ run = "pnpm run dev"
 
 [tasks.migrate]
 run = "pnpm exec drizzle-kit migrate"
+
+[tasks.import]
+run = [
+  "pnpm run dump:contributors --keep-dump --no-download",
+  "pnpm run dump:works --keep-dump --no-download",
+  "pnpm run dump:openlibrary --keep-dump --no-download",
+  "pnpm run imaages:refresh --keep-dump --no-download",
+]

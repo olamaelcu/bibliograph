@@ -14,7 +14,7 @@ import { registerBlobProxy } from './storage/blob-proxy.js';
 import { createXrpcRouter } from './xrpc/router.js';
 import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
-import { renderStatsPage } from './pages/stats.js';
+import { renderStatsPage, getCatalogStats } from './pages/stats.js';
 import { lexiconEndpoints, procedureCount, queryCount } from './lexicon-catalog.js';
 import type { ViewContext } from './xrpc/views.js';
 
@@ -79,6 +79,10 @@ export function createApp(): Hono {
 		),
 	);
 	app.get('/stats', (ctx) => ctx.html(renderStatsPage()));
+	app.get('/stats.json', (ctx) => {
+		ctx.header('Cache-Control', 'no-store');
+		return ctx.json(getCatalogStats());
+	});
 	app.get('/health', healthCheck);
 	app.get('/.well-known/did.json', didDocumentHandler);
 	app.get('/.well-known/atproto-did', serveAtprotoDid);

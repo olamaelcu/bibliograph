@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     logger.info(s, 'contributors import done');
   } else if (cmd === 'bookhive:catalog') {
     const { importBookhiveCatalog } = await import('./bookhive/importer.js');
-    const s = await importBookhiveCatalog({ db, reset: flags.reset });
+    const s = await importBookhiveCatalog({ db, reset: flags.reset, limit: flags.batchSize });
     logger.info(s, 'bookhive catalog import done');
   } else if (cmd === 'images:refresh') {
     const { BlobStore, blobStoreConfigFromEnv } = await import('../storage/store.js');
@@ -185,7 +185,7 @@ export { main };
 // module without triggering a usage-exit.
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
-    logger.fatal({ err: (err as Error).message }, 'import failed');
+    logger.fatal({ err: err as Error }, 'import failed');
     process.exit(1);
   });
 }

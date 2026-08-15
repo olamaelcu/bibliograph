@@ -56,6 +56,17 @@ describe('pages', () => {
     expect(body).toContain('contributors');
   });
 
+  it('serves live stats as JSON without caching', async () => {
+    const res = await app.request('/stats.json');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const body = await res.json();
+    expect(Array.isArray(body.catalog)).toBe(true);
+    expect(typeof body.openIssues).toBe('number');
+    expect(Array.isArray(body.backfill)).toBe(true);
+  });
+
   it('serves webawesome theme assets', async () => {
     const res = await app.request('/webawesome/dist-cdn/styles/webawesome.css');
     expect(res.status).toBe(200);

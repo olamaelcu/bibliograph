@@ -101,4 +101,14 @@ describe('page templates', () => {
 			expect(html).toContain(label);
 		}
 	});
+
+	it('marks cells updatable and includes the live polling script', () => {
+		const html = renderStatsPage();
+		expect(html).toContain('data-stat="total"');
+		expect(html).toContain('data-stat="openIssues"');
+		expect(html).toContain('data-catalog=');
+		expect(html).toContain('id="backfill-container"');
+		expect(html).toContain("fetch('/stats.json'");
+		expect(html).toContain('setInterval(refresh, POLL_MS)');
+	});
 });

@@ -7,6 +7,7 @@ import { Reservation } from '../../dump/reservation.js';
 import { mergeEntity } from '../merge.js';
 import { mapCatalogBook, type BookhiveCatalogBook } from './mapper.js';
 import { BOOKHIVE_CATALOG_NSID, bookhiveCatalogDid, bookhivePdsUrl } from './constants.js';
+import { withRetry } from './network.js';
 import { logger } from '../../logger.js';
 
 export interface BookhiveImportOptions {
@@ -53,21 +54,35 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
     const rpc = new Client({ handler: simpleFetchHandler({ service: bookhivePdsUrl() }) });
     const did = bookhiveCatalogDid();
 
+    logger.info(
+      { pds: bookhivePdsUrl(), did, collection: BOOKHIVE_CATALOG_NSID, cursor },
+      'starting bookhive catalog import',
+    );
+
     let processed = 0;
     let failed = 0;
+    let pages = 0;
     let nextCursor: string | null = cursor;
     do {
-      const res = await rpc.get('com.atproto.repo.listRecords', {
-        params: {
-          repo: did as ActorIdentifier,
-          collection: BOOKHIVE_CATALOG_NSID,
-          limit: opts.limit ?? 100,
-          cursor: nextCursor ?? undefined,
-        },
-      });
+      const res = await withRetry(
+        'bookhive listRecords failed',
+        () =>
+          rpc.get('com.atproto.repo.listRecords', {
+            params: {
+              repo: did as ActorIdentifier,
+              collection: BOOKHIVE_CATALOG_NSID,
+              limit: opts.limit ?? 100,
+              cursor: nextCursor ?? undefined,
+            },
+          }),
+        { cursor: nextCursor ?? null },
+      );
 
       if (!res.ok) {
-        throw new Error(`bookhive listRecords failed: ${res.data.error}${res.data.message ? `: ${res.data.message}` : ''}`);
+        const where = nextCursor ?? 'start';
+        throw new Error(
+          `bookhive listRecords failed (cursor ${where}): ${res.data.error}${res.data.message ? `: ${res.data.message}` : ''}`,
+        );
       }
       const body = res.data;
       for (const record of body.records) {
@@ -81,12 +96,18 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
         processed += 1;
       }
 
+      pages += 1;
+      logger.debug({ cursor: nextCursor ?? null, records: body.records.length, next: body.cursor ?? null }, 'bookhive page fetched');
+      if (pages % 50 === 0) {
+        logger.info({ pages, processed, failed }, 'bookhive catalog import progress');
+      }
+
       nextCursor = body.cursor ?? null;
       state.set({ lastKeyCursor: nextCursor });
     } while (nextCursor);
 
     state.markComplete();
-    logger.info({ processed, failed }, 'bookhive catalog import complete');
+    logger.info({ processed, failed, pages }, 'bookhive catalog import complete');
     return { processed, failed };
   } finally {
     if (acquired) reservation.release();

@@ -12,14 +12,6 @@
   <style>
     :root {
       color-scheme: light dark;
-      --bg: light-dark(#ffffff, #0c1016);
-      --surface: light-dark(#f6f7f9, #121820);
-      --surface-2: light-dark(#ffffff, #0a0e13);
-      --border: light-dark(#e4e7ec, #1f2933);
-      --text: light-dark(#1a1f24, #d8dfe7);
-      --muted: light-dark(#5d6771, #8b98a5);
-      --accent: light-dark(#1f5fea, #5aa2ff);
-      --code-bg: light-dark(#f1f3f5, #0a0f15);
     }
 
     /* Avoid a flash of unstyled content for elements that weren't server-rendered. */
@@ -30,8 +22,8 @@
     body {
       margin: 0;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      background: var(--wa-color-surface-default);
+      color: var(--wa-color-text-normal);
     }
 
     code,
@@ -51,8 +43,8 @@
       align-items: center;
       gap: 1.5rem;
       padding: 0.9rem 2rem;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      background: var(--wa-color-surface-raised);
+      border-bottom: 1px solid var(--wa-form-control-border-color);
       position: sticky;
       top: 0;
       z-index: 10;
@@ -63,13 +55,13 @@
       align-items: center;
       gap: 0.5rem;
       text-decoration: none;
-      color: var(--text);
+      color: var(--wa-color-text-normal);
       white-space: nowrap;
     }
 
     .brand wa-icon {
       font-size: 1.15rem;
-      color: var(--accent);
+      color: var(--wa-color-brand-50);
     }
 
     .brand-name {
@@ -78,13 +70,13 @@
     }
 
     .brand-sub {
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.72rem;
-      border: 1px solid var(--border);
+      border: 1px solid var(--wa-form-control-border-color);
       border-radius: 4px;
       padding: 0.1rem 0.35rem;
-      background: var(--code-bg);
+      background: var(--wa-color-surface-lowered);
     }
 
     .topbar .nav {
@@ -94,7 +86,7 @@
     }
 
     .topbar .nav a {
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       text-decoration: none;
       font-weight: 500;
       font-size: 0.95rem;
@@ -103,12 +95,12 @@
     }
 
     .topbar .nav a:hover {
-      color: var(--text);
+      color: var(--wa-color-text-normal);
     }
 
     .topbar .nav a.active {
-      color: var(--text);
-      border-bottom-color: var(--accent);
+      color: var(--wa-color-text-normal);
+      border-bottom-color: var(--wa-color-brand-50);
     }
 
     .topbar-actions {
@@ -136,7 +128,7 @@
 
     .hero .hero-sub {
       margin: 0;
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       max-width: 42rem;
       font-size: 1.05rem;
       line-height: 1.55;
@@ -154,10 +146,10 @@
       align-items: center;
       gap: 0.35rem;
       padding: 0.5rem 0.9rem;
-      border: 1px solid var(--border);
+      border: 1px solid var(--wa-form-control-border-color);
       border-radius: 6px;
-      background: var(--surface-2);
-      color: var(--text);
+      background: var(--wa-color-surface-default);
+      color: var(--wa-color-text-normal);
       text-decoration: none;
       font-weight: 600;
       font-size: 0.9rem;
@@ -165,12 +157,12 @@
     }
 
     .btn:hover {
-      border-color: var(--accent);
+      border-color: var(--wa-color-brand-50);
     }
 
     .btn-primary {
-      background: var(--accent);
-      border-color: var(--accent);
+      background: var(--wa-color-brand-50);
+      border-color: var(--wa-color-brand-50);
       color: #ffffff;
     }
 
@@ -182,8 +174,8 @@
       display: flex;
       align-items: center;
       gap: 0.6rem;
-      background: var(--code-bg);
-      border: 1px solid var(--border);
+      background: var(--wa-color-surface-lowered);
+      border: 1px solid var(--wa-form-control-border-color);
       border-radius: 8px;
       padding: 0.7rem 0.9rem;
       margin-top: 0.5rem;
@@ -212,7 +204,7 @@
       max-width: 50rem;
       margin: 0 auto;
       padding: 0.5rem 2rem 2.5rem;
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       line-height: 1.6;
     }
 
@@ -272,7 +264,7 @@
     }
 
     .muted {
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
     }
 
     .row-head {
@@ -283,12 +275,12 @@
     }
 
     .param-type {
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       font-size: 0.875rem;
     }
 
     .param-meta {
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       font-size: 0.875rem;
       margin-top: 0.25rem;
     }
@@ -326,11 +318,11 @@
     .stats-page td {
       text-align: left;
       padding: 0.4rem 0.75rem;
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid var(--wa-form-control-border-color);
     }
 
     .stats-page th {
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       font-weight: 600;
     }
 
@@ -343,7 +335,7 @@
       max-width: 1100px;
       margin: 2rem auto 0;
       padding: 2rem 2rem 2.5rem;
-      border-top: 1px solid var(--border);
+      border-top: 1px solid var(--wa-form-control-border-color);
     }
 
     .footer-col {
@@ -359,13 +351,13 @@
     }
 
     .footer-col a {
-      color: var(--muted);
+      color: var(--wa-color-on-quiet);
       text-decoration: none;
       width: fit-content;
     }
 
     .footer-col a:hover {
-      color: var(--accent);
+      color: var(--wa-color-brand-50);
     }
   </style>
 </head>
