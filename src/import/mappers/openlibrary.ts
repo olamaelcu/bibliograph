@@ -73,7 +73,13 @@ export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
       pk: sourceKeySlug(workKey),
       source: 'openlibrary',
       matchName: ed.title ?? null,
-      identifiers: [{ resource: identifierResource('openlibrary', workKey.replace(/^\//, '')), url: `https://openlibrary.org${workKey}` }],
+      // Editions carry ISBNs, not works — attach each edition's ISBNs to its
+      // work too so a work accumulates the ISBN-10/13 of every edition merged
+      // into it, not just its own openlibrary: identifier.
+      identifiers: [
+        { resource: identifierResource('openlibrary', workKey.replace(/^\//, '')), url: `https://openlibrary.org${workKey}` },
+        ...isbnIds,
+      ],
       fields: {
         title: ed.title ?? null,
         description: text(ed.description),

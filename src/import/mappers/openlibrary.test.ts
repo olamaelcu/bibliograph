@@ -23,6 +23,27 @@ describe('OL mappers', () => {
 		expect(book.fields.workPk).toBe('works-ol893423w');
   });
 
+  it('also attaches the edition\'s ISBN-13/ISBN-10 identifiers to its work', () => {
+    const cands = mapEditionToCandidates({
+      key: '/books/OL123M',
+      title: 'Dune',
+      works: [{ key: '/works/OL893423W' }],
+      isbn_13: ['9780441172719'],
+      isbn_10: ['0441172717'],
+    });
+    const work = cands.find((c) => c.entityType === 'work');
+    expect(work?.identifiers.some((i) => i.resource === 'openlibrary:works/OL893423W')).toBe(true);
+    expect(work?.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
+    expect(work?.identifiers.some((i) => i.resource === 'isbn:0441172717')).toBe(true);
+  });
+
+  it('does not attach any ISBNs to a work when the edition has none', () => {
+    const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', works: [{ key: '/works/OL1W' }] });
+    const work = cands.find((c) => c.entityType === 'work');
+    expect(work?.identifiers).toHaveLength(1);
+    expect(work?.identifiers[0].resource).toBe('openlibrary:works/OL1W');
+  });
+
   it('maps work and author', () => {
     const w = mapWorkToCandidate({ key: '/works/OL893423W', title: 'Dune' });
 		expect(w.pk).toBe('works-ol893423w');
