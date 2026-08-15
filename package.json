@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "build:server": "tsc",
+    "build": "lex-cli generate && tsc",
+    "build:server": "lex-cli generate && tsc",
     "check": "tsc && tsc -p tsconfig.client.json",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -3,7 +3,12 @@ import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const dbPath = resolve(process.env.DB_PATH);
+const dbPathEnv = process.env.DB_PATH;
+if (!dbPathEnv) {
+  console.error("DB_PATH is not set; run 'mise run migrate' or set DB_PATH");
+  process.exit(1);
+}
+const dbPath = resolve(dbPathEnv);
 
 if (!existsSync(dbPath)) {
   console.error(`no database at ${dbPath}; run 'mise run migrate' or set DB_PATH`);

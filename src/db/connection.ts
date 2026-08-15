@@ -3,7 +3,9 @@ import { dirname, resolve } from 'node:path';
 import Database, { type Database as BetterSqlite3Database } from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 
-const dbPath = resolve(process.env.DB_PATH);
+const dbPathEnv = process.env.DB_PATH;
+if (!dbPathEnv) throw new Error('DB_PATH environment variable is not set');
+const dbPath = resolve(dbPathEnv);
 const dataDir = dirname(dbPath);
 
 if (!existsSync(dataDir)) {

@@ -539,7 +539,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const last = page.at(-1);
       const hitsTotalCount = Number(hitsTotal?.count ?? 0);
       const cursor = hasMore && last ? encodeCursor({ key: last.title, pk: last.pk }) : undefined;
-      logger.info({ count: views.length, hits: hitsTotal.count, cursor, q, limit }, "Search completed")
+      logger.info({ count: views.length, hits: hitsTotalCount, cursor, q, limit }, "Search completed")
       return json({
         books: views,
         hitsTotal: hitsTotalCount,
