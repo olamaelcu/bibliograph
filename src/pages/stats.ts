@@ -29,6 +29,7 @@ export interface CatalogStats {
 		name: string;
 		complete: boolean;
 		totalProcessed: number;
+		totalRecords: number | null;
 		fileSize: number | null;
 	}>;
 }
@@ -72,6 +73,7 @@ export function getCatalogStats(): CatalogStats {
 			name: b.name,
 			complete: b.complete === 1,
 			totalProcessed: b.totalProcessed ?? 0,
+			totalRecords: b.totalRecords ?? null,
 			fileSize: b.fileSize,
 		})),
 	};

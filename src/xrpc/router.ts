@@ -29,8 +29,8 @@ import {
   bookGenres,
   bookIdentifiers,
   books,
-  contributorRoles,
-  formats,
+  // contributorRoles,
+  // formats,
   genreIdentifiers,
   genres,
   workIdentifiers,
@@ -43,6 +43,7 @@ import type {
   ShelfView,
   ShelfWithBooksView,
 } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
+import { logger } from '../logger.js';
 
 type Db = BetterSQLite3Database;
 
@@ -510,6 +511,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const q = params.q.trim();
       const limit = clampLimit(params.limit);
       const term = `%${q}%`;
+      logger.info({ q, limit }, 'Searching books...');
       const idSub = db
         .select({ bookPk: bookIdentifiers.bookPk })
         .from(bookIdentifiers)
@@ -535,10 +537,13 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       for (const row of page) views.push(await toBookView(db, ctx, row));
       const hitsTotal = db.select({ count: sql`count(*)` }).from(books).where(where).get();
       const last = page.at(-1);
+      const hitsTotalCount = Number(hitsTotal?.count ?? 0);
+      const cursor = hasMore && last ? encodeCursor({ key: last.title, pk: last.pk }) : undefined;
+      logger.info({ count: views.length, hits: hitsTotal.count, cursor, q, limit }, "Search completed")
       return json({
         books: views,
-        hitsTotal: Number(hitsTotal?.count ?? 0),
-        cursor: hasMore && last ? encodeCursor({ key: last.title, pk: last.pk }) : undefined,
+        hitsTotal: hitsTotalCount,
+        cursor,
       });
     },
   });

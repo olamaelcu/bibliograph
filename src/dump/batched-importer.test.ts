@@ -42,4 +42,32 @@ describe('importInBatches', () => {
     expect(summary.inserted).toBe(2);
     expect(summary.failed).toBe(1);
   });
+
+  it('reports progress with the known total after each flushed batch', async () => {
+    const { db } = createTestDb();
+    const calls: Array<{ processed: number; total: number | null }> = [];
+    await importInBatches(db, gen([1, 2, 3, 4, 5]), {
+      batchSize: 2,
+      total: 5,
+      onProgress: (processed, total) => calls.push({ processed, total }),
+      upsert: () => ({ action: 'inserted' }),
+    });
+    // Two full batches + one trailing flush.
+    expect(calls).toEqual([
+      { processed: 2, total: 5 },
+      { processed: 4, total: 5 },
+      { processed: 5, total: 5 },
+    ]);
+  });
+
+  it('passes total null when unknown', async () => {
+    const { db } = createTestDb();
+    const calls: Array<{ processed: number; total: number | null }> = [];
+    await importInBatches(db, gen([1]), {
+      batchSize: 1,
+      onProgress: (processed, total) => calls.push({ processed, total }),
+      upsert: () => ({ action: 'inserted' }),
+    });
+    expect(calls).toEqual([{ processed: 1, total: null }]);
+  });
 });

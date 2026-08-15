@@ -20,6 +20,10 @@ export function importInBatches<T>(
   opts: {
     batchSize?: number;
     logInterval?: number;
+    /** Known total record count, used only to compute progress. */
+    total?: number;
+    /** Called after each flushed batch with cumulative processed + total. */
+    onProgress?: (processed: number, total: number | null) => void;
     upsert: (item: T) => { action: 'inserted' | 'skipped' | 'failed' };
   },
 ): Promise<BatchSummary> {
@@ -37,12 +41,16 @@ export function importInBatches<T>(
       if (batch.length >= batchSize) {
         flushBatch(batch);
         batch = [];
+        opts.onProgress?.(summary.processed, opts.total ?? null);
         if (summary.processed % logInterval === 0) {
           logger.info({ ...summary, elapsedMs: Date.now() - startedAt }, 'import progress');
         }
       }
     }
-    if (batch.length) flushBatch(batch);
+    if (batch.length) {
+      flushBatch(batch);
+      opts.onProgress?.(summary.processed, opts.total ?? null);
+    }
     logger.debug({ ...summary, elapsedMs: Date.now() - startedAt }, 'import final batch flushed');
     return summary;
 

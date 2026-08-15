@@ -12,6 +12,14 @@
   <style>
     :root {
       color-scheme: light dark;
+      --bg: light-dark(#ffffff, #0c1016);
+      --surface: light-dark(#f6f7f9, #121820);
+      --surface-2: light-dark(#ffffff, #0a0e13);
+      --border: light-dark(#e4e7ec, #1f2933);
+      --text: light-dark(#1a1f24, #d8dfe7);
+      --muted: light-dark(#5d6771, #8b98a5);
+      --accent: light-dark(#1f5fea, #5aa2ff);
+      --code-bg: light-dark(#f1f3f5, #0a0f15);
     }
 
     /* Avoid a flash of unstyled content for elements that weren't server-rendered. */
@@ -19,43 +27,201 @@
       visibility: hidden;
     }
 
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.9em;
+    }
+
     wa-page {
       --wa-page-width: 1100px;
     }
 
-    .hero {
-      padding: 2rem;
-      flex-direction: column;
+    /* ---- Top bar ------------------------------------------------------- */
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      padding: 0.9rem 2rem;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
 
-    .hero p {
-      max-width: 50rem;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      text-decoration: none;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .brand wa-icon {
+      font-size: 1.15rem;
+      color: var(--accent);
+    }
+
+    .brand-name {
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-sub {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.35rem;
+      background: var(--code-bg);
+    }
+
+    .topbar .nav {
+      display: flex;
+      gap: 1.25rem;
       margin: 0 auto;
     }
 
-    .hero h1 {
-      margin: 0 0 0.25rem;
+    .topbar .nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.95rem;
+      padding: 0.25rem 0;
+      border-bottom: 2px solid transparent;
     }
 
-    .hero .subtitle {
-      margin: 0 0 0.5rem;
-      color: var(--wa-color-neutral-500);
+    .topbar .nav a:hover {
+      color: var(--text);
     }
 
-    .nav {
+    .topbar .nav a.active {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+
+    .topbar-actions {
+      white-space: nowrap;
+    }
+
+    /* ---- Hero (home page) --------------------------------------------- */
+
+    .hero {
+      max-width: 50rem;
+      margin: 0 auto;
+      padding: 3.5rem 2rem 2.5rem;
       display: flex;
-      gap: 1.25rem;
-      margin-top: 1rem;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 1rem;
     }
 
-    .nav a {
-      color: var(--wa-color-primary-600);
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 2.9rem);
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+
+    .hero .hero-sub {
+      margin: 0;
+      color: var(--muted);
+      max-width: 42rem;
+      font-size: 1.05rem;
+      line-height: 1.55;
+    }
+
+    .hero-cta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-top: 0.5rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.5rem 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface-2);
+      color: var(--text);
       text-decoration: none;
       font-weight: 600;
+      font-size: 0.9rem;
+      transition: border-color 0.15s, background 0.15s;
     }
 
-    .nav a:hover {
-      text-decoration: underline;
+    .btn:hover {
+      border-color: var(--accent);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.08);
+    }
+
+    .code-block {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.7rem 0.9rem;
+      margin-top: 0.5rem;
+      max-width: 100%;
+    }
+
+    .code-block code {
+      overflow-x: auto;
+      white-space: nowrap;
+      font-size: 0.85rem;
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.25rem;
+    }
+
+    .hero-meta .muted {
+      font-size: 0.85rem;
+    }
+
+    .about {
+      max-width: 50rem;
+      margin: 0 auto;
+      padding: 0.5rem 2rem 2.5rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* ---- Shared content pages ----------------------------------------- */
+
+    .page-intro {
+      max-width: 50rem;
+      margin: 1rem auto 0;
+      padding: 0 2rem;
     }
 
     .home {
@@ -74,17 +240,13 @@
       text-decoration: none;
     }
 
-    .page-intro {
-      max-width: 50rem;
-      margin: 1rem auto 0;
-      padding: 0 2rem;
-    }
-
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(35vw, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(25rem, 1fr));
       gap: 1rem;
-      padding: 1rem 0 2rem;
+      padding: 1rem 2rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
     }
 
     .card-header {
@@ -95,13 +257,14 @@
     }
 
     .endpoint-card {
-      width: 45vw;
-      margin: 0 auto;
+      width: auto;
+      margin: 0;
     }
 
     .endpoint-id {
       font-weight: 600;
       flex: 1 1;
+      word-break: break-all;
     }
 
     .endpoint-desc {
@@ -109,7 +272,7 @@
     }
 
     .muted {
-      color: var(--wa-color-neutral-500);
+      color: var(--muted);
     }
 
     .row-head {
@@ -120,12 +283,12 @@
     }
 
     .param-type {
-      color: var(--wa-color-neutral-500);
+      color: var(--muted);
       font-size: 0.875rem;
     }
 
     .param-meta {
-      color: var(--wa-color-neutral-500);
+      color: var(--muted);
       font-size: 0.875rem;
       margin-top: 0.25rem;
     }
@@ -142,12 +305,6 @@
 
     .card-footer {
       text-align: right;
-    }
-
-    .footer {
-      max-width: 50rem;
-      text-align: center;
-      padding: var(--wa-space-m);
     }
 
     .stats-page {
@@ -169,33 +326,94 @@
     .stats-page td {
       text-align: left;
       padding: 0.4rem 0.75rem;
-      border-bottom: 1px solid var(--wa-color-neutral-300);
+      border-bottom: 1px solid var(--border);
     }
 
     .stats-page th {
-      color: var(--wa-color-neutral-500);
+      color: var(--muted);
       font-weight: 600;
+    }
+
+    /* ---- Footer ------------------------------------------------------- */
+
+    .footer {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1.5rem;
+      max-width: 1100px;
+      margin: 2rem auto 0;
+      padding: 2rem 2rem 2.5rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.9rem;
+    }
+
+    .footer-col .footer-head {
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .footer-col a {
+      color: var(--muted);
+      text-decoration: none;
+      width: fit-content;
+    }
+
+    .footer-col a:hover {
+      color: var(--accent);
     }
   </style>
 </head>
 
 <body>
   <wa-page mobile-breakpoint="920" view="desktop">
-    <header class="hero" slot="header">
-      <h1><wa-icon name="circle-star"></wa-icon> Bibliograph</h1>
-      <p class="subtitle"><code>net.olamaelcu.livtet.biblio</code> &mdash; a literary-centric <a
-          href="https://atproto.com/guides/glossary#app-view">AT Protocol AppView</a></p>
+    <header class="topbar" slot="header">
+      <a class="brand" href="/">
+        <wa-icon name="circle-star"></wa-icon>
+        <span class="brand-name">Bibliograph</span>
+        <span class="brand-sub">net.olamaelcu.livtet.biblio</span>
+      </a>
       <nav class="nav">
-        <a href="/">Home</a>
-        <a href="/queries">Queries</a>
-        <a href="/procedures">Procedures</a>
-        <a href="/stats">Stats</a>
+        <a href="/" class="<%= it.title === 'Overview' ? 'active' : '' %>">Home</a>
+        <a href="/queries" class="<%= it.title === 'Queries' ? 'active' : '' %>">Queries</a>
+        <a href="/procedures" class="<%= it.title === 'Procedures' ? 'active' : '' %>">Procedures</a>
+        <a href="/stats" class="<%= it.title === 'Stats' ? 'active' : '' %>">Stats</a>
       </nav>
+      <div class="topbar-actions">
+        <wa-badge variant="brand" appearance="tint">read-only AppView</wa-badge>
+      </div>
     </header>
     <%~ it.body %>
-      <div class="footer">
-        Built by <a href="https://www.olamaelcu.net">Olamaelcu</a>
-      </div>
+      <footer class="footer">
+        <div class="footer-col">
+          <div class="footer-head">Bibliograph</div>
+          <p class="muted" style="margin:0">A literary-centric AT Protocol AppView over
+            <code>net.olamaelcu.livtet.biblio</code>.
+          </p>
+        </div>
+        <div class="footer-col">
+          <div class="footer-head">Product</div>
+          <a href="/">Home</a>
+          <a href="/queries">Queries</a>
+          <a href="/procedures">Procedures</a>
+          <a href="/stats">Stats</a>
+        </div>
+        <div class="footer-col">
+          <div class="footer-head">Project</div>
+          <a href="https://atproto.com/guides/glossary#app-view">AT Protocol AppView</a>
+          <a href="https://atproto.com">AT Protocol</a>
+          <a href="https://openlibrary.org">Open Library</a>
+        </div>
+        <div class="footer-col">
+          <div class="footer-head">Built by</div>
+          <a href="https://www.olamaelcu.net">Olamaelcu</a>
+        </div>
+      </footer>
   </wa-page>
 </body>
 

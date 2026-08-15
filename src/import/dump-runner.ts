@@ -6,6 +6,7 @@ import { DumpStreamer, SeekError } from '../dump/streamer.js';
 import { HttpDownloader } from '../dump/downloader.js';
 import { acquireLock, releaseLock } from '../dump/lock.js';
 import { Reservation } from '../dump/reservation.js';
+import { countDumpLines, readCountCache, writeCountCache } from '../dump/count-lines.js';
 import { importInBatches, type BatchSummary } from '../dump/batched-importer.js';
 import { mergeEntity, type MergeCandidate } from './merge.js';
 import { logger } from '../logger.js';
@@ -21,6 +22,8 @@ export interface DumpRunOptions {
   batchSize?: number;
   /** Called as download body bytes stream in: (received, total|null). */
   onProgress?: (received: number, total: number | null) => void;
+  /** Called as import records are processed: (processedIncludingResume, total|null). */
+  onImportProgress?: (processed: number, total: number | null) => void;
   keyOf: (fields: string[]) => string | null;
   parse: (fields: string[]) => MergeCandidate[];
   /** Optional per-record post-merge hook (e.g. hydrate book_contributors). */
@@ -74,6 +77,20 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     // Resume is cursor-based: gzip cannot be seeked safely, so we always start
     // at byte 0 and skip records whose key <= the persisted cursor.
     const lastKeyCursor = existing?.cursor ?? null;
+    // Continue the progress bar from where the previous run left off instead of
+    // restarting at 0 (records already processed are skipped, not replayed).
+    const progressBase = existing?.totalProcessed ?? 0;
+
+    // Resolve the total record count for progress: reuse the sidecar cache when
+    // the file is unchanged, otherwise one gunzip pass to count lines exactly.
+    let total = readCountCache(gzPath);
+    if (total === null) {
+      logger.info({ stateName: opts.stateName, gzPath }, 'counting dump records');
+      total = await countDumpLines(gzPath);
+      writeCountCache(gzPath, total);
+    }
+    logger.info({ stateName: opts.stateName, totalRecords: total }, 'dump record count');
+    state.set({ totalRecords: total });
 
     // NOTE: byte-seek resume is intentionally unused. `runOnce` is always called
     // with offset 0, so `SeekError` below is unreachable in practice; the branch
@@ -84,6 +101,10 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       const items = streamer.iter({ startByteOffset: offset, lastKeyCursor: cursor, keyOf: opts.keyOf });
       const s = await importInBatches(opts.db, items, {
         batchSize: opts.batchSize ?? 500,
+        total,
+        onProgress: opts.onImportProgress
+          ? (processed, t) => opts.onImportProgress?.(progressBase + processed, t)
+          : undefined,
         upsert: (item) => {
           const cands = opts.parse(item.fields);
           let inserted = false;
@@ -110,7 +131,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       }
     }
 
-    state.set({ lastKeyCursor: null, lastByteOffset: 0 });
+    state.set({ lastKeyCursor: null, lastByteOffset: 0, totalProcessed: progressBase + summary.processed });
     state.markComplete();
 
     if (!opts.keepDump) {

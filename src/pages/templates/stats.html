@@ -51,6 +51,7 @@
               <%= b.name %>
             </code> &mdash; <%= b.complete ? 'complete' : 'in progress' %>
               · <%= b.totalProcessed.toLocaleString() %> processed
+                <% if (b.totalRecords) { %> of <%= b.totalRecords.toLocaleString() %> (<%= Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString() %>%)<% } %>
                 <% if (b.fileSize) { %> · <%= Math.round(b.fileSize / 1024 / 1024).toLocaleString() %> MB dump<% } %>
           </li>
           <% } %>

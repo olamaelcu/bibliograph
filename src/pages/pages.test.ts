@@ -45,6 +45,21 @@ describe('lexicon catalog', () => {
 });
 
 describe('page templates', () => {
+	it('renders backfill progress as X of Y records with a percentage', () => {
+		const html = renderPage('stats', {
+			title: 'Stats',
+			description: 'd',
+			stats: {
+				catalog: [],
+				openIssues: 0,
+				backfill: [
+					{ name: 'ol-works', complete: false, totalProcessed: 20_000_000, totalRecords: 40_000_000, fileSize: null },
+				],
+			},
+		});
+		expect(html).toContain('of 40,000,000 (50%)');
+	});
+
 	it('renders a full document with declarative shadow DOM', () => {
 		const html = renderPage('home', { title: 'Overview', description: 'd', queryCount, procedureCount });
 		expect(html).toContain('<!doctype html>');

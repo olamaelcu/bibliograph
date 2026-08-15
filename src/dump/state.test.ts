@@ -35,6 +35,15 @@ describe('DumpState', () => {
     expect(row?.totalProcessed).toBe(42);
   });
 
+  it('persists totalRecords', () => {
+    const { db } = createTestDb();
+    const state = new DumpState(db, 'ol-editions');
+    state.set({ url: 'https://dump.example/ol.gz' });
+    expect(state.get()?.totalRecords).toBeNull();
+    state.set({ totalRecords: 41_619_418 });
+    expect(state.get()?.totalRecords).toBe(41_619_418);
+  });
+
   it('clears state', () => {
     const { db } = createTestDb();
     const state = new DumpState(db, 'ol-editions');

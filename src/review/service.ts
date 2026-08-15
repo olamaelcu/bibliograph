@@ -12,6 +12,40 @@ export interface ReviewListRow {
 	name: string;
 }
 
+/** Below SQLite's bound-parameter limit, with headroom for the query's other params. */
+const SQL_VARIABLE_CHUNK_SIZE = 500;
+
+function chunk<T>(items: T[], size: number): T[][] {
+	const out: T[][] = [];
+	for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+	return out;
+}
+
+/** Open-issue counts per pk, chunked to stay under SQLite's SQL variable limit. */
+function openIssueCounts(
+	db: BetterSQLite3Database,
+	entity: ReviewEntityType,
+	pks: string[],
+): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const batch of chunk(pks, SQL_VARIABLE_CHUNK_SIZE)) {
+		const counted = db
+			.select({ entityPk: importIssues.entityPk, c: sql<number>`count(*)` })
+			.from(importIssues)
+			.where(
+				and(
+					eq(importIssues.entityType, entity),
+					eq(importIssues.status, 'open'),
+					inArray(importIssues.entityPk, batch),
+				),
+			)
+			.groupBy(importIssues.entityPk)
+			.all();
+		for (const row of counted) counts.set(row.entityPk, Number(row.c));
+	}
+	return counts;
+}
+
 export function listForReview(
 	db: BetterSQLite3Database,
 	entity: ReviewEntityType,
@@ -37,22 +71,7 @@ export function listForReview(
 		.all() as Array<Record<string, unknown>>;
 
 	const pks = rows.map((r) => String(r.pk));
-	const counts = new Map<string, number>();
-	if (pks.length > 0) {
-		const counted = db
-			.select({ entityPk: importIssues.entityPk, c: sql<number>`count(*)` })
-			.from(importIssues)
-			.where(
-				and(
-					eq(importIssues.entityType, entity),
-					eq(importIssues.status, 'open'),
-					inArray(importIssues.entityPk, pks),
-				),
-			)
-			.groupBy(importIssues.entityPk)
-			.all();
-		for (const row of counted) counts.set(row.entityPk, Number(row.c));
-	}
+	const counts = pks.length > 0 ? openIssueCounts(db, entity, pks) : new Map<string, number>();
 
 	return rows.map((r) => ({
 		pk: String(r.pk),
@@ -225,22 +244,7 @@ export function approveAll(
 	const result: ApproveAllResult = { entity, approved: 0, skippedWithIssues: 0 };
 	if (pks.length === 0) return result;
 
-	const counts = new Map<string, number>();
-	if (!opts.keepIssues) {
-		const counted = db
-			.select({ entityPk: importIssues.entityPk, c: sql<number>`count(*)` })
-			.from(importIssues)
-			.where(
-				and(
-					eq(importIssues.entityType, entity),
-					eq(importIssues.status, 'open'),
-					inArray(importIssues.entityPk, pks),
-				),
-			)
-			.groupBy(importIssues.entityPk)
-			.all();
-		for (const row of counted) counts.set(row.entityPk, Number(row.c));
-	}
+	const counts = opts.keepIssues ? new Map<string, number>() : openIssueCounts(db, entity, pks);
 
 	const toRelease = pks.filter((pk) => opts.keepIssues || (counts.get(pk) ?? 0) === 0);
 	result.skippedWithIssues = pks.length - toRelease.length;

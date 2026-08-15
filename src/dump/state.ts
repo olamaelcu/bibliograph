@@ -9,8 +9,9 @@ export interface DumpStateFields {
   fileSize?: number | null;
   /** Informational only; not used as a seek target (gzip dumps are not randomly seekable). */
   lastByteOffset?: number;
-  lastKeyCursor?: string | null;
-  totalProcessed?: number;
+	lastKeyCursor?: string | null;
+	totalProcessed?: number;
+	totalRecords?: number;
   complete?: boolean;
 }
 
@@ -35,7 +36,8 @@ export class DumpState {
       fileSize: fields.fileSize ?? existing?.fileSize ?? null,
       lastByteOffset: fields.lastByteOffset ?? existing?.lastByteOffset ?? 0,
       cursor: fields.lastKeyCursor ?? existing?.cursor ?? null,
-      totalProcessed: fields.totalProcessed ?? existing?.totalProcessed ?? 0,
+		totalProcessed: fields.totalProcessed ?? existing?.totalProcessed ?? 0,
+		totalRecords: fields.totalRecords ?? existing?.totalRecords ?? null,
       complete: fields.complete ? 1 : (existing?.complete ?? 0),
       updatedAt: now,
     };

@@ -11,37 +11,35 @@ import {
 } from './mappers/openlibrary.js';
 import { hydrateBookContributorsFromEdition } from './book-contributors.js';
 import { logger } from '../logger.js';
+import { ProgressBar } from './progress.js';
 
 const OL_EDITIONS_URL = process.env.OL_EDITIONS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
 const OL_WORKS_URL = process.env.OL_WORKS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_works_latest.txt.gz';
 const OL_AUTHORS_URL = process.env.OL_AUTHORS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_authors_latest.txt.gz';
 
+const mbFormat = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`;
+
 /**
- * Progress reporter for the dump download. Renders a single-line \r progress
- * bar on a TTY (throttled to ~4/s); on a pipe it falls back to one pino log
- * line per percent tick so redirected output still shows progress.
+ * Run a dump import with shared terminal progress bars: one for the download
+ * (bytes, labelled "download") and one for the import phase (records). Both are
+ * finalised with a newline when the run ends so later log lines don't collide
+ * with the \r render.
  */
-function downloadProgress(stateName: string): (received: number, total: number | null) => void {
-  const isTTY = Boolean(process.stdout.isTTY);
-  let lastRender = 0;
-  let lastPct = -1;
-  return (received, total) => {
-    const now = Date.now();
-    if (isTTY) {
-      if (now - lastRender < 250) return;
-      lastRender = now;
-      const pct = total ? ` ${((received / total) * 100).toFixed(1)}%` : '';
-      const mb = (received / 1024 / 1024).toFixed(1);
-      const totalMb = total ? ` / ${(total / 1024 / 1024).toFixed(1)} MB` : ' MB';
-      process.stdout.write(`\r${stateName}: ${mb}${totalMb}${pct}   `);
-      return;
-    }
-    const pct = total ? Math.floor((received / total) * 100) : -1;
-    if (pct !== lastPct) {
-      lastPct = pct;
-      logger.info({ stateName, receivedMb: (received / 1024 / 1024).toFixed(1), totalMb: total ? (total / 1024 / 1024).toFixed(1) : null, pct }, 'download progress');
-    }
-  };
+async function runWithProgress<T>(
+  label: string,
+  run: (onDownload: (r: number, t: number | null) => void, onImport: (p: number, t: number | null) => void) => Promise<T>,
+): Promise<T> {
+  const download = new ProgressBar({ label: `${label} download`, format: mbFormat });
+  const importBar = new ProgressBar({ label: `${label} import` });
+  try {
+    return await run(
+      (received, total) => download.update(received, total),
+      (processed, total) => importBar.update(processed, total),
+    );
+  } finally {
+    download.done();
+    importBar.done();
+  }
 }
 
 const USAGE =
@@ -84,38 +82,47 @@ async function main(): Promise<void> {
   if (flags.unknown.length > 0) logger.warn({ unknown: flags.unknown }, 'ignoring unknown flags');
 
   if (cmd === 'openlibrary:dump') {
-    const s = await runDumpImport({
-      db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
-      noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
-      dumpPath: flags.dumpPath, batchSize: flags.batchSize,
-      onProgress: downloadProgress('ol-editions'),
-      keyOf: olKeyOf,
-      parse: (fields) => mapEditionToCandidates(JSON.parse(fields[4])),
-      hydrate: (fields) => {
-        const rec = JSON.parse(fields[4]) as { key: string; authors?: Array<{ key?: string }> };
-        hydrateBookContributorsFromEdition(db, rec.key, rec.authors ?? []);
-      },
-    });
+    const s = await runWithProgress('ol-editions', (onDownload, onImport) =>
+      runDumpImport({
+        db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
+        dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+        onProgress: onDownload,
+        onImportProgress: onImport,
+        keyOf: olKeyOf,
+        parse: (fields) => mapEditionToCandidates(JSON.parse(fields[4])),
+        hydrate: (fields) => {
+          const rec = JSON.parse(fields[4]) as { key: string; authors?: Array<{ key?: string }> };
+          hydrateBookContributorsFromEdition(db, rec.key, rec.authors ?? []);
+        },
+      }),
+    );
     logger.info(s, 'editions import done');
   } else if (cmd === 'works:dump') {
-    const s = await runDumpImport({
-      db, stateName: 'ol-works', url: OL_WORKS_URL,
-      noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
-      dumpPath: flags.dumpPath, batchSize: flags.batchSize,
-      onProgress: downloadProgress('ol-works'),
-      keyOf: olKeyOf,
-      parse: (fields) => [mapWorkToCandidate(JSON.parse(fields[4]))],
-    });
+    const s = await runWithProgress('ol-works', (onDownload, onImport) =>
+      runDumpImport({
+        db, stateName: 'ol-works', url: OL_WORKS_URL,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
+        dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+        onProgress: onDownload,
+        onImportProgress: onImport,
+        keyOf: olKeyOf,
+        parse: (fields) => [mapWorkToCandidate(JSON.parse(fields[4]))],
+      }),
+    );
     logger.info(s, 'works import done');
   } else if (cmd === 'contributors:dump') {
-    const s = await runDumpImport({
-      db, stateName: 'ol-authors', url: OL_AUTHORS_URL,
-      noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
-      dumpPath: flags.dumpPath, batchSize: flags.batchSize,
-      onProgress: downloadProgress('ol-authors'),
-      keyOf: olKeyOf,
-      parse: (fields) => [mapAuthorToCandidate(JSON.parse(fields[4]))],
-    });
+    const s = await runWithProgress('ol-authors', (onDownload, onImport) =>
+      runDumpImport({
+        db, stateName: 'ol-authors', url: OL_AUTHORS_URL,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
+        dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+        onProgress: onDownload,
+        onImportProgress: onImport,
+        keyOf: olKeyOf,
+        parse: (fields) => [mapAuthorToCandidate(JSON.parse(fields[4]))],
+      }),
+    );
     logger.info(s, 'contributors import done');
   } else if (cmd === 'bookhive:catalog') {
     const { importBookhiveCatalog } = await import('./bookhive/importer.js');

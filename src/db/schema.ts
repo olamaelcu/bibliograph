@@ -314,6 +314,7 @@ export const backfillState = sqliteTable('backfill_state', {
 	lastByteOffset: integer('last_byte_offset'),
 	cursor: text('cursor'),
 	totalProcessed: integer('total_processed'),
+	totalRecords: integer('total_records'),
 	complete: integer('complete').notNull().default(0),
 	updatedAt: integer('updated_at').notNull(),
 });
