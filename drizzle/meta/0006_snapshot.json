@@ -1,0 +1,1529 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "302849fd-f0f0-4e80-ac39-92e7cef9ab87",
+  "prevId": "08b16ad9-6fcc-4fb7-a0e0-3d76e5ddd89e",
+  "tables": {
+    "backfill_reservation": {
+      "name": "backfill_reservation",
+      "columns": {
+        "state_name": {
+          "name": "state_name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pid": {
+          "name": "pid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "backfill_state": {
+      "name": "backfill_state",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "file_path": {
+          "name": "file_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_modified": {
+          "name": "last_modified",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "file_size": {
+          "name": "file_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_byte_offset": {
+          "name": "last_byte_offset",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cursor": {
+          "name": "cursor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "total_processed": {
+          "name": "total_processed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "complete": {
+          "name": "complete",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "book_contributors": {
+      "name": "book_contributors",
+      "columns": {
+        "book_pk": {
+          "name": "book_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contributor_pk": {
+          "name": "contributor_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role_pk": {
+          "name": "role_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "book_contributors_book_pk_books_pk_fk": {
+          "name": "book_contributors_book_pk_books_pk_fk",
+          "tableFrom": "book_contributors",
+          "tableTo": "books",
+          "columnsFrom": [
+            "book_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "book_contributors_contributor_pk_contributors_pk_fk": {
+          "name": "book_contributors_contributor_pk_contributors_pk_fk",
+          "tableFrom": "book_contributors",
+          "tableTo": "contributors",
+          "columnsFrom": [
+            "contributor_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "book_contributors_role_pk_contributor_roles_pk_fk": {
+          "name": "book_contributors_role_pk_contributor_roles_pk_fk",
+          "tableFrom": "book_contributors",
+          "tableTo": "contributor_roles",
+          "columnsFrom": [
+            "role_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "book_contributors_book_pk_contributor_pk_pk": {
+          "columns": [
+            "book_pk",
+            "contributor_pk"
+          ],
+          "name": "book_contributors_book_pk_contributor_pk_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "book_genres": {
+      "name": "book_genres",
+      "columns": {
+        "book_pk": {
+          "name": "book_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "genre_pk": {
+          "name": "genre_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "book_genres_genre_pk_idx": {
+          "name": "book_genres_genre_pk_idx",
+          "columns": [
+            "genre_pk"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "book_genres_book_pk_books_pk_fk": {
+          "name": "book_genres_book_pk_books_pk_fk",
+          "tableFrom": "book_genres",
+          "tableTo": "books",
+          "columnsFrom": [
+            "book_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "book_genres_genre_pk_genres_pk_fk": {
+          "name": "book_genres_genre_pk_genres_pk_fk",
+          "tableFrom": "book_genres",
+          "tableTo": "genres",
+          "columnsFrom": [
+            "genre_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "book_genres_book_pk_genre_pk_pk": {
+          "columns": [
+            "book_pk",
+            "genre_pk"
+          ],
+          "name": "book_genres_book_pk_genre_pk_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "book_identifiers": {
+      "name": "book_identifiers",
+      "columns": {
+        "book_pk": {
+          "name": "book_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "book_identifiers_url_idx": {
+          "name": "book_identifiers_url_idx",
+          "columns": [
+            "url"
+          ],
+          "isUnique": false
+        },
+        "book_identifiers_resource_unique": {
+          "name": "book_identifiers_resource_unique",
+          "columns": [
+            "resource"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "book_identifiers_book_pk_books_pk_fk": {
+          "name": "book_identifiers_book_pk_books_pk_fk",
+          "tableFrom": "book_identifiers",
+          "tableTo": "books",
+          "columnsFrom": [
+            "book_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "book_identifiers_book_pk_resource_pk": {
+          "columns": [
+            "book_pk",
+            "resource"
+          ],
+          "name": "book_identifiers_book_pk_resource_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "books": {
+      "name": "books",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "work_pk": {
+          "name": "work_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "format_pk": {
+          "name": "format_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "publish_date": {
+          "name": "publish_date",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cover_url": {
+          "name": "cover_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "release_status": {
+          "name": "release_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'staged'"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "books_work_pk_idx": {
+          "name": "books_work_pk_idx",
+          "columns": [
+            "work_pk"
+          ],
+          "isUnique": false
+        },
+        "books_format_pk_idx": {
+          "name": "books_format_pk_idx",
+          "columns": [
+            "format_pk"
+          ],
+          "isUnique": false
+        },
+        "books_release_status_idx": {
+          "name": "books_release_status_idx",
+          "columns": [
+            "release_status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "books_work_pk_works_pk_fk": {
+          "name": "books_work_pk_works_pk_fk",
+          "tableFrom": "books",
+          "tableTo": "works",
+          "columnsFrom": [
+            "work_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "books_format_pk_formats_pk_fk": {
+          "name": "books_format_pk_formats_pk_fk",
+          "tableFrom": "books",
+          "tableTo": "formats",
+          "columnsFrom": [
+            "format_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "books_release_status_check": {
+          "name": "books_release_status_check",
+          "value": "\"books\".\"release_status\" IN ('staged', 'released', 'rejected')"
+        }
+      }
+    },
+    "catalog_blobs": {
+      "name": "catalog_blobs",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_pk": {
+          "name": "entity_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mime_type": {
+          "name": "mime_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "size": {
+          "name": "size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "catalog_blobs_entity_idx": {
+          "name": "catalog_blobs_entity_idx",
+          "columns": [
+            "entity_type",
+            "entity_pk"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "contributor_identifiers": {
+      "name": "contributor_identifiers",
+      "columns": {
+        "contributor_pk": {
+          "name": "contributor_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "contributor_identifiers_url_idx": {
+          "name": "contributor_identifiers_url_idx",
+          "columns": [
+            "url"
+          ],
+          "isUnique": false
+        },
+        "contributor_identifiers_resource_unique": {
+          "name": "contributor_identifiers_resource_unique",
+          "columns": [
+            "resource"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "contributor_identifiers_contributor_pk_contributors_pk_fk": {
+          "name": "contributor_identifiers_contributor_pk_contributors_pk_fk",
+          "tableFrom": "contributor_identifiers",
+          "tableTo": "contributors",
+          "columnsFrom": [
+            "contributor_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "contributor_identifiers_contributor_pk_resource_pk": {
+          "columns": [
+            "contributor_pk",
+            "resource"
+          ],
+          "name": "contributor_identifiers_contributor_pk_resource_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "contributor_roles": {
+      "name": "contributor_roles",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "icon_image_url": {
+          "name": "icon_image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "release_status": {
+          "name": "release_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'staged'"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "contributor_roles_release_status_idx": {
+          "name": "contributor_roles_release_status_idx",
+          "columns": [
+            "release_status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "contributor_roles_release_status_check": {
+          "name": "contributor_roles_release_status_check",
+          "value": "\"contributor_roles\".\"release_status\" IN ('staged', 'released', 'rejected')"
+        }
+      }
+    },
+    "contributors": {
+      "name": "contributors",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sort_name": {
+          "name": "sort_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bio": {
+          "name": "bio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "image_url": {
+          "name": "image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "release_status": {
+          "name": "release_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'staged'"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "contributors_name_idx": {
+          "name": "contributors_name_idx",
+          "columns": [
+            "name"
+          ],
+          "isUnique": false
+        },
+        "contributors_release_status_idx": {
+          "name": "contributors_release_status_idx",
+          "columns": [
+            "release_status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "contributors_release_status_check": {
+          "name": "contributors_release_status_check",
+          "value": "\"contributors\".\"release_status\" IN ('staged', 'released', 'rejected')"
+        }
+      }
+    },
+    "formats": {
+      "name": "formats",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "emoji": {
+          "name": "emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "icon_image_url": {
+          "name": "icon_image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "unit": {
+          "name": "unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "genre_children": {
+      "name": "genre_children",
+      "columns": {
+        "parent_pk": {
+          "name": "parent_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "child_pk": {
+          "name": "child_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "genre_children_child_pk_idx": {
+          "name": "genre_children_child_pk_idx",
+          "columns": [
+            "child_pk"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "genre_children_parent_pk_genres_pk_fk": {
+          "name": "genre_children_parent_pk_genres_pk_fk",
+          "tableFrom": "genre_children",
+          "tableTo": "genres",
+          "columnsFrom": [
+            "parent_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "genre_children_child_pk_genres_pk_fk": {
+          "name": "genre_children_child_pk_genres_pk_fk",
+          "tableFrom": "genre_children",
+          "tableTo": "genres",
+          "columnsFrom": [
+            "child_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "genre_children_parent_pk_child_pk_pk": {
+          "columns": [
+            "parent_pk",
+            "child_pk"
+          ],
+          "name": "genre_children_parent_pk_child_pk_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "genre_identifiers": {
+      "name": "genre_identifiers",
+      "columns": {
+        "genre_pk": {
+          "name": "genre_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "genre_identifiers_url_idx": {
+          "name": "genre_identifiers_url_idx",
+          "columns": [
+            "url"
+          ],
+          "isUnique": false
+        },
+        "genre_identifiers_resource_unique": {
+          "name": "genre_identifiers_resource_unique",
+          "columns": [
+            "resource"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "genre_identifiers_genre_pk_genres_pk_fk": {
+          "name": "genre_identifiers_genre_pk_genres_pk_fk",
+          "tableFrom": "genre_identifiers",
+          "tableTo": "genres",
+          "columnsFrom": [
+            "genre_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "genre_identifiers_genre_pk_resource_pk": {
+          "columns": [
+            "genre_pk",
+            "resource"
+          ],
+          "name": "genre_identifiers_genre_pk_resource_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "genres": {
+      "name": "genres",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "emoji": {
+          "name": "emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "icon_image_url": {
+          "name": "icon_image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "parent_pk": {
+          "name": "parent_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "release_status": {
+          "name": "release_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'staged'"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "genres_name_idx": {
+          "name": "genres_name_idx",
+          "columns": [
+            "name"
+          ],
+          "isUnique": false
+        },
+        "genres_parent_pk_idx": {
+          "name": "genres_parent_pk_idx",
+          "columns": [
+            "parent_pk"
+          ],
+          "isUnique": false
+        },
+        "genres_release_status_idx": {
+          "name": "genres_release_status_idx",
+          "columns": [
+            "release_status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "genres_parent_pk_genres_pk_fk": {
+          "name": "genres_parent_pk_genres_pk_fk",
+          "tableFrom": "genres",
+          "tableTo": "genres",
+          "columnsFrom": [
+            "parent_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "genres_release_status_check": {
+          "name": "genres_release_status_check",
+          "value": "\"genres\".\"release_status\" IN ('staged', 'released', 'rejected')"
+        }
+      }
+    },
+    "import_issues": {
+      "name": "import_issues",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entity_pk": {
+          "name": "entity_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "field": {
+          "name": "field",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "incoming_value": {
+          "name": "incoming_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stored_value": {
+          "name": "stored_value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'open'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "import_issues_entity_idx": {
+          "name": "import_issues_entity_idx",
+          "columns": [
+            "entity_type",
+            "entity_pk"
+          ],
+          "isUnique": false
+        },
+        "import_issues_status_idx": {
+          "name": "import_issues_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "import_issues_entity_type_check": {
+          "name": "import_issues_entity_type_check",
+          "value": "\"import_issues\".\"entity_type\" IN ('book', 'work', 'contributor', 'genre', 'contributorRole')"
+        },
+        "import_issues_status_check": {
+          "name": "import_issues_status_check",
+          "value": "\"import_issues\".\"status\" IN ('open', 'resolved', 'dismissed')"
+        }
+      }
+    },
+    "jetstream_cursor": {
+      "name": "jetstream_cursor",
+      "columns": {
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cursor": {
+          "name": "cursor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "user_records": {
+      "name": "user_records",
+      "columns": {
+        "did": {
+          "name": "did",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "collection": {
+          "name": "collection",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rkey": {
+          "name": "rkey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "record": {
+          "name": "record",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "indexed_at": {
+          "name": "indexed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "user_records_collection_idx": {
+          "name": "user_records_collection_idx",
+          "columns": [
+            "collection"
+          ],
+          "isUnique": false
+        },
+        "user_records_did_collection_idx": {
+          "name": "user_records_did_collection_idx",
+          "columns": [
+            "did",
+            "collection"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "user_records_did_collection_rkey_pk": {
+          "columns": [
+            "did",
+            "collection",
+            "rkey"
+          ],
+          "name": "user_records_did_collection_rkey_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "work_identifiers": {
+      "name": "work_identifiers",
+      "columns": {
+        "work_pk": {
+          "name": "work_pk",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "work_identifiers_url_idx": {
+          "name": "work_identifiers_url_idx",
+          "columns": [
+            "url"
+          ],
+          "isUnique": false
+        },
+        "work_identifiers_resource_unique": {
+          "name": "work_identifiers_resource_unique",
+          "columns": [
+            "resource"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "work_identifiers_work_pk_works_pk_fk": {
+          "name": "work_identifiers_work_pk_works_pk_fk",
+          "tableFrom": "work_identifiers",
+          "tableTo": "works",
+          "columnsFrom": [
+            "work_pk"
+          ],
+          "columnsTo": [
+            "pk"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "work_identifiers_work_pk_resource_pk": {
+          "columns": [
+            "work_pk",
+            "resource"
+          ],
+          "name": "work_identifiers_work_pk_resource_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "works": {
+      "name": "works",
+      "columns": {
+        "pk": {
+          "name": "pk",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "original_publish_date": {
+          "name": "original_publish_date",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cid": {
+          "name": "cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "release_status": {
+          "name": "release_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'staged'"
+        },
+        "released_at": {
+          "name": "released_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "works_title_idx": {
+          "name": "works_title_idx",
+          "columns": [
+            "title"
+          ],
+          "isUnique": false
+        },
+        "works_release_status_idx": {
+          "name": "works_release_status_idx",
+          "columns": [
+            "release_status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "works_release_status_check": {
+          "name": "works_release_status_check",
+          "value": "\"works\".\"release_status\" IN ('staged', 'released', 'rejected')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

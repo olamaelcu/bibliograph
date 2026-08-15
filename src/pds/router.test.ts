@@ -1,12 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Hono } from 'hono';
-import { getServiceDid } from '../did.js';
-import { makeDidDoc, makeJwt } from '../test-utils/fake-auth.js';
-import { createFakePds, serveFakePds } from '../test-utils/fake-pds.js';
+import { describe, expect, it } from 'vitest';
 import { createXrpcRouter } from '../xrpc/router.js';
 import { createTestDb, SERVICE_DID } from '../test-utils/db.js';
 import type { ViewContext } from '../xrpc/views.js';
-import { registerUploadBlobRoute } from './router.js';
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 
@@ -218,123 +213,5 @@ describe('com.atproto.identity.resolveHandle', () => {
 		const params = new URLSearchParams({ handle: 'someone.example.net' });
 		const res = await fetch(`/xrpc/com.atproto.identity.resolveHandle?${params}`);
 		expect(res.status).toBe(400);
-	});
-});
-
-// ─── write-proxy helpers ─────────────────────────────────────────────────────
-
-const USER_DID = 'did:web:alice.example.com';
-const USER_COLLS = {
-	review: 'net.olamaelcu.livtet.biblio.review',
-	shelf: 'net.olamaelcu.livtet.biblio.shelf',
-	bookShelving: 'net.olamaelcu.livtet.biblio.bookShelving',
-	actor: 'net.olamaelcu.livtet.biblio.actor',
-} as const;
-
-interface OutboundCall {
-	pathname: string;
-	body?: unknown;
-}
-
-interface WriteHarness {
-	fetch: (path: string, init?: RequestInit) => Promise<Response>;
-	fake: ReturnType<typeof createFakePds>;
-	token: string;
-	calls: OutboundCall[];
-}
-
-const openServers: Array<() => void> = [];
-
-afterEach(() => {
-	while (openServers.length) openServers.pop()!();
-	vi.unstubAllGlobals();
-});
-
-/**
- * fetch stub that answers DID-document lookups from the fixture, lets every
- * other request hit the real network (the fake PDS), and records the JSON
- * bodies of outbound xrpc POSTs so tests can assert on the forwarded request.
- */
-function routingFetch(didDoc: Record<string, unknown>, calls: OutboundCall[]): typeof fetch {
-	const realFetch = globalThis.fetch;
-	return (async (input: RequestInfo | URL, init?: RequestInit) => {
-		const url = new URL(String(input));
-		if (url.pathname.endsWith('/.well-known/did.json')) {
-			return new Response(JSON.stringify(didDoc), { status: 200 });
-		}
-		if (url.pathname.startsWith('/xrpc/') && (init?.method ?? 'GET').toUpperCase() === 'POST') {
-			const req = new Request(input, init);
-			calls.push({ pathname: url.pathname, body: await req.json().catch(() => undefined) });
-		}
-		return realFetch(input, init);
-	}) as typeof fetch;
-}
-
-async function writeApp(): Promise<WriteHarness> {
-	const { db, seed } = createTestDb();
-	seed();
-	const fake = createFakePds({ repo: USER_DID });
-	const server = await serveFakePds(fake);
-	openServers.push(server.close);
-	const didDoc = makeDidDoc({ serviceEndpoint: server.baseUrl, alsoKnownAs: ['at://alice.example.com'] });
-	const calls: OutboundCall[] = [];
-	vi.stubGlobal('fetch', routingFetch(didDoc, calls));
-
-	const router = createXrpcRouter(db, { serviceDid: SERVICE_DID });
-	const app = new Hono();
-	registerUploadBlobRoute(app);
-	app.all('/xrpc/*', (c) => router.fetch(c.req.raw));
-	app.onError((err, c) => {
-		if (typeof err === 'object' && err !== null && 'status' in err) {
-			const e = err as { status: number; error: string; message: string };
-			return c.json(
-				{ error: e.error || 'UnexpectedError', message: e.message || 'An error occurred' },
-				e.status as never,
-			);
-		}
-		return c.json({ error: 'InternalServerError', message: 'An unexpected error occurred' }, 500);
-	});
-
-	const token = makeJwt({ sub: USER_DID, aud: getServiceDid() });
-	return {
-		fetch: (path, init) => app.fetch(new Request(`https://books.example.com${path}`, init)),
-		fake,
-		token,
-		calls,
-	};
-}
-
-function post(token: string, body: unknown, contentType = 'application/json'): RequestInit {
-	const headers: Record<string, string> = { 'content-type': contentType };
-	if (token) headers.authorization = `Bearer ${token}`;
-	return { method: 'POST', headers, body: JSON.stringify(body) };
-}
-
-describe('com.atproto.repo.uploadBlob (proxy, Hono route)', () => {
-	it('forwards a raw blob body and returns {blob}', async () => {
-		const w = await writeApp();
-		const bytes = new TextEncoder().encode('fake-cover-bytes');
-		const res = await w.fetch('/xrpc/com.atproto.repo.uploadBlob', {
-			method: 'POST',
-			headers: { authorization: `Bearer ${w.token}`, 'content-type': 'image/png' },
-			body: bytes,
-		});
-		expect(res.status).toBe(200);
-		const out = await res.json();
-		expect(out.blob.$type).toBe('blob');
-		expect(out.blob.ref.$link).toMatch(/^baf/);
-		expect(out.blob.mimeType).toBe('image/png');
-		expect(out.blob.size).toBe(bytes.byteLength);
-	});
-
-	it('rejects an upload without a bearer token', async () => {
-		const w = await writeApp();
-		const res = await w.fetch('/xrpc/com.atproto.repo.uploadBlob', {
-			method: 'POST',
-			headers: { 'content-type': 'image/png' },
-			body: new TextEncoder().encode('nope'),
-		});
-		expect(res.status).toBe(401);
-		expect(w.fake.requests).toHaveLength(0);
 	});
 });

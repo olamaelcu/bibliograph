@@ -1,7 +1,8 @@
 import { serve } from '@hono/node-server';
 import { createApp } from './app.js';
-import { sqliteHandle } from './db/connection.js';
+import { db, sqliteHandle } from './db/connection.js';
 import { logger } from './logger.js';
+import { createJetstreamIngestor } from './jetstream/ingest.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
@@ -19,6 +20,9 @@ async function main(): Promise<void> {
 
   serve({ fetch: safeFetch, port: PORT });
   logger.info({ port: PORT }, 'HTTP server running');
+
+  const jetstream = process.env.JETSTREAM_DISABLE === 'true' ? undefined : createJetstreamIngestor(db);
+  jetstream?.start();
 
   const walCheckpointInterval = setInterval(() => {
     try {
@@ -44,6 +48,7 @@ async function main(): Promise<void> {
 
   const shutdown = async () => {
     logger.info('shutting down...');
+    jetstream?.stop();
     clearInterval(walCheckpointInterval);
     process.exit(0);
   };

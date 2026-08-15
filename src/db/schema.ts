@@ -349,3 +349,40 @@ export const catalogBlobs = sqliteTable(
 
 export type CatalogBlob = typeof catalogBlobs.$inferSelect;
 export type NewCatalogBlob = typeof catalogBlobs.$inferInsert;
+
+// ─── Jetstream-indexed user content ──────────────────────────────────────────
+
+/**
+ * Generic index of user-owned biblio records (reviews, shelves, book
+ * shelvings, actor profiles), ingested live from the Jetstream firehose.
+ * One row per `(did, collection, rkey)` record; `record` holds the raw
+ * lexicon-typed JSON value as written by the user's own PDS.
+ */
+export const userRecords = sqliteTable(
+	'user_records',
+	{
+		did: text('did').notNull(),
+		collection: text('collection').notNull(),
+		rkey: text('rkey').notNull(),
+		cid: text('cid').notNull(),
+		record: text('record', { mode: 'json' }).notNull(),
+		indexedAt: integer('indexed_at').notNull(),
+	},
+	(t) => ({
+		pk: primaryKey({ columns: [t.did, t.collection, t.rkey] }),
+		collectionIdx: index('user_records_collection_idx').on(t.collection),
+		didCollectionIdx: index('user_records_did_collection_idx').on(t.did, t.collection),
+	}),
+);
+
+export type UserRecord = typeof userRecords.$inferSelect;
+export type NewUserRecord = typeof userRecords.$inferInsert;
+
+/** Single-row-per-consumer cursor checkpoint for resuming the Jetstream subscription. */
+export const jetstreamCursor = sqliteTable('jetstream_cursor', {
+	name: text('name').primaryKey(),
+	cursor: integer('cursor'),
+	updatedAt: integer('updated_at').notNull(),
+});
+
+export type JetstreamCursor = typeof jetstreamCursor.$inferSelect;

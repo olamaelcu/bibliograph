@@ -16,22 +16,13 @@ describe('lexicon catalog', () => {
 		}
 	});
 
-	it('catalogs the biblio write procedures', () => {
+	it('no longer catalogs any write procedures (writes go browser → user PDS directly)', () => {
 		const writeIds = lexiconEndpoints
 			.filter((e) => /^(put|delete)/.test(e.name))
 			.map((e) => e.id)
 			.sort();
-		expect(writeIds).toEqual([
-			'net.olamaelcu.livtet.biblio.deleteActor',
-			'net.olamaelcu.livtet.biblio.deleteBookShelving',
-			'net.olamaelcu.livtet.biblio.deleteReview',
-			'net.olamaelcu.livtet.biblio.deleteShelf',
-			'net.olamaelcu.livtet.biblio.putActor',
-			'net.olamaelcu.livtet.biblio.putBookShelving',
-			'net.olamaelcu.livtet.biblio.putReview',
-			'net.olamaelcu.livtet.biblio.putShelf',
-		]);
-		expect(procedureCount).toBeGreaterThanOrEqual(8);
+		expect(writeIds).toEqual([]);
+		expect(procedureCount).toBe(0);
 		for (const endpoint of lexiconEndpoints) {
 			expect(endpoint.lexiconPath).toBeDefined();
 		}

@@ -34,15 +34,13 @@ describe('pages', () => {
     const body = await res.text();
     expect(body).toContain('net.olamaelcu.livtet.biblio.searchBooks');
     expect(body).toContain('did-ssr');
-    expect(body).not.toContain('net.olamaelcu.livtet.biblio.putReview');
   });
 
-  it('serves the procedures page with no queries', async () => {
+  it('serves the procedures page with no procedures (writes go browser → user PDS directly)', async () => {
     const res = await app.request('/procedures');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const body = await res.text();
-    expect(body).toContain('net.olamaelcu.livtet.biblio.putReview');
     expect(body).toContain('did-ssr');
     expect(body).not.toContain('net.olamaelcu.livtet.biblio.searchBooks');
   });

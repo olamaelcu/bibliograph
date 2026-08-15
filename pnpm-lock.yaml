@@ -20,6 +20,12 @@ importers:
       '@atcute/client':
         specifier: ^5.1.1
         version: 5.1.1(@atcute/lexicons@2.0.3)(typescript@7.0.2)
+      '@atcute/identity':
+        specifier: ^2.0.2
+        version: 2.0.2(@atcute/lexicons@2.0.3)(typescript@7.0.2)
+      '@atcute/identity-resolver':
+        specifier: ^2.0.1
+        version: 2.0.1(@atcute/identity@2.0.2(@atcute/lexicons@2.0.3)(typescript@7.0.2))(@atcute/lexicons@2.0.3)(typescript@7.0.2)
       '@atcute/lexicons':
         specifier: ^2.0.3
         version: 2.0.3
@@ -47,6 +53,9 @@ importers:
       hono:
         specifier: ^4.13.0
         version: 4.13.1
+      jose:
+        specifier: ^6.2.8
+        version: 6.2.8
       opendal:
         specifier: ^0.49.6
         version: 0.49.6
@@ -1388,6 +1397,9 @@ packages:
   istanbul-reports@3.2.0:
     resolution: {integrity: sha512-HGYWWS/ehqTV3xN10i23tkPkpH46MLCIMFNCaaKNavAXTF1RkqxawEPtnjnGZ6XKSInBKkiOA5BKS+aZiY3AvA==}
     engines: {node: '>=8'}
+
+  jose@6.2.8:
+    resolution: {integrity: sha512-Bsdjwm3Qsd/P0jR+BHDe3LytDfY7WBq2HmCCLIwuVRHMuEC9ae7/R474GIUdF1NgCyZjzVo/A9DOiOBtXq8ZoQ==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -2763,6 +2775,8 @@ snapshots:
     dependencies:
       html-escaper: 2.0.2
       istanbul-lib-report: 3.0.1
+
+  jose@6.2.8: {}
 
   joycon@3.1.1: {}
 

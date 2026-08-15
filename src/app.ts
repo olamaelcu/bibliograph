@@ -12,7 +12,7 @@ import { db } from './db/connection.js';
 import { BlobStore, blobStoreConfigFromEnv } from './storage/store.js';
 import { registerBlobProxy } from './storage/blob-proxy.js';
 import { createXrpcRouter } from './xrpc/router.js';
-import { registerUploadBlobRoute } from './pds/router.js';
+import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
 import { renderStatsPage } from './pages/stats.js';
 import { lexiconEndpoints, procedureCount, queryCount } from './lexicon-catalog.js';
@@ -23,6 +23,7 @@ export function createApp(): Hono {
 
 	app.use('*', cors());
 	app.use('*', requestTracing);
+	app.use('*', dpopNonceMiddleware);
 
 	const viewCtx: ViewContext = {
 		serviceDid: getServiceDid(),
@@ -72,7 +73,7 @@ export function createApp(): Hono {
 		ctx.html(
 			renderPage('procedures', {
 				title: 'Procedures',
-				description: 'Mutating procedures served by the Bibliograph AppView.',
+				description: 'Bibliograph is a read-only AppView and serves no mutating procedures.',
 				endpoints: lexiconEndpoints.filter((e) => e.type === 'procedure'),
 			}),
 		),
@@ -82,7 +83,6 @@ export function createApp(): Hono {
 	app.get('/.well-known/did.json', didDocumentHandler);
 	app.get('/.well-known/atproto-did', serveAtprotoDid);
 	app.use('/lexicons/*', lexiconsStatic);
-	registerUploadBlobRoute(app);
 	app.all('/xrpc/*', (ctx) => xrpcRouter.fetch(ctx.req.raw));
 	app.onError(handleServerError);
 

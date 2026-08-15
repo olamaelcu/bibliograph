@@ -1,17 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
-import type { XRPCRouter } from '@atcute/xrpc-server';
 import { createXrpcRouter } from './router.js';
 import { createTestDb, SERVICE_DID, SERVICE_HOST, uri } from '../test-utils/db.js';
-import { createFakePds, serveFakePds, type FakePds } from '../test-utils/fake-pds.js';
-import { makeDidDoc, makeJwt } from '../test-utils/fake-auth.js';
-import { getServiceDid } from '../did.js';
+import { userRecords } from '../db/schema.js';
 import type { ViewContext } from './views.js';
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 
 const USER_DID = 'did:web:alice.example.com';
-const USER_HANDLE = 'alice.example.com';
 
 const COLLECTION = {
 	review: 'net.olamaelcu.livtet.biblio.review',
@@ -23,9 +19,6 @@ const COLLECTION = {
 const BOOK_URI = (pk: string) => encodeURIComponent(uri('net.olamaelcu.livtet.biblio.book', pk));
 const userUri = (collection: string, rkey: string) => `at://${USER_DID}/${collection}/${rkey}`;
 const SHELF_URI = (rkey: string) => encodeURIComponent(userUri(COLLECTION.shelf, rkey));
-
-/** Valid CIDv1 string the fake PDS echoes back (schema-valid for client validation). */
-const FIXED_CID = 'bafyreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe';
 
 beforeAll(() => {
 	process.env.ATP_SERVICE_DID = SERVICE_DID;
@@ -49,79 +42,25 @@ function testDb(): ReturnType<typeof createTestDb>['db'] {
 	return db;
 }
 
-/** Full proxy harness: local catalog + fake user PDS with an authenticated session. */
-function makeUserHarness() {
-	let fake: FakePds;
-	let close: () => void;
-	let token: string;
-	let db: ReturnType<typeof createTestDb>['db'];
-	let router: XRPCRouter;
+const FIXED_CID = 'bafyreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe';
 
-	beforeEach(async () => {
-		const t = createTestDb();
-		t.seed();
-		db = t.db;
-		router = createXrpcRouter(db, ctx);
-
-		fake = createFakePds({ repo: USER_DID });
-		const server = await serveFakePds(fake);
-		close = server.close;
-
-		const realFetch = globalThis.fetch;
-		const doc = makeDidDoc({
-			serviceEndpoint: server.baseUrl,
-			alsoKnownAs: [`at://${USER_HANDLE}`],
-		});
-		vi.stubGlobal(
-			'fetch',
-			((input: RequestInfo | URL, init?: RequestInit) => {
-				const url =
-					typeof input === 'string'
-						? input
-						: input instanceof URL
-							? input.toString()
-							: (input as Request).url;
-				if (url.includes('/.well-known/did.json')) {
-					return Promise.resolve(
-						new Response(JSON.stringify(doc), {
-							status: 200,
-							headers: { 'content-type': 'application/json' },
-						}),
-					);
-				}
-				return realFetch(input, init);
-			}) as typeof fetch,
-		);
-
-		token = makeJwt({ sub: USER_DID, aud: getServiceDid() });
-	});
-
-	afterEach(() => {
-		vi.unstubAllGlobals();
-		close();
-	});
-
-	const fetchUser = (path: string) =>
-		router.fetch(
-			new Request(`https://books.example.com${path}`, {
-				headers: { authorization: `Bearer ${token}` },
-			}),
-		);
-
-	const seed = (collection: string, rkey: string, value: Record<string, unknown>) => {
-		fake.records.set(`${collection}/${rkey}`, {
-			value: { $type: collection, ...value },
+function seedUserRecord(
+	db: ReturnType<typeof createTestDb>['db'],
+	did: string,
+	collection: string,
+	rkey: string,
+	value: Record<string, unknown>,
+) {
+	db.insert(userRecords)
+		.values({
+			did,
+			collection,
+			rkey,
 			cid: FIXED_CID,
-		});
-	};
-
-	return {
-		get db() {
-			return db;
-		},
-		fetchUser,
-		seed,
-	};
+			record: { $type: collection, ...value },
+			indexedAt: Math.floor(Date.now() / 1000),
+		})
+		.run();
 }
 
 describe('catalog release gating', () => {
@@ -174,52 +113,13 @@ describe('catalog release gating', () => {
 });
 
 describe('auth gating', () => {
-	it('requires a token for review endpoints', async () => {
-		const res = await app(testDb()).fetch(
-			`/xrpc/net.olamaelcu.livtet.biblio.getReview?uri=${encodeURIComponent(userUri(COLLECTION.review, 'rev-1'))}`,
-		);
-		expect(res.status).toBe(401);
-	});
-
-	it('requires a token for shelf endpoints', async () => {
-		const res = await app(testDb()).fetch(
-			`/xrpc/net.olamaelcu.livtet.biblio.getShelf?uri=${SHELF_URI('shelf-1')}`,
-		);
-		expect(res.status).toBe(401);
-	});
-
-	it('requires a token for bookShelving endpoints', async () => {
-		const res = await app(testDb()).fetch(
-			`/xrpc/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${encodeURIComponent(userUri(COLLECTION.bookShelving, 'shelving-1'))}`,
-		);
-		expect(res.status).toBe(401);
-	});
-
-	it('requires a token for list endpoints over user records', async () => {
+	it('serves user-content and catalog endpoints anonymously (no self-only restriction)', async () => {
 		const db = testDb();
-		const paths = [
-			`/xrpc/net.olamaelcu.livtet.biblio.listReviewsByBook?book=${BOOK_URI('book-dune')}`,
-			'/xrpc/net.olamaelcu.livtet.biblio.listShelves',
-			'/xrpc/net.olamaelcu.livtet.biblio.listShelvesWithBooks',
-			`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${SHELF_URI('shelf-1')}`,
-			`/xrpc/net.olamaelcu.livtet.biblio.getShelvingOfBook?book=${BOOK_URI('book-dune')}`,
-			'/xrpc/net.olamaelcu.livtet.biblio.searchReviews?q=' + encodeURIComponent('worldbuilding'),
-		];
-		for (const path of paths) {
-			const res = await app(db).fetch(path);
-			expect(res.status).toBe(401);
-		}
-	});
-
-	it('requires a token for getActor', async () => {
-		const res = await app(testDb()).fetch(
-			'/xrpc/net.olamaelcu.livtet.biblio.getActor?actor=' + encodeURIComponent(USER_DID),
-		);
-		expect(res.status).toBe(401);
-	});
-
-	it('serves catalog endpoints anonymously', async () => {
-		const db = testDb();
+		seedUserRecord(db, USER_DID, COLLECTION.review, 'rev-1', {
+			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-dune'), title: 'Dune' },
+			status: 'read',
+		});
+		seedUserRecord(db, USER_DID, COLLECTION.shelf, 'shelf-1', { name: 'Favorites' });
 		const paths = [
 			`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${BOOK_URI('book-dune')}`,
 			'/xrpc/net.olamaelcu.livtet.biblio.listBooks',
@@ -227,39 +127,43 @@ describe('auth gating', () => {
 			'/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=' + encodeURIComponent('Dune'),
 			'/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('Dune'),
 			'/xrpc/net.olamaelcu.livtet.biblio.searchContributors?q=' + encodeURIComponent('Frank'),
+			`/xrpc/net.olamaelcu.livtet.biblio.getReview?uri=${encodeURIComponent(userUri(COLLECTION.review, 'rev-1'))}`,
+			`/xrpc/net.olamaelcu.livtet.biblio.getShelf?uri=${SHELF_URI('shelf-1')}`,
+			'/xrpc/net.olamaelcu.livtet.biblio.listShelves',
+			'/xrpc/net.olamaelcu.livtet.biblio.getActor?actor=' + encodeURIComponent(USER_DID),
 		];
 		for (const path of paths) {
 			const res = await app(db).fetch(path);
-			expect(res.status).toBe(200);
+			expect(res.status, path).toBe(200);
 		}
 	});
 });
 
 describe('user-record release gating', () => {
-	const h = makeUserHarness();
-
 	it('404s a review of a staged book from getReview', async () => {
-		h.seed(COLLECTION.review, 'rev-1', {
+		const db = testDb();
+		seedUserRecord(db, USER_DID, COLLECTION.review, 'rev-1', {
 			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-dune'), title: 'Dune' },
 			rating: 5,
 			status: 'read',
 		});
-		h.db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
-		const res = await h.fetchUser(
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
+		const res = await app(db).fetch(
 			`/xrpc/net.olamaelcu.livtet.biblio.getReview?uri=${encodeURIComponent(userUri(COLLECTION.review, 'rev-1'))}`,
 		);
 		expect(res.status).toBe(404);
 	});
 
 	it('skips reviews of staged books from searchReviews', async () => {
-		h.seed(COLLECTION.review, 'rev-1', {
+		const db = testDb();
+		seedUserRecord(db, USER_DID, COLLECTION.review, 'rev-1', {
 			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-dune'), title: 'Dune' },
 			rating: 5,
 			status: 'read',
 			text: 'worldbuilding',
 		});
-		h.db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
-		const res = await h.fetchUser('/xrpc/net.olamaelcu.livtet.biblio.searchReviews?q=' + encodeURIComponent('worldbuilding'));
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
+		const res = await app(db).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchReviews?q=' + encodeURIComponent('worldbuilding'));
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.reviews).toHaveLength(0);
@@ -267,33 +171,35 @@ describe('user-record release gating', () => {
 	});
 
 	it('404s a bookShelving of a staged book from getBookOnShelf', async () => {
-		h.seed(COLLECTION.shelf, 'shelf-favorites', { name: 'Favorites' });
-		h.seed(COLLECTION.bookShelving, 'shelving-1', {
+		const db = testDb();
+		seedUserRecord(db, USER_DID, COLLECTION.shelf, 'shelf-favorites', { name: 'Favorites' });
+		seedUserRecord(db, USER_DID, COLLECTION.bookShelving, 'shelving-1', {
 			shelf: userUri(COLLECTION.shelf, 'shelf-favorites'),
 			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-dune'), title: 'Dune' },
 			metadata: { status: 'reading' },
 		});
-		h.db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
-		const res = await h.fetchUser(
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-dune'`);
+		const res = await app(db).fetch(
 			`/xrpc/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${encodeURIComponent(userUri(COLLECTION.bookShelving, 'shelving-1'))}`,
 		);
 		expect(res.status).toBe(404);
 	});
 
 	it('omits staged books from listBooksOnShelf', async () => {
-		h.seed(COLLECTION.shelf, 'shelf-favorites', { name: 'Favorites' });
-		h.seed(COLLECTION.bookShelving, 'shelving-1', {
+		const db = testDb();
+		seedUserRecord(db, USER_DID, COLLECTION.shelf, 'shelf-favorites', { name: 'Favorites' });
+		seedUserRecord(db, USER_DID, COLLECTION.bookShelving, 'shelving-1', {
 			shelf: userUri(COLLECTION.shelf, 'shelf-favorites'),
 			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-dune'), title: 'Dune' },
 			metadata: { status: 'reading' },
 		});
-		h.seed(COLLECTION.bookShelving, 'shelving-2', {
+		seedUserRecord(db, USER_DID, COLLECTION.bookShelving, 'shelving-2', {
 			shelf: userUri(COLLECTION.shelf, 'shelf-favorites'),
 			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-flowers'), title: 'Flowers for Algernon' },
 			metadata: { status: 'to-read' },
 		});
-		h.db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-flowers'`);
-		const res = await h.fetchUser(
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-flowers'`);
+		const res = await app(db).fetch(
 			`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${SHELF_URI('shelf-favorites')}`,
 		);
 		expect(res.status).toBe(200);
@@ -303,19 +209,20 @@ describe('user-record release gating', () => {
 	});
 
 	it('omits staged books from listShelvesWithBooks', async () => {
-		h.seed(COLLECTION.shelf, 'shelf-favorites', { name: 'Favorites' });
-		h.seed(COLLECTION.bookShelving, 'shelving-1', {
+		const db = testDb();
+		seedUserRecord(db, USER_DID, COLLECTION.shelf, 'shelf-favorites', { name: 'Favorites' });
+		seedUserRecord(db, USER_DID, COLLECTION.bookShelving, 'shelving-1', {
 			shelf: userUri(COLLECTION.shelf, 'shelf-favorites'),
 			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-dune'), title: 'Dune' },
 			metadata: { status: 'reading' },
 		});
-		h.seed(COLLECTION.bookShelving, 'shelving-2', {
+		seedUserRecord(db, USER_DID, COLLECTION.bookShelving, 'shelving-2', {
 			shelf: userUri(COLLECTION.shelf, 'shelf-favorites'),
 			book: { ref: uri('net.olamaelcu.livtet.biblio.book', 'book-flowers'), title: 'Flowers for Algernon' },
 			metadata: { status: 'to-read' },
 		});
-		h.db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-flowers'`);
-		const res = await h.fetchUser('/xrpc/net.olamaelcu.livtet.biblio.listShelvesWithBooks');
+		db.run(sql`UPDATE books SET release_status = 'staged' WHERE pk = 'book-flowers'`);
+		const res = await app(db).fetch('/xrpc/net.olamaelcu.livtet.biblio.listShelvesWithBooks');
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.shelves).toHaveLength(1);

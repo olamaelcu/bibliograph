@@ -1,5 +1,5 @@
 <main class="home">
-	<p>Every query and procedure exposed by this service following standards (<code>/xrpc</code>), documented from the lexicon files. User-owned records (reviews, shelves, shelvings, profiles) are written through the <code>put*</code>/<code>delete*</code> procedures, which proxy each write to the reader&rsquo;s own PDS.</p>
+	<p>Every query and procedure exposed by this service following standards (<code>/xrpc</code>), documented from the lexicon files. User-owned records (reviews, shelves, shelvings, profiles) are written by clients directly to the author&rsquo;s own PDS and indexed here from the Jetstream firehose; callers authenticate with a DPoP-bound OAuth access token.</p>
 	<div class="stats">
 		<a href="/queries"><wa-badge variant="brand" appearance="filled"><%= it.queryCount %> queries</wa-badge></a>
 		<a href="/procedures"><wa-badge variant="success" appearance="filled"><%= it.procedureCount %> procedures</wa-badge></a>

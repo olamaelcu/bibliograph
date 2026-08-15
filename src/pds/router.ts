@@ -12,9 +12,6 @@ import {
 	ComAtprotoRepoGetRecord,
 	ComAtprotoRepoListRecords,
 } from '@atcute/atproto';
-import type { Hono } from 'hono';
-import { authenticate, type PdsSession } from './auth.js';
-import { createPdsClient } from './client.js';
 import { cidForRecord } from './cid.js';
 import {
 	COLLECTIONS,
@@ -239,24 +236,4 @@ function decodeCursor(cursor: string): string {
 	} catch {
 		errorInvalidRequest('invalid cursor');
 	}
-}
-
-/**
- * Mount `com.atproto.repo.uploadBlob` as a raw-body route. Uploads can't go
- * through the JSON XRPC router (the request body is an arbitrary media type,
- * not JSON), so the AppView serves the endpoint directly and proxies the bytes
- * to the caller's PDS with their token.
- *
- * NOTE: the wiring task must call this BEFORE mounting the `/xrpc/*` catch-all
- * so the specific POST route wins over the generic pass-through.
- */
-export function registerUploadBlobRoute(app: Hono): void {
-	app.post('/xrpc/com.atproto.repo.uploadBlob', async (c) => {
-		const session = await authenticate(c.req.raw);
-		const body = new Uint8Array(await c.req.arrayBuffer());
-		const contentType = c.req.header('content-type') ?? undefined;
-		const client = createPdsClient({ pdsUrl: session.pdsUrl, token: session.token, repo: session.did });
-		const result = await client.uploadBlob(body, contentType);
-		return c.json(result);
-	});
 }

@@ -124,11 +124,14 @@ describe('staged-release schema', () => {
 		const trimDir = mkdtempSync(join(tmpdir(), 'drizzle-trim-'));
 		try {
 			cpSync('drizzle/meta', join(trimDir, 'meta'), { recursive: true });
-			for (const tag of ['0000_reflective_lake', '0001_parallel_chronomancer', '0002_perfect_charles_xavier', '0003_pretty_violations']) {
+			const preLifecycleTags = ['0000_reflective_lake', '0001_parallel_chronomancer', '0002_perfect_charles_xavier', '0003_pretty_violations'];
+			for (const tag of preLifecycleTags) {
 				cpSync(`drizzle/${tag}.sql`, join(trimDir, `${tag}.sql`));
 			}
 			const journal = JSON.parse(readFileSync('drizzle/meta/_journal.json', 'utf8'));
-			journal.entries = journal.entries.filter((e: { tag: string }) => e.tag !== '0004_noisy_raza' && e.tag !== '0005_awesome_doctor_doom');
+			// Keep only the migrations actually copied above — any migration added
+			// after 0003 must be excluded here too, not just 0004/0005 by name.
+			journal.entries = journal.entries.filter((e: { tag: string }) => preLifecycleTags.includes(e.tag));
 			writeFileSync(join(trimDir, 'meta/_journal.json'), JSON.stringify(journal));
 
 			const sqlite = new Database(':memory:');
