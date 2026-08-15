@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import Database, { type Database as BetterSqlite3Database } from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 
-const dbPath = resolve(process.env.DB_PATH || 'data/bibliograph.db');
+const dbPath = resolve(process.env.DB_PATH);
 const dataDir = dirname(dbPath);
 
 if (!existsSync(dataDir)) {
