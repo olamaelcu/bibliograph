@@ -2,6 +2,7 @@
   "name": "bibliograph",
   "version": "0.0.1",
   "private": true,
+  "packageManager": "pnpm@11.13.1",
   "type": "module",
   "scripts": {
     "build": "lex-cli generate && tsc",
