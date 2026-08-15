@@ -146,6 +146,7 @@ describe('page templates', () => {
 		const html = renderStatsPage();
 		expect(html).toContain('data-stat="total"');
 		expect(html).toContain('data-stat="openIssues"');
+		expect(html).toContain('data-stat="covers"');
 		expect(html).toContain('data-catalog=');
 		expect(html).toContain('id="backfill-container"');
 		expect(html).toContain("fetch('/stats.json'");
@@ -167,5 +168,15 @@ describe('page templates', () => {
 			expect(html).toContain(r.id);
 			expect(html).toContain(r.lexiconPath);
 		}
+	});
+
+	it('renders the search page with a form and both XRPC queries', () => {
+		const html = renderPage('search', { title: 'Search', description: 'd' });
+		expect(html).toContain('id="search-form"');
+		expect(html).toContain('id="search-q"');
+		expect(html).toContain('/xrpc/net.olamaelcu.livtet.biblio.searchWorks');
+		expect(html).toContain('/xrpc/net.olamaelcu.livtet.biblio.listBooks');
+		expect(html).toContain('c.contributor?.name');
+		expect(html).toContain('e.coverUrl');
 	});
 });

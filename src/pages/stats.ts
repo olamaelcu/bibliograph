@@ -1,4 +1,4 @@
-import { count, eq } from 'drizzle-orm';
+import { count, eq, isNotNull } from 'drizzle-orm';
 import type { AnySQLiteColumn, AnySQLiteTable } from 'drizzle-orm/sqlite-core';
 import { db } from '../db/connection.js';
 import {
@@ -20,6 +20,8 @@ interface CatalogRow {
 	total: number;
 	/** Tables without a release_status column (e.g. formats) omit the breakdown. */
 	byStatus?: Record<ReleaseStatus, number>;
+	/** Table with a cover/portrait field: how many rows have one. */
+	coverCount?: number;
 }
 
 export interface CatalogStats {
@@ -60,6 +62,14 @@ export function getCatalogStats(): CatalogStats {
 
 	const formatsTotal = db.select({ n: count() }).from(formats).get()?.n ?? 0;
 	catalog.push({ label: 'formats', total: formatsTotal });
+
+	const bookCovers = db.select({ n: count() }).from(books).where(isNotNull(books.coverUrl)).get()?.n ?? 0;
+	const contributorPortraits =
+		db.select({ n: count() }).from(contributors).where(isNotNull(contributors.imageUrl)).get()?.n ?? 0;
+	for (const row of catalog) {
+		if (row.label === 'books') row.coverCount = bookCovers;
+		if (row.label === 'contributors') row.coverCount = contributorPortraits;
+	}
 
 	const openIssues =
 		db.select({ n: count() }).from(importIssues).where(eq(importIssues.status, 'open')).get()?.n ?? 0;

@@ -45,6 +45,17 @@ describe('pages', () => {
     expect(body).not.toContain('net.olamaelcu.livtet.biblio.searchBooks');
   });
 
+  it('serves the search page', async () => {
+    const res = await app.request('/search');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const body = await res.text();
+    expect(body).toContain('did-ssr');
+    expect(body).toContain('id="search-form"');
+    expect(body).toContain('searchWorks');
+    expect(body).toContain('listBooks');
+  });
+
   it('serves the live stats page', async () => {
     const res = await app.request('/stats');
     expect(res.status).toBe(200);

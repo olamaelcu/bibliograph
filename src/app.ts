@@ -89,6 +89,14 @@ export function createApp(): Hono {
 		),
 	);
 	app.get('/stats', (ctx) => ctx.html(renderStatsPage()));
+	app.get('/search', (ctx) =>
+		ctx.html(
+			renderPage('search', {
+				title: 'Search',
+				description: 'Search the Bibliograph catalog for works, their editions, and covers.',
+			}),
+		),
+	);
 	app.get('/stats.json', (ctx) => {
 		ctx.header('Cache-Control', 'no-store');
 		return ctx.json(getCatalogStats());

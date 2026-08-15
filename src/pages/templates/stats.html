@@ -17,6 +17,7 @@
       <th>Staged</th>
       <th>Released</th>
       <th>Rejected</th>
+      <th>Covers</th>
     </tr>
     <% for (const row of it.stats.catalog) { %>
       <tr data-catalog="<%= row.label %>">
@@ -26,19 +27,22 @@
         <td data-stat="total">
           <%= row.total.toLocaleString() %>
         </td>
-        <% if (row.byStatus) { %>
-          <td data-stat="staged">
-            <%= row.byStatus.staged.toLocaleString() ?? 0 %>
-          </td>
-          <td data-stat="released">
-            <%= row.byStatus.released.toLocaleString() ?? 0 %>
-          </td>
-          <td data-stat="rejected">
-            <%= row.byStatus.rejected.toLocaleString() ?? 0 %>
-          </td>
-          <% } else { %>
-            <td colspan="3" class="muted">&mdash;</td>
-            <% } %>
+          <% if (row.byStatus) { %>
+            <td data-stat="staged">
+              <%= row.byStatus.staged.toLocaleString() ?? 0 %>
+            </td>
+            <td data-stat="released">
+              <%= row.byStatus.released.toLocaleString() ?? 0 %>
+            </td>
+            <td data-stat="rejected">
+              <%= row.byStatus.rejected.toLocaleString() ?? 0 %>
+            </td>
+            <% } else { %>
+              <td colspan="3" class="muted">&mdash;</td>
+              <% } %>
+        <td data-stat="covers">
+          <% if (row.coverCount != null) { %><%= row.coverCount.toLocaleString() %><% } else { %>&mdash;<% } %>
+        </td>
       </tr>
       <% } %>
   </table>
@@ -109,6 +113,12 @@
           setStat(tr, 'staged', (row.byStatus.staged ?? 0).toLocaleString());
           setStat(tr, 'released', (row.byStatus.released ?? 0).toLocaleString());
           setStat(tr, 'rejected', (row.byStatus.rejected ?? 0).toLocaleString());
+        }
+        if (row.coverCount != null) {
+          setStat(tr, 'covers', row.coverCount.toLocaleString());
+        } else {
+          const covers = tr.querySelector('[data-stat="covers"]');
+          if (covers) covers.textContent = '—';
         }
       }
       setStat(document, 'openIssues', data.openIssues.toLocaleString());

@@ -1,0 +1,213 @@
+<style>
+  .search-page {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem 2rem 2rem;
+  }
+
+  .search-form {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 1rem;
+  }
+
+  .search-form wa-input {
+    flex: 1;
+    min-width: 12rem;
+  }
+
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .search-count {
+    margin: 1.25rem 0 0.75rem;
+  }
+
+  .work-card {
+    width: auto;
+    margin: 0 0 0.75rem;
+  }
+
+  .work-card-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .work-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+
+  .work-id {
+    font-family: var(--wa-font-family-code), monospace;
+    font-size: 0.8rem;
+    color: var(--wa-color-on-quiet);
+    word-break: break-all;
+  }
+
+  .work-authors {
+    margin: 0.25rem 0 0;
+    color: var(--wa-color-on-quiet);
+    font-size: 0.9rem;
+  }
+
+  .work-desc {
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .work-covers {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .work-cover {
+    width: 2.6rem;
+    height: 4rem;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--wa-form-control-border-color);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+  }
+
+  .no-covers {
+    font-size: 0.85rem;
+    color: var(--wa-color-on-quiet);
+  }
+</style>
+
+<main class="search-page">
+  <div class="page-intro" style="margin:0;padding:0">
+    <h2>Search</h2>
+    <p class="muted">
+      Search the catalog for works and browse their editions, contributors, and covers.
+      This page is a live client of the <code>searchWorks</code> and
+      <code>listBooks</code> queries served over <code>/xrpc</code>.
+    </p>
+  </div>
+  <form id="search-form" class="search-form">
+    <div class="search-bar">
+      <wa-input id="search-q" placeholder="Search titles, descriptions, identifiers&hellip;" clearable></wa-input>
+      <button id="search-btn" class="wa-brand">Search</button>
+    </div>
+  </form>
+  <div id="results"></div>
+</main>
+
+<script type="module">
+  const SEARCH_WORKS = '/xrpc/net.olamaelcu.livtet.biblio.searchWorks';
+  const LIST_BOOKS = '/xrpc/net.olamaelcu.livtet.biblio.listBooks';
+  const WORKS_LIMIT = 20;
+  const EDITIONS_PER_WORK = 5;
+
+  const form = document.getElementById('search-form');
+  const input = document.getElementById('search-q');
+  const results = document.getElementById('results');
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function snippet(text, max) {
+    const trimmed = String(text ?? '').trim();
+    if (trimmed.length <= max) return trimmed;
+    return trimmed.slice(0, max).trimEnd() + '&hellip;';
+  }
+
+  async function listBooksForWork(uri) {
+    const qs = new URLSearchParams({work: uri, limit: String(EDITIONS_PER_WORK)});
+    const res = await fetch(`${LIST_BOOKS}?${qs}`, {headers: {accept: 'application/json'}});
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.books ?? [];
+  }
+
+  function renderCard(work, editions) {
+    const byName = new Map();
+    for (const edition of editions) {
+      for (const c of edition.contributors ?? []) {
+        const name = c.contributor?.name;
+        if (!name) continue;
+        const role = String(c.role ?? '').split('/').pop();
+        const entry = byName.get(name) ?? {name, roles: new Set()};
+        if (role) entry.roles.add(role);
+        byName.set(name, entry);
+      }
+    }
+    const people = [...byName.values()].map(({name, roles}) =>
+      roles.size ? `${name} (${[...roles].join(', ')})` : name,
+    );
+    const covers = editions.map((e) => e.coverUrl).filter(Boolean);
+    const coversHtml = covers.length
+      ? `<div class="work-covers">${covers.map((u) => `<img class="work-cover" loading="lazy" src="${escapeHtml(u)}" alt="" />`).join('')}</div>`
+      : `<p class="no-covers">No covers on its editions.</p>`;
+
+    return `<wa-card class="work-card"><div slot="header" class="work-card-header">
+          <h3 class="work-title">${escapeHtml(work.title)}</h3>
+          <span class="work-id">${escapeHtml(work.uri)}</span>
+        </div>
+        ${people.length ? `<p class="work-authors">${escapeHtml(people.join(', '))}</p>` : ''}
+        ${work.description ? `<p class="work-desc">${snippet(work.description, 200)}</p>` : ''}
+        ${coversHtml}
+      </wa-card>`;
+  }
+
+  async function runSearch(q) {
+    const qs = new URLSearchParams({q, limit: String(WORKS_LIMIT)});
+    const res = await fetch(`${SEARCH_WORKS}?${qs}`, {headers: {accept: 'application/json'}});
+    if (!res.ok) {
+      results.innerHTML = `<p class="muted">Search failed (HTTP ${res.status}).</p>`;
+      return;
+    }
+    const data = await res.json();
+    const works = data.works ?? [];
+    if (works.length === 0) {
+      results.innerHTML = '<p class="muted">No works matched your query.</p>';
+      return;
+    }
+    results.innerHTML = `<p class="muted search-count">${works.length} works found.</p>`;
+    const editionLists = await Promise.all(works.map((w) => listBooksForWork(w.uri)));
+    const cards = works.map((w, i) => renderCard(w, editionLists[i]));
+    results.insertAdjacentHTML('beforeend', cards.join(''));
+    history.replaceState(null, '', `?q=${encodeURIComponent(q)}`);
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const q = input.value.trim();
+    if (!q) return;
+    results.innerHTML = '<p class="muted">Searching&hellip;</p>';
+    try {
+      await runSearch(q);
+    } catch {
+      results.innerHTML = '<p class="muted">Search failed.</p>';
+    }
+  });
+
+  const initial = new URLSearchParams(location.search).get('q');
+  if (initial) {
+    input.value = initial;
+    runSearch(initial).catch(() => {
+      results.innerHTML = '<p class="muted">Search failed.</p>';
+    });
+  }
+</script>
