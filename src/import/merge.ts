@@ -12,6 +12,7 @@ import type { IdentifierSpec } from './identifiers.js';
 import { bookIdentifiersAdapter, contributorIdentifiersAdapter, genreIdentifiersAdapter, upsertIdentifiers, workIdentifiersAdapter } from './identifiers.js';
 import { flagIssue } from './issues.js';
 import { sourceKeySlug } from './slugs.js';
+import { logger } from '../logger.js';
 
 export interface EntityTable {
 	pk: string;
@@ -64,13 +65,27 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 
 	// 1. Identifier match (unique resource index guarantees ≤1)
 	let pk: string | null = null;
+	let matchedResource: string | null = null;
 	for (const id of candidate.identifiers) {
 		const hit = adapter.findByResource(db, id.resource);
 		if (hit !== null) {
 			pk = hit;
+			matchedResource = id.resource;
 			break;
 		}
 	}
+	logger.debug(
+		{
+			entityType: candidate.entityType,
+			pk: candidate.pk,
+			source: candidate.source,
+			matchName: candidate.matchName,
+			matchedResource,
+			existingPk: pk,
+			identifierLookups: candidate.identifiers.length,
+		},
+		'merge: identifier match',
+	);
 
 	// 2. Title/name fallback (case-insensitive)
 	let foundViaNameFallback = false;
@@ -84,8 +99,16 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 		if (rows.length === 1) {
 			pk = (rows[0] as unknown as { pk: string }).pk;
 			foundViaNameFallback = true;
+			logger.debug(
+				{ entityType: candidate.entityType, pk: candidate.pk, matchName, existingPk: pk },
+				'merge: name fallback matched',
+			);
 		} else if (rows.length > 1) {
 			// Ambiguous — leave staged with an issue rather than guessing.
+			logger.warn(
+				{ entityType: candidate.entityType, pk: candidate.pk, matchName, matches: rows.length },
+				'merge: name fallback ambiguous',
+			);
 			flagIssue(db, {
 				entityType: candidate.entityType,
 				entityPk: candidate.pk,
@@ -94,6 +117,8 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 				storedValue: `${rows.length} existing records share this name`,
 				source: candidate.source,
 			});
+		} else {
+			logger.debug({ entityType: candidate.entityType, pk: candidate.pk, matchName }, 'merge: name fallback matched nothing');
 		}
 	}
 
@@ -103,6 +128,7 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 	const existingRow = existed
 		? db.select().from(table).where(eq(table.pk as never, effectivePk as never)).get()
 		: undefined;
+	logger.debug({ entityType: candidate.entityType, pk: effectivePk, existed }, 'merge: resolved');
 
 	if (existed) {
 		// Merge fields: stored value wins; differences become open issues.
@@ -116,6 +142,10 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 			const stored = existingRow ? (existingRow as unknown as Record<string, unknown>)[field] : undefined;
 			const storedStr = stored == null ? null : String(stored);
 			if (storedStr !== incoming) {
+				logger.debug(
+					{ entityType: candidate.entityType, pk: effectivePk, field, incoming, stored: storedStr },
+					'merge: field conflict',
+				);
 				flagIssue(db, {
 					entityType: candidate.entityType,
 					entityPk: effectivePk,
@@ -141,6 +171,7 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 		if (insertResult.changes === 0) {
 			// The pk already exists but nothing above matched it (slug collision); the
 			// insert silently no-op'd, so surface the collision as an issue.
+			logger.warn({ entityType: candidate.entityType, pk: effectivePk, candidatePk: candidate.pk, source: candidate.source }, 'merge: slug collision');
 			flagIssue(db, {
 				entityType: candidate.entityType,
 				entityPk: effectivePk,
@@ -149,11 +180,20 @@ export function mergeEntity(db: BetterSQLite3Database, candidate: MergeCandidate
 				storedValue: candidate.pk,
 				source: candidate.source,
 			});
+		} else {
+			logger.debug(
+				{ entityType: candidate.entityType, pk: effectivePk, source: candidate.source, fields: Object.keys(candidate.fields) },
+				'merge: inserted',
+			);
 		}
 	}
 
 	const { conflicts } = upsertIdentifiers(db, adapter, effectivePk, candidate.identifiers);
 	for (const conflict of conflicts) {
+		logger.warn(
+			{ entityType: candidate.entityType, pk: effectivePk, resource: conflict.resource, ownerPk: conflict.ownerPk },
+			'merge: identifier conflict',
+		);
 		flagIssue(db, {
 			entityType: candidate.entityType,
 			entityPk: effectivePk,

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../test-utils/db.js';
+import { logger } from '../logger.js';
 import { mergeEntity } from './merge.js';
 import { openIssuesFor } from './issues.js';
 import { bookIdentifiersAdapter } from './identifiers.js';
@@ -193,5 +194,67 @@ describe('mergeEntity', () => {
 		expect(
 			issues.some((i) => i.field === 'identifier' && i.incomingValue === 'isbn:9780000000002' && i.storedValue === 'books/ol-b'),
 		).toBe(true);
+	});
+});
+
+describe('mergeEntity logging', () => {
+	it('logs each merge step and warns on anomalies', () => {
+		const { db, seed } = createTestDb();
+		seed();
+
+		const debugSpy = vi.spyOn(logger, 'debug');
+		const warnSpy = vi.spyOn(logger, 'warn');
+
+		// fresh insert path
+		mergeEntity(db, {
+			entityType: 'book',
+			pk: 'books/ol-log-a',
+			source: 'openlibrary',
+			matchName: 'Logging Test Book',
+			identifiers: [{ resource: 'isbn:9785555555555', url: 'https://ol/x' }],
+			fields: { title: 'Logging Test Book' },
+		});
+
+		// slug collision path (candidate pk exists but nothing matched it)
+		mergeEntity(db, {
+			entityType: 'book',
+			pk: 'book-dune',
+			source: 'bookhive',
+			matchName: 'Completely Unrelated Title',
+			identifiers: [{ resource: 'isbn:9786666666666', url: 'https://ol/x' }],
+			fields: { title: 'Completely Unrelated Title' },
+		});
+
+		// establish an owner for isbn:9780000000002, then merge a candidate whose
+		// two identifiers span two different entities (0441172717 → book-dune, the
+		// other → the owner we just created)
+		mergeEntity(db, {
+			entityType: 'book',
+			pk: 'books/ol-log-owner',
+			source: 'bookhive',
+			matchName: null,
+			identifiers: [{ resource: 'isbn:9780000000002', url: 'https://ol/2' }],
+			fields: { title: 'Owner' },
+		});
+		mergeEntity(db, {
+			entityType: 'book',
+			pk: 'books/ol-log-b',
+			source: 'openlibrary',
+			matchName: null,
+			identifiers: [
+				{ resource: 'isbn:0441172717', url: 'https://ol/dune' },
+				{ resource: 'isbn:9780000000002', url: 'https://ol/2' },
+			],
+			fields: { title: 'Book B2' },
+		});
+
+		expect(debugSpy.mock.calls.some(([o, m]) => m === 'merge: identifier match')).toBe(true);
+		expect(debugSpy.mock.calls.some(([o, m]) => m === 'merge: field conflict')).toBe(true);
+		expect(debugSpy.mock.calls.some(([o, m]) => m === 'merge: inserted')).toBe(true);
+		expect(warnSpy.mock.calls.some(([o, m]) => m === 'merge: slug collision')).toBe(true);
+		expect(warnSpy.mock.calls.some(([o, m]) => m === 'merge: identifier conflict')).toBe(true);
+
+		debugSpy.mockRestore();
+		warnSpy.mockRestore();
 	});
 });
