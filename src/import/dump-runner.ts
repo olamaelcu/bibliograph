@@ -7,6 +7,8 @@ import { HttpDownloader } from '../dump/downloader.js';
 import { acquireLock, releaseLock } from '../dump/lock.js';
 import { Reservation } from '../dump/reservation.js';
 import { countDumpLines, readCountCache, writeCountCache } from '../dump/count-lines.js';
+import { splitTsv } from '../dump/tsv.js';
+import { buildSnapshot, snapshotIsCurrent, snapshotPathOf } from '../dump/snapshot.js';
 import { importInBatches, type BatchSummary } from '../dump/batched-importer.js';
 import { mergeEntity, type MergeCandidate } from './merge.js';
 import { logger } from '../logger.js';
@@ -19,13 +21,22 @@ export interface DumpRunOptions {
   noDownload?: boolean;
   reset?: boolean;
   keepDump?: boolean;
+  /** Keep an uncompressed sidecar so a resume can byte-seek instead of replaying from 0. */
+  useSnapshot?: boolean;
   batchSize?: number;
   /** Called as download body bytes stream in: (received, total|null). */
   onProgress?: (received: number, total: number | null) => void;
   /** Called as import records are processed: (processedIncludingResume, total|null). */
   onImportProgress?: (processed: number, total: number | null) => void;
-  keyOf: (fields: string[]) => string | null;
+  /** Key extraction for resume-skip ordering (sortable key or null). */
+  keyOf: (line: string) => string | null;
   parse: (fields: string[]) => MergeCandidate[];
+  /**
+   * Fast-path: when true the record is counted as skipped and parse/merge are
+   * not run (the line is not even split). Lets redundant passes (e.g. the
+   * authors dump after editions) skip records that already exist.
+   */
+  skipIfSeen?: (key: string | null, line: string) => boolean;
   /** Optional per-record post-merge hook (e.g. hydrate book_contributors). */
   hydrate?: (fields: string[]) => void;
 }
@@ -34,6 +45,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
   const dumpDir = resolve(opts.dumpPath ?? process.env.OL_DUMP_PATH ?? resolve(process.cwd(), 'data', 'dumps'));
   if (!existsSync(dumpDir)) mkdirSync(dumpDir, { recursive: true });
   const gzPath = resolve(dumpDir, `${opts.stateName}.txt.gz`);
+  const snapshotPath = snapshotPathOf(gzPath);
   const lockPath = resolve(dumpDir, `${opts.stateName}.lock`);
 
   if (!acquireLock(lockPath)) {
@@ -74,45 +86,63 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       logger.info({ stateName: opts.stateName, gzPath }, 'reusing existing dump file');
     }
 
-    // Resume is cursor-based: gzip cannot be seeked safely, so we always start
-    // at byte 0 and skip records whose key <= the persisted cursor.
+    // Uncompressed snapshot: decompress once so interrupted runs can byte-seek
+    // back to the checkpoint instead of replaying from byte 0.
+    const useSnapshot = Boolean(opts.useSnapshot);
+    if (useSnapshot && !snapshotIsCurrent(gzPath, snapshotPath)) {
+      await buildSnapshot(gzPath, snapshotPath);
+    }
+
     const lastKeyCursor = existing?.cursor ?? null;
+    const lastByteOffset = existing?.lastByteOffset ?? 0;
     // Continue the progress bar from where the previous run left off instead of
     // restarting at 0 (records already processed are skipped, not replayed).
     const progressBase = existing?.totalProcessed ?? 0;
 
     // Resolve the total record count for progress: reuse the sidecar cache when
-    // the file is unchanged, otherwise one gunzip pass to count lines exactly.
+    // the file is unchanged, otherwise one pass to count lines exactly. A plain
+    // snapshot counts without gunzipping.
     let total = readCountCache(gzPath);
     if (total === null) {
       logger.info({ stateName: opts.stateName, gzPath }, 'counting dump records');
-      total = await countDumpLines(gzPath);
+      total = await countDumpLines(useSnapshot ? snapshotPath : gzPath, { plain: useSnapshot });
       writeCountCache(gzPath, total);
     }
     logger.info({ stateName: opts.stateName, totalRecords: total }, 'dump record count');
     state.set({ totalRecords: total });
 
-    // NOTE: byte-seek resume is intentionally unused. `runOnce` is always called
-    // with offset 0, so `SeekError` below is unreachable in practice; the branch
-    // is kept only as a defensive replay path if a future caller ever passes a
-    // non-zero offset.
+    // Resuming replays from byte 0 and cursor-skips for a gzip source; a
+    // snapshot source seeks straight to the checkpointed byte offset.
     const runOnce = async (offset: number, cursor: string | null): Promise<BatchSummary> => {
-      const streamer = new DumpStreamer(gzPath);
+      const streamer = new DumpStreamer(useSnapshot ? snapshotPath : gzPath, useSnapshot);
       const items = streamer.iter({ startByteOffset: offset, lastKeyCursor: cursor, keyOf: opts.keyOf });
+      let lastKey: string | null = null;
+      let lastEndOffset = offset;
       const s = await importInBatches(opts.db, items, {
         batchSize: opts.batchSize ?? 500,
         total,
         onProgress: opts.onImportProgress
           ? (processed, t) => opts.onImportProgress?.(progressBase + processed, t)
           : undefined,
+        onCheckpoint: (processed) => {
+          state.set({
+            lastKeyCursor: lastKey,
+            lastByteOffset: lastEndOffset,
+            totalProcessed: progressBase + processed,
+          });
+        },
         upsert: (item) => {
-          const cands = opts.parse(item.fields);
+          if (item.key !== null) lastKey = item.key;
+          lastEndOffset = item.byteOffset + Buffer.byteLength(item.line, 'utf8') + 1;
+          if (opts.skipIfSeen?.(item.key, item.line)) return { action: 'skipped' };
+          const fields = splitTsv(item.line, 5);
+          const cands = opts.parse(fields);
           let inserted = false;
           for (const c of cands) {
             const res = mergeEntity(opts.db, c);
             if (!res.existed) inserted = true;
           }
-          opts.hydrate?.(item.fields);
+          opts.hydrate?.(fields);
           return { action: inserted ? 'inserted' : 'skipped' };
         },
       });
@@ -120,8 +150,9 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     };
 
     let summary: BatchSummary | null = null;
+    const resumeOffset = useSnapshot ? lastByteOffset : 0;
     try {
-      summary = await runOnce(0, lastKeyCursor);
+      summary = await runOnce(resumeOffset, lastKeyCursor);
     } catch (err) {
       if (err instanceof SeekError) {
         logger.warn({ err: err.message }, 'gz resume failed; replaying from byte 0');
@@ -135,12 +166,14 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     state.markComplete();
 
     if (!opts.keepDump) {
-      try {
-        unlinkSync(gzPath);
-        logger.info({ gzPath }, 'removed dump file after import');
-      } catch {
-        // best-effort cleanup
+      for (const p of [gzPath, snapshotPath, `${snapshotPath}.meta`]) {
+        try {
+          unlinkSync(p);
+        } catch {
+          // best-effort cleanup
+        }
       }
+      logger.info({ stateName: opts.stateName }, 'removed dump files after import');
     }
 
     logger.info({ ...summary }, 'dump import complete');

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { mapAuthorToCandidate, mapEditionToCandidates, mapWorkToCandidate } from './openlibrary.js';
+import { eq } from 'drizzle-orm';
+import { mapAuthorToCandidate, mapEditionToCandidates, mapWorkToCandidate, skipSeenContributors, skipSeenWorks } from './openlibrary.js';
+import { createTestDb } from '../../test-utils/db.js';
+import { contributors, works, contributorIdentifiers, workIdentifiers } from '../../db/schema.js';
 
 const edition: any = {
   key: '/books/OL123M',
@@ -74,5 +77,37 @@ describe('OL mappers', () => {
     const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', isbn_13: ['978-0-441-17271-9'] });
     const book = cands.find((c) => c.entityType === 'book');
     expect(book?.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
+  });
+
+  it('skipSeenContributors is true only for keys already in contributor identifiers', () => {
+    const { db } = createTestDb();
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(contributors).values({ pk: 'authors-ol1a', name: 'Alpha', createdAt: now, releaseStatus: 'staged' }).run();
+    db.insert(contributorIdentifiers).values({
+      contributorPk: 'authors-ol1a',
+      resource: 'openlibrary:authors/OL1A',
+      url: 'https://openlibrary.org/authors/OL1A',
+    }).run();
+
+    const skip = skipSeenContributors(db);
+    expect(skip('/authors/OL1A', '')).toBe(true);
+    expect(skip('/authors/OLNEW', '')).toBe(false);
+    expect(skip(null, '')).toBe(false);
+  });
+
+  it('skipSeenWorks is true only for keys already in work identifiers', () => {
+    const { db } = createTestDb();
+    const now = Math.floor(Date.now() / 1000);
+    db.insert(works).values({ pk: 'works-ol1w', title: 'Dune', createdAt: now, releaseStatus: 'staged' }).run();
+    db.insert(workIdentifiers).values({
+      workPk: 'works-ol1w',
+      resource: 'openlibrary:works/OL1W',
+      url: 'https://openlibrary.org/works/OL1W',
+    }).run();
+
+    const skip = skipSeenWorks(db);
+    expect(skip('/works/OL1W', '')).toBe(true);
+    expect(skip('/works/OLNEW', '')).toBe(false);
+    expect(skip(null, '')).toBe(false);
   });
 });

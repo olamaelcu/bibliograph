@@ -2,26 +2,30 @@ import type { Readable } from 'node:stream';
 import { createReadStream, statSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { createGunzip } from 'node:zlib';
+import { hasMinFields, tsvField } from './tsv.js';
 import { logger } from '../logger.js';
 
 export interface StreamerItem {
   byteOffset: number;
   line: string;
-  fields: string[];
+  /** Resume-sortable key (defaults to the 2nd TSV field), null when the line has none. */
+  key: string | null;
 }
 
 export interface StreamerOptions {
   /**
-   * Informational only: resuming replays from byte 0 and skips via `lastKeyCursor`.
-   * Not used as a seek target (gzip is not randomly seekable).
+   * Informational only for gzip sources (gzip is not randomly seekable). For a
+   * plain source it is a real byte seek target, and resuming reads from there.
    */
   startByteOffset: number;
   lastKeyCursor: string | null;
   /** Key extraction for resume-skip: return the sortable key or null to always yield. */
-  keyOf: (fields: string[]) => string | null;
+  keyOf?: (line: string) => string | null;
 }
 
 const MIN_FIELDS = 5;
+
+const defaultKeyOf = (line: string): string | null => tsvField(line, 1);
 
 export class SeekError extends Error {
   constructor(message: string) {
@@ -31,34 +35,30 @@ export class SeekError extends Error {
 }
 
 /**
- * Yields one item per line of a gzipped TSV dump. Resuming from a mid-file
- * byte offset may fail because gzip streams are not randomly seekable — when
- * that happens we throw SeekError and the caller replays from byte 0, skipping
- * records whose key <= lastKeyCursor.
+ * Yields one item per line of a dump. The default source is a gzipped TSV dump;
+ * pass `{ plain: true }` to read a plain (already-decompressed) copy so a
+ * mid-file `startByteOffset` becomes a real seek instead of a SeekError.
+ *
+ * Resuming a gzip source always replays from byte 0 and skips records whose key
+ * <= lastKeyCursor. Resuming a plain source seeks to `startByteOffset` directly.
  */
 export class DumpStreamer {
-  constructor(private readonly gzPath: string) {}
+  constructor(
+    private readonly path: string,
+    private readonly plain = false,
+  ) {}
 
-  /**
-   * Streams one item per line of the dump.
-   *
-   * Resuming ALWAYS replays from byte 0 and skips records whose key <= lastKeyCursor.
-   * `startByteOffset` is retained for API compatibility, but a mid-file start lands
-   * inside the gzip DEFLATE payload (gzip is not randomly seekable) and throws
-   * `SeekError`; callers must fall back to byte 0 on `SeekError` and rely on the
-   * key-cursor skip for resumption.
-   */
   async *iter(opts: StreamerOptions): AsyncGenerator<StreamerItem, void, void> {
     const source: Readable =
       opts.startByteOffset > 0
-        ? createReadStream(this.gzPath, { start: opts.startByteOffset })
-        : createReadStream(this.gzPath);
+        ? createReadStream(this.path, { start: opts.startByteOffset })
+        : createReadStream(this.path);
+    const input: Readable = this.plain ? source : source.pipe(createGunzip());
+    const lines = createInterface({ input, crlfDelay: Infinity });
 
-    logger.debug({ gzPath: this.gzPath, startByteOffset: opts.startByteOffset, cursor: opts.lastKeyCursor }, 'streaming dump');
+    logger.debug({ path: this.path, plain: this.plain, startByteOffset: opts.startByteOffset, cursor: opts.lastKeyCursor }, 'streaming dump');
 
-    const gunzip = createGunzip();
-    const lines = createInterface({ input: source.pipe(gunzip), crlfDelay: Infinity });
-
+    const keyOf = opts.keyOf ?? defaultKeyOf;
     let runningOffset = opts.startByteOffset;
 
     try {
@@ -67,20 +67,19 @@ export class DumpStreamer {
         const lineStart = runningOffset;
         runningOffset += lineByteLen;
 
-        const fields = line.split('\t');
-        if (fields.length < MIN_FIELDS) continue;
+        if (!hasMinFields(line, MIN_FIELDS)) continue;
 
-        const key = opts.keyOf(fields);
+        const key = keyOf(line);
         if (key !== null && opts.lastKeyCursor !== null && key <= opts.lastKeyCursor) {
           continue;
         }
 
-        yield { byteOffset: lineStart, line, fields };
+        yield { byteOffset: lineStart, line, key };
       }
     } catch (err) {
       const msg = (err as Error).message;
-      if (opts.startByteOffset > 0 && /invalid|incorrect/i.test(msg)) {
-        const totalSize = statSync(this.gzPath).size;
+      if (!this.plain && opts.startByteOffset > 0 && /invalid|incorrect/i.test(msg)) {
+        const totalSize = statSync(this.path).size;
         throw new SeekError(
           `gunzip failed at byte offset ${opts.startByteOffset}; replay from 0 (file size ${totalSize})`,
         );
@@ -90,6 +89,6 @@ export class DumpStreamer {
   }
 
   fileSize(): number {
-    return statSync(this.gzPath).size;
+    return statSync(this.path).size;
   }
 }

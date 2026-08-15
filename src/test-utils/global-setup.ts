@@ -1,6 +1,6 @@
 // Runs once in the main vitest process, before any test file. The app-level
 // connection (src/db/connection.ts) opens DB_PATH unmigrated at import time,
-// but production runs the migrator before serving (src/release.ts). Mirror
+// but production runs the migrator before serving (src/index.ts). Mirror
 // that here so routes that read tables (e.g. /stats) work under test.
 //
 // The path is forced unconditionally: the ambient shell env (mise) exports

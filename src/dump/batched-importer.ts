@@ -24,6 +24,8 @@ export function importInBatches<T>(
     total?: number;
     /** Called after each flushed batch with cumulative processed + total. */
     onProgress?: (processed: number, total: number | null) => void;
+    /** Called after each flushed batch with cumulative processed and the last item of that batch. */
+    onCheckpoint?: (processed: number, lastItem: T) => void;
     upsert: (item: T) => { action: 'inserted' | 'skipped' | 'failed' };
   },
 ): Promise<BatchSummary> {
@@ -39,8 +41,10 @@ export function importInBatches<T>(
       batch.push(item);
       summary.processed += 1;
       if (batch.length >= batchSize) {
+        const lastItem = batch[batch.length - 1];
         flushBatch(batch);
         batch = [];
+        opts.onCheckpoint?.(summary.processed, lastItem);
         opts.onProgress?.(summary.processed, opts.total ?? null);
         if (summary.processed % logInterval === 0) {
           logger.info({ ...summary, elapsedMs: Date.now() - startedAt }, 'import progress');
@@ -48,7 +52,9 @@ export function importInBatches<T>(
       }
     }
     if (batch.length) {
+      const lastItem = batch[batch.length - 1];
       flushBatch(batch);
+      opts.onCheckpoint?.(summary.processed, lastItem);
       opts.onProgress?.(summary.processed, opts.total ?? null);
     }
     logger.debug({ ...summary, elapsedMs: Date.now() - startedAt }, 'import final batch flushed');

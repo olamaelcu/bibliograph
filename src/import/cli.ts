@@ -8,6 +8,8 @@ import {
   mapEditionToCandidates,
   mapWorkToCandidate,
   olKeyOf,
+  skipSeenContributors,
+  skipSeenWorks,
 } from './mappers/openlibrary.js';
 import { hydrateBookContributorsFromEdition } from './book-contributors.js';
 import { logger } from '../logger.js';
@@ -43,23 +45,25 @@ async function runWithProgress<T>(
 }
 
 const USAGE =
-  'usage: tsx src/import/cli.ts openlibrary:dump|works:dump|contributors:dump|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--path=DIR] [--batch-size=N]';
+  'usage: tsx src/import/cli.ts openlibrary:dump|works:dump|contributors:dump|contributors:enrich|works:enrich|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--snapshot] [--path=DIR] [--batch-size=N]';
 
 interface Flags {
   noDownload: boolean;
   reset: boolean;
   keepDump: boolean;
+  snapshot: boolean;
   dumpPath?: string;
   batchSize?: number;
   unknown: string[];
 }
 
 function parseFlags(rest: string[]): Flags {
-  const f: Flags = { noDownload: false, reset: false, keepDump: false, unknown: [] };
+  const f: Flags = { noDownload: false, reset: false, keepDump: false, snapshot: false, unknown: [] };
   for (const arg of rest) {
     if (arg === '--no-download') f.noDownload = true;
     else if (arg === '--reset') f.reset = true;
     else if (arg === '--keep-dump') f.keepDump = true;
+    else if (arg === '--snapshot') f.snapshot = true;
     else if (arg.startsWith('--path=')) f.dumpPath = arg.slice('--path='.length);
     else if (arg.startsWith('--batch-size=')) {
       f.batchSize = Number(arg.slice('--batch-size='.length));
@@ -85,7 +89,7 @@ async function main(): Promise<void> {
     const s = await runWithProgress('ol-editions', (onDownload, onImport) =>
       runDumpImport({
         db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
-        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
         dumpPath: flags.dumpPath, batchSize: flags.batchSize,
         onProgress: onDownload,
         onImportProgress: onImport,
@@ -102,11 +106,12 @@ async function main(): Promise<void> {
     const s = await runWithProgress('ol-works', (onDownload, onImport) =>
       runDumpImport({
         db, stateName: 'ol-works', url: OL_WORKS_URL,
-        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
         dumpPath: flags.dumpPath, batchSize: flags.batchSize,
         onProgress: onDownload,
         onImportProgress: onImport,
         keyOf: olKeyOf,
+        skipIfSeen: skipSeenWorks(db),
         parse: (fields) => [mapWorkToCandidate(JSON.parse(fields[4]))],
       }),
     );
@@ -115,15 +120,24 @@ async function main(): Promise<void> {
     const s = await runWithProgress('ol-authors', (onDownload, onImport) =>
       runDumpImport({
         db, stateName: 'ol-authors', url: OL_AUTHORS_URL,
-        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
         dumpPath: flags.dumpPath, batchSize: flags.batchSize,
         onProgress: onDownload,
         onImportProgress: onImport,
         keyOf: olKeyOf,
+        skipIfSeen: skipSeenContributors(db),
         parse: (fields) => [mapAuthorToCandidate(JSON.parse(fields[4]))],
       }),
     );
     logger.info(s, 'contributors import done');
+  } else if (cmd === 'contributors:enrich') {
+    const { enrichContributors } = await import('./enrich.js');
+    const s = await enrichContributors(db, { dumpPath: flags.dumpPath, batchSize: flags.batchSize });
+    logger.info(s, 'contributors enrichment done');
+  } else if (cmd === 'works:enrich') {
+    const { enrichWorks } = await import('./enrich.js');
+    const s = await enrichWorks(db, { dumpPath: flags.dumpPath, batchSize: flags.batchSize });
+    logger.info(s, 'works enrichment done');
   } else if (cmd === 'bookhive:catalog') {
     const { importBookhiveCatalog } = await import('./bookhive/importer.js');
     const s = await importBookhiveCatalog({ db, reset: flags.reset, limit: flags.batchSize });

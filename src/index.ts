@@ -1,4 +1,5 @@
 import { serve } from '@hono/node-server';
+import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { createApp } from './app.js';
 import { db, sqliteHandle } from './db/connection.js';
 import { logger } from './logger.js';
@@ -7,6 +8,14 @@ import { createJetstreamIngestor } from './jetstream/ingest.js';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 async function main(): Promise<void> {
+  try {
+    migrate(db, { migrationsFolder: 'drizzle' });
+    logger.info('migrations applied');
+  } catch (err) {
+    logger.fatal({ err }, 'migrations failed');
+    process.exit(1);
+  }
+
   const app = createApp();
 
   const safeFetch: typeof app.fetch = async (req: Request, ...args) => {
@@ -22,7 +31,11 @@ async function main(): Promise<void> {
   logger.info({ port: PORT }, 'HTTP server running');
 
   const jetstream = process.env.JETSTREAM_DISABLE === 'true' ? undefined : createJetstreamIngestor(db);
-  jetstream?.start();
+  try {
+    jetstream?.start();
+  } catch (err) {
+    logger.error({ err }, 'jetstream: failed to start, continuing without live ingest');
+  }
 
   const walCheckpointInterval = setInterval(() => {
     try {

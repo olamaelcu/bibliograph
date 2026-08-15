@@ -53,8 +53,7 @@ open import issues, and backfill state. Pages are server-side rendered with
 - `pnpm run check` — typecheck
 - `pnpm run test` — vitest
 - `pnpm run build` — compile server to `dist/`
-- `pnpm run start` — production server
-- `pnpm run release` — Dokku release task
+- `pnpm run start` — production server (runs migrations on startup)
 - `pnpm run db:generate` — generate Drizzle migrations
 - `pnpm run db:migrate` — apply pending Drizzle migrations
 - `pnpm run dump:openlibrary` — import the OL editions dump
@@ -145,9 +144,9 @@ docker compose up -d storage   # rustfs S3-compatible blob storage
 pnpm run db:migrate    # apply pending migrations from drizzle/
 ```
 
-New schema versions are generated with `pnpm run db:generate`. The Dokku
-`release` task applies migrations automatically before the web process
-starts, so `db:migrate` is only needed for local development.
+New schema versions are generated with `pnpm run db:generate`. The web
+process (`pnpm start`) applies pending migrations itself on startup, so
+`db:migrate` is only needed for local development.
 
 ## Deployment
 

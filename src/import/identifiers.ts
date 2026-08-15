@@ -20,6 +20,12 @@ type PkAdapter = {
 	remove: (db: BetterSQLite3Database, pk: string) => void;
 }
 
+export type { PkAdapter };
+
+export function identifierTaken(db: BetterSQLite3Database, adapter: PkAdapter, resource: string): boolean {
+	return adapter.findByResource(db, resource) !== null;
+}
+
 function makeAdapter(table: IdentifierTable, pkCol: { pk: string }): PkAdapter {
 	return {
 		findByResource(db, resource) {

@@ -60,6 +60,21 @@ describe('importInBatches', () => {
     ]);
   });
 
+  it('fires onCheckpoint after each flushed batch with its last item', async () => {
+    const { db } = createTestDb();
+    const calls: Array<{ processed: number; lastItem: string }> = [];
+    await importInBatches(db, gen(['a', 'b', 'c', 'd', 'e']), {
+      batchSize: 2,
+      onCheckpoint: (processed, lastItem) => calls.push({ processed, lastItem }),
+      upsert: () => ({ action: 'inserted' }),
+    });
+    expect(calls).toEqual([
+      { processed: 2, lastItem: 'b' },
+      { processed: 4, lastItem: 'd' },
+      { processed: 5, lastItem: 'e' },
+    ]);
+  });
+
   it('passes total null when unknown', async () => {
     const { db } = createTestDb();
     const calls: Array<{ processed: number; total: number | null }> = [];

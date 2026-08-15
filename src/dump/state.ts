@@ -34,10 +34,11 @@ export class DumpState {
       filePath: fields.filePath ?? existing?.filePath ?? null,
       lastModified: fields.lastModified ?? existing?.lastModified ?? null,
       fileSize: fields.fileSize ?? existing?.fileSize ?? null,
-      lastByteOffset: fields.lastByteOffset ?? existing?.lastByteOffset ?? 0,
-      cursor: fields.lastKeyCursor ?? existing?.cursor ?? null,
-		totalProcessed: fields.totalProcessed ?? existing?.totalProcessed ?? 0,
-		totalRecords: fields.totalRecords ?? existing?.totalRecords ?? null,
+      // undefined means "keep", so an explicit null (clear) or 0 (reset) is honored.
+      lastByteOffset: fields.lastByteOffset !== undefined ? fields.lastByteOffset : (existing?.lastByteOffset ?? 0),
+      cursor: fields.lastKeyCursor !== undefined ? fields.lastKeyCursor : (existing?.cursor ?? null),
+      totalProcessed: fields.totalProcessed ?? existing?.totalProcessed ?? 0,
+      totalRecords: fields.totalRecords ?? existing?.totalRecords ?? null,
       complete: fields.complete ? 1 : (existing?.complete ?? 0),
       updatedAt: now,
     };

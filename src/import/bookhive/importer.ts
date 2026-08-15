@@ -64,6 +64,7 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
     let pages = 0;
     let nextCursor: string | null = cursor;
     do {
+      logger.info({ processed, failed, pages }, 'fetching records from listRecords');
       const res = await withRetry(
         'bookhive listRecords failed',
         () =>

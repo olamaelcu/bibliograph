@@ -1,6 +1,9 @@
 import type { MergeCandidate } from '../merge.js';
 import { identifierResource, sourceKeySlug } from '../slugs.js';
 import { normalizeIsbn } from '../isbn.js';
+import { tsvField } from '../../dump/tsv.js';
+import { contributorIdentifiersAdapter, identifierTaken, workIdentifiersAdapter, type PkAdapter } from '../identifiers.js';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 
 export interface OlEdition {
   key: string;
@@ -33,12 +36,12 @@ export interface OlAuthor {
   photos?: number[];
 }
 
-function text(v: string | { value?: string } | undefined): string | null {
+export function text(v: string | { value?: string } | undefined): string | null {
   if (v == null) return null;
   return typeof v === 'string' ? v : (v.value ?? null);
 }
 
-function unixSecondsOrNull(date: string | undefined): string | null {
+export function unixSecondsOrNull(date: string | undefined): string | null {
   if (!date) return null;
   const ms = new Date(date).getTime();
   if (!Number.isFinite(ms)) return null;
@@ -150,7 +153,20 @@ export function mapAuthorToCandidate(a: OlAuthor): MergeCandidate {
   };
 }
 
-/** Extract the OL key from TSV fields[1] for resume-skip ordering. */
-export function olKeyOf(fields: string[]): string | null {
-  return fields[1] ?? null;
+/** Extract the OL key from a raw dump line (item.json's 2nd TSV field) for resume-skip ordering. */
+export function olKeyOf(line: string): string | null {
+  return tsvField(line, 1);
 }
+
+/** True when an OL resource (`openlibrary:authors/OL1A`) is already claimed by someone. */
+export function olResourceExists(db: BetterSQLite3Database, adapter: PkAdapter, key: string): boolean {
+  return identifierTaken(db, adapter, `openlibrary:${key.replace(/^\//, '')}`);
+}
+
+/** Fast-path predicate for contributors:dump — skip authors already imported by editions. */
+export const skipSeenContributors = (db: BetterSQLite3Database) => (key: string | null) =>
+  key != null && olResourceExists(db, contributorIdentifiersAdapter, key);
+
+/** Fast-path predicate for works:dump — skip works already imported by editions. */
+export const skipSeenWorks = (db: BetterSQLite3Database) => (key: string | null) =>
+  key != null && olResourceExists(db, workIdentifiersAdapter, key);

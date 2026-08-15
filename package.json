@@ -23,7 +23,6 @@
     "review": "tsx src/review/cli.ts",
     "lex:gen": "lex-cli generate",
     "key:generate": "node scripts/generate-atproto-key.mjs",
-    "release": "tsx src/release.ts",
     "lex:check": "atprotolex check lexicons/net/olamaelcu/livtet/biblio/*.json"
   },
   "dependencies": {
