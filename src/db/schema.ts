@@ -1,14 +1,17 @@
 import { sql } from 'drizzle-orm';
 import {
+	bigserial,
 	check,
 	foreignKey,
 	index,
 	integer,
+	jsonb,
+	pgTable,
 	primaryKey,
-	sqliteTable,
+	serial,
 	text,
 	uniqueIndex,
-} from 'drizzle-orm/sqlite-core';
+} from 'drizzle-orm/pg-core';
 
 /**
  * Bibliograph relational schema.
@@ -20,7 +23,7 @@ import {
  * can be referenced by foreign keys.
  */
 
-export const works = sqliteTable(
+export const works = pgTable(
 	'works',
 	{
 		pk: text('pk').primaryKey(),
@@ -44,7 +47,7 @@ export const works = sqliteTable(
 	}),
 );
 
-export const contributors = sqliteTable(
+export const contributors = pgTable(
 	'contributors',
 	{
 		pk: text('pk').primaryKey(),
@@ -68,7 +71,7 @@ export const contributors = sqliteTable(
 	}),
 );
 
-export const formats = sqliteTable('formats', {
+export const formats = pgTable('formats', {
 	pk: text('pk').primaryKey(),
 	description: text('description').notNull(),
 	emoji: text('emoji').notNull(),
@@ -77,7 +80,7 @@ export const formats = sqliteTable('formats', {
 	cid: text('cid').notNull().default(''),
 });
 
-export const genres = sqliteTable(
+export const genres = pgTable(
 	'genres',
 	{
 		pk: text('pk').primaryKey(),
@@ -103,7 +106,7 @@ export const genres = sqliteTable(
 	}),
 );
 
-export const contributorRoles = sqliteTable(
+export const contributorRoles = pgTable(
 	'contributor_roles',
 	{
 		pk: text('pk').primaryKey(),
@@ -124,7 +127,7 @@ export const contributorRoles = sqliteTable(
 	}),
 );
 
-export const books = sqliteTable(
+export const books = pgTable(
 	'books',
 	{
 		pk: text('pk').primaryKey(),
@@ -151,9 +154,10 @@ export const books = sqliteTable(
 	}),
 );
 
-export const bookContributorStaging = sqliteTable(
+export const bookContributorStaging = pgTable(
 	'book_contributor_staging',
 	{
+		id: bigserial('id', { mode: 'number' }),
 		editionOlKey: text('edition_ol_key').notNull(),
 		authorOlKey: text('author_ol_key').notNull(),
 		rolePk: text('role_pk').notNull().default('author'),
@@ -166,7 +170,7 @@ export const bookContributorStaging = sqliteTable(
 export type BookContributorStaging = typeof bookContributorStaging.$inferSelect;
 export type NewBookContributorStaging = typeof bookContributorStaging.$inferInsert;
 
-export const bookContributors = sqliteTable(
+export const bookContributors = pgTable(
 	'book_contributors',
 	{
 		bookPk: text('book_pk').notNull(),
@@ -188,7 +192,7 @@ export const bookContributors = sqliteTable(
 	}),
 );
 
-export const bookGenres = sqliteTable(
+export const bookGenres = pgTable(
 	'book_genres',
 	{
 		bookPk: text('book_pk').notNull(),
@@ -202,7 +206,7 @@ export const bookGenres = sqliteTable(
 	}),
 );
 
-export const genreChildren = sqliteTable(
+export const genreChildren = pgTable(
 	'genre_children',
 	{
 		parentPk: text('parent_pk').notNull(),
@@ -216,7 +220,7 @@ export const genreChildren = sqliteTable(
 	}),
 );
 
-export const bookIdentifiers = sqliteTable(
+export const bookIdentifiers = pgTable(
 	'book_identifiers',
 	{
 		bookPk: text('book_pk').notNull(),
@@ -231,7 +235,7 @@ export const bookIdentifiers = sqliteTable(
 	}),
 );
 
-export const workIdentifiers = sqliteTable(
+export const workIdentifiers = pgTable(
 	'work_identifiers',
 	{
 		workPk: text('work_pk').notNull(),
@@ -246,7 +250,7 @@ export const workIdentifiers = sqliteTable(
 	}),
 );
 
-export const contributorIdentifiers = sqliteTable(
+export const contributorIdentifiers = pgTable(
 	'contributor_identifiers',
 	{
 		contributorPk: text('contributor_pk').notNull(),
@@ -264,7 +268,7 @@ export const contributorIdentifiers = sqliteTable(
 	}),
 );
 
-export const genreIdentifiers = sqliteTable(
+export const genreIdentifiers = pgTable(
 	'genre_identifiers',
 	{
 		genrePk: text('genre_pk').notNull(),
@@ -290,10 +294,10 @@ export type ImportIssueEntityType = (typeof importIssueEntityTypes)[number];
 export const importIssueStatuses = ['open', 'resolved', 'dismissed'] as const;
 export type ImportIssueStatus = (typeof importIssueStatuses)[number];
 
-export const importIssues = sqliteTable(
+export const importIssues = pgTable(
 	'import_issues',
 	{
-		pk: integer('pk').primaryKey({ autoIncrement: true }),
+		pk: serial('pk').primaryKey(),
 		entityType: text('entity_type').notNull(),
 		entityPk: text('entity_pk').notNull(),
 		field: text('field').notNull(),
@@ -321,7 +325,7 @@ export const importIssues = sqliteTable(
 export type ImportIssue = typeof importIssues.$inferSelect;
 export type NewImportIssue = typeof importIssues.$inferInsert;
 
-	export const backfillState = sqliteTable('backfill_state', {
+	export const backfillState = pgTable('backfill_state', {
 		name: text('name').primaryKey(),
 		url: text('url'),
 		filePath: text('file_path'),
@@ -338,7 +342,7 @@ export type NewImportIssue = typeof importIssues.$inferInsert;
 
 export type BackfillState = typeof backfillState.$inferSelect;
 
-export const backfillReservation = sqliteTable('backfill_reservation', {
+export const backfillReservation = pgTable('backfill_reservation', {
 	stateName: text('state_name').primaryKey(),
 	pid: integer('pid').notNull(),
 	startedAt: integer('started_at').notNull(),
@@ -346,7 +350,7 @@ export const backfillReservation = sqliteTable('backfill_reservation', {
 
 export type BackfillReservation = typeof backfillReservation.$inferSelect;
 
-export const catalogBlobs = sqliteTable(
+export const catalogBlobs = pgTable(
 	'catalog_blobs',
 	{
 		pk: text('pk').primaryKey(),
@@ -376,14 +380,14 @@ export type NewCatalogBlob = typeof catalogBlobs.$inferInsert;
  * One row per `(did, collection, rkey)` record; `record` holds the raw
  * lexicon-typed JSON value as written by the user's own PDS.
  */
-export const userRecords = sqliteTable(
+export const userRecords = pgTable(
 	'user_records',
 	{
 		did: text('did').notNull(),
 		collection: text('collection').notNull(),
 		rkey: text('rkey').notNull(),
 		cid: text('cid').notNull(),
-		record: text('record', { mode: 'json' }).notNull(),
+		record: jsonb('record').notNull(),
 		indexedAt: integer('indexed_at').notNull(),
 	},
 	(t) => ({
@@ -397,7 +401,7 @@ export type UserRecord = typeof userRecords.$inferSelect;
 export type NewUserRecord = typeof userRecords.$inferInsert;
 
 /** Single-row-per-consumer cursor checkpoint for resuming the Jetstream subscription. */
-export const jetstreamCursor = sqliteTable('jetstream_cursor', {
+export const jetstreamCursor = pgTable('jetstream_cursor', {
 	name: text('name').primaryKey(),
 	cursor: integer('cursor'),
 	updatedAt: integer('updated_at').notNull(),

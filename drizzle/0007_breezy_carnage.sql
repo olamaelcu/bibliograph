@@ -1,1 +1,0 @@
-ALTER TABLE `backfill_state` ADD `total_records` integer;

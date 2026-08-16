@@ -1,1 +1,0 @@
-ALTER TABLE `backfill_state` ADD `stopped` integer DEFAULT 0 NOT NULL;
