@@ -35,6 +35,7 @@ export const works = sqliteTable(
 	},
 	(t) => ({
 		titleIdx: index('works_title_idx').on(t.title),
+		titleLowerIdx: index('works_title_lower_idx').on(sql`lower(${t.title})`),
 		releaseStatusIdx: index('works_release_status_idx').on(t.releaseStatus),
 		releaseStatusCheck: check(
 			'works_release_status_check',

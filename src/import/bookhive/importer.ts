@@ -27,6 +27,49 @@ export interface BookhiveImportResult {
   failed: number;
 }
 
+/**
+ * Read-only pre-count pass: walks every page of the catalog from the given
+ * cursor and sums the record counts, so we can report progress against a known
+ * total. Returns null if interrupted partway (a partial count is useless).
+ */
+async function countCatalogRecords(
+  rpc: Client,
+  did: string,
+  startCursor: string | null,
+  opts: { signal?: AbortSignal; limit?: number },
+): Promise<number | null> {
+  let total = 0;
+  let nextCursor: string | null = startCursor;
+  do {
+    if (opts.signal?.aborted) {
+      logger.info({ counted: total }, 'bookhive count interrupted');
+      return null;
+    }
+    const res = await withRetry(
+      'bookhive listRecords failed',
+      () =>
+        rpc.get('com.atproto.repo.listRecords', {
+          params: {
+            repo: did as ActorIdentifier,
+            collection: BOOKHIVE_CATALOG_NSID,
+            limit: opts.limit ?? 100,
+            cursor: nextCursor ?? undefined,
+          },
+        }),
+      { cursor: nextCursor ?? null },
+    );
+    if (!res.ok) {
+      const where = nextCursor ?? 'start';
+      throw new Error(
+        `bookhive listRecords failed (cursor ${where}): ${res.data.error}${res.data.message ? `: ${res.data.message}` : ''}`,
+      );
+    }
+    total += res.data.records.length;
+    nextCursor = res.data.cursor ?? null;
+  } while (nextCursor);
+  return total;
+}
+
 export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promise<BookhiveImportResult> {
   const lockPath = opts.lockPath ?? 'data/bookhive-catalog.lock';
   if (!acquireLock(lockPath)) {
@@ -62,13 +105,29 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
       'starting bookhive catalog import',
     );
 
+    const baseProcessed = existing?.totalProcessed ?? 0;
+
+    // Pre-count the catalog once so progress can be reported against a known
+    // total (and an ETA derived). Skipped when a prior run already stored the
+    // total, so resumes don't re-walk the collection.
+    if (existing?.totalRecords == null) {
+      const counted = await countCatalogRecords(rpc, did, cursor, { signal: opts.signal, limit: opts.limit });
+      if (counted === null) {
+        state.set({ stopped: true });
+        logger.info('bookhive count interrupted before import; run stopped');
+        return { processed: 0, failed: 0 };
+      }
+      state.set({ totalRecords: baseProcessed + counted });
+      logger.info({ totalRecords: baseProcessed + counted }, 'bookhive catalog pre-counted records');
+    }
+
     let processed = 0;
     let failed = 0;
     let pages = 0;
     let nextCursor: string | null = cursor;
     do {
       if (opts.signal?.aborted) {
-        state.set({ stopped: true });
+        state.set({ stopped: true, totalProcessed: baseProcessed + processed });
         logger.info({ processed, failed, pages, cursor: nextCursor }, 'bookhive import stopped by interrupt');
         return { processed, failed };
       }
@@ -121,7 +180,7 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
       }
 
       nextCursor = body.cursor ?? null;
-      state.set({ lastKeyCursor: nextCursor });
+      state.set({ lastKeyCursor: nextCursor, totalProcessed: baseProcessed + processed });
     } while (nextCursor);
 
     state.markComplete();

@@ -1,0 +1,1 @@
+CREATE INDEX `works_title_lower_idx` ON `works` (lower("title"));
