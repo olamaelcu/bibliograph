@@ -17,7 +17,7 @@ import { resolveBookContributors, stageEditionAuthors, type StagedAuthorLink } f
 import { workIdentifiersAdapter } from './identifiers.js';
 import { logger } from '../logger.js';
 import { ProgressBar } from './progress.js';
-import { installInterruptHandlers } from '../dump/interrupt.js';
+import { installInterruptHandlers, signalExitCode, InterruptedError } from '../dump/interrupt.js';
 
 const OL_EDITIONS_URL = process.env.OL_EDITIONS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
 const OL_WORKS_URL = process.env.OL_WORKS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_works_latest.txt.gz';
@@ -247,6 +247,10 @@ export { main };
 // module without triggering a usage-exit.
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
+    if (err instanceof InterruptedError) {
+      logger.warn({ signal: err.signal }, 'import interrupted');
+      process.exit(signalExitCode(err.signal));
+    }
     logger.fatal({ err: err as Error }, 'import failed');
     process.exit(1);
   });
