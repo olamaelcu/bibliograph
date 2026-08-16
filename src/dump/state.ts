@@ -13,6 +13,8 @@ export interface DumpStateFields {
 	totalProcessed?: number;
 	totalRecords?: number;
   complete?: boolean;
+  /** True when the last run stopped before completing (e.g. interrupted). */
+  stopped?: boolean;
 }
 
 export class DumpState {
@@ -40,6 +42,8 @@ export class DumpState {
       totalProcessed: fields.totalProcessed ?? existing?.totalProcessed ?? 0,
       totalRecords: fields.totalRecords ?? existing?.totalRecords ?? null,
       complete: fields.complete ? 1 : (existing?.complete ?? 0),
+      // undefined means "keep", so an explicit false (not stopped) or true is honored.
+      stopped: fields.stopped !== undefined ? (fields.stopped ? 1 : 0) : (existing?.stopped ?? 0),
       updatedAt: now,
     };
     this.db
@@ -53,7 +57,7 @@ export class DumpState {
   }
 
   markComplete(): void {
-    this.set({ complete: true });
+    this.set({ complete: true, stopped: false });
   }
 
   clear(): void {

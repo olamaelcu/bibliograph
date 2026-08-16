@@ -3,6 +3,7 @@ import type { AnySQLiteColumn, AnySQLiteTable } from 'drizzle-orm/sqlite-core';
 import { db } from '../db/connection.js';
 import {
 	backfillState,
+	bookContributors,
 	books,
 	contributorRoles,
 	contributors,
@@ -24,12 +25,13 @@ interface CatalogRow {
 	coverCount?: number;
 }
 
-export interface CatalogStats {
+	export interface CatalogStats {
 	catalog: CatalogRow[];
 	openIssues: number;
 	backfill: Array<{
 		name: string;
 		complete: boolean;
+		stopped: boolean;
 		totalProcessed: number;
 		totalRecords: number | null;
 		fileSize: number | null;
@@ -63,6 +65,9 @@ export function getCatalogStats(): CatalogStats {
 	const formatsTotal = db.select({ n: count() }).from(formats).get()?.n ?? 0;
 	catalog.push({ label: 'formats', total: formatsTotal });
 
+	const bookContributorsTotal = db.select({ n: count() }).from(bookContributors).get()?.n ?? 0;
+	catalog.push({ label: 'book contributors', total: bookContributorsTotal });
+
 	const bookCovers = db.select({ n: count() }).from(books).where(isNotNull(books.coverUrl)).get()?.n ?? 0;
 	const contributorPortraits =
 		db.select({ n: count() }).from(contributors).where(isNotNull(contributors.imageUrl)).get()?.n ?? 0;
@@ -82,6 +87,7 @@ export function getCatalogStats(): CatalogStats {
 		backfill: rows.map((b) => ({
 			name: b.name,
 			complete: b.complete === 1,
+			stopped: b.stopped === 1,
 			totalProcessed: b.totalProcessed ?? 0,
 			totalRecords: b.totalRecords ?? null,
 			fileSize: b.fileSize,

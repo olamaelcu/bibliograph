@@ -3,6 +3,7 @@ import type { Readable } from 'node:stream';
 import { createInterface } from 'node:readline';
 import { createGunzip } from 'node:zlib';
 import { hasMinFields } from './tsv.js';
+import { abortReason } from './interrupt.js';
 import { logger } from '../logger.js';
 
 const MIN_FIELDS = 5;
@@ -11,6 +12,8 @@ export interface CountDumpLinesOptions {
   /** Read a plain (already-decompressed) file instead of gunzipping. */
   plain?: boolean;
   minFields?: number;
+  /** Abort: stop counting and reject at the next line boundary. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -31,10 +34,18 @@ export function countDumpLines(path: string, opts: CountDumpLinesOptions = {}): 
       crlfDelay: Infinity,
     });
     let count = 0;
+    const onAbort = (): void => {
+      lines.close();
+      reject(abortReason(opts.signal) ?? new Error('count aborted'));
+    };
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
     lines.on('line', (line) => {
       if (hasMinFields(line, minFields)) count += 1;
     });
-    lines.on('close', () => resolve(count));
+    lines.on('close', () => {
+      opts.signal?.removeEventListener('abort', onAbort);
+      resolve(count);
+    });
     lines.on('error', reject);
     source.on('error', reject);
     if (!plain) input.on('error', reject);

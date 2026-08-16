@@ -64,7 +64,7 @@
             <li>
               <code>
                 <%= b.name %>
-              </code> &mdash; <%= b.complete ? 'complete' : 'in progress' %>
+              </code> &mdash; <%= b.complete ? 'complete' : (b.stopped ? 'stopped' : 'in progress') %>
                 · <%= b.totalProcessed.toLocaleString() %> processed
                   <% if (b.totalRecords) { %> of <%= b.totalRecords.toLocaleString() %> (<%=
                         Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString() %>%)<% } %>
@@ -92,10 +92,11 @@
       return;
     }
     const lis = backfill.map((b) => {
-      const total = b.totalProcessed.toLocaleString();
-      const of = b.totalRecords ? ` of ${b.totalRecords.toLocaleString()} (${Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString()}%)` : '';
-      const size = b.fileSize ? ` · ${Math.round(b.fileSize / 1024 / 1024).toLocaleString()} MB dump` : '';
-      return `<li><code>${b.name}</code> &mdash; ${b.complete ? 'complete' : 'in progress'} · ${total} processed${of}${size}</li>`;
+    const total = b.totalProcessed.toLocaleString();
+    const of = b.totalRecords ? ` of ${b.totalRecords.toLocaleString()} (${Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString()}%)` : '';
+    const size = b.fileSize ? ` · ${Math.round(b.fileSize / 1024 / 1024).toLocaleString()} MB dump` : '';
+    const status = b.complete ? 'complete' : b.stopped ? 'stopped' : 'in progress';
+    return `<li><code>${b.name}</code> &mdash; ${status} · ${total} processed${of}${size}</li>`;
     });
     container.innerHTML = `<ul class="spec">${lis.join('')}</ul>`;
   }

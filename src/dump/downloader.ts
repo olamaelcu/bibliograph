@@ -18,6 +18,8 @@ export interface DownloaderOptions {
   timeoutMs?: number;
   /** Called as body bytes stream in; total is null when the server sends no content-length. */
   onProgress?: (received: number, total: number | null) => void;
+  /** Abort: cancel the in-flight download; the partial file is kept for resume. */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_USER_AGENT = 'bibliograph/0.1.0 (+https://github.com/olamaelcu/bibliograph)';
@@ -62,6 +64,7 @@ export class HttpDownloader {
         );
         return meta;
       } catch (err) {
+        if (this.opts.signal?.aborted) throw err; // external abort: no retry
         lastErr = err;
         logger.warn({ url: this._url, attempt: attempt + 1, err: (err as Error).message }, 'dump download failed; retrying');
       }
@@ -94,14 +97,17 @@ export class HttpDownloader {
       existingSize = 0; // missing file = fresh download
     }
 
-    // Idle timeout: aborts only when no data arrives for `timeoutMs`, so a
-    // slow-but-flowing multi-GB download is never killed by a wall-clock cap.
+    // Combine the idle timeout with an external abort signal so a graceful
+    // stop cancels the in-flight download. The external signal's reason (an
+    // InterruptedError) propagates through the pipeline when it fires.
+    const externalSignal = this.opts.signal;
     const controller = new AbortController();
     let timer: NodeJS.Timeout | undefined;
     const arm = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => controller.abort(), this.timeoutMs);
     };
+    const signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal;
     arm();
     try {
       let currentUrl = this._url;
@@ -112,7 +118,7 @@ export class HttpDownloader {
           method: 'GET',
           redirect: 'manual',
           headers,
-          signal: controller.signal,
+          signal,
         });
 
         if (res.status >= 300 && res.status < 400) {
@@ -160,7 +166,7 @@ export class HttpDownloader {
         });
         // Append when resuming, truncate on a fresh (200) start.
         await pipeline(nodeBody, createWriteStream(destPath, { flags: isResume ? 'a' : 'w' }), {
-          signal: controller.signal,
+          signal,
         });
         return {
           url: res.url,
@@ -172,8 +178,9 @@ export class HttpDownloader {
     } catch (err) {
       // Keep the partial file: a later run resumes it via Range instead of
       // re-downloading. Remove it only if the server gave a clean error for
-      // a fresh (non-resumed) download.
-      if (existingSize === 0) {
+      // a fresh (non-resumed) download (and not on an external abort, which
+      // keeps the partial for resume).
+      if (existingSize === 0 && !externalSignal?.aborted) {
         try {
           await unlink(destPath);
         } catch (cleanupErr) {

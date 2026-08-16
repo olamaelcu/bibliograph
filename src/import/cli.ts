@@ -1,19 +1,23 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db } from '../db/connection.js';
+import { db, pragmaImportMode, pragmaNormalMode } from '../db/connection.js';
 import { runDumpImport } from './dump-runner.js';
 import {
   mapAuthorToCandidate,
   mapEditionToCandidates,
   mapWorkToCandidate,
   olKeyOf,
+  olResourceExists,
   skipSeenContributors,
   skipSeenWorks,
+  type OlEdition,
 } from './mappers/openlibrary.js';
-import { hydrateBookContributorsFromEdition } from './book-contributors.js';
+import { resolveBookContributors, stageEditionAuthors, type StagedAuthorLink } from './book-contributors.js';
+import { workIdentifiersAdapter } from './identifiers.js';
 import { logger } from '../logger.js';
 import { ProgressBar } from './progress.js';
+import { installInterruptHandlers } from '../dump/interrupt.js';
 
 const OL_EDITIONS_URL = process.env.OL_EDITIONS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
 const OL_WORKS_URL = process.env.OL_WORKS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_works_latest.txt.gz';
@@ -81,33 +85,76 @@ async function main(): Promise<void> {
     console.log(USAGE);
     process.exit(0);
   }
+  const interrupt = installInterruptHandlers();
+  try {
+    await dispatch(args, interrupt.signal);
+  } finally {
+    interrupt.dispose();
+  }
+  // Import loops stop gracefully and return normally on an interrupt; exit with
+  // the signal-derived code so scripts see a non-zero (non-1) result.
+  interrupt.exit();
+}
+
+async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
   const [cmd, ...rest] = args;
   const flags = parseFlags(rest);
   if (flags.unknown.length > 0) logger.warn({ unknown: flags.unknown }, 'ignoring unknown flags');
 
   if (cmd === 'openlibrary:dump') {
-    const s = await runWithProgress('ol-editions', (onDownload, onImport) =>
-      runDumpImport({
-        db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
-        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
-        dumpPath: flags.dumpPath, batchSize: flags.batchSize,
-        onProgress: onDownload,
-        onImportProgress: onImport,
-        keyOf: olKeyOf,
-        parse: (fields) => mapEditionToCandidates(JSON.parse(fields[4])),
-        hydrate: (fields) => {
-          const rec = JSON.parse(fields[4]) as { key: string; authors?: Array<{ key?: string }> };
-          hydrateBookContributorsFromEdition(db, rec.key, rec.authors ?? []);
-        },
-      }),
-    );
-    logger.info(s, 'editions import done');
+    // Bulk-import mode: skip per-commit fsyncs, raise the page cache, and drop
+    // FK validation. Restored in finally so a crash or error re-enables it on exit.
+    pragmaImportMode();
+    try {
+      // Edition→author links deferred to the staging table: collected during
+      // each batch, flushed after the batch commits, and resolved into
+      // book_contributors after the whole dump is imported.
+      const pending: StagedAuthorLink[] = [];
+      const s = await runWithProgress('ol-editions', (onDownload, onImport) =>
+        runDumpImport({
+          db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
+          noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
+          dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+          signal,
+          onProgress: onDownload,
+          onImportProgress: onImport,
+          keyOf: olKeyOf,
+          parse: (fields) => {
+            const rec = JSON.parse(fields[4]) as OlEdition;
+            for (const a of rec.authors ?? []) {
+              if (a.key) pending.push({ editionKey: rec.key, authorKey: a.key });
+            }
+            // Work-skip: works are referenced by many editions; once a work's
+            // openlibrary: key is claimed, skip its merge entirely (saves the
+            // per-ISBN identifier pass on an existing row). The book candidate
+            // still links to it via workPk, so the FK stays intact.
+            const workKey = rec.works?.[0]?.key;
+            const cands = mapEditionToCandidates(rec);
+            if (workKey && olResourceExists(db, workIdentifiersAdapter, workKey)) {
+              return cands.filter((c) => c.entityType !== 'work');
+            }
+            return cands;
+          },
+          afterBatch: () => {
+            if (pending.length === 0) return;
+            stageEditionAuthors(db, pending);
+            pending.length = 0;
+          },
+        }),
+      );
+      logger.info(s, 'editions import done');
+      const linked = resolveBookContributors(db, { batchSize: flags.batchSize ?? 10_000 });
+      logger.info({ linked }, 'book contributors linked from staging');
+    } finally {
+      pragmaNormalMode();
+    }
   } else if (cmd === 'works:dump') {
     const s = await runWithProgress('ol-works', (onDownload, onImport) =>
       runDumpImport({
         db, stateName: 'ol-works', url: OL_WORKS_URL,
         noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
         dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+        signal,
         onProgress: onDownload,
         onImportProgress: onImport,
         keyOf: olKeyOf,
@@ -122,6 +169,7 @@ async function main(): Promise<void> {
         db, stateName: 'ol-authors', url: OL_AUTHORS_URL,
         noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
         dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+        signal,
         onProgress: onDownload,
         onImportProgress: onImport,
         keyOf: olKeyOf,
@@ -132,15 +180,15 @@ async function main(): Promise<void> {
     logger.info(s, 'contributors import done');
   } else if (cmd === 'contributors:enrich') {
     const { enrichContributors } = await import('./enrich.js');
-    const s = await enrichContributors(db, { dumpPath: flags.dumpPath, batchSize: flags.batchSize });
+    const s = await enrichContributors(db, { dumpPath: flags.dumpPath, batchSize: flags.batchSize, signal });
     logger.info(s, 'contributors enrichment done');
   } else if (cmd === 'works:enrich') {
     const { enrichWorks } = await import('./enrich.js');
-    const s = await enrichWorks(db, { dumpPath: flags.dumpPath, batchSize: flags.batchSize });
+    const s = await enrichWorks(db, { dumpPath: flags.dumpPath, batchSize: flags.batchSize, signal });
     logger.info(s, 'works enrichment done');
   } else if (cmd === 'bookhive:catalog') {
     const { importBookhiveCatalog } = await import('./bookhive/importer.js');
-    const s = await importBookhiveCatalog({ db, reset: flags.reset, limit: flags.batchSize });
+    const s = await importBookhiveCatalog({ db, reset: flags.reset, limit: flags.batchSize, signal });
     logger.info(s, 'bookhive catalog import done');
   } else if (cmd === 'images:refresh') {
     const { BlobStore, blobStoreConfigFromEnv } = await import('../storage/store.js');

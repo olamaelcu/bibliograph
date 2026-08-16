@@ -47,6 +47,11 @@ function authorNames(authors: BookhiveCatalogBook['authors']): Array<{ name: str
     .filter((a) => a.name.trim().length > 0);
 }
 
+/** Author names+roles from a catalog record, for hydration of book_contributors. */
+export function catalogAuthorNames(record: BookhiveCatalogBook): Array<{ name: string; role: string }> {
+  return authorNames(record.authors ?? record.author);
+}
+
 function isbns(record: BookhiveCatalogBook): Array<{ resource: string; url: string }> {
   const raw = record.identifiers?.isbn ?? record.isbn;
   const list = Array.isArray(raw) ? raw : raw ? [raw] : [];

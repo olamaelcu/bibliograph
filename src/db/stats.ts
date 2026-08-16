@@ -79,10 +79,11 @@ const openIssues = (sqlite.prepare("SELECT COUNT(*) c FROM import_issues WHERE s
 console.log(`Open import issues: ${openIssues.toLocaleString()}`);
 
 const states = sqlite
-  .prepare('SELECT name, complete, total_processed, total_records, file_size FROM backfill_state ORDER BY name')
+  .prepare('SELECT name, complete, stopped, total_processed, total_records, file_size FROM backfill_state ORDER BY name')
   .all() as Array<{
   name: string;
   complete: number;
+  stopped: number;
   total_processed: number | null;
   total_records: number | null;
   file_size: number | null;
@@ -96,8 +97,9 @@ if (states.length > 0) {
     const of = s.total_records
       ? ` of ${s.total_records.toLocaleString()} (${Math.round((processed / s.total_records) * 100).toLocaleString()}%)`
       : '';
+    const status = s.complete ? 'complete' : s.stopped ? 'stopped' : 'in progress';
     console.log(
-      `  ${pad(s.name)}${s.complete ? 'complete' : 'in progress'}   processed: ${processed.toLocaleString()}${of}   dump: ${sizeMb}`,
+      `  ${pad(s.name)}${status}   processed: ${processed.toLocaleString()}${of}   dump: ${sizeMb}`,
     );
   }
 }

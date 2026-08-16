@@ -5,7 +5,8 @@ import { DumpState } from '../../dump/state.js';
 import { acquireLock, releaseLock } from '../../dump/lock.js';
 import { Reservation } from '../../dump/reservation.js';
 import { mergeEntity } from '../merge.js';
-import { mapCatalogBook, type BookhiveCatalogBook } from './mapper.js';
+import { hydrateBookContributorsByName } from '../book-contributors.js';
+import { mapCatalogBook, catalogAuthorNames, type BookhiveCatalogBook } from './mapper.js';
 import { BOOKHIVE_CATALOG_NSID, bookhiveCatalogDid, bookhivePdsUrl } from './constants.js';
 import { withRetry } from './network.js';
 import { logger } from '../../logger.js';
@@ -15,6 +16,8 @@ export interface BookhiveImportOptions {
   reset?: boolean;
   limit?: number;
   lockPath?: string;
+  /** Abort: stop between pages and mark the run stopped. */
+  signal?: AbortSignal;
 }
 
 const STATE_NAME = 'bookhive-catalog';
@@ -64,6 +67,11 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
     let pages = 0;
     let nextCursor: string | null = cursor;
     do {
+      if (opts.signal?.aborted) {
+        state.set({ stopped: true });
+        logger.info({ processed, failed, pages, cursor: nextCursor }, 'bookhive import stopped by interrupt');
+        return { processed, failed };
+      }
       logger.info({ processed, failed, pages }, 'fetching records from listRecords');
       const res = await withRetry(
         'bookhive listRecords failed',
@@ -89,7 +97,16 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
       for (const record of body.records) {
         try {
           const cands = mapCatalogBook(record.value as BookhiveCatalogBook);
-          for (const c of cands) mergeEntity(opts.db, c);
+          let bookPk: string | null = null;
+          for (const c of cands) {
+            const res = mergeEntity(opts.db, c);
+            if (c.entityType === 'book') bookPk = res.pk;
+          }
+          // Link the merged book to its authors (BookHive catalogs authors by name).
+          if (bookPk) {
+            const names = catalogAuthorNames(record.value as BookhiveCatalogBook);
+            if (names.length > 0) hydrateBookContributorsByName(opts.db, bookPk, names);
+          }
         } catch (err) {
           failed += 1;
           logger.warn({ err: (err as Error).message, uri: record.uri }, 'bookhive record failed');

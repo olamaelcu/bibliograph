@@ -85,4 +85,80 @@ describe('importInBatches', () => {
     });
     expect(calls).toEqual([{ processed: 1, total: null }]);
   });
+
+  it('fires afterBatch after each flushed batch with that batch, including the trailing partial one', async () => {
+    const { db } = createTestDb();
+    const calls: string[][] = [];
+    await importInBatches(db, gen(['a', 'b', 'c', 'd', 'e']), {
+      batchSize: 2,
+      afterBatch: (batch) => calls.push([...batch]),
+      upsert: () => ({ action: 'inserted' }),
+    });
+    expect(calls).toEqual([
+      ['a', 'b'],
+      ['c', 'd'],
+      ['e'],
+    ]);
+  });
+
+  it('fires afterBatch after the batch transaction commits (writes visible to it)', async () => {
+    const { db } = createTestDb();
+    const seen: string[] = [];
+    const now = Math.floor(Date.now() / 1000);
+    await importInBatches(db, gen([{ pk: 'book-x' }, { pk: 'book-y' }]), {
+      batchSize: 2,
+      upsert: ({ pk }) => {
+        db.insert(books).values({ pk, title: pk, createdAt: now, releaseStatus: 'staged' }).run();
+        return { action: 'inserted' };
+      },
+      afterBatch: (batch) => {
+        seen.push(...batch.map((b) => b.pk));
+        // The inserted rows must be committed and readable here (runs after the tx).
+        const rows = db.select().from(books).all();
+        expect(rows.map((r) => r.pk).sort()).toEqual(['book-x', 'book-y']);
+      },
+    });
+    expect(seen).toEqual(['book-x', 'book-y']);
+  });
+
+  it('stops at the next batch boundary when the signal aborts mid-stream', async () => {
+    const { db } = createTestDb();
+    const controller = new AbortController();
+    const source = (async function* () {
+      yield 1;
+      yield 2;
+      controller.abort(new Error('stopped by test'));
+      yield 3;
+      yield 4;
+    })();
+
+    const checkpoints: Array<number> = [];
+    await expect(
+      importInBatches(db, source, {
+        batchSize: 2,
+        signal: controller.signal,
+        onCheckpoint: (processed) => checkpoints.push(processed),
+        upsert: () => ({ action: 'inserted' }),
+      }),
+    ).rejects.toThrow('stopped by test');
+    expect(checkpoints).toEqual([2]);
+  });
+
+  it('stops before processing any item when aborted before the loop starts', async () => {
+    const { db } = createTestDb();
+    const controller = new AbortController();
+    controller.abort(new Error('pre-aborted'));
+
+    const called: boolean[] = [];
+    await expect(
+      importInBatches(db, gen([1, 2, 3]), {
+        signal: controller.signal,
+        upsert: () => {
+          called.push(true);
+          return { action: 'inserted' };
+        },
+      }),
+    ).rejects.toThrow('pre-aborted');
+    expect(called).toEqual([]);
+  });
 });

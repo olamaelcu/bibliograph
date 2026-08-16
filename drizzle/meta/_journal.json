@@ -57,6 +57,20 @@
       "when": 1786801342644,
       "tag": "0007_breezy_carnage",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1786898187456,
+      "tag": "0008_steady_ultragirl",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786898207458,
+      "tag": "0009_third_rafael_vega",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,30 @@ describe('DumpState', () => {
     expect(state.get()?.complete).toBe(0);
     state.markComplete();
     expect(state.get()?.complete).toBe(1);
+    // A completed run is not marked stopped.
+    expect(state.get()?.stopped).toBe(0);
+  });
+
+  it('marks a run stopped without touching complete or the resume cursor', () => {
+    const { db } = createTestDb();
+    const state = new DumpState(db, 'ol-editions');
+    state.set({ url: 'https://dump.example/ol.gz', lastKeyCursor: 'OL100M', totalProcessed: 42 });
+    state.set({ stopped: true });
+    const row = state.get();
+    expect(row?.stopped).toBe(1);
+    expect(row?.complete).toBe(0);
+    expect(row?.cursor).toBe('OL100M');
+    expect(row?.totalProcessed).toBe(42);
+  });
+
+  it('can clear the stopped flag to resume', () => {
+    const { db } = createTestDb();
+    const state = new DumpState(db, 'ol-editions');
+    state.set({ stopped: true });
+    state.set({ stopped: false, lastKeyCursor: 'OL200M' });
+    const row = state.get();
+    expect(row?.stopped).toBe(0);
+    expect(row?.cursor).toBe('OL200M');
   });
 
   it('partial updates preserve existing fields', () => {

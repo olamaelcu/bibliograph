@@ -150,6 +150,21 @@ export const books = sqliteTable(
 	}),
 );
 
+export const bookContributorStaging = sqliteTable(
+	'book_contributor_staging',
+	{
+		editionOlKey: text('edition_ol_key').notNull(),
+		authorOlKey: text('author_ol_key').notNull(),
+		rolePk: text('role_pk').notNull().default('author'),
+	},
+	(t) => ({
+		pk: primaryKey({ columns: [t.editionOlKey, t.authorOlKey, t.rolePk] }),
+	}),
+);
+
+export type BookContributorStaging = typeof bookContributorStaging.$inferSelect;
+export type NewBookContributorStaging = typeof bookContributorStaging.$inferInsert;
+
 export const bookContributors = sqliteTable(
 	'book_contributors',
 	{
@@ -305,19 +320,20 @@ export const importIssues = sqliteTable(
 export type ImportIssue = typeof importIssues.$inferSelect;
 export type NewImportIssue = typeof importIssues.$inferInsert;
 
-export const backfillState = sqliteTable('backfill_state', {
-	name: text('name').primaryKey(),
-	url: text('url'),
-	filePath: text('file_path'),
-	lastModified: text('last_modified'),
-	fileSize: integer('file_size'),
-	lastByteOffset: integer('last_byte_offset'),
-	cursor: text('cursor'),
-	totalProcessed: integer('total_processed'),
-	totalRecords: integer('total_records'),
-	complete: integer('complete').notNull().default(0),
-	updatedAt: integer('updated_at').notNull(),
-});
+	export const backfillState = sqliteTable('backfill_state', {
+		name: text('name').primaryKey(),
+		url: text('url'),
+		filePath: text('file_path'),
+		lastModified: text('last_modified'),
+		fileSize: integer('file_size'),
+		lastByteOffset: integer('last_byte_offset'),
+		cursor: text('cursor'),
+		totalProcessed: integer('total_processed'),
+		totalRecords: integer('total_records'),
+		complete: integer('complete').notNull().default(0),
+		stopped: integer('stopped').notNull().default(0),
+		updatedAt: integer('updated_at').notNull(),
+	});
 
 export type BackfillState = typeof backfillState.$inferSelect;
 

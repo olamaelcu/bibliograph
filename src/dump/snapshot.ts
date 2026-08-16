@@ -29,9 +29,9 @@ export function snapshotIsCurrent(gzPath: string, snapshotPath: string): boolean
 }
 
 /** Decompress a gz dump into a plain sidecar; resumes can then byte-seek into it. */
-export async function buildSnapshot(gzPath: string, snapshotPath: string): Promise<void> {
+export async function buildSnapshot(gzPath: string, snapshotPath: string, signal?: AbortSignal): Promise<void> {
   logger.info({ gzPath, snapshotPath }, 'building uncompressed snapshot');
-  await pipeline(createReadStream(gzPath), createGunzip(), createWriteStream(snapshotPath));
+  await pipeline(createReadStream(gzPath), createGunzip(), createWriteStream(snapshotPath), { signal });
   const gz = statSync(gzPath);
   const meta: SnapshotMeta = { gzSize: gz.size, gzMtimeMs: gz.mtimeMs };
   writeFileSync(metaPath(snapshotPath), JSON.stringify(meta));

@@ -28,3 +28,22 @@ sqlite.pragma('cache_size = -200000');
 
 export const db = drizzle(sqlite);
 export const sqliteHandle: BetterSqlite3Database = sqlite;
+
+/**
+ * Switch the connection into bulk-import mode: don't fsync every WAL commit,
+ * raise the page cache, and skip foreign-key validation on every INSERT.
+ * Only safe for a restartable bulk import phase; call pragmaNormalMode() when
+ * the import completes (or in a finally block) to restore live-service settings.
+ */
+export function pragmaImportMode(): void {
+  sqlite.pragma('synchronous = OFF');
+  sqlite.pragma('cache_size = -800000'); // ~781 MiB page cache
+  sqlite.pragma('foreign_keys = OFF');
+}
+
+/** Restore the connection to live-service settings (used after a bulk import). */
+export function pragmaNormalMode(): void {
+  sqlite.pragma('synchronous = NORMAL');
+  sqlite.pragma('cache_size = -200000'); // ~195 MiB page cache
+  sqlite.pragma('foreign_keys = ON');
+}

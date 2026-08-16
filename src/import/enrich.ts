@@ -18,6 +18,8 @@ export interface EnrichResult {
 export interface EnrichOptions {
   dumpPath?: string;
   batchSize?: number;
+  /** Abort: stop the enrichment at the next batch boundary. */
+  signal?: AbortSignal;
 }
 
 interface Target {
@@ -34,11 +36,12 @@ type Apply = (db: BetterSQLite3Database, target: Target, rec: Record<string, unk
  */
 async function runEnrichment(
   db: BetterSQLite3Database,
-  opts: { gzPath: string; targets: ReadonlyMap<string, Target>; batchSize?: number; apply: Apply },
+  opts: { gzPath: string; targets: ReadonlyMap<string, Target>; batchSize?: number; apply: Apply; signal?: AbortSignal },
 ): Promise<EnrichResult> {
-  const items = new DumpStreamer(opts.gzPath).iter({ startByteOffset: 0, lastKeyCursor: null });
+  const items = new DumpStreamer(opts.gzPath).iter({ startByteOffset: 0, lastKeyCursor: null, signal: opts.signal });
   const summary = await importInBatches(db, items, {
     batchSize: opts.batchSize ?? 500,
+    signal: opts.signal,
     upsert: (item) => {
       if (item.key === null) return { action: 'skipped' };
       const target = opts.targets.get(item.key);
@@ -104,7 +107,7 @@ export async function enrichContributors(db: BetterSQLite3Database, opts: Enrich
   const targets = contributorTargets(db);
   logger.info({ gzPath, eligible: targets.size }, 'contributors enrichment started');
   if (targets.size === 0) return { processed: 0, enriched: 0, failed: 0 };
-  const res = await runEnrichment(db, { gzPath, targets, batchSize: opts.batchSize, apply: applyContributor });
+  const res = await runEnrichment(db, { gzPath, targets, batchSize: opts.batchSize, apply: applyContributor, signal: opts.signal });
   logger.info({ ...res }, 'contributors enrichment complete');
   return res;
 }
@@ -138,7 +141,7 @@ export async function enrichWorks(db: BetterSQLite3Database, opts: EnrichOptions
   const targets = workTargets(db);
   logger.info({ gzPath, eligible: targets.size }, 'works enrichment started');
   if (targets.size === 0) return { processed: 0, enriched: 0, failed: 0 };
-  const res = await runEnrichment(db, { gzPath, targets, batchSize: opts.batchSize, apply: applyWork });
+  const res = await runEnrichment(db, { gzPath, targets, batchSize: opts.batchSize, apply: applyWork, signal: opts.signal });
   logger.info({ ...res }, 'works enrichment complete');
   return res;
 }

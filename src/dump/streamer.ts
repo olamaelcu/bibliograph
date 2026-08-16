@@ -21,6 +21,8 @@ export interface StreamerOptions {
   lastKeyCursor: string | null;
   /** Key extraction for resume-skip: return the sortable key or null to always yield. */
   keyOf?: (line: string) => string | null;
+  /** Abort: stop iterating at the next line boundary. */
+  signal?: AbortSignal;
 }
 
 const MIN_FIELDS = 5;
@@ -56,13 +58,20 @@ export class DumpStreamer {
     const input: Readable = this.plain ? source : source.pipe(createGunzip());
     const lines = createInterface({ input, crlfDelay: Infinity });
 
-    logger.debug({ path: this.path, plain: this.plain, startByteOffset: opts.startByteOffset, cursor: opts.lastKeyCursor }, 'streaming dump');
-
-    const keyOf = opts.keyOf ?? defaultKeyOf;
-    let runningOffset = opts.startByteOffset;
+    const onAbort = (): void => {
+      // Closing readline stops the for-await loop cleanly at the next boundary.
+      lines.close();
+    };
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
+      logger.debug({ path: this.path, plain: this.plain, startByteOffset: opts.startByteOffset, cursor: opts.lastKeyCursor }, 'streaming dump');
+
+      const keyOf = opts.keyOf ?? defaultKeyOf;
+      let runningOffset = opts.startByteOffset;
+
       for await (const line of lines) {
+        if (opts.signal?.aborted) break;
         const lineByteLen = Buffer.byteLength(line, 'utf8') + 1; // +1 for \n
         const lineStart = runningOffset;
         runningOffset += lineByteLen;
@@ -85,6 +94,9 @@ export class DumpStreamer {
         );
       }
       throw err;
+    } finally {
+      opts.signal?.removeEventListener('abort', onAbort);
+      lines.close();
     }
   }
 

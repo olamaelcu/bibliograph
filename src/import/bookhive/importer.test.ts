@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createTestDb } from '../../test-utils/db.js';
 import { importBookhiveCatalog } from './importer.js';
-import { backfillReservation } from '../../db/schema.js';
+import { backfillReservation, bookContributors, contributorRoles, contributors } from '../../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { join } from 'node:path';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -75,6 +75,51 @@ describe('importBookhiveCatalog', () => {
     const resetRes = await importBookhiveCatalog({ db, lockPath, reset: true });
     expect(listRecordsMock).toHaveBeenCalledTimes(2);
     expect(resetRes.processed).toBe(0);
+    rmSync(lockDir, { recursive: true, force: true });
+  });
+
+  it('hydrates book_contributors and contributor_roles from record authors', async () => {
+    listRecordsMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        records: [
+          {
+            uri: 'at://did:web:test/buzz.bookhive.catalogBook/a',
+            value: {
+              id: 'h1',
+              title: 'Alpha',
+              authors: [{ name: 'Ada Lovelace' }, { name: 'Grace Hopper' }],
+            },
+          },
+          {
+            uri: 'at://did:web:test/buzz.bookhive.catalogBook/b',
+            value: { id: 'h2', title: 'Beta', author: 'Bob' },
+          },
+        ],
+        cursor: undefined,
+      },
+    });
+
+    const { db } = createTestDb();
+    const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
+    const lockPath = join(lockDir, 'lock');
+    const res = await importBookhiveCatalog({ db, lockPath });
+    expect(res.failed).toBe(0);
+
+    const links = db.select().from(bookContributors).all();
+    expect(links).toHaveLength(3); // Ada + Grace on h1, Bob on h2
+    const h1 = links.filter((l) => l.bookPk === 'h1');
+    expect(h1.map((l) => l.contributorPk).sort()).toEqual(['ada-lovelace', 'grace-hopper']);
+    expect(h1.every((l) => l.rolePk === 'author')).toBe(true);
+    expect(links.some((l) => l.bookPk === 'h2' && l.contributorPk === 'bob')).toBe(true);
+
+    // The author role is seeded so the FK is satisfiable (normalize read via contributor_roles).
+    const role = db.select().from(contributorRoles).where(eq(contributorRoles.pk, 'author')).get();
+    expect(role?.name).toBe('Author');
+    // Contributors were created by the import as well.
+    const contributor = db.select().from(contributors).where(eq(contributors.pk, 'ada-lovelace')).get();
+    expect(contributor?.name).toBe('Ada Lovelace');
+
     rmSync(lockDir, { recursive: true, force: true });
   });
 

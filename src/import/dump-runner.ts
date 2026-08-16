@@ -12,6 +12,7 @@ import { buildSnapshot, snapshotIsCurrent, snapshotPathOf } from '../dump/snapsh
 import { importInBatches, type BatchSummary } from '../dump/batched-importer.js';
 import { mergeEntity, type MergeCandidate } from './merge.js';
 import { logger } from '../logger.js';
+import { InterruptedError, abortReason } from '../dump/interrupt.js';
 
 export interface DumpRunOptions {
   db: BetterSQLite3Database;
@@ -37,8 +38,10 @@ export interface DumpRunOptions {
    * authors dump after editions) skip records that already exist.
    */
   skipIfSeen?: (key: string | null, line: string) => boolean;
-  /** Optional per-record post-merge hook (e.g. hydrate book_contributors). */
-  hydrate?: (fields: string[]) => void;
+  /** Called after each batch transaction commits (outside the transaction). */
+  afterBatch?: () => void;
+  /** Abort: stop the import cleanly at the next safe point and mark the run stopped. */
+  signal?: AbortSignal;
 }
 
 export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary> {
@@ -79,18 +82,20 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       } else {
         logger.info({ stateName: opts.stateName, url: opts.url, gzPath }, 'downloading dump');
       }
-      const downloader = new HttpDownloader(opts.url, { onProgress: opts.onProgress });
+      const downloader = new HttpDownloader(opts.url, { onProgress: opts.onProgress, signal: opts.signal });
       const meta = await downloader.downloadWithRetry(gzPath);
       state.set({ url: meta.url, lastModified: meta.lastModified, fileSize: meta.contentLength });
     } else {
       logger.info({ stateName: opts.stateName, gzPath }, 'reusing existing dump file');
     }
 
+    if (opts.signal?.aborted) throw abortReason(opts.signal) ?? new InterruptedError('SIGINT');
+
     // Uncompressed snapshot: decompress once so interrupted runs can byte-seek
     // back to the checkpoint instead of replaying from byte 0.
     const useSnapshot = Boolean(opts.useSnapshot);
     if (useSnapshot && !snapshotIsCurrent(gzPath, snapshotPath)) {
-      await buildSnapshot(gzPath, snapshotPath);
+      await buildSnapshot(gzPath, snapshotPath, opts.signal);
     }
 
     const lastKeyCursor = existing?.cursor ?? null;
@@ -105,7 +110,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     let total = readCountCache(gzPath);
     if (total === null) {
       logger.info({ stateName: opts.stateName, gzPath }, 'counting dump records');
-      total = await countDumpLines(useSnapshot ? snapshotPath : gzPath, { plain: useSnapshot });
+      total = await countDumpLines(useSnapshot ? snapshotPath : gzPath, { plain: useSnapshot, signal: opts.signal });
       writeCountCache(gzPath, total);
     }
     logger.info({ stateName: opts.stateName, totalRecords: total }, 'dump record count');
@@ -115,12 +120,14 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     // snapshot source seeks straight to the checkpointed byte offset.
     const runOnce = async (offset: number, cursor: string | null): Promise<BatchSummary> => {
       const streamer = new DumpStreamer(useSnapshot ? snapshotPath : gzPath, useSnapshot);
-      const items = streamer.iter({ startByteOffset: offset, lastKeyCursor: cursor, keyOf: opts.keyOf });
+      const items = streamer.iter({ startByteOffset: offset, lastKeyCursor: cursor, keyOf: opts.keyOf, signal: opts.signal });
       let lastKey: string | null = null;
       let lastEndOffset = offset;
       const s = await importInBatches(opts.db, items, {
         batchSize: opts.batchSize ?? 500,
         total,
+        afterBatch: opts.afterBatch,
+        signal: opts.signal,
         onProgress: opts.onImportProgress
           ? (processed, t) => opts.onImportProgress?.(progressBase + processed, t)
           : undefined,
@@ -142,7 +149,6 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
             const res = mergeEntity(opts.db, c);
             if (!res.existed) inserted = true;
           }
-          opts.hydrate?.(fields);
           return { action: inserted ? 'inserted' : 'skipped' };
         },
       });
@@ -158,11 +164,27 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
         logger.warn({ err: err.message }, 'gz resume failed; replaying from byte 0');
         summary = await runOnce(0, lastKeyCursor);
       } else {
+        // An interrupted/aborted run: keep the resume checkpoint and mark the
+        // state as stopped so a later run resumes from where it stopped. The
+        // processed count comes from the checkpoint that was committed just
+        // before the stop (importInBatches flushed + checkpointed the batch
+        // it was in the middle of).
+        if (opts.signal?.aborted || err instanceof InterruptedError) {
+          state.set({ stopped: true });
+          const stoppedState = state.get();
+          logger.info({ stateName: opts.stateName }, 'import stopped; resume checkpoint kept');
+          return {
+            processed: (stoppedState?.totalProcessed ?? 0) - progressBase,
+            inserted: 0,
+            skipped: 0,
+            failed: 0,
+          };
+        }
         throw err;
       }
     }
 
-    state.set({ lastKeyCursor: null, lastByteOffset: 0, totalProcessed: progressBase + summary.processed });
+    state.set({ lastKeyCursor: null, lastByteOffset: 0, totalProcessed: progressBase + (summary?.processed ?? 0) });
     state.markComplete();
 
     if (!opts.keepDump) {

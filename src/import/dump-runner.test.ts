@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { inArray, eq } from 'drizzle-orm';
-import { backfillState, books, contributors, contributorIdentifiers } from '../db/schema.js';
+import { backfillState, books, contributors, contributorIdentifiers, bookContributorStaging, bookContributors } from '../db/schema.js';
 import { createTestDb } from '../test-utils/db.js';
 import { runDumpImport } from './dump-runner.js';
 import { mapAuthorToCandidate, olKeyOf } from './mappers/openlibrary.js';
+import { stageEditionAuthors, resolveBookContributors, type StagedAuthorLink } from './book-contributors.js';
+import { sourceKeySlug } from './slugs.js';
 
 function authorFixture(dir: string, lines: string[]) {
   const dumpPath = join(dir, 'dump');
@@ -175,6 +177,61 @@ describe('runDumpImport', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('stages edition→author links after each batch and resolves them after import', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dump-run-'));
+    const lines = [
+      '/type/edition\t/books/OL1M\t1\t2026-01-01T00:00:00Z\t{"key":"/books/OL1M","title":"Alpha","authors":[{"key":"/authors/OL1A"}]}',
+      '/type/edition\t/books/OL2M\t1\t2026-01-01T00:00:00Z\t{"key":"/books/OL2M","title":"Beta","authors":[{"key":"/authors/OL2A"}]}',
+    ];
+    // authorFixture writes ol-authors.txt.gz; the editions path needs ol-editions.txt.gz.
+    const dumpPath = join(dir, 'dump');
+    mkdirSync(dumpPath, { recursive: true });
+    writeFileSync(join(dumpPath, 'ol-editions.txt.gz'), gzipSync(lines.join('\n') + '\n'));
+
+    const { db } = createTestDb();
+    const now = Math.floor(Date.now() / 1000);
+    for (const [pk, name] of [['authors-ol1a', 'Alpha'], ['authors-ol2a', 'Beta']] as const) {
+      db.insert(contributors).values({ pk, name, createdAt: now, releaseStatus: 'staged' }).run();
+    }
+
+    // Mirror the editions CLI wiring: 'parse' collects links, 'afterBatch' stages them.
+    const pending: StagedAuthorLink[] = [];
+    await runDumpImport({
+      db,
+      stateName: 'ol-editions',
+      url: 'https://example.invalid/dump.gz',
+      dumpPath,
+      noDownload: true,
+      keepDump: true,
+      keyOf: olKeyOf,
+      parse: (fields) => {
+        const rec = JSON.parse(fields[4]) as { key: string; authors?: Array<{ key?: string }> };
+        for (const a of rec.authors ?? []) {
+          if (a.key) pending.push({ editionKey: rec.key, authorKey: a.key });
+        }
+        return [{
+          entityType: 'book',
+          pk: sourceKeySlug(rec.key),
+          source: 'openlibrary',
+          matchName: rec.title ?? null,
+          identifiers: [{ resource: `openlibrary:${rec.key.replace(/^\//, '')}`, url: `https://ol${rec.key}` }],
+          fields: { title: rec.title ?? null },
+        }];
+      },
+      afterBatch: () => {
+        stageEditionAuthors(db, pending);
+        pending.length = 0;
+      },
+    });
+
+    expect(db.select().from(bookContributorStaging).all()).toHaveLength(2);
+    const linked = resolveBookContributors(db);
+    expect(linked).toBe(2);
+    expect(db.select().from(bookContributorStaging).all()).toHaveLength(0);
+    expect(db.select().from(bookContributors).all()).toHaveLength(2);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('checkpoints mid-run so an interrupted import resumes from the cursor', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dump-run-'));
     const lines = [
@@ -214,6 +271,60 @@ describe('runDumpImport', () => {
     expect(fin?.cursor).toBeNull();
     expect(fin?.totalProcessed).toBe(3);
     expect(fin?.complete).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('marks a run stopped and keeps the resume cursor when the signal aborts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dump-run-'));
+    const lines = [
+      '/type/author\t/authors/OL1A\t1\t2026-01-01T00:00:00Z\t{"key":"/authors/OL1A","name":"Alpha"}',
+      '/type/author\t/authors/OL2A\t1\t2026-01-01T00:00:00Z\t{"key":"/authors/OL2A","name":"Beta"}',
+      '/type/author\t/authors/OL3A\t1\t2026-01-01T00:00:00Z\t{"key":"/authors/OL3A","name":"Gamma"}',
+    ];
+    const dumpPath = authorFixture(dir, lines);
+
+    const { db } = createTestDb();
+    const controller = new AbortController();
+    const summary = await runDumpImport({
+      db,
+      stateName: 'ol-authors',
+      url: 'https://example.invalid/dump.gz',
+      dumpPath,
+      noDownload: true,
+      keepDump: true,
+      batchSize: 1,
+      signal: controller.signal,
+      keyOf: olKeyOf,
+      parse: authorParse,
+      onImportProgress: (processed) => {
+        if (processed === 1) controller.abort(new Error('interrupt by test'));
+      },
+    });
+
+    expect(summary.processed).toBe(1);
+    const mid = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    expect(mid?.stopped).toBe(1);
+    expect(mid?.complete).toBe(0);
+    expect(mid?.cursor).toBe('/authors/OL1A');
+    expect(mid?.totalProcessed).toBe(1);
+
+    // A fresh run clears the stopped flag on completion.
+    const finSummary = await runDumpImport({
+      db,
+      stateName: 'ol-authors',
+      url: 'https://example.invalid/dump.gz',
+      dumpPath,
+      noDownload: true,
+      keepDump: true,
+      batchSize: 1,
+      signal: new AbortController().signal,
+      keyOf: olKeyOf,
+      parse: authorParse,
+    });
+    expect(finSummary.processed).toBe(2); // resumes past the cursor
+    const fin = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    expect(fin?.complete).toBe(1);
+    expect(fin?.stopped).toBe(0);
     rmSync(dir, { recursive: true, force: true });
   });
 

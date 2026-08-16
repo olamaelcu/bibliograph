@@ -1,5 +1,6 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { logger } from '../logger.js';
+import { abortReason } from './interrupt.js';
 
 export interface BatchSummary {
   processed: number;
@@ -26,7 +27,11 @@ export function importInBatches<T>(
     onProgress?: (processed: number, total: number | null) => void;
     /** Called after each flushed batch with cumulative processed and the last item of that batch. */
     onCheckpoint?: (processed: number, lastItem: T) => void;
+    /** Called after the batch transaction commits, with the batch that was just flushed. */
+    afterBatch?: (batch: T[]) => void;
     upsert: (item: T) => { action: 'inserted' | 'skipped' | 'failed' };
+    /** Abort: stop cleanly at the next batch boundary. */
+    signal?: AbortSignal;
   },
 ): Promise<BatchSummary> {
   const batchSize = opts.batchSize ?? 500;
@@ -37,28 +42,35 @@ export function importInBatches<T>(
   return (async () => {
     logger.info({ batchSize, logInterval }, 'import started');
     let batch: T[] = [];
+
     for await (const item of items) {
+      if (opts.signal?.aborted) throw interruptedError(opts.signal);
       batch.push(item);
       summary.processed += 1;
       if (batch.length >= batchSize) {
         const lastItem = batch[batch.length - 1];
         flushBatch(batch);
         batch = [];
-        opts.onCheckpoint?.(summary.processed, lastItem);
-        opts.onProgress?.(summary.processed, opts.total ?? null);
-        if (summary.processed % logInterval === 0) {
-          logger.info({ ...summary, elapsedMs: Date.now() - startedAt }, 'import progress');
-        }
+        checkpoint(lastItem);
+        if (opts.signal?.aborted) throw interruptedError(opts.signal);
       }
     }
     if (batch.length) {
       const lastItem = batch[batch.length - 1];
       flushBatch(batch);
-      opts.onCheckpoint?.(summary.processed, lastItem);
-      opts.onProgress?.(summary.processed, opts.total ?? null);
+      batch = [];
+      checkpoint(lastItem);
     }
     logger.debug({ ...summary, elapsedMs: Date.now() - startedAt }, 'import final batch flushed');
     return summary;
+
+    function checkpoint(lastItem: T): void {
+      opts.onCheckpoint?.(summary.processed, lastItem);
+      opts.onProgress?.(summary.processed, opts.total ?? null);
+      if (summary.processed % logInterval === 0) {
+        logger.info({ ...summary, elapsedMs: Date.now() - startedAt }, 'import progress');
+      }
+    }
 
     function flushBatch(b: T[]): void {
       db.transaction((tx) => {
@@ -74,6 +86,11 @@ export function importInBatches<T>(
           }
         }
       });
+      opts.afterBatch?.(b);
     }
   })();
+}
+
+function interruptedError(signal: AbortSignal): Error {
+  return abortReason(signal) ?? new Error('import stopped');
 }
