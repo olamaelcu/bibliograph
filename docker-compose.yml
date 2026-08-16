@@ -10,5 +10,16 @@ services:
       - RUSTFS_ACCESS_KEY=rustfsadmin
       - RUSTFS_SECRET_KEY=rustfsadmin
     command: --address :9000 --access-key rustfsadmin --secret-key rustfsadmin /data
+  postgres:
+    image: postgres:18.4
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: bibliograph
+      POSTGRES_PASSWORD: bibliograph
+      POSTGRES_DB: bibliograph
 volumes:
   rustfs-data:
+  pgdata:

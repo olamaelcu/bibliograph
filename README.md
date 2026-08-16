@@ -32,7 +32,7 @@ open import issues, and backfill state. Pages are server-side rendered with
 | --------------------- | ----------------------------- | ------------------------------------------ |
 | `PORT`                | `3000`                        | HTTP server port                           |
 | `NODE_ENV`            | _(unset)_                     | `production` enables pino JSON logs        |
-| `DB_PATH`             | `data/bibliograph.db`         | SQLite database path                       |
+| `DATABASE_URL`        | `postgres://bibliograph:bibliograph@localhost:5432/bibliograph` | PostgreSQL connection string |
 | `OL_EDITIONS_DUMP_URL` | `https://openlibrary.org/data/ol_dump_editions_latest.txt.gz` | OL editions dump URL  |
 | `OL_WORKS_DUMP_URL`   | `https://openlibrary.org/data/ol_dump_works_latest.txt.gz`    | OL works dump URL     |
 | `OL_AUTHORS_DUMP_URL` | `https://openlibrary.org/data/ol_dump_authors_latest.txt.gz`  | OL authors dump URL   |
@@ -151,6 +151,16 @@ process (`pnpm start`) applies pending migrations itself on startup, so
 ## Deployment
 
 Dokku via `git push dokku main`; `app.json` healthcheck targets `/health`.
+
+Provision PostgreSQL and link it to the app:
+
+```bash
+dokku postgres:create bibliograph-db
+dokku postgres:link bibliograph-db bibliograph
+```
+
+Dokku's Postgres plugin auto-injects `DATABASE_URL`. For a single-process
+deployment, set `dokku config:set bibliograph PG_MAX_POOL=1`.
 
 [1]: https://atproto.com/guides/glossary#app-view
 [2]: https://atproto.com/guides/feeds

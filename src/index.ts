@@ -1,7 +1,7 @@
 import { serve } from '@hono/node-server';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { createApp } from './app.js';
-import { db, sqliteHandle } from './db/connection.js';
+import { db, closeDb } from './db/connection.js';
 import { logger } from './logger.js';
 import { createJetstreamIngestor } from './jetstream/ingest.js';
 
@@ -9,7 +9,7 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 
 async function main(): Promise<void> {
   try {
-    migrate(db, { migrationsFolder: 'drizzle' });
+    await migrate(db, { migrationsFolder: 'drizzle' });
     logger.info('migrations applied');
   } catch (err) {
     logger.fatal({ err }, 'migrations failed');
@@ -37,19 +37,6 @@ async function main(): Promise<void> {
     logger.error({ err }, 'jetstream: failed to start, continuing without live ingest');
   }
 
-  const walCheckpointInterval = setInterval(() => {
-    try {
-      const result = sqliteHandle.pragma('wal_checkpoint(TRUNCATE)') as Array<{ busy: number; log: number; checkpointed: number }>;
-      const frame = result[0];
-      if (frame && frame.checkpointed > 0) {
-        logger.info({ busy: frame.busy, log: frame.log, checkpointed: frame.checkpointed }, 'wal_checkpoint(TRUNCATE)');
-      }
-    } catch (err) {
-      logger.warn({ err }, 'wal_checkpoint failed');
-    }
-  }, 30_000);
-  walCheckpointInterval.unref();
-
   process.on('unhandledRejection', (reason) => {
     logger.fatal({ reason }, 'unhandledRejection');
   });
@@ -62,7 +49,7 @@ async function main(): Promise<void> {
   const shutdown = async () => {
     logger.info('shutting down...');
     jetstream?.stop();
-    clearInterval(walCheckpointInterval);
+    await closeDb();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

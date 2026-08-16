@@ -4,7 +4,6 @@ pnpm = "11.13.1"
 
 [env]
 _.file = ".env"
-DB_PATH = "data/bibliograph.db"
 
 [tasks.dev]
 run = "pnpm run dev"
