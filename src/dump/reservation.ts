@@ -1,7 +1,10 @@
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { backfillReservation } from '../db/schema.js';
 import { isPidAlive } from './lock.js';
+
+type Database = NodePgDatabase<typeof schema>;
 
 /**
  * Serialize long-running backfill work against live web writes. Web write
@@ -10,44 +13,41 @@ import { isPidAlive } from './lock.js';
  */
 export class Reservation {
   constructor(
-    private readonly db: BetterSQLite3Database,
+    private readonly db: Database,
     private readonly stateName: string,
     private readonly pid = process.pid,
   ) {}
 
-  acquire(): boolean {
+  async acquire(): Promise<boolean> {
     const now = Math.floor(Date.now() / 1000);
     try {
-      const held = this.db
+      const heldRows = await this.db
         .select()
         .from(backfillReservation)
-        .where(eq(backfillReservation.stateName, this.stateName))
-        .get();
+        .where(eq(backfillReservation.stateName, this.stateName));
+      const held = heldRows[0];
       if (held) {
         // Take over reservations left by a dead process (crashed/interrupted
         // run); otherwise only the owning pid may re-acquire.
         if (this.isPidAlive(held.pid)) return held.pid === this.pid;
-        this.db.delete(backfillReservation).where(eq(backfillReservation.stateName, this.stateName)).run();
+        await this.db.delete(backfillReservation).where(eq(backfillReservation.stateName, this.stateName));
       }
-      const res = this.db
+      const res = await this.db
         .insert(backfillReservation)
         .values({ stateName: this.stateName, pid: this.pid, startedAt: now })
-        .onConflictDoNothing()
-        .run();
-      return res.changes > 0;
+        .onConflictDoNothing();
+      return (res.rowCount ?? 0) > 0;
     } catch {
       return false;
     }
   }
 
-  isHeld(): boolean {
-    return (
-      this.db
-        .select()
-        .from(backfillReservation)
-        .where(eq(backfillReservation.stateName, this.stateName))
-        .get() != null
-    );
+  async isHeld(): Promise<boolean> {
+    const heldRows = await this.db
+      .select()
+      .from(backfillReservation)
+      .where(eq(backfillReservation.stateName, this.stateName));
+    return heldRows[0] != null;
   }
 
   /** True if `pid` is a live process on this host. */
@@ -55,7 +55,7 @@ export class Reservation {
     return isPidAlive(pid);
   }
 
-  release(): void {
-    this.db.delete(backfillReservation).where(eq(backfillReservation.stateName, this.stateName)).run();
+  async release(): Promise<void> {
+    await this.db.delete(backfillReservation).where(eq(backfillReservation.stateName, this.stateName));
   }
 }

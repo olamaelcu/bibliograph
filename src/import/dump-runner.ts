@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { DumpState } from '../dump/state.js';
 import { DumpStreamer, SeekError } from '../dump/streamer.js';
 import { HttpDownloader } from '../dump/downloader.js';
@@ -14,8 +15,10 @@ import { mergeEntity, type MergeCandidate } from './merge.js';
 import { logger } from '../logger.js';
 import { InterruptedError, abortReason } from '../dump/interrupt.js';
 
+type Database = NodePgDatabase<typeof schema>;
+
 export interface DumpRunOptions {
-  db: BetterSQLite3Database;
+  db: Database;
   stateName: string;
   url: string;
   dumpPath?: string;
@@ -58,10 +61,10 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
 
   const state = new DumpState(opts.db, opts.stateName);
   const reservation = new Reservation(opts.db, opts.stateName);
-  if (!reservation.acquire()) {
+  if (!(await reservation.acquire())) {
     // Either another live run holds the reservation, or the DB is mid-write
     // (SQLITE_BUSY). Distinguish so the operator knows what actually happened.
-    if (reservation.isHeld()) {
+    if (await reservation.isHeld()) {
       logger.warn({ stateName: opts.stateName }, 'reservation held by another run; aborting');
       throw new Error(`reservation held for state '${opts.stateName}'`);
     }
@@ -71,8 +74,8 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
   let acquired = true;
 
   try {
-    if (opts.reset) state.clear();
-    const existing = state.get();
+    if (opts.reset) await state.clear();
+    const existing = await state.get();
 
     // Download unless asked to reuse the local file. The downloader resumes a
     // partial file on disk via HTTP Range (206) instead of restarting.
@@ -84,7 +87,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       }
       const downloader = new HttpDownloader(opts.url, { onProgress: opts.onProgress, signal: opts.signal });
       const meta = await downloader.downloadWithRetry(gzPath);
-      state.set({ url: meta.url, lastModified: meta.lastModified, fileSize: meta.contentLength });
+      await state.set({ url: meta.url, lastModified: meta.lastModified, fileSize: meta.contentLength });
     } else {
       logger.info({ stateName: opts.stateName, gzPath }, 'reusing existing dump file');
     }
@@ -114,7 +117,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       writeCountCache(gzPath, total);
     }
     logger.info({ stateName: opts.stateName, totalRecords: total }, 'dump record count');
-    state.set({ totalRecords: total });
+    await state.set({ totalRecords: total });
 
     // Resuming replays from byte 0 and cursor-skips for a gzip source; a
     // snapshot source seeks straight to the checkpointed byte offset.
@@ -131,14 +134,12 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
         onProgress: opts.onImportProgress
           ? (processed, t) => opts.onImportProgress?.(progressBase + processed, t)
           : undefined,
-        onCheckpoint: (processed) => {
-          state.set({
-            lastKeyCursor: lastKey,
-            lastByteOffset: lastEndOffset,
-            totalProcessed: progressBase + processed,
-          });
-        },
-        upsert: (item) => {
+        onCheckpoint: (processed) => state.set({
+          lastKeyCursor: lastKey,
+          lastByteOffset: lastEndOffset,
+          totalProcessed: progressBase + processed,
+        }),
+        upsert: async (tx, item) => {
           if (item.key !== null) lastKey = item.key;
           lastEndOffset = item.byteOffset + Buffer.byteLength(item.line, 'utf8') + 1;
           if (opts.skipIfSeen?.(item.key, item.line)) return { action: 'skipped' };
@@ -146,7 +147,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
           const cands = opts.parse(fields);
           let inserted = false;
           for (const c of cands) {
-            const res = mergeEntity(opts.db, c);
+            const res = await mergeEntity(tx, c);
             if (!res.existed) inserted = true;
           }
           return { action: inserted ? 'inserted' : 'skipped' };
@@ -170,8 +171,8 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
         // before the stop (importInBatches flushed + checkpointed the batch
         // it was in the middle of).
         if (opts.signal?.aborted || err instanceof InterruptedError) {
-          state.set({ stopped: true });
-          const stoppedState = state.get();
+          await state.set({ stopped: true });
+          const stoppedState = await state.get();
           logger.info({ stateName: opts.stateName }, 'import stopped; resume checkpoint kept');
           return {
             processed: (stoppedState?.totalProcessed ?? 0) - progressBase,
@@ -184,8 +185,8 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       }
     }
 
-    state.set({ lastKeyCursor: null, lastByteOffset: 0, totalProcessed: progressBase + (summary?.processed ?? 0) });
-    state.markComplete();
+    await state.set({ lastKeyCursor: null, lastByteOffset: 0, totalProcessed: progressBase + (summary?.processed ?? 0) });
+    await state.markComplete();
 
     if (!opts.keepDump) {
       for (const p of [gzPath, snapshotPath, `${snapshotPath}.meta`]) {
@@ -201,7 +202,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     logger.info({ ...summary }, 'dump import complete');
     return summary;
   } finally {
-    if (acquired) reservation.release();
+    if (acquired) await reservation.release();
     releaseLock(lockPath);
   }
 }

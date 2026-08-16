@@ -1,4 +1,5 @@
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import {
 	bookIdentifiers,
@@ -7,6 +8,8 @@ import {
 	workIdentifiers,
 } from '../db/schema.js';
 
+type Database = NodePgDatabase<typeof schema>;
+
 export type IdentifierTable = typeof bookIdentifiers | typeof contributorIdentifiers | typeof genreIdentifiers | typeof workIdentifiers;
 
 export interface IdentifierSpec {
@@ -14,32 +17,30 @@ export interface IdentifierSpec {
 	url: string;
 }
 
-type PkAdapter = {
-	findByResource: (db: BetterSQLite3Database, resource: string) => string | null;
-	upsert: (db: BetterSQLite3Database, pk: string, spec: IdentifierSpec) => void;
-	remove: (db: BetterSQLite3Database, pk: string) => void;
+export type PkAdapter = {
+	findByResource: (db: Database, resource: string) => Promise<string | null>;
+	upsert: (db: Database, pk: string, spec: IdentifierSpec) => Promise<void>;
+	remove: (db: Database, pk: string) => Promise<void>;
 }
 
-export type { PkAdapter };
-
-export function identifierTaken(db: BetterSQLite3Database, adapter: PkAdapter, resource: string): boolean {
-	return adapter.findByResource(db, resource) !== null;
+export async function identifierTaken(db: Database, adapter: PkAdapter, resource: string): Promise<boolean> {
+	return (await adapter.findByResource(db, resource)) !== null;
 }
 
 function makeAdapter(table: IdentifierTable, pkCol: { pk: string }): PkAdapter {
 	return {
-		findByResource(db, resource) {
-			const row = db.select().from(table).where(eq(table.resource, resource)).get();
+		async findByResource(db, resource) {
+			const rows = await db.select().from(table).where(eq(table.resource, resource));
+			const row = rows[0];
 			return row ? (row as unknown as Record<string, string>)[pkCol.pk] ?? null : null;
 		},
-		upsert(db, pk, spec) {
-			db.insert(table)
+		async upsert(db, pk, spec) {
+			await db.insert(table)
 				.values({ [pkCol.pk]: pk, resource: spec.resource, url: spec.url } as never)
-				.onConflictDoNothing()
-				.run();
+				.onConflictDoNothing();
 		},
-		remove(db, pk) {
-			db.delete(table).where(eq(table[pkCol.pk as keyof typeof table] as never, pk as never)).run();
+		async remove(db, pk) {
+			await db.delete(table).where(eq(table[pkCol.pk as keyof typeof table] as never, pk as never));
 		},
 	};
 }
@@ -56,18 +57,18 @@ export interface IdentifierUpsertResult {
 }
 
 /** Upsert identifier specs onto an entity, returning new claims and conflicting claims. */
-export function upsertIdentifiers(
-	db: BetterSQLite3Database,
+export async function upsertIdentifiers(
+	db: Database,
 	adapter: PkAdapter,
 	pk: string,
 	specs: IdentifierSpec[],
-): IdentifierUpsertResult {
+): Promise<IdentifierUpsertResult> {
 	let added = 0;
 	const conflicts: IdentifierUpsertResult['conflicts'] = [];
 	for (const spec of specs) {
-		const existing = adapter.findByResource(db, spec.resource);
+		const existing = await adapter.findByResource(db, spec.resource);
 		if (existing === null) {
-			adapter.upsert(db, pk, spec);
+			await adapter.upsert(db, pk, spec);
 			added += 1;
 		} else if (existing !== pk) {
 			conflicts.push({ resource: spec.resource, ownerPk: existing });

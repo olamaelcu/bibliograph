@@ -1,6 +1,9 @@
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { logger } from '../logger.js';
 import { abortReason } from './interrupt.js';
+
+type Database = NodePgDatabase<typeof schema>;
 
 export interface BatchSummary {
   processed: number;
@@ -12,11 +15,11 @@ export interface BatchSummary {
 /**
  * Runs a per-record upsert function in transaction batches. Each batch is
  * atomic; a failing record is caught, counted, and skipped so one bad line
- * doesn't abort the whole import. The batch function must be synchronous
- * (better-sqlite3 is sync).
+ * doesn't abort the whole import. The upsert runs against the transaction
+ * handle, so all writes in a batch share one transaction.
  */
-export function importInBatches<T>(
-  db: BetterSQLite3Database,
+export async function importInBatches<T>(
+  db: Database,
   items: AsyncGenerator<T, void, void>,
   opts: {
     batchSize?: number;
@@ -26,10 +29,10 @@ export function importInBatches<T>(
     /** Called after each flushed batch with cumulative processed + total. */
     onProgress?: (processed: number, total: number | null) => void;
     /** Called after each flushed batch with cumulative processed and the last item of that batch. */
-    onCheckpoint?: (processed: number, lastItem: T) => void;
+    onCheckpoint?: (processed: number, lastItem: T) => void | Promise<void>;
     /** Called after the batch transaction commits, with the batch that was just flushed. */
     afterBatch?: (batch: T[]) => void;
-    upsert: (item: T) => { action: 'inserted' | 'skipped' | 'failed' };
+    upsert: (tx: Database, item: T) => { action: 'inserted' | 'skipped' | 'failed' } | Promise<{ action: 'inserted' | 'skipped' | 'failed' }>;
     /** Abort: stop cleanly at the next batch boundary. */
     signal?: AbortSignal;
   },
@@ -39,56 +42,54 @@ export function importInBatches<T>(
   const summary: BatchSummary = { processed: 0, inserted: 0, skipped: 0, failed: 0 };
   const startedAt = Date.now();
 
-  return (async () => {
-    logger.info({ batchSize, logInterval }, 'import started');
-    let batch: T[] = [];
+  logger.info({ batchSize, logInterval }, 'import started');
+  let batch: T[] = [];
 
-    for await (const item of items) {
-      if (opts.signal?.aborted) throw interruptedError(opts.signal);
-      batch.push(item);
-      summary.processed += 1;
-      if (batch.length >= batchSize) {
-        const lastItem = batch[batch.length - 1];
-        flushBatch(batch);
-        batch = [];
-        checkpoint(lastItem);
-        if (opts.signal?.aborted) throw interruptedError(opts.signal);
-      }
-    }
-    if (batch.length) {
+  for await (const item of items) {
+    if (opts.signal?.aborted) throw interruptedError(opts.signal);
+    batch.push(item);
+    summary.processed += 1;
+    if (batch.length >= batchSize) {
       const lastItem = batch[batch.length - 1];
-      flushBatch(batch);
+      await flushBatch(batch);
       batch = [];
-      checkpoint(lastItem);
+      await checkpoint(lastItem);
+      if (opts.signal?.aborted) throw interruptedError(opts.signal);
     }
-    logger.debug({ ...summary, elapsedMs: Date.now() - startedAt }, 'import final batch flushed');
-    return summary;
+  }
+  if (batch.length) {
+    const lastItem = batch[batch.length - 1];
+    await flushBatch(batch);
+    batch = [];
+    await checkpoint(lastItem);
+  }
+  logger.debug({ ...summary, elapsedMs: Date.now() - startedAt }, 'import final batch flushed');
+  return summary;
 
-    function checkpoint(lastItem: T): void {
-      opts.onCheckpoint?.(summary.processed, lastItem);
-      opts.onProgress?.(summary.processed, opts.total ?? null);
-      if (summary.processed % logInterval === 0) {
-        logger.info({ ...summary, elapsedMs: Date.now() - startedAt }, 'import progress');
-      }
+  async function checkpoint(lastItem: T): Promise<void> {
+    await opts.onCheckpoint?.(summary.processed, lastItem);
+    opts.onProgress?.(summary.processed, opts.total ?? null);
+    if (summary.processed % logInterval === 0) {
+      logger.info({ ...summary, elapsedMs: Date.now() - startedAt }, 'import progress');
     }
+  }
 
-    function flushBatch(b: T[]): void {
-      db.transaction((tx) => {
-        for (const item of b) {
-          try {
-            const res = opts.upsert(item);
-            if (res.action === 'inserted') summary.inserted += 1;
-            else if (res.action === 'skipped') summary.skipped += 1;
-            else summary.failed += 1;
-          } catch (err) {
-            summary.failed += 1;
-            logger.warn({ err: (err as Error).message }, 'record failed in batch');
-          }
+  async function flushBatch(b: T[]): Promise<void> {
+    await db.transaction(async (tx) => {
+      for (const item of b) {
+        try {
+          const res = await opts.upsert(tx, item);
+          if (res.action === 'inserted') summary.inserted += 1;
+          else if (res.action === 'skipped') summary.skipped += 1;
+          else summary.failed += 1;
+        } catch (err) {
+          summary.failed += 1;
+          logger.warn({ err: (err as Error).message }, 'record failed in batch');
         }
-      });
-      opts.afterBatch?.(b);
-    }
-  })();
+      }
+    });
+    opts.afterBatch?.(b);
+  }
 }
 
 function interruptedError(signal: AbortSignal): Error {

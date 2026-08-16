@@ -1,4 +1,5 @@
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../../db/schema.js';
 import type { ActorIdentifier } from '@atcute/lexicons/syntax';
 import { Client, simpleFetchHandler } from '@atcute/client';
 import { DumpState } from '../../dump/state.js';
@@ -11,8 +12,10 @@ import { BOOKHIVE_CATALOG_NSID, bookhiveCatalogDid, bookhivePdsUrl } from './con
 import { withRetry } from './network.js';
 import { logger } from '../../logger.js';
 
+type Database = NodePgDatabase<typeof schema>;
+
 export interface BookhiveImportOptions {
-  db: BetterSQLite3Database;
+  db: Database;
   reset?: boolean;
   limit?: number;
   lockPath?: string;
@@ -79,9 +82,9 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
   const reservation = new Reservation(opts.db, STATE_NAME);
   let acquired = false;
   try {
-    acquired = reservation.acquire();
+    acquired = await reservation.acquire();
     if (!acquired) {
-      const msg = reservation.isHeld()
+      const msg = (await reservation.isHeld())
         ? 'bookhive catalog reservation held by another run'
         : 'database busy; is another import running?';
       logger.warn(msg);
@@ -89,8 +92,8 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
     }
 
     const state = new DumpState(opts.db, STATE_NAME);
-    if (opts.reset) state.clear();
-    const existing = state.get();
+    if (opts.reset) await state.clear();
+    const existing = await state.get();
     if (existing?.complete) {
       logger.info('bookhive catalog already complete; use --reset to re-import');
       return { processed: 0, failed: 0 };
@@ -113,11 +116,11 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
     if (existing?.totalRecords == null) {
       const counted = await countCatalogRecords(rpc, did, cursor, { signal: opts.signal, limit: opts.limit });
       if (counted === null) {
-        state.set({ stopped: true });
+        await state.set({ stopped: true });
         logger.info('bookhive count interrupted before import; run stopped');
         return { processed: 0, failed: 0 };
       }
-      state.set({ totalRecords: baseProcessed + counted });
+      await state.set({ totalRecords: baseProcessed + counted });
       logger.info({ totalRecords: baseProcessed + counted }, 'bookhive catalog pre-counted records');
     }
 
@@ -127,7 +130,7 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
     let nextCursor: string | null = cursor;
     do {
       if (opts.signal?.aborted) {
-        state.set({ stopped: true, totalProcessed: baseProcessed + processed });
+        await state.set({ stopped: true, totalProcessed: baseProcessed + processed });
         logger.info({ processed, failed, pages, cursor: nextCursor }, 'bookhive import stopped by interrupt');
         return { processed, failed };
       }
@@ -158,13 +161,13 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
           const cands = mapCatalogBook(record.value as BookhiveCatalogBook);
           let bookPk: string | null = null;
           for (const c of cands) {
-            const res = mergeEntity(opts.db, c);
+            const res = await mergeEntity(opts.db, c);
             if (c.entityType === 'book') bookPk = res.pk;
           }
           // Link the merged book to its authors (BookHive catalogs authors by name).
           if (bookPk) {
             const names = catalogAuthorNames(record.value as BookhiveCatalogBook);
-            if (names.length > 0) hydrateBookContributorsByName(opts.db, bookPk, names);
+            if (names.length > 0) await hydrateBookContributorsByName(opts.db, bookPk, names);
           }
         } catch (err) {
           failed += 1;
@@ -180,14 +183,14 @@ export async function importBookhiveCatalog(opts: BookhiveImportOptions): Promis
       }
 
       nextCursor = body.cursor ?? null;
-      state.set({ lastKeyCursor: nextCursor, totalProcessed: baseProcessed + processed });
+      await state.set({ lastKeyCursor: nextCursor, totalProcessed: baseProcessed + processed });
     } while (nextCursor);
 
-    state.markComplete();
+    await state.markComplete();
     logger.info({ processed, failed, pages }, 'bookhive catalog import complete');
     return { processed, failed };
   } finally {
-    if (acquired) reservation.release();
+    if (acquired) await reservation.release();
     releaseLock(lockPath);
   }
 }

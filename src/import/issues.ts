@@ -1,6 +1,9 @@
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { importIssues, type ImportIssueEntityType } from '../db/schema.js';
+
+type Database = NodePgDatabase<typeof schema>;
 
 export interface IssueSpec {
 	entityType: ImportIssueEntityType;
@@ -11,7 +14,7 @@ export interface IssueSpec {
 	source: string;
 }
 
-const dedupWhere = (db: BetterSQLite3Database, spec: IssueSpec) =>
+const dedupWhere = (db: Database, spec: IssueSpec) =>
 	and(
 		eq(importIssues.entityType, spec.entityType),
 		eq(importIssues.entityPk, spec.entityPk),
@@ -22,10 +25,10 @@ const dedupWhere = (db: BetterSQLite3Database, spec: IssueSpec) =>
 	);
 
 /** Insert an open issue unless an identical open issue already exists. */
-export function flagIssue(db: BetterSQLite3Database, spec: IssueSpec): void {
-	const existing = db.select().from(importIssues).where(dedupWhere(db, spec)).get();
-	if (existing) return;
-	db.insert(importIssues)
+export async function flagIssue(db: Database, spec: IssueSpec): Promise<void> {
+	const existing = await db.select().from(importIssues).where(dedupWhere(db, spec));
+	if (existing[0]) return;
+	await db.insert(importIssues)
 		.values({
 			entityType: spec.entityType,
 			entityPk: spec.entityPk,
@@ -35,20 +38,18 @@ export function flagIssue(db: BetterSQLite3Database, spec: IssueSpec): void {
 			source: spec.source,
 			status: 'open',
 			createdAt: Math.floor(Date.now() / 1000),
-		})
-		.run();
+		});
 }
 
-export function openIssuesFor(db: BetterSQLite3Database, entityType: ImportIssueEntityType, entityPk: string) {
+export async function openIssuesFor(db: Database, entityType: ImportIssueEntityType, entityPk: string) {
 	return db
 		.select()
 		.from(importIssues)
-		.where(and(eq(importIssues.entityType, entityType), eq(importIssues.entityPk, entityPk), eq(importIssues.status, 'open')))
-		.all();
+		.where(and(eq(importIssues.entityType, entityType), eq(importIssues.entityPk, entityPk), eq(importIssues.status, 'open')));
 }
 
-export function resolveIssuesForField(db: BetterSQLite3Database, entityType: ImportIssueEntityType, entityPk: string, field: string): void {
-	db.update(importIssues)
+export async function resolveIssuesForField(db: Database, entityType: ImportIssueEntityType, entityPk: string, field: string): Promise<void> {
+	await db.update(importIssues)
 		.set({ status: 'resolved', resolvedAt: Math.floor(Date.now() / 1000) })
 		.where(
 			and(
@@ -57,6 +58,5 @@ export function resolveIssuesForField(db: BetterSQLite3Database, entityType: Imp
 				eq(importIssues.field, field),
 				eq(importIssues.status, 'open'),
 			),
-		)
-		.run();
+		);
 }

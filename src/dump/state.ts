@@ -1,6 +1,9 @@
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { backfillState } from '../db/schema.js';
+
+type Database = NodePgDatabase<typeof schema>;
 
 export interface DumpStateFields {
   url?: string;
@@ -19,16 +22,17 @@ export interface DumpStateFields {
 
 export class DumpState {
   constructor(
-    private readonly db: BetterSQLite3Database,
+    private readonly db: Database,
     private readonly name: string,
   ) {}
 
-  get(): (typeof backfillState.$inferSelect) | null {
-    return this.db.select().from(backfillState).where(eq(backfillState.name, this.name)).get() ?? null;
+  async get(): Promise<(typeof backfillState.$inferSelect) | null> {
+    const rows = await this.db.select().from(backfillState).where(eq(backfillState.name, this.name));
+    return rows[0] ?? null;
   }
 
-  set(fields: DumpStateFields): void {
-    const existing = this.get();
+  async set(fields: DumpStateFields): Promise<void> {
+    const existing = await this.get();
     const now = Math.floor(Date.now() / 1000);
     const values = {
       name: this.name,
@@ -46,21 +50,20 @@ export class DumpState {
       stopped: fields.stopped !== undefined ? (fields.stopped ? 1 : 0) : (existing?.stopped ?? 0),
       updatedAt: now,
     };
-    this.db
+    await this.db
       .insert(backfillState)
       .values(values)
       .onConflictDoUpdate({
         target: backfillState.name,
         set: values,
-      })
-      .run();
+      });
   }
 
-  markComplete(): void {
-    this.set({ complete: true, stopped: false });
+  async markComplete(): Promise<void> {
+    await this.set({ complete: true, stopped: false });
   }
 
-  clear(): void {
-    this.db.delete(backfillState).where(eq(backfillState.name, this.name)).run();
+  async clear(): Promise<void> {
+    await this.db.delete(backfillState).where(eq(backfillState.name, this.name));
   }
 }
