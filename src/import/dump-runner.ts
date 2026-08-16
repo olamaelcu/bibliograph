@@ -34,15 +34,15 @@ export interface DumpRunOptions {
   onImportProgress?: (processed: number, total: number | null) => void;
   /** Key extraction for resume-skip ordering (sortable key or null). */
   keyOf: (line: string) => string | null;
-  parse: (fields: string[]) => MergeCandidate[];
+  parse: (fields: string[]) => MergeCandidate[] | Promise<MergeCandidate[]>;
   /**
    * Fast-path: when true the record is counted as skipped and parse/merge are
    * not run (the line is not even split). Lets redundant passes (e.g. the
    * authors dump after editions) skip records that already exist.
    */
-  skipIfSeen?: (key: string | null, line: string) => boolean;
+  skipIfSeen?: (key: string | null, line: string) => boolean | Promise<boolean>;
   /** Called after each batch transaction commits (outside the transaction). */
-  afterBatch?: () => void;
+  afterBatch?: () => void | Promise<void>;
   /** Abort: stop the import cleanly at the next safe point and mark the run stopped. */
   signal?: AbortSignal;
 }
@@ -142,9 +142,9 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
         upsert: async (tx, item) => {
           if (item.key !== null) lastKey = item.key;
           lastEndOffset = item.byteOffset + Buffer.byteLength(item.line, 'utf8') + 1;
-          if (opts.skipIfSeen?.(item.key, item.line)) return { action: 'skipped' };
+          if (await opts.skipIfSeen?.(item.key, item.line)) return { action: 'skipped' };
           const fields = splitTsv(item.line, 5);
-          const cands = opts.parse(fields);
+          const cands = await opts.parse(fields);
           let inserted = false;
           for (const c of cands) {
             const res = await mergeEntity(tx, c);

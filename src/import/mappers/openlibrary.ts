@@ -3,7 +3,8 @@ import { identifierResource, sourceKeySlug } from '../slugs.js';
 import { normalizeIsbn } from '../isbn.js';
 import { tsvField } from '../../dump/tsv.js';
 import { contributorIdentifiersAdapter, identifierTaken, workIdentifiersAdapter, type PkAdapter } from '../identifiers.js';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../../db/schema.js';
 
 export interface OlEdition {
   key: string;
@@ -158,15 +159,17 @@ export function olKeyOf(line: string): string | null {
   return tsvField(line, 1);
 }
 
+type Database = NodePgDatabase<typeof schema>;
+
 /** True when an OL resource (`openlibrary:authors/OL1A`) is already claimed by someone. */
-export function olResourceExists(db: BetterSQLite3Database, adapter: PkAdapter, key: string): boolean {
+export async function olResourceExists(db: Database, adapter: PkAdapter, key: string): Promise<boolean> {
   return identifierTaken(db, adapter, `openlibrary:${key.replace(/^\//, '')}`);
 }
 
 /** Fast-path predicate for contributors:dump — skip authors already imported by editions. */
-export const skipSeenContributors = (db: BetterSQLite3Database) => (key: string | null) =>
+export const skipSeenContributors = (db: Database) => (key: string | null) =>
   key != null && olResourceExists(db, contributorIdentifiersAdapter, key);
 
 /** Fast-path predicate for works:dump — skip works already imported by editions. */
-export const skipSeenWorks = (db: BetterSQLite3Database) => (key: string | null) =>
+export const skipSeenWorks = (db: Database) => (key: string | null) =>
   key != null && olResourceExists(db, workIdentifiersAdapter, key);

@@ -15,7 +15,3 @@ export const db = drizzle(pool, { schema });
 export async function closeDb(): Promise<void> {
   await pool.end();
 }
-
-export function pragmaImportMode(): void {}
-
-export function pragmaNormalMode(): void {}

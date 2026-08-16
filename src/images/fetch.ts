@@ -1,7 +1,10 @@
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type { BlobStore } from '../storage/store.js';
 import { flagIssue } from '../import/issues.js';
 import { logger } from '../logger.js';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
+
+type Database = NodePgDatabase<typeof schema>;
 
 export interface ImageFetchResult {
 	kind: 'cover' | 'portrait';
@@ -41,7 +44,7 @@ async function fetchImageBytes(url: string): Promise<{ bytes: Uint8Array; mimeTy
  * `/b/isbn/...`). When it is null/undefined nothing is fetched.
  */
 export async function fetchBookCover(
-	db: BetterSQLite3Database,
+	db: Database,
 	store: BlobStore,
 	bookPk: string,
 	coverRef: number | string | undefined,
@@ -63,7 +66,7 @@ export async function fetchBookCover(
 
 /** Fetch a contributor portrait: OL photo, else Wikipedia REST thumbnail. */
 export async function fetchContributorPortrait(
-	db: BetterSQLite3Database,
+	db: Database,
 	store: BlobStore,
 	contributorPk: string,
 	name: string,

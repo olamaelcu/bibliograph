@@ -31,7 +31,7 @@ export async function importInBatches<T>(
     /** Called after each flushed batch with cumulative processed and the last item of that batch. */
     onCheckpoint?: (processed: number, lastItem: T) => void | Promise<void>;
     /** Called after the batch transaction commits, with the batch that was just flushed. */
-    afterBatch?: (batch: T[]) => void;
+    afterBatch?: (batch: T[]) => void | Promise<void>;
     upsert: (tx: Database, item: T) => { action: 'inserted' | 'skipped' | 'failed' } | Promise<{ action: 'inserted' | 'skipped' | 'failed' }>;
     /** Abort: stop cleanly at the next batch boundary. */
     signal?: AbortSignal;
@@ -88,7 +88,7 @@ export async function importInBatches<T>(
         }
       }
     });
-    opts.afterBatch?.(b);
+    await opts.afterBatch?.(b);
   }
 }
 

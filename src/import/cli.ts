@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, pragmaImportMode, pragmaNormalMode } from '../db/connection.js';
+import { db } from '../db/connection.js';
 import { runDumpImport } from './dump-runner.js';
 import {
   mapAuthorToCandidate,
@@ -102,52 +102,45 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
   if (flags.unknown.length > 0) logger.warn({ unknown: flags.unknown }, 'ignoring unknown flags');
 
   if (cmd === 'openlibrary:dump') {
-    // Bulk-import mode: skip per-commit fsyncs, raise the page cache, and drop
-    // FK validation. Restored in finally so a crash or error re-enables it on exit.
-    pragmaImportMode();
-    try {
-      // Edition→author links deferred to the staging table: collected during
-      // each batch, flushed after the batch commits, and resolved into
-      // book_contributors after the whole dump is imported.
-      const pending: StagedAuthorLink[] = [];
-      const s = await runWithProgress('ol-editions', (onDownload, onImport) =>
-        runDumpImport({
-          db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
-          noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
-          dumpPath: flags.dumpPath, batchSize: flags.batchSize,
-          signal,
-          onProgress: onDownload,
-          onImportProgress: onImport,
-          keyOf: olKeyOf,
-          parse: (fields) => {
-            const rec = JSON.parse(fields[4]) as OlEdition;
-            for (const a of rec.authors ?? []) {
-              if (a.key) pending.push({ editionKey: rec.key, authorKey: a.key });
-            }
-            // Work-skip: works are referenced by many editions; once a work's
-            // openlibrary: key is claimed, skip its merge entirely (saves the
-            // per-ISBN identifier pass on an existing row). The book candidate
-            // still links to it via workPk, so the FK stays intact.
-            const workKey = rec.works?.[0]?.key;
-            const cands = mapEditionToCandidates(rec);
-            if (workKey && olResourceExists(db, workIdentifiersAdapter, workKey)) {
-              return cands.filter((c) => c.entityType !== 'work');
-            }
-            return cands;
-          },
-          afterBatch: () => {
-            if (pending.length === 0) return;
-            stageEditionAuthors(db, pending);
-            pending.length = 0;
-          },
-        }),
-      );
-      logger.info(s, 'editions import done');
-      const linked = resolveBookContributors(db, { batchSize: flags.batchSize ?? 10_000 });
-      logger.info({ linked }, 'book contributors linked from staging');
-    } finally {
-      pragmaNormalMode();
-    }
+    // Edition→author links deferred to the staging table: collected during
+    // each batch, flushed after the batch commits, and resolved into
+    // book_contributors after the whole dump is imported.
+    const pending: StagedAuthorLink[] = [];
+    const s = await runWithProgress('ol-editions', (onDownload, onImport) =>
+      runDumpImport({
+        db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
+        dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+        signal,
+        onProgress: onDownload,
+        onImportProgress: onImport,
+        keyOf: olKeyOf,
+        parse: async (fields) => {
+          const rec = JSON.parse(fields[4]) as OlEdition;
+          for (const a of rec.authors ?? []) {
+            if (a.key) pending.push({ editionKey: rec.key, authorKey: a.key });
+          }
+          // Work-skip: works are referenced by many editions; once a work's
+          // openlibrary: key is claimed, skip its merge entirely (saves the
+          // per-ISBN identifier pass on an existing row). The book candidate
+          // still links to it via workPk, so the FK stays intact.
+          const workKey = rec.works?.[0]?.key;
+          const cands = mapEditionToCandidates(rec);
+          if (workKey && (await olResourceExists(db, workIdentifiersAdapter, workKey))) {
+            return cands.filter((c) => c.entityType !== 'work');
+          }
+          return cands;
+        },
+        afterBatch: async () => {
+          if (pending.length === 0) return;
+          await stageEditionAuthors(db, pending);
+          pending.length = 0;
+        },
+      }),
+    );
+    logger.info(s, 'editions import done');
+    const linked = await resolveBookContributors(db, { batchSize: flags.batchSize ?? 10_000 });
+    logger.info({ linked }, 'book contributors linked from staging');
   } else if (cmd === 'works:dump') {
     const s = await runWithProgress('ol-works', (onDownload, onImport) =>
       runDumpImport({
@@ -199,15 +192,13 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
     const store = new BlobStore(db, blobStoreConfigFromEnv());
     const limit = flags.batchSize ?? 100;
 
-    const bookRows = db.select().from(books)
+    const bookRows = await db.select().from(books)
       .where(and(eq(books.releaseStatus as never, 'released' as never), isNull(books.coverUrl)))
       .orderBy(books.pk)
-      .limit(limit)
-      .all() as Array<{ pk: string; coverUrl: string | null }>;
+      .limit(limit);
     for (const b of bookRows) {
-      const coverSource = db.select().from(bookIdentifiers)
-        .where(eq(bookIdentifiers.bookPk, b.pk))
-        .all() as Array<{ resource: string }>;
+      const coverSource = await db.select().from(bookIdentifiers)
+        .where(eq(bookIdentifiers.bookPk, b.pk));
       let coverUrl: string | undefined;
       for (const id of coverSource) {
         if (id.resource.startsWith('openlibrary:books/')) {
@@ -221,18 +212,17 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
       }
       if (coverUrl) {
         const res = await fetchBookCover(db, store, b.pk, coverUrl);
-        if (res.fetched) db.update(books).set({ coverUrl: res.url }).where(eq(books.pk, b.pk)).run();
+        if (res.fetched) await db.update(books).set({ coverUrl: res.url }).where(eq(books.pk, b.pk));
       }
     }
 
-    const contributorRows = db.select().from(contributors)
+    const contributorRows = await db.select().from(contributors)
       .where(and(eq(contributors.releaseStatus as never, 'released' as never), isNull(contributors.imageUrl)))
       .orderBy(contributors.pk)
-      .limit(limit)
-      .all() as Array<{ pk: string; name: string; imageUrl: string | null }>;
+      .limit(limit);
     for (const c of contributorRows) {
       const res = await fetchContributorPortrait(db, store, c.pk, c.name, undefined);
-      if (res.fetched) db.update(contributors).set({ imageUrl: res.url }).where(eq(contributors.pk, c.pk)).run();
+      if (res.fetched) await db.update(contributors).set({ imageUrl: res.url }).where(eq(contributors.pk, c.pk));
     }
     logger.info({ books: bookRows.length, contributors: contributorRows.length }, 'images refresh done');
   } else {
