@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { jetstreamCursor, userRecords } from '../db/schema.js';
 import { COLLECTION } from '../xrpc/views.js';
 import { logger } from '../logger.js';
@@ -12,7 +13,7 @@ import { logger } from '../logger.js';
  * itself observed.
  */
 
-type Db = BetterSQLite3Database;
+type Db = NodePgDatabase<typeof schema>;
 
 const CURSOR_NAME = 'default';
 const WANTED_COLLECTIONS = [COLLECTION.review, COLLECTION.shelf, COLLECTION.bookShelf, COLLECTION.actor] as const;
@@ -35,36 +36,37 @@ export interface JetstreamEvent {
 	commit?: JetstreamCommit;
 }
 
-export function loadCursor(db: Db): number | undefined {
-	const row = db.select().from(jetstreamCursor).where(eq(jetstreamCursor.name, CURSOR_NAME)).get();
+export async function loadCursor(db: Db): Promise<number | undefined> {
+	const row = (await db.select().from(jetstreamCursor).where(eq(jetstreamCursor.name, CURSOR_NAME)))[0];
 	return row?.cursor ?? undefined;
 }
 
-function saveCursor(db: Db, cursor: number): void {
+async function saveCursor(db: Db, cursor: number): Promise<void> {
 	const updatedAt = Math.floor(Date.now() / 1000);
-	db.insert(jetstreamCursor)
+	await db
+		.insert(jetstreamCursor)
 		.values({ name: CURSOR_NAME, cursor, updatedAt })
-		.onConflictDoUpdate({ target: jetstreamCursor.name, set: { cursor, updatedAt } })
-		.run();
+		.onConflictDoUpdate({ target: jetstreamCursor.name, set: { cursor, updatedAt } });
 }
 
 /** Apply one Jetstream event to the local index. Exported for direct unit testing. */
-export function applyJetstreamEvent(db: Db, event: JetstreamEvent): void {
+export async function applyJetstreamEvent(db: Db, event: JetstreamEvent): Promise<void> {
 	const { commit } = event;
 	if (commit && (WANTED_COLLECTIONS as readonly string[]).includes(commit.collection)) {
 		if (commit.operation === 'delete') {
-			db.delete(userRecords)
+			await db
+				.delete(userRecords)
 				.where(
 					and(
 						eq(userRecords.did, event.did),
 						eq(userRecords.collection, commit.collection),
 						eq(userRecords.rkey, commit.rkey),
 					),
-				)
-				.run();
+				);
 		} else if (commit.cid && commit.record !== undefined) {
 			const indexedAt = Math.floor(Date.now() / 1000);
-			db.insert(userRecords)
+			await db
+				.insert(userRecords)
 				.values({
 					did: event.did,
 					collection: commit.collection,
@@ -76,11 +78,10 @@ export function applyJetstreamEvent(db: Db, event: JetstreamEvent): void {
 				.onConflictDoUpdate({
 					target: [userRecords.did, userRecords.collection, userRecords.rkey],
 					set: { cid: commit.cid, record: commit.record, indexedAt },
-				})
-				.run();
+				});
 		}
 	}
-	saveCursor(db, event.time_us);
+	await saveCursor(db, event.time_us);
 }
 
 function buildSubscribeUrl(host: string, cursor: number | undefined): string {
@@ -111,9 +112,9 @@ export function createJetstreamIngestor(db: Db, opts: JetstreamIngestOpts = {}):
 	let backoffMs = MIN_BACKOFF_MS;
 	let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
-	function connect(): void {
+	async function connect(): Promise<void> {
 		if (stopped) return;
-		const cursor = loadCursor(db);
+		const cursor = await loadCursor(db);
 		const url = buildSubscribeUrl(host, cursor);
 		logger.info({ url }, 'jetstream: connecting');
 
@@ -133,11 +134,9 @@ export function createJetstreamIngestor(db: Db, opts: JetstreamIngestOpts = {}):
 				logger.warn({ err }, 'jetstream: malformed event, skipping');
 				return;
 			}
-			try {
-				applyJetstreamEvent(db, event);
-			} catch (err) {
+			void applyJetstreamEvent(db, event).catch((err) => {
 				logger.error({ err, event }, 'jetstream: failed to apply event');
-			}
+			});
 		});
 
 		ws.addEventListener('close', (ev) => {
@@ -164,7 +163,7 @@ export function createJetstreamIngestor(db: Db, opts: JetstreamIngestOpts = {}):
 			if (!stopped) return;
 			stopped = false;
 			backoffMs = MIN_BACKOFF_MS;
-			connect();
+			void connect();
 		},
 		stop() {
 			stopped = true;

@@ -1,5 +1,5 @@
 import { count, eq, isNotNull } from 'drizzle-orm';
-import type { AnySQLiteColumn, AnySQLiteTable } from 'drizzle-orm/sqlite-core';
+import type { AnyPgColumn, AnyPgTable } from 'drizzle-orm/pg-core';
 import { db } from '../db/connection.js';
 import {
 	backfillState,
@@ -38,7 +38,7 @@ interface CatalogRow {
 	}>;
 }
 
-const RELEASE_TABLES: Array<{ label: string; table: AnySQLiteTable; status: AnySQLiteColumn }> = [
+const RELEASE_TABLES: Array<{ label: string; table: AnyPgTable; status: AnyPgColumn }> = [
 	{ label: 'books', table: books, status: books.releaseStatus },
 	{ label: 'works', table: works, status: works.releaseStatus },
 	{ label: 'contributors', table: contributors, status: contributors.releaseStatus },
@@ -46,40 +46,39 @@ const RELEASE_TABLES: Array<{ label: string; table: AnySQLiteTable; status: AnyS
 	{ label: 'contributor roles', table: contributorRoles, status: contributorRoles.releaseStatus },
 ];
 
-export function getCatalogStats(): CatalogStats {
+export async function getCatalogStats(): Promise<CatalogStats> {
 	const catalog: CatalogRow[] = [];
 	for (const { label, table, status } of RELEASE_TABLES) {
-		const total = db.select({ n: count() }).from(table).get()?.n ?? 0;
-		const grouped = db
+		const total = Number((await db.select({ n: count() }).from(table))[0]?.n ?? 0);
+		const grouped = await db
 			.select({ status, n: count() })
 			.from(table)
-			.groupBy(status)
-			.all();
+			.groupBy(status);
 		const byStatus: Record<ReleaseStatus, number> = { staged: 0, released: 0, rejected: 0 };
 		for (const row of grouped) {
-			byStatus[row.status as ReleaseStatus] = row.n;
+			byStatus[row.status as ReleaseStatus] = Number(row.n);
 		}
 		catalog.push({ label, total, byStatus });
 	}
 
-	const formatsTotal = db.select({ n: count() }).from(formats).get()?.n ?? 0;
+	const formatsTotal = Number((await db.select({ n: count() }).from(formats))[0]?.n ?? 0);
 	catalog.push({ label: 'formats', total: formatsTotal });
 
-	const bookContributorsTotal = db.select({ n: count() }).from(bookContributors).get()?.n ?? 0;
+	const bookContributorsTotal = Number((await db.select({ n: count() }).from(bookContributors))[0]?.n ?? 0);
 	catalog.push({ label: 'book contributors', total: bookContributorsTotal });
 
-	const bookCovers = db.select({ n: count() }).from(books).where(isNotNull(books.coverUrl)).get()?.n ?? 0;
+	const bookCovers = Number((await db.select({ n: count() }).from(books).where(isNotNull(books.coverUrl)))[0]?.n ?? 0);
 	const contributorPortraits =
-		db.select({ n: count() }).from(contributors).where(isNotNull(contributors.imageUrl)).get()?.n ?? 0;
+		Number((await db.select({ n: count() }).from(contributors).where(isNotNull(contributors.imageUrl)))[0]?.n ?? 0);
 	for (const row of catalog) {
 		if (row.label === 'books') row.coverCount = bookCovers;
 		if (row.label === 'contributors') row.coverCount = contributorPortraits;
 	}
 
 	const openIssues =
-		db.select({ n: count() }).from(importIssues).where(eq(importIssues.status, 'open')).get()?.n ?? 0;
+		Number((await db.select({ n: count() }).from(importIssues).where(eq(importIssues.status, 'open')))[0]?.n ?? 0);
 
-	const rows = db.select().from(backfillState).orderBy(backfillState.name).all();
+	const rows = await db.select().from(backfillState).orderBy(backfillState.name);
 
 	return {
 		catalog,
@@ -96,10 +95,10 @@ export function getCatalogStats(): CatalogStats {
 }
 
 /** Live stats page; queries the database on every request. */
-export function renderStatsPage(): string {
+export async function renderStatsPage(): Promise<string> {
 	return renderPage('stats', {
 		title: 'Stats',
 		description: 'Live catalog statistics for the Bibliograph AppView database.',
-		stats: getCatalogStats(),
+		stats: await getCatalogStats(),
 	});
 }

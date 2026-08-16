@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { importIssues, type ReleaseStatus } from '../db/schema.js';
 import { resolveIssuesForField } from '../import/issues.js';
 import { entityTable, entityViewName, type ReviewEntityType } from './views.js';
@@ -22,14 +23,14 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /** Open-issue counts per pk, chunked to stay under SQLite's SQL variable limit. */
-function openIssueCounts(
-	db: BetterSQLite3Database,
+async function openIssueCounts(
+	db: NodePgDatabase<typeof schema>,
 	entity: ReviewEntityType,
 	pks: string[],
-): Map<string, number> {
+): Promise<Map<string, number>> {
 	const counts = new Map<string, number>();
 	for (const batch of chunk(pks, SQL_VARIABLE_CHUNK_SIZE)) {
-		const counted = db
+		const counted = await db
 			.select({ entityPk: importIssues.entityPk, c: sql<number>`count(*)` })
 			.from(importIssues)
 			.where(
@@ -39,18 +40,17 @@ function openIssueCounts(
 					inArray(importIssues.entityPk, batch),
 				),
 			)
-			.groupBy(importIssues.entityPk)
-			.all();
+			.groupBy(importIssues.entityPk);
 		for (const row of counted) counts.set(row.entityPk, Number(row.c));
 	}
 	return counts;
 }
 
-export function listForReview(
-	db: BetterSQLite3Database,
+export async function listForReview(
+	db: NodePgDatabase<typeof schema>,
 	entity: ReviewEntityType,
 	opts: { status?: ReleaseStatus } = {},
-): ReviewListRow[] {
+): Promise<ReviewListRow[]> {
 	const view = entityTable[entity];
 	const statusCol = view.releaseStatus as never;
 	const nameCol = (
@@ -63,15 +63,14 @@ export function listForReview(
 	const conds: ReturnType<typeof eq>[] = [];
 	if (opts.status) conds.push(eq(statusCol, opts.status as never));
 
-	const rows = db
+	const rows = (await db
 		.select()
 		.from(view)
 		.where(conds.length ? and(...conds) : undefined)
-		.orderBy(sql`${nameCol} asc`)
-		.all() as Array<Record<string, unknown>>;
+		.orderBy(sql`${nameCol} asc`)) as Array<Record<string, unknown>>;
 
 	const pks = rows.map((r) => String(r.pk));
-	const counts = pks.length > 0 ? openIssueCounts(db, entity, pks) : new Map<string, number>();
+	const counts = pks.length > 0 ? await openIssueCounts(db, entity, pks) : new Map<string, number>();
 
 	return rows.map((r) => ({
 		pk: String(r.pk),
@@ -82,9 +81,10 @@ export function listForReview(
 }
 
 /** Rows with ≥1 open issue, via the per-entity review view. */
-export function listWithIssues(db: BetterSQLite3Database, entity: ReviewEntityType): ReviewListRow[] {
+export async function listWithIssues(db: NodePgDatabase<typeof schema>, entity: ReviewEntityType): Promise<ReviewListRow[]> {
 	const viewName = entityViewName[entity];
-	const rows = db.all(sql`SELECT * FROM ${sql.raw(viewName)} ORDER BY pk`) as Array<Record<string, unknown>>;
+	const result = await db.execute(sql`SELECT * FROM ${sql.raw(viewName)} ORDER BY pk`);
+	const rows = result.rows as Array<Record<string, unknown>>;
 	return rows.map((r) => ({
 		pk: String(r.pk),
 		status: String(r.release_status ?? r.releaseStatus ?? 'staged'),
@@ -107,57 +107,55 @@ function countOpenIssues(raw: unknown): number {
 	return Number(raw ?? 0);
 }
 
-export function showRecord(
-	db: BetterSQLite3Database,
+export async function showRecord(
+	db: NodePgDatabase<typeof schema>,
 	entity: ReviewEntityType,
 	pk: string,
-): Record<string, unknown> | null {
+): Promise<Record<string, unknown> | null> {
 	const view = entityTable[entity];
-	const row = db.select().from(view).where(eq(view.pk as never, pk as never)).get();
+	const row = (await db.select().from(view).where(eq(view.pk as never, pk as never)))[0];
 	if (!row) return null;
 	return row as unknown as Record<string, unknown>;
 }
 
-export function editField(
-	db: BetterSQLite3Database,
+export async function editField(
+	db: NodePgDatabase<typeof schema>,
 	entity: ReviewEntityType,
 	pk: string,
 	field: string,
 	rawValue: string,
-): { field: string; value: string | number | null } {
+): Promise<{ field: string; value: string | number | null }> {
 	if (!(editableFields[entity] as readonly string[]).includes(field)) {
 		throw new Error(`field '${field}' is not editable on '${entity}'`);
 	}
 	const value = coerceValue(entity, field, rawValue);
 	const view = entityTable[entity];
-	const res = db
+	const res = await db
 		.update(view)
 		.set({ [field]: value } as never)
-		.where(eq(view.pk as never, pk as never))
-		.run();
-	if (res.changes === 0) throw new Error(`no ${entity} row with pk '${pk}'`);
-	resolveIssuesForField(db, entity, pk, field);
+		.where(eq(view.pk as never, pk as never));
+	if (res.rowCount === 0) throw new Error(`no ${entity} row with pk '${pk}'`);
+	await resolveIssuesForField(db, entity, pk, field);
 	return { field, value };
 }
 
-export function openIssueCount(db: BetterSQLite3Database, entity: ReviewEntityType, pk: string): number {
-	const row = db
+export async function openIssueCount(db: NodePgDatabase<typeof schema>, entity: ReviewEntityType, pk: string): Promise<number> {
+	const row = (await db
 		.select({ count: sql`count(*)` })
 		.from(importIssues)
-		.where(and(eq(importIssues.entityType, entity), eq(importIssues.entityPk, pk), eq(importIssues.status, 'open')))
-		.get();
+		.where(and(eq(importIssues.entityType, entity), eq(importIssues.entityPk, pk), eq(importIssues.status, 'open'))))[0];
 	return Number(row?.count ?? 0);
 }
 
 /** Staged dependents of a book: work, contributors, genres. */
-export function stagedDependents(db: BetterSQLite3Database, bookPk: string): string[] {
+export async function stagedDependents(db: NodePgDatabase<typeof schema>, bookPk: string): Promise<string[]> {
 	const out: string[] = [];
-	const book = db.select().from(entityTable.book).where(eq(entityTable.book.pk as never, bookPk as never)).get();
+	const book = (await db.select().from(entityTable.book).where(eq(entityTable.book.pk as never, bookPk as never)))[0];
 	if (!book) return out;
 	const b = book as unknown as { workPk?: string | null };
 
 	if (b.workPk) {
-		const w = db
+		const w = (await db
 			.select()
 			.from(entityTable.work)
 			.where(
@@ -165,44 +163,42 @@ export function stagedDependents(db: BetterSQLite3Database, bookPk: string): str
 					eq(entityTable.work.pk as never, b.workPk as never),
 					eq(entityTable.work.releaseStatus as never, 'staged' as never),
 				),
-			)
-			.get();
+			))[0];
 		if (w) out.push(`work ${b.workPk}`);
 	}
-	const contribs = db.all(sql`
+	const contribs = (await db.execute(sql`
     SELECT c.pk FROM book_contributors bc
     JOIN contributors c ON c.pk = bc.contributor_pk
     WHERE bc.book_pk = ${bookPk} AND c.release_status = 'staged'
-  `) as Array<{ pk: string }>;
+  `)).rows as Array<{ pk: string }>;
 	for (const c of contribs) out.push(`contributor ${c.pk}`);
 
-	const genres = db.all(sql`
+	const genres = (await db.execute(sql`
     SELECT g.pk FROM book_genres bg
     JOIN genres g ON g.pk = bg.genre_pk
     WHERE bg.book_pk = ${bookPk} AND g.release_status = 'staged'
-  `) as Array<{ pk: string }>;
+  `)).rows as Array<{ pk: string }>;
 	for (const g of genres) out.push(`genre ${g.pk}`);
 
 	return out;
 }
 
-export function setStatus(
-	db: BetterSQLite3Database,
+export async function setStatus(
+	db: NodePgDatabase<typeof schema>,
 	entity: ReviewEntityType,
 	pk: string,
 	status: 'released' | 'rejected',
-): void {
+): Promise<void> {
 	const view = entityTable[entity];
 	const now = Math.floor(Date.now() / 1000);
-	const res = db
+	const res = await db
 		.update(view)
 		.set({
 			releaseStatus: status,
 			releasedAt: status === 'released' ? now : null,
 		} as never)
-		.where(eq(view.pk as never, pk as never))
-		.run();
-	if (res.changes === 0) throw new Error(`no ${entity} row with pk '${pk}'`);
+		.where(eq(view.pk as never, pk as never));
+	if (res.rowCount === 0) throw new Error(`no ${entity} row with pk '${pk}'`);
 }
 
 export interface ApproveAllOptions {
@@ -225,37 +221,36 @@ export interface ApproveAllResult {
  * open issues unless `keepIssues`. Returns per-entity counts. Bypasses the
  * per-record dependency guard on purpose — the point is bulk release.
  */
-export function approveAll(
-	db: BetterSQLite3Database,
+export async function approveAll(
+	db: NodePgDatabase<typeof schema>,
 	entity: ReviewEntityType,
 	opts: ApproveAllOptions = {},
-): ApproveAllResult {
+): Promise<ApproveAllResult> {
 	const view = entityTable[entity];
 	const now = Math.floor(Date.now() / 1000);
 
-	const staged = (db
+	const staged = (await db
 		.select({ pk: view.pk })
 		.from(view)
-		.where(eq(view.releaseStatus as never, 'staged' as never))
-		.all() as Array<{ pk: string }>)
+		.where(eq(view.releaseStatus as never, 'staged' as never)) as Array<{ pk: string }>)
 		.slice(0, opts.limit);
 	const pks = staged.map((r) => String(r.pk));
 
 	const result: ApproveAllResult = { entity, approved: 0, skippedWithIssues: 0 };
 	if (pks.length === 0) return result;
 
-	const counts = opts.keepIssues ? new Map<string, number>() : openIssueCounts(db, entity, pks);
+	const counts = opts.keepIssues ? new Map<string, number>() : await openIssueCounts(db, entity, pks);
 
 	const toRelease = pks.filter((pk) => opts.keepIssues || (counts.get(pk) ?? 0) === 0);
 	result.skippedWithIssues = pks.length - toRelease.length;
 
 	if (!opts.dryRun && toRelease.length > 0) {
-		db.transaction((tx) => {
+		await db.transaction(async (tx) => {
 			for (const pk of toRelease) {
-				tx.update(view)
+				await tx
+					.update(view)
 					.set({ releaseStatus: 'released', releasedAt: now } as never)
-					.where(eq(view.pk as never, pk as never))
-					.run();
+					.where(eq(view.pk as never, pk as never));
 			}
 		});
 	}
@@ -263,20 +258,18 @@ export function approveAll(
 	return result;
 }
 
-export function resolveIssue(db: BetterSQLite3Database, issuePk: number): void {
-	const res = db
+export async function resolveIssue(db: NodePgDatabase<typeof schema>, issuePk: number): Promise<void> {
+	const res = await db
 		.update(importIssues)
 		.set({ status: 'resolved', resolvedAt: Math.floor(Date.now() / 1000) })
-		.where(eq(importIssues.pk, issuePk))
-		.run();
-	if (res.changes === 0) throw new Error(`no issue with pk '${issuePk}'`);
+		.where(eq(importIssues.pk, issuePk));
+	if (res.rowCount === 0) throw new Error(`no issue with pk '${issuePk}'`);
 }
 
-export function dismissIssue(db: BetterSQLite3Database, issuePk: number): void {
-	const res = db
+export async function dismissIssue(db: NodePgDatabase<typeof schema>, issuePk: number): Promise<void> {
+	const res = await db
 		.update(importIssues)
 		.set({ status: 'dismissed', resolvedAt: Math.floor(Date.now() / 1000) })
-		.where(eq(importIssues.pk, issuePk))
-		.run();
-	if (res.changes === 0) throw new Error(`no issue with pk '${issuePk}'`);
+		.where(eq(importIssues.pk, issuePk));
+	if (res.rowCount === 0) throw new Error(`no issue with pk '${issuePk}'`);
 }

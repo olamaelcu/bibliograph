@@ -1,5 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import * as Lexicons from '../lexicons/index.js';
 import type {
 	ActorView,
@@ -47,7 +48,7 @@ export const COLLECTION = {
 	actor: 'net.olamaelcu.livtet.biblio.actor',
 } as const;
 
-type Db = BetterSQLite3Database;
+type Db = NodePgDatabase<typeof schema>;
 
 export interface ViewContext {
 	serviceDid: string;
@@ -212,49 +213,51 @@ export async function toBookView(
 ): Promise<BookView> {
 	const [workRow, formatRow, genreRows, contributorRows, identifierRows] = await Promise.all([
 		b.workPk
-			? db.select().from(works).where(and(eq(works.pk, b.workPk), releasedFilter(works))).get()
+			? db
+					.select()
+					.from(works)
+					.where(and(eq(works.pk, b.workPk), releasedFilter(works)))
+					.then((rows) => rows[0])
 			: undefined,
-		b.formatPk ? db.select().from(formats).where(eq(formats.pk, b.formatPk)).get() : undefined,
+		b.formatPk
+			? db.select().from(formats).where(eq(formats.pk, b.formatPk)).then((rows) => rows[0])
+			: undefined,
 		(async () => {
 			if (!b.workPk) return [];
-			const joins = db
+			const joins = await db
 				.select({ genre: genres })
 				.from(bookGenres)
 				.innerJoin(genres, eq(bookGenres.genrePk, genres.pk))
-				.where(and(eq(bookGenres.bookPk, b.pk), releasedFilter(genres)))
-				.all();
+				.where(and(eq(bookGenres.bookPk, b.pk), releasedFilter(genres)));
 			return joins.map((j) => j.genre);
 		})(),
 		(async () => {
-			const joins = db
+			const joins = await db
 				.select({ contributor: contributors, role: contributorRoles })
 				.from(bookContributors)
 				.innerJoin(contributors, eq(bookContributors.contributorPk, contributors.pk))
 				.innerJoin(contributorRoles, eq(bookContributors.rolePk, contributorRoles.pk))
-				.where(and(eq(bookContributors.bookPk, b.pk), releasedFilter(contributors as never)))
-				.all();
+				.where(and(eq(bookContributors.bookPk, b.pk), releasedFilter(contributors as never)));
 			return joins;
 		})(),
-		db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, b.pk)).all(),
+		db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, b.pk)),
 	]);
 
 	const [workIds, genreIds, contributorIds] = await Promise.all([
 		b.workPk
-			? db.select().from(workIdentifiers).where(eq(workIdentifiers.workPk, b.workPk)).all()
+			? db.select().from(workIdentifiers).where(eq(workIdentifiers.workPk, b.workPk))
 			: Promise.resolve([]),
 		genreRows.length
 			? db
 					.select()
 					.from(genreIdentifiers)
 					.where(inArray(genreIdentifiers.genrePk, genreRows.map((g) => g.pk)))
-					.all()
 			: Promise.resolve([]),
 		contributorRows.length
 			? db
 					.select()
 					.from(contributorIdentifiers)
 					.where(inArray(contributorIdentifiers.contributorPk, contributorRows.map((c) => c.contributor.pk)))
-					.all()
 			: Promise.resolve([]),
 	]);
 
@@ -314,18 +317,16 @@ export async function toExpandedBook(
 				.from(bookContributors)
 				.innerJoin(contributors, eq(bookContributors.contributorPk, contributors.pk))
 				.innerJoin(contributorRoles, eq(bookContributors.rolePk, contributorRoles.pk))
-				.where(and(eq(bookContributors.bookPk, row.pk), releasedFilter(contributors as never)))
-				.all();
+				.where(and(eq(bookContributors.bookPk, row.pk), releasedFilter(contributors as never)));
 		})(),
-		db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, row.pk)).all(),
+		db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, row.pk)),
 	]);
 
 	const contributorIds = contributorRows.length
-		? db
+		? await db
 				.select()
 				.from(contributorIdentifiers)
 				.where(inArray(contributorIdentifiers.contributorPk, contributorRows.map((c) => c.contributor.pk)))
-				.all()
 		: [];
 	const idByContributor = new Map<string, IdentifierRow[]>();
 	for (const id of contributorIds) {
@@ -376,7 +377,7 @@ async function toProgressView(
 	const p = progress as { format?: unknown; progress?: number; unit?: string };
 	if (typeof p.format !== 'string') return undefined;
 	const formatPk = rkeyFromAtUri(p.format, COLLECTION.format);
-	const formatRow = formatPk ? db.select().from(formats).where(eq(formats.pk, formatPk)).get() : undefined;
+	const formatRow = formatPk ? (await db.select().from(formats).where(eq(formats.pk, formatPk)))[0] : undefined;
 	if (!formatRow) return undefined;
 
 	return {

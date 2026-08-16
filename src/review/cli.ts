@@ -44,14 +44,14 @@ async function main(): Promise<void> {
     const status = args.get('status');
     const issuesOnly = args.get('issues') === 'true';
     const rows = issuesOnly
-      ? listWithIssues(db, entity)
-      : listForReview(db, entity, status ? { status: status as ReleaseStatus } : {});
+      ? await listWithIssues(db, entity)
+      : await listForReview(db, entity, status ? { status: status as ReleaseStatus } : {});
     printTable(rows as unknown as Array<Record<string, unknown>>);
   } else if (cmd === 'show') {
     const entity = parseEntity(rest[0]);
     const pk = rest[1];
     if (!pk) throw new Error('show requires <entity> <pk>');
-    const row = showRecord(db, entity, pk);
+    const row = await showRecord(db, entity, pk);
     if (!row) throw new Error(`not found: ${entity} ${pk}`);
     console.log(JSON.stringify(row, null, 2));
   } else if (cmd === 'edit') {
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     const field = args.get('field');
     const value = args.get('value');
     if (!field || value === undefined) throw new Error('edit requires --field=NAME --value=VALUE');
-    const res = editField(db, entity, pk, field, value);
+    const res = await editField(db, entity, pk, field, value);
     logger.info({ entity, pk, ...res }, 'field edited');
   } else if (cmd === 'approve') {
     const entity = parseEntity(rest[0]);
@@ -73,17 +73,17 @@ async function main(): Promise<void> {
     const keepIssues = rest.includes('--keep-issues');
     const yes = rest.includes('--yes');
 
-    const open = openIssueCount(db, entity, pk);
+    const open = await openIssueCount(db, entity, pk);
     if (open > 0 && !keepIssues) {
       throw new Error(`${entity} ${pk} has ${open} open issue(s); use --keep-issues to override`);
     }
     if (entity === 'book') {
-      const deps = stagedDependents(db, pk);
+      const deps = await stagedDependents(db, pk);
       if (deps.length > 0 && !yes) {
         throw new Error(`staged dependents: ${deps.join(', ')}; use --yes to approve anyway`);
       }
     }
-    setStatus(db, entity, pk, 'released');
+    await setStatus(db, entity, pk, 'released');
     logger.info({ entity, pk }, 'released');
   } else if (cmd === 'approve-all') {
     const keepIssues = rest.includes('--keep-issues');
@@ -93,11 +93,11 @@ async function main(): Promise<void> {
     if (limitArg && Number.isNaN(limit)) throw new Error(`invalid --limit value`);
     const entities = (rest.filter((a) => !a.startsWith('--')) as string[])
       .map(parseEntity);
-    if (entities.length === 0) entities.push('book', 'contributor');
+    if (entities.length === 0) entities.push('book', 'work', 'contributor', 'genre', 'contributorRole');
 
-    const results = entities.map((entity) =>
+    const results = await Promise.all(entities.map((entity) =>
       approveAll(db, entity, { keepIssues, limit, dryRun: !yes }),
-    );
+    ));
     for (const r of results) {
       logger.info(
         { entity: r.entity, approved: r.approved, skippedWithIssues: r.skippedWithIssues, dryRun: !yes },
@@ -110,22 +110,21 @@ async function main(): Promise<void> {
   } else if (cmd === 'reject') {
     const entity = parseEntity(rest[0]);
     const pk = rest[1];
-    setStatus(db, entity, pk, 'rejected');
+    await setStatus(db, entity, pk, 'rejected');
     logger.info({ entity, pk }, 'rejected');
   } else if (cmd === 'issue') {
     const sub = rest[0];
     const issuePk = Number(rest[1]);
     if (sub === 'resolve') {
-      resolveIssue(db, issuePk);
+      await resolveIssue(db, issuePk);
       logger.info({ issuePk }, 'issue resolved');
     } else if (sub === 'dismiss') {
-      dismissIssue(db, issuePk);
+      await dismissIssue(db, issuePk);
       logger.info({ issuePk }, 'issue dismissed');
     } else {
       const entity = parseEntity(rest[1]);
       const pk = rest[2];
-      const rows = db
-        .select()
+      const rows = await db.select()
         .from(importIssues)
         .where(
           and(
@@ -133,8 +132,7 @@ async function main(): Promise<void> {
             eq(importIssues.entityPk, pk),
             eq(importIssues.status, 'open'),
           ),
-        )
-        .all();
+        );
       printTable(rows as unknown as Array<Record<string, unknown>>);
     }
   } else {

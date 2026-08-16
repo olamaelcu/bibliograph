@@ -1,17 +1,18 @@
 import type { Hono } from 'hono';
 import type { Context } from 'hono';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { and, eq } from 'drizzle-orm';
 import { books, catalogBlobs, contributors } from '../db/schema.js';
 
 export function registerBlobProxy(
 	app: Hono,
-	db: BetterSQLite3Database,
+	db: NodePgDatabase<typeof schema>,
 	store: { get: (key: string) => Promise<Uint8Array> },
 ) {
 	app.get('/catalog-blobs/*', async (c: Context) => {
 		const key = c.req.path.replace(/^\/catalog-blobs\//, '');
-		const row = db.select().from(catalogBlobs).where(eq(catalogBlobs.objectKey, key)).get();
+		const row = (await db.select().from(catalogBlobs).where(eq(catalogBlobs.objectKey, key)))[0];
 		if (!row) return c.json({ error: 'NotFound' }, 404);
 
 		// Only books and contributors own blobs; anything else is a 404.
@@ -21,16 +22,17 @@ export function registerBlobProxy(
 
 		// Release gate: entity must be released.
 		const entityTable = row.entityType === 'book' ? books : contributors;
-		const entity = db
-			.select()
-			.from(entityTable)
-			.where(
-				and(
-					eq(entityTable.pk as never, row.entityPk as never),
-					eq(entityTable.releaseStatus as never, 'released' as never),
-				),
-			)
-			.get();
+		const entity = (
+			await db
+				.select()
+				.from(entityTable)
+				.where(
+					and(
+						eq(entityTable.pk as never, row.entityPk as never),
+						eq(entityTable.releaseStatus as never, 'released' as never),
+					),
+				)
+		)[0];
 		if (!entity) return c.json({ error: 'NotFound' }, 404);
 
 		try {

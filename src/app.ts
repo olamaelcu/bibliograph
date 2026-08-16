@@ -88,7 +88,7 @@ export function createApp(): Hono {
 			}),
 		),
 	);
-	app.get('/stats', (ctx) => ctx.html(renderStatsPage()));
+	app.get('/stats', async (ctx) => ctx.html(await renderStatsPage()));
 	app.get('/search', (ctx) =>
 		ctx.html(
 			renderPage('search', {
@@ -97,9 +97,9 @@ export function createApp(): Hono {
 			}),
 		),
 	);
-	app.get('/stats.json', (ctx) => {
+	app.get('/stats.json', async (ctx) => {
 		ctx.header('Cache-Control', 'no-store');
-		return ctx.json(getCatalogStats());
+		return ctx.json(await getCatalogStats());
 	});
 	app.get('/health', healthCheck);
 	app.get('/.well-known/did.json', didDocumentHandler);

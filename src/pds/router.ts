@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import {
 	XRPCRouter,
 	json,
@@ -26,7 +27,7 @@ import { contributors, contributorRoles, formats, genres, works, books } from '.
 import { releasedFilter } from '../xrpc/gate.js';
 import type { ViewContext } from '../xrpc/views.js';
 
-type Db = BetterSQLite3Database;
+type Db = NodePgDatabase<typeof schema>;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -85,10 +86,10 @@ export function registerPdsHandlers(router: XRPCRouter, db: Db, ctx: ViewContext
 				errorRecordNotFound(`record not found: ${params.repo}/${params.collection}/${rkey}`);
 			}
 
-			let cid = loadCid(db, params.collection, rkey);
+			let cid = await loadCid(db, params.collection, rkey);
 			if (!cid) {
 				cid = await cidForRecord(value!);
-				persistCid(db, params.collection, rkey, cid);
+				await persistCid(db, params.collection, rkey, cid);
 			}
 
 			if (params.cid && params.cid !== cid) {
@@ -131,10 +132,10 @@ export function registerPdsHandlers(router: XRPCRouter, db: Db, ctx: ViewContext
 			for (const pk of page) {
 				const value = await loadRecord(db, ctx, params.collection, pk);
 				if (!value) continue;
-				let cid = loadCid(db, params.collection, pk);
+				let cid = await loadCid(db, params.collection, pk);
 				if (!cid) {
 					cid = await cidForRecord(value);
-					persistCid(db, params.collection, pk, cid);
+					await persistCid(db, params.collection, pk, cid);
 				}
 				out.push({
 					uri: recordKeyUri(ctx.serviceDid, params.collection, pk) as ComAtprotoRepoListRecords.$output['records'][number]['uri'],
@@ -201,11 +202,10 @@ async function listPage(
 	if ('releaseStatus' in t) {
 		conds.push(releasedFilter(t));
 	}
-	const rows = base
+	const rows = await base
 		.where(conds.length ? and(...conds) : undefined)
 		.orderBy(reverse ? sql`${t.pk} DESC` : sql`${t.pk} ASC`)
-		.limit(limit + 1)
-		.all();
+		.limit(limit + 1);
 	return rows.map((r) => r.pk);
 }
 

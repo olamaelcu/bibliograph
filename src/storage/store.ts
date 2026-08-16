@@ -1,6 +1,7 @@
 import { Operator } from 'opendal';
 import { createHash } from 'node:crypto';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { eq } from 'drizzle-orm';
 import { catalogBlobs } from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -41,7 +42,7 @@ export class BlobStore {
 	private op: Operator;
 
 	constructor(
-		private readonly db: BetterSQLite3Database,
+		private readonly db: NodePgDatabase<typeof schema>,
 		private readonly cfg: BlobStoreConfig,
 	) {
 		// The s3 operator throws ConfigInvalid at construction if the bucket is missing, so
@@ -81,7 +82,7 @@ export class BlobStore {
 		await this.op.write(objectKey, Buffer.from(opts.bytes));
 
 		const now = Math.floor(Date.now() / 1000);
-		this.db
+		await this.db
 			.insert(catalogBlobs)
 			.values({
 				pk,
@@ -104,8 +105,7 @@ export class BlobStore {
 					objectKey,
 					source: opts.source,
 				},
-			})
-			.run();
+			});
 
 		return {
 			pk,
@@ -130,13 +130,12 @@ export class BlobStore {
 	}
 
 	async delete(entityType: string, entityPk: string, kind: string): Promise<void> {
-		const row = this.db
+		const row = (await this.db
 			.select()
 			.from(catalogBlobs)
-			.where(eq(catalogBlobs.pk, `${entityType}:${entityPk}:${kind}`))
-			.get();
+			.where(eq(catalogBlobs.pk, `${entityType}:${entityPk}:${kind}`)))[0];
 		if (!row) return;
 		await this.op.delete(row.objectKey);
-		this.db.delete(catalogBlobs).where(eq(catalogBlobs.pk, row.pk)).run();
+		await this.db.delete(catalogBlobs).where(eq(catalogBlobs.pk, row.pk));
 	}
 }

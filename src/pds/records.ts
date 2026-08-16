@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import type * as Lexicons from '../lexicons/index.js';
 
 type Book = Lexicons.NetOlamaelcuLivtetBiblioBook.Main;
@@ -39,7 +40,7 @@ export function isOwnedCollection(value: string): value is OwnedCollection {
 	return Object.values(COLLECTIONS).includes(value as OwnedCollection);
 }
 
-type Db = BetterSQLite3Database;
+type Db = NodePgDatabase<typeof schema>;
 
 export interface RecordWithCid {
 	cid: string;
@@ -245,17 +246,17 @@ export interface PdsContext {
 }
 
 async function loadIdentifiers(db: Db, table: any, pkCol: any, pk: string): Promise<IdentifierRow[]> {
-	const rows = db.select().from(table).where(eq(pkCol, pk)).all() as IdentifierRow[];
+	const rows = (await db.select().from(table).where(eq(pkCol, pk))) as IdentifierRow[];
 	return rows;
 }
 
 export async function hydrateFormat(db: Db, pk: string) {
-	const row = db.select().from(formats).where(eq(formats.pk, pk)).get();
+	const row = (await db.select().from(formats).where(eq(formats.pk, pk)))[0];
 	return row ? serializeFormat(row) : undefined;
 }
 
 export async function hydrateWork(db: Db, pk: string): Promise<Work | undefined> {
-	const row = db.select().from(works).where(and(eq(works.pk, pk), releasedFilter(works))).get();
+	const row = (await db.select().from(works).where(and(eq(works.pk, pk), releasedFilter(works))))[0];
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, workIdentifiers, workIdentifiers.workPk, pk);
 	return serializeWork(row, identifiers);
@@ -266,7 +267,7 @@ export async function hydrateGenre(
 	ctx: PdsContext,
 	pk: string,
 ): Promise<Genre | undefined> {
-	const row = db.select().from(genres).where(and(eq(genres.pk, pk), releasedFilter(genres))).get();
+	const row = (await db.select().from(genres).where(and(eq(genres.pk, pk), releasedFilter(genres))))[0];
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, genreIdentifiers, genreIdentifiers.genrePk, pk);
 	return serializeGenre(ctx, row, identifiers);
@@ -276,19 +277,19 @@ export async function hydrateContributor(
 	db: Db,
 	pk: string,
 ): Promise<Contributor | undefined> {
-	const row = db.select().from(contributors).where(and(eq(contributors.pk, pk), releasedFilter(contributors))).get();
+	const row = (await db.select().from(contributors).where(and(eq(contributors.pk, pk), releasedFilter(contributors))))[0];
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, contributorIdentifiers, contributorIdentifiers.contributorPk, pk);
 	return serializeContributor(row, identifiers);
 }
 
 export async function hydrateContributorRole(db: Db, pk: string) {
-	const row = db.select().from(contributorRoles).where(and(eq(contributorRoles.pk, pk), releasedFilter(contributorRoles))).get();
+	const row = (await db.select().from(contributorRoles).where(and(eq(contributorRoles.pk, pk), releasedFilter(contributorRoles))))[0];
 	return row ? serializeContributorRole(row) : undefined;
 }
 
 export async function hydrateBook(db: Db, ctx: PdsContext, pk: string): Promise<Book | undefined> {
-	const row = db.select().from(books).where(and(eq(books.pk, pk), releasedFilter(books))).get();
+	const row = (await db.select().from(books).where(and(eq(books.pk, pk), releasedFilter(books))))[0];
 	if (!row) return undefined;
 
 	const [genreRows, identifierRows] = await Promise.all([
@@ -296,17 +297,21 @@ export async function hydrateBook(db: Db, ctx: PdsContext, pk: string): Promise<
 			.select({ genre: genres })
 			.from(bookGenres)
 			.innerJoin(genres, eq(bookGenres.genrePk, genres.pk))
-			.where(eq(bookGenres.bookPk, pk))
-			.all(),
+			.where(eq(bookGenres.bookPk, pk)),
 		loadIdentifiers(db, bookIdentifiers, bookIdentifiers.bookPk, pk),
 	]);
 
+	const work = row.workPk
+		? (await db.select().from(works).where(eq(works.pk, row.workPk)))[0]
+		: undefined;
+	const format = row.formatPk
+		? (await db.select().from(formats).where(eq(formats.pk, row.formatPk)))[0]
+		: undefined;
+
 	return serializeBook(row, {
 		serviceDid: ctx.serviceDid,
-		work: row.workPk ? (db.select().from(works).where(eq(works.pk, row.workPk)).get() ?? undefined) : undefined,
-		format: row.formatPk
-			? (db.select().from(formats).where(eq(formats.pk, row.formatPk)).get() ?? undefined)
-			: undefined,
+		work,
+		format,
 		genres: genreRows.map((j) => j.genre),
 		identifiers: identifierRows,
 	});
@@ -337,20 +342,20 @@ export async function loadRecord(
 }
 
 /** Load a stored CID for a record, if one has been persisted. */
-export function loadCid(db: Db, collection: OwnedCollection, pk: string): string | undefined {
+export async function loadCid(db: Db, collection: OwnedCollection, pk: string): Promise<string | undefined> {
 	const table = tableFor(collection);
-	const row = db.select({ cid: table.cid }).from(table).where(eq(table.pk, pk)).get();
+	const row = (await db.select({ cid: table.cid }).from(table).where(eq(table.pk, pk)))[0];
 	return row?.cid || undefined;
 }
 
-export function persistCid(
+export async function persistCid(
 	db: Db,
 	collection: OwnedCollection,
 	pk: string,
 	cid: string,
-): void {
+): Promise<void> {
 	const table = tableFor(collection);
-	db.update(table).set({ cid }).where(eq(table.pk, pk)).run();
+	await db.update(table).set({ cid }).where(eq(table.pk, pk));
 }
 
 function tableFor(collection: OwnedCollection) {

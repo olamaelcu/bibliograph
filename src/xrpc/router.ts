@@ -1,5 +1,6 @@
 import { and, eq, inArray, like, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type * as schema from '../db/schema.js';
 import { XRPCRouter, json, InvalidRequestError, XRPCError } from '@atcute/xrpc-server';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
@@ -45,7 +46,7 @@ import type {
 } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
 import { logger } from '../logger.js';
 
-type Db = BetterSQLite3Database;
+type Db = NodePgDatabase<typeof schema>;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -128,11 +129,7 @@ async function hydrateBook(
 ): Promise<BookView | undefined> {
   const rkey = bookRkeyFromRef(ref);
   if (!rkey) return undefined;
-  const row = db
-    .select()
-    .from(books)
-    .where(and(eq(books.pk, rkey), releasedFilter(books)))
-    .get();
+  const row = (await db.select().from(books).where(and(eq(books.pk, rkey), releasedFilter(books))))[0];
   return row ? toBookView(db, ctx, row) : undefined;
 }
 
@@ -187,11 +184,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const rkey = rkeyFromUri(ctx, COLLECTION.book, params.uri);
-      const row = db
-        .select()
-        .from(books)
-        .where(and(eq(books.pk, rkey), releasedFilter(books)))
-        .get();
+      const row = (await db.select().from(books).where(and(eq(books.pk, rkey), releasedFilter(books))))[0];
       if (!row) notFound();
       return json({ book: await toBookView(db, ctx, row!) });
     },
@@ -202,17 +195,12 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const rkey = rkeyFromUri(ctx, COLLECTION.work, params.uri);
-      const row = db
-        .select()
-        .from(works)
-        .where(and(eq(works.pk, rkey), releasedFilter(works)))
-        .get();
+      const row = (await db.select().from(works).where(and(eq(works.pk, rkey), releasedFilter(works))))[0];
       if (!row) notFound();
-      const identifiers = db
+      const identifiers = await db
         .select()
         .from(workIdentifiers)
-        .where(eq(workIdentifiers.workPk, rkey))
-        .all();
+        .where(eq(workIdentifiers.workPk, rkey));
       return json({ work: toWorkView(ctx, row!, identifiers) });
     },
   });
@@ -222,17 +210,12 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const rkey = rkeyFromUri(ctx, COLLECTION.contributor, params.uri);
-      const row = db
-        .select()
-        .from(contributors)
-        .where(and(eq(contributors.pk, rkey), releasedFilter(contributors)))
-        .get();
+      const row = (await db.select().from(contributors).where(and(eq(contributors.pk, rkey), releasedFilter(contributors))))[0];
       if (!row) notFound();
-      const identifiers = db
+      const identifiers = await db
         .select()
         .from(contributorIdentifiers)
-        .where(eq(contributorIdentifiers.contributorPk, rkey))
-        .all();
+        .where(eq(contributorIdentifiers.contributorPk, rkey));
       return json({ contributor: toContributorView(ctx, row!, identifiers) });
     },
   });
@@ -243,7 +226,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       void session;
       const parsed = parseRecordUri(params.uri);
       requireCollection(parsed, COLLECTION.review);
-      const rec = getUserRecord(db, parsed.did, COLLECTION.review, parsed.rkey);
+      const rec = await getUserRecord(db, parsed.did, COLLECTION.review, parsed.rkey);
       if (!rec) notFound();
       const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioReview.Main;
       const book = await hydrateBook(db, ctx, value.book?.ref);
@@ -258,7 +241,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       void session;
       const parsed = parseRecordUri(params.uri);
       requireCollection(parsed, COLLECTION.shelf);
-      const rec = getUserRecord(db, parsed.did, COLLECTION.shelf, parsed.rkey);
+      const rec = await getUserRecord(db, parsed.did, COLLECTION.shelf, parsed.rkey);
       if (!rec) notFound();
       return json({ shelf: toShelfView(rec) });
     },
@@ -269,17 +252,12 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const rkey = rkeyFromUri(ctx, COLLECTION.genre, params.uri);
-      const row = db
-        .select()
-        .from(genres)
-        .where(and(eq(genres.pk, rkey), releasedFilter(genres)))
-        .get();
+      const row = (await db.select().from(genres).where(and(eq(genres.pk, rkey), releasedFilter(genres))))[0];
       if (!row) notFound();
-      const identifiers = db
+      const identifiers = await db
         .select()
         .from(genreIdentifiers)
-        .where(eq(genreIdentifiers.genrePk, rkey))
-        .all();
+        .where(eq(genreIdentifiers.genrePk, rkey));
       return json({ genre: toGenreView(ctx, row!, identifiers) });
     },
   });
@@ -307,13 +285,12 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         filters.push(eq(books.formatPk, formatPk));
       }
       const where = filters.length ? and(...filters) : undefined;
-      const rows = db
+      const rows = await db
         .select()
         .from(books)
         .where(and(where, cursorAfter(books.title, books.pk, params.cursor)))
         .orderBy(sql`${books.title} asc, ${books.pk} asc`)
-        .limit(limit + 1)
-        .all();
+        .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
       const views = [];
@@ -331,14 +308,10 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const bookPk = rkeyFromUri(ctx, COLLECTION.book, params.book);
-      const bookRow = db
-        .select()
-        .from(books)
-        .where(and(eq(books.pk, bookPk), releasedFilter(books)))
-        .get();
+      const bookRow = (await db.select().from(books).where(and(eq(books.pk, bookPk), releasedFilter(books))))[0];
       if (!bookRow) notFound();
       const limit = clampLimit(params.limit);
-      const records = listByCollection(db, COLLECTION.review);
+      const records = await listByCollection(db, COLLECTION.review);
       const book = await toBookView(db, ctx, bookRow);
       const reviews: ReviewView[] = [];
       for (const rec of records) {
@@ -357,7 +330,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const limit = clampLimit(params.limit);
-      const records = listByCollection(db, COLLECTION.shelf);
+      const records = await listByCollection(db, COLLECTION.shelf);
       const shelves = records.map((rec) => toShelfView(rec));
       const { page, cursor } = paginate(shelves, limit, params.cursor);
       return json({ shelves: page, cursor });
@@ -370,13 +343,13 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       void session;
       const parsed = parseRecordUri(params.uri);
       requireCollection(parsed, COLLECTION.bookShelf);
-      const rec = getUserRecord(db, parsed.did, COLLECTION.bookShelf, parsed.rkey);
+      const rec = await getUserRecord(db, parsed.did, COLLECTION.bookShelf, parsed.rkey);
       if (!rec) notFound();
       const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main;
       const book = await hydrateBook(db, ctx, value.book?.ref);
       if (!book) notFound();
       const shelfParsed = parseRecordUri(String(value.shelf));
-      const shelfRec = getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
+      const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
       if (!shelfRec) notFound();
       return json({ bookShelf: toBookShelfView(rec, parsed.did, toShelfView(shelfRec), book) });
     },
@@ -387,8 +360,8 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const limit = clampLimit(params.limit);
-      const shelfRecords = listByCollection(db, COLLECTION.shelf);
-      const shelvingRecords = listByCollection(db, COLLECTION.bookShelf);
+      const shelfRecords = await listByCollection(db, COLLECTION.shelf);
+      const shelvingRecords = await listByCollection(db, COLLECTION.bookShelf);
       const shelves = shelfIndex(shelfRecords);
       const views: BookShelfView[] = [];
       for (const rec of shelvingRecords) {
@@ -411,8 +384,8 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const limit = clampLimit(params.limit);
-      const shelfRecords = listByCollection(db, COLLECTION.shelf);
-      const shelvingRecords = listByCollection(db, COLLECTION.bookShelf);
+      const shelfRecords = await listByCollection(db, COLLECTION.shelf);
+      const shelvingRecords = await listByCollection(db, COLLECTION.bookShelf);
       const shelves = shelfIndex(shelfRecords);
       const filtered = shelvingRecords
         .filter((rec) => String((rec.value as Lexicons.NetOlamaelcuLivtetBiblioBookShelving.Main).shelf) === params.shelf)
@@ -437,8 +410,8 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const session = await authenticateOptional(request);
       void session;
       const limit = clampLimit(params.limit);
-      const shelfRecords = listByCollection(db, COLLECTION.shelf);
-      const shelvingRecords = listByCollection(db, COLLECTION.bookShelf);
+      const shelfRecords = await listByCollection(db, COLLECTION.shelf);
+      const shelvingRecords = await listByCollection(db, COLLECTION.bookShelf);
       const shelves = shelfIndex(shelfRecords);
       const shelvingsByShelf = new Map<string, PdsRecord[]>();
       for (const rec of shelvingRecords) {
@@ -473,22 +446,20 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const limit = clampLimit(params.limit);
       const conds = [releasedFilter(genres)];
       if (params.topLevelOnly) conds.push(sql`${genres.parentPk} is null`);
-      const rows = db
+      const rows = await db
         .select()
         .from(genres)
         .where(and(...conds, cursorAfter(genres.name, genres.pk, params.cursor)))
         .orderBy(sql`${genres.name} asc, ${genres.pk} asc`)
-        .limit(limit + 1)
-        .all();
+        .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
       const pks = page.map((g) => g.pk);
       const idRows: { genrePk: string; resource: string; url: string }[] = pks.length
-        ? db
+        ? await db
           .select()
           .from(genreIdentifiers)
           .where(inArray(genreIdentifiers.genrePk, pks))
-          .all()
         : [];
       const idByGenre = new Map<string, { genrePk: string; resource: string; url: string }[]>();
       for (const row of idRows) {
@@ -524,18 +495,17 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
           sql`${books.pk} in (${idSub})`,
         ),
       );
-      const rows = db
+      const rows = await db
         .select()
         .from(books)
         .where(and(where, cursorAfter(books.title, books.pk, params.cursor)))
         .orderBy(sql`${books.title} asc, ${books.pk} asc`)
-        .limit(limit + 1)
-        .all();
+        .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
       const views = [];
       for (const row of page) views.push(await toBookView(db, ctx, row));
-      const hitsTotal = db.select({ count: sql`count(*)` }).from(books).where(where).get();
+      const hitsTotal = (await db.select({ count: sql`count(*)` }).from(books).where(where))[0];
       const last = page.at(-1);
       const hitsTotalCount = Number(hitsTotal?.count ?? 0);
       const cursor = hasMore && last ? encodeCursor({ key: last.title, pk: last.pk }) : undefined;
@@ -569,22 +539,20 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         filters.push(sql`${contributors.pk} in (${sub})`);
       }
       const where = and(...filters);
-      const rows = db
+      const rows = await db
         .select()
         .from(contributors)
         .where(and(where, cursorAfter(contributors.name, contributors.pk, params.cursor)))
         .orderBy(sql`${contributors.name} asc, ${contributors.pk} asc`)
-        .limit(limit + 1)
-        .all();
+        .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
       const pks = page.map((a) => a.pk);
       const idRows: { contributorPk: string; resource: string; url: string }[] = pks.length
-        ? db
+        ? await db
           .select()
           .from(contributorIdentifiers)
           .where(inArray(contributorIdentifiers.contributorPk, pks))
-          .all()
         : [];
       const idByContributor = new Map<string, { contributorPk: string; resource: string; url: string }[]>();
       for (const row of idRows) {
@@ -592,7 +560,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         list.push(row);
         idByContributor.set(row.contributorPk, list);
       }
-      const hitsTotal = db.select({ count: sql`count(*)` }).from(contributors).where(where).get();
+      const hitsTotal = (await db.select({ count: sql`count(*)` }).from(contributors).where(where))[0];
       const last = page.at(-1);
       return json({
         contributors: page.map((a) => toContributorView(ctx, a, idByContributor.get(a.pk) ?? [])),
@@ -609,7 +577,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const q = (params.q ?? '').trim();
       const term = q.toLowerCase();
       const limit = clampLimit(params.limit);
-      const records = listByCollection(db, COLLECTION.review);
+      const records = await listByCollection(db, COLLECTION.review);
       const matched: ReviewView[] = [];
       for (const rec of records) {
         const value = rec.value as Lexicons.NetOlamaelcuLivtetBiblioReview.Main;
@@ -647,22 +615,20 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
           sql`${works.pk} in (${idSub})`,
         ),
       );
-      const rows = db
+      const rows = await db
         .select()
         .from(works)
         .where(and(where, cursorAfter(works.title, works.pk, params.cursor)))
         .orderBy(sql`${works.title} asc, ${works.pk} asc`)
-        .limit(limit + 1)
-        .all();
+        .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
       const pks = page.map((w) => w.pk);
       const idRows: { workPk: string; resource: string; url: string }[] = pks.length
-        ? db
+        ? await db
           .select()
           .from(workIdentifiers)
           .where(inArray(workIdentifiers.workPk, pks))
-          .all()
         : [];
       const idByWork = new Map<string, { workPk: string; resource: string; url: string }[]>();
       for (const row of idRows) {
@@ -670,7 +636,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         list.push(row);
         idByWork.set(row.workPk, list);
       }
-      const hitsTotal = db.select({ count: sql`count(*)` }).from(works).where(where).get();
+      const hitsTotal = (await db.select({ count: sql`count(*)` }).from(works).where(where))[0];
       const last = page.at(-1);
       return json({
         works: page.map((w) => toWorkView(ctx, w, idByWork.get(w.pk) ?? [])),
@@ -684,7 +650,7 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
     async handler({ params, request }) {
       const session = await authenticateOptional(request);
       void session;
-      const rec = getUserRecord(db, params.actor, COLLECTION.actor, 'self');
+      const rec = await getUserRecord(db, params.actor, COLLECTION.actor, 'self');
       return json({ actor: toActorView(rec, { did: params.actor }) });
     },
   });
