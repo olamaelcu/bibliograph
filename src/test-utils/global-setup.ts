@@ -1,23 +1,20 @@
-// Runs once in the main vitest process, before any test file. The app-level
-// connection (src/db/connection.ts) opens DB_PATH unmigrated at import time,
-// but production runs the migrator before serving (src/index.ts). Mirror
-// that here so routes that read tables (e.g. /stats) work under test.
-//
-// The path is forced unconditionally: the ambient shell env (mise) exports
-// DB_PATH=data/bibliograph.sqlite, which must NEVER be migrated or deleted by
-// the test suite. The scratch test DB is a shared on-disk file, so start it
-// clean and migrate exactly once up front (a stale WAL from an aborted run
-// leaves a lock bit).
-import { rmSync } from 'node:fs';
+// Runs once in the main vitest process, before any test file. Test databases
+// are created lazily per worker in src/test-utils/db.ts (bibliograph_test_<pid>),
+// so this setup only has to verify the local Postgres is reachable. The test
+// toolchain never touches a real database: each worker CREATE DATABASEs its own
+// throwaway DB from the DATABASE_URL credentials and drops nothing on exit.
+import { Client } from 'pg';
 
-const TEST_DB_PATH = 'data/test.sqlite';
+const DEFAULT_URL = 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph_test';
 
 export default async function globalSetup(): Promise<void> {
-	process.env.DB_PATH = TEST_DB_PATH;
-	rmSync(TEST_DB_PATH, { force: true });
-	rmSync(`${TEST_DB_PATH}-wal`, { force: true });
-	rmSync(`${TEST_DB_PATH}-shm`, { force: true });
-	const { migrate } = await import('drizzle-orm/better-sqlite3/migrator');
-	const { db } = await import('../db/connection.js');
-	migrate(db, { migrationsFolder: 'drizzle' });
+	const connectionString = process.env.DATABASE_URL ?? DEFAULT_URL;
+	const adminUrl = new URL(connectionString);
+	adminUrl.pathname = '/postgres';
+	const client = new Client({ connectionString: adminUrl.toString() });
+	try {
+		await client.connect();
+	} finally {
+		await client.end();
+	}
 }

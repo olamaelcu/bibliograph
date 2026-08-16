@@ -1,6 +1,8 @@
-import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { sql } from 'drizzle-orm';
+import { Client, Pool } from 'pg';
+import * as schema from '../db/schema.js';
 import {
 	contributors,
 	contributorIdentifiers,
@@ -36,20 +38,89 @@ export function uri(collection: string, pk: string): string {
 }
 
 export interface TestDb {
-	db: ReturnType<typeof drizzle>;
-	sqlite: Database.Database;
-	seed: () => void;
+	db: NodePgDatabase<typeof schema>;
+	seed: () => Promise<void>;
+	reset: () => Promise<void>;
+	close: () => Promise<void>;
 }
 
-export function createTestDb(): TestDb {
-	const sqlite = new Database(':memory:');
-	sqlite.pragma('foreign_keys = ON');
-	const db = drizzle(sqlite);
-	migrate(db, { migrationsFolder: 'drizzle' });
-	return { db, sqlite, seed: () => seed(db) };
+type Database = NodePgDatabase<typeof schema>;
+
+/**
+ * Vitest's forks pool runs one process per test file, so a database named after
+ * the worker pid gives cross-file isolation with no coordination: each file
+ * CREATE DATABASEs its own throwaway `bibliograph_test_<pid>` on first use,
+ * runs migrations once per process, and truncates between tests within the
+ * file. The DATABASE_URL host/port/credentials are reused as-is; only the
+ * database name is swapped, so tests can run against the docker-compose
+ * Postgres unchanged.
+ */
+const TEST_DB_CACHE = new Map<string, TestDb>();
+
+export async function createTestDb(): Promise<TestDb> {
+	const baseUrl = new URL(process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph_test');
+	const dbName = `bibliograph_test_${process.pid}`;
+	let testDb = TEST_DB_CACHE.get(dbName);
+	if (!testDb) {
+		await ensureDatabase(baseUrl, dbName);
+
+		const url = new URL(baseUrl);
+		url.pathname = `/${dbName}`;
+		const pool = new Pool({ connectionString: url.toString(), max: 1 });
+		const db = drizzle(pool, { schema });
+		await migrate(db, { migrationsFolder: 'drizzle' });
+
+		testDb = {
+			db,
+			seed: async () => {
+				await seed(db);
+			},
+			reset: async () => {
+				await truncateAll(db);
+			},
+			close: async () => {
+				await pool.end();
+			},
+		};
+		TEST_DB_CACHE.set(dbName, testDb);
+	}
+	// The cached handle is shared across all createTestDb calls in this test file
+	// (one process per file under vitest forks). Re-establish the SQLite :memory:
+	// contract — every call returns tables in a pristine state, not whatever a
+	// previous test left behind.
+	await testDb.reset();
+	return testDb;
 }
 
-function seed(db: ReturnType<typeof drizzle>) {
+async function ensureDatabase(baseUrl: URL, dbName: string): Promise<void> {
+	const adminUrl = new URL(baseUrl);
+	adminUrl.pathname = '/postgres';
+	const client = new Client({ connectionString: adminUrl.toString() });
+	try {
+		await client.connect();
+		const existing = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
+		if (existing.rowCount === 0) {
+			await client.query(`CREATE DATABASE ${quoteIdent(dbName)}`);
+		}
+	} finally {
+		await client.end();
+	}
+}
+
+function quoteIdent(name: string): string {
+	return `"${name.replace(/"/g, '""')}"`;
+}
+
+async function truncateAll(db: Database): Promise<void> {
+	const result = await db.execute(
+		sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '__drizzle_migrations'`,
+	);
+	const tables = result.rows.map((r) => (r as { tablename: string }).tablename);
+	if (tables.length === 0) return;
+	await db.execute(sql.raw(`TRUNCATE TABLE ${tables.map(quoteIdent).join(', ')} RESTART IDENTITY CASCADE`));
+}
+
+async function seed(db: Database) {
 	const now = Math.floor(Date.now() / 1000);
 
 	const formatRows = [
@@ -75,33 +146,33 @@ function seed(db: ReturnType<typeof drizzle>) {
 		{ pk: 'book-dune', title: 'Dune (40th Anniversary)', workPk: 'work-dune', formatPk: 'paperback', publishDate: 1119484800, description: 'The classic', coverUrl: 'https://cdn.example.com/dune.jpg', createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
 		{ pk: 'book-flowers', title: 'Flowers for Algernon', workPk: null, formatPk: 'ebook', publishDate: 1119484800, description: 'A touching story', coverUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
 	];
-	db.insert(formats).values(formatRows).run();
-	db.insert(genres).values(genreRows).run();
-	db.insert(contributorRoles).values(roleRows).run();
-	db.insert(works).values(workRows).run();
-	db.insert(contributors).values(contributorRows).run();
-	db.insert(books).values(bookRows).run();
+	await db.insert(formats).values(formatRows);
+	await db.insert(genres).values(genreRows);
+	await db.insert(contributorRoles).values(roleRows);
+	await db.insert(works).values(workRows);
+	await db.insert(contributors).values(contributorRows);
+	await db.insert(books).values(bookRows);
 
-	db.insert(bookGenres).values([
+	await db.insert(bookGenres).values([
 		{ bookPk: 'book-dune', genrePk: 'fiction' },
 		{ bookPk: 'book-dune', genrePk: 'scifi' },
-	]).run();
-	db.insert(bookContributors).values([
+	]);
+	await db.insert(bookContributors).values([
 		{ bookPk: 'book-dune', contributorPk: 'author-herbert', rolePk: 'author', createdAt: now },
 		{ bookPk: 'book-flowers', contributorPk: 'author-algernon', rolePk: 'author', createdAt: now },
-	]).run();
-	db.insert(bookIdentifiers).values([
+	]);
+	await db.insert(bookIdentifiers).values([
 		{ bookPk: 'book-dune', resource: 'isbn:0441172717', url: 'https://isbn.example.com/0441172717' },
-	]).run();
-	db.insert(workIdentifiers).values([
+	]);
+	await db.insert(workIdentifiers).values([
 		{ workPk: 'work-dune', resource: 'openlibrary:works/OL893423W', url: 'https://openlibrary.example.com/works/OL893423W' },
-	]).run();
-	db.insert(contributorIdentifiers).values([
+	]);
+	await db.insert(contributorIdentifiers).values([
 		{ contributorPk: 'author-herbert', resource: 'viaf:59083797', url: 'https://viaf.example.com/59083797' },
-	]).run();
-	db.insert(genreIdentifiers).values([
+	]);
+	await db.insert(genreIdentifiers).values([
 		{ genrePk: 'scifi', resource: 'babelio:science-fiction', url: 'https://babelio.example.com/science-fiction' },
-	]).run();
+	]);
 }
 
 export { COLLECTION };

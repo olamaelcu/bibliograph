@@ -8,7 +8,7 @@ export default defineConfig({
     passWithNoTests: true,
     include: ['src/**/*.{test,spec}.ts'],
     env: {
-      DB_PATH: "data/test.sqlite"
+      DATABASE_URL: "postgres://bibliograph:bibliograph@localhost:5432/bibliograph_test"
     },
     globalSetup: ['./src/test-utils/global-setup.ts'],
     coverage: {
