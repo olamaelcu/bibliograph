@@ -179,4 +179,14 @@ describe('page templates', () => {
 		expect(html).toContain('c.contributor?.name');
 		expect(html).toContain('e.coverUrl');
 	});
+
+	it('wires up cursor-based load-more pagination in the search script', () => {
+		const html = renderPage('search', { title: 'Search', description: 'd' });
+		expect(html).toContain('let currentCursor = null');
+		expect(html).toContain('currentCursor = data.cursor');
+		expect(html).toContain('cursor: currentCursor');
+		expect(html).toContain('appendLoadMore');
+		expect(html).toContain('load-more-btn');
+		expect(html).toContain('All works loaded');
+	});
 });

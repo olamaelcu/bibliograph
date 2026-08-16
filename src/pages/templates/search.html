@@ -34,6 +34,7 @@
 
   .work-card-header {
     display: flex;
+    flex-direction: column;
     align-items: baseline;
     justify-content: space-between;
     gap: 1rem;
@@ -88,6 +89,11 @@
     font-size: 0.85rem;
     color: var(--wa-color-on-quiet);
   }
+
+  .load-more {
+    text-align: center;
+    margin: 1.25rem 0 0.5rem;
+  }
 </style>
 
 <main class="search-page">
@@ -117,6 +123,9 @@
   const form = document.getElementById('search-form');
   const input = document.getElementById('search-q');
   const results = document.getElementById('results');
+
+  let currentQuery = '';
+  let currentCursor = null;
 
   function escapeHtml(value) {
     return String(value ?? '')
@@ -165,13 +174,15 @@
           <h3 class="work-title">${escapeHtml(work.title)}</h3>
           <span class="work-id">${escapeHtml(work.uri)}</span>
         </div>
-        ${people.length ? `<p class="work-authors">${escapeHtml(people.join(', '))}</p>` : ''}
-        ${work.description ? `<p class="work-desc">${snippet(work.description, 200)}</p>` : ''}
+        <p class="work-authors">${people.length ? `Contributed by ${escapeHtml(people.join(', '))}` : 'No contributors.'}</p>
+        <p class="work-desc">${work.description ? `${snippet(work.description, 200)}` : 'No description'}</p>
         ${coversHtml}
       </wa-card>`;
   }
 
   async function runSearch(q) {
+    currentQuery = q;
+    currentCursor = null;
     const qs = new URLSearchParams({q, limit: String(WORKS_LIMIT)});
     const res = await fetch(`${SEARCH_WORKS}?${qs}`, {headers: {accept: 'application/json'}});
     if (!res.ok) {
@@ -179,16 +190,49 @@
       return;
     }
     const data = await res.json();
+    currentCursor = data.cursor ?? null;
     const works = data.works ?? [];
     if (works.length === 0) {
       results.innerHTML = '<p class="muted">No works matched your query.</p>';
       return;
     }
-    results.innerHTML = `<p class="muted search-count">${works.length} works found.</p>`;
+    const total = data.hitsTotal != null ? ` of ${data.hitsTotal.toLocaleString()}` : '';
+    results.innerHTML = `<p class="muted search-count">${works.length}${total} works found.</p>`;
     const editionLists = await Promise.all(works.map((w) => listBooksForWork(w.uri)));
     const cards = works.map((w, i) => renderCard(w, editionLists[i]));
     results.insertAdjacentHTML('beforeend', cards.join(''));
+    appendLoadMore();
     history.replaceState(null, '', `?q=${encodeURIComponent(q)}`);
+  }
+
+  async function loadMore() {
+    if (!currentCursor) return;
+    const btn = document.getElementById('load-more-btn');
+    if (btn) btn.loading = true;
+    const qs = new URLSearchParams({q: currentQuery, limit: String(WORKS_LIMIT), cursor: currentCursor});
+    const res = await fetch(`${SEARCH_WORKS}?${qs}`, {headers: {accept: 'application/json'}});
+    if (!res.ok) {
+      if (btn) btn.loading = false;
+      return;
+    }
+    const data = await res.json();
+    currentCursor = data.cursor ?? null;
+    const works = data.works ?? [];
+    const editionLists = await Promise.all(works.map((w) => listBooksForWork(w.uri)));
+    const cards = works.map((w, i) => renderCard(w, editionLists[i]));
+    document.querySelector('.load-more')?.remove();
+    results.insertAdjacentHTML('beforeend', cards.join(''));
+    appendLoadMore();
+    if (btn) btn.loading = false;
+  }
+
+  function appendLoadMore() {
+    if (currentCursor) {
+      results.insertAdjacentHTML('beforeend', '<div class="load-more"><wa-button id="load-more-btn">Load more works</wa-button></div>');
+      document.getElementById('load-more-btn').addEventListener('click', loadMore);
+    } else {
+      results.insertAdjacentHTML('beforeend', '<p class="muted load-more">All works loaded.</p>');
+    }
   }
 
   form.addEventListener('submit', async (event) => {
