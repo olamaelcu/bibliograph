@@ -84,7 +84,7 @@ export async function importInBatches<T>(
           else summary.failed += 1;
         } catch (err) {
           summary.failed += 1;
-          logger.warn({ err: (err as Error).message }, 'record failed in batch');
+          logger.warn({ err }, 'record failed in batch');
         }
       }
     });
