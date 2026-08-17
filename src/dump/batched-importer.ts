@@ -78,7 +78,13 @@ export async function importInBatches<T>(
     await db.transaction(async (tx) => {
       for (const item of b) {
         try {
-          const res = await opts.upsert(tx, item);
+          // Per-record savepoint: a malformed OL row that violates a NOT NULL
+          // or CHECK constraint fails ONLY that record's subtransaction. Without
+          // this, Postgres marks the outer transaction aborted and every
+          // subsequent query in the same batch returns "current transaction is
+          // aborted" until commit, producing a flood of indistinguishable
+          // failures that mask the real one.
+          const res = await tx.transaction(async (savepoint) => opts.upsert(savepoint, item));
           if (res.action === 'inserted') summary.inserted += 1;
           else if (res.action === 'skipped') summary.skipped += 1;
           else summary.failed += 1;
