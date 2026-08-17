@@ -1,7 +1,25 @@
-import { describe, expect, it } from 'vitest';
-import { createApp } from './app.js';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { createTestDb } from './test-utils/db.js';
+import type { Hono } from 'hono';
 
-const app = createApp();
+const dbHolder = vi.hoisted(() => ({
+	db: undefined as
+		| Awaited<ReturnType<typeof createTestDb>>['db']
+		| undefined,
+}));
+vi.mock('./db/connection.js', () => ({
+	get db() {
+		return dbHolder.db;
+	},
+}));
+
+let app: Hono;
+
+beforeAll(async () => {
+	const { db } = await createTestDb();
+	dbHolder.db = db;
+	app = (await import('./app.js')).createApp();
+});
 
 const LEXICON_NSIDS = [
   'book',

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { createTestDb } from '../test-utils/db.js';
 import { books, contributors, works } from '../db/schema.js';
 
@@ -44,12 +45,11 @@ describe('images:refresh cover derivation', () => {
   }
 
   it('derives olid URL from openlibrary identifier', async () => {
-    const { db, sqlite } = createTestDb();
-    db.insert(works).values({ pk: 'work-dune', title: 'Dune', createdAt: 0, releaseStatus: 'released' }).run();
-    db.insert(books).values({ pk: 'books/ol123m', title: 'Dune', workPk: 'work-dune', createdAt: 0, releaseStatus: 'released' }).run();
-    db.insert(contributors).values({ pk: 'c1', name: 'N', createdAt: 0, releaseStatus: 'released' }).run();
-    sqlite.prepare('INSERT INTO book_identifiers (book_pk, resource, url) VALUES (?, ?, ?)')
-      .run('books/ol123m', 'openlibrary:books/OL123M', 'https://openlibrary.org/books/OL123M');
+    const { db } = await createTestDb();
+    await db.insert(works).values({ pk: 'work-dune', title: 'Dune', createdAt: 0, releaseStatus: 'released' });
+    await db.insert(books).values({ pk: 'books/ol123m', title: 'Dune', workPk: 'work-dune', createdAt: 0, releaseStatus: 'released' });
+    await db.insert(contributors).values({ pk: 'c1', name: 'N', createdAt: 0, releaseStatus: 'released' });
+    await db.execute(sql`INSERT INTO book_identifiers (book_pk, resource, url) VALUES (${'books/ol123m'}, ${'openlibrary:books/OL123M'}, ${'https://openlibrary.org/books/OL123M'})`);
 
     await run(['images:refresh', '--batch-size=1'], db);
 
@@ -60,12 +60,11 @@ describe('images:refresh cover derivation', () => {
   });
 
   it('falls back to isbn when no openlibrary id exists', async () => {
-    const { db, sqlite } = createTestDb();
-    db.insert(works).values({ pk: 'work-dune', title: 'Dune', createdAt: 0, releaseStatus: 'released' }).run();
-    db.insert(books).values({ pk: 'books/ol456w', title: 'We', workPk: 'work-dune', createdAt: 0, releaseStatus: 'released' }).run();
-    db.insert(contributors).values({ pk: 'c1', name: 'N', createdAt: 0, releaseStatus: 'released' }).run();
-    sqlite.prepare('INSERT INTO book_identifiers (book_pk, resource, url) VALUES (?, ?, ?)')
-      .run('books/ol456w', 'isbn:9780000000001', 'https://openlibrary.org/isbn/9780000000001');
+    const { db } = await createTestDb();
+    await db.insert(works).values({ pk: 'work-dune', title: 'Dune', createdAt: 0, releaseStatus: 'released' });
+    await db.insert(books).values({ pk: 'books/ol456w', title: 'We', workPk: 'work-dune', createdAt: 0, releaseStatus: 'released' });
+    await db.insert(contributors).values({ pk: 'c1', name: 'N', createdAt: 0, releaseStatus: 'released' });
+    await db.execute(sql`INSERT INTO book_identifiers (book_pk, resource, url) VALUES (${'books/ol456w'}, ${'isbn:9780000000001'}, ${'https://openlibrary.org/isbn/9780000000001'})`);
 
     await run(['images:refresh', '--batch-size=1'], db);
 

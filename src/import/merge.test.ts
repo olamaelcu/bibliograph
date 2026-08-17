@@ -1,15 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../test-utils/db.js';
+import { sql } from 'drizzle-orm';
 import { logger } from '../logger.js';
 import { mergeEntity } from './merge.js';
 import { openIssuesFor } from './issues.js';
 import { bookIdentifiersAdapter } from './identifiers.js';
 
 describe('mergeEntity', () => {
-	it('inserts new record as staged with identifiers', () => {
-		const { db, seed } = createTestDb();
-		seed();
-		const res = mergeEntity(db, {
+	it('inserts new record as staged with identifiers', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		const res = await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/olnew',
 			source: 'openlibrary',
@@ -21,10 +22,10 @@ describe('mergeEntity', () => {
 		expect(res.pk).toBe('books/olnew');
 	});
 
-	it('forces new records to staged even when fields include releaseStatus', () => {
-		const { db, sqlite, seed } = createTestDb();
-		seed();
-		mergeEntity(db, {
+	it('forces new records to staged even when fields include releaseStatus', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/olnew',
 			source: 'openlibrary',
@@ -32,15 +33,16 @@ describe('mergeEntity', () => {
 			identifiers: [],
 			fields: { title: 'Some New Book', releaseStatus: 'released' },
 		});
-		const row = sqlite.prepare('SELECT release_status AS rs FROM books WHERE pk = ?').get('books/olnew') as { rs: string };
+		const result = await db.execute(sql`SELECT release_status AS rs FROM books WHERE pk = ${'books/olnew'}`);
+		const row = result.rows[0] as { rs: string };
 		expect(row.rs).toBe('staged');
 	});
 
-	it('merges onto existing record by identifier and flags conflict', () => {
-		const { db, seed } = createTestDb();
-		seed();
+	it('merges onto existing record by identifier and flags conflict', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
 		// book-dune exists with title 'Dune (40th Anniversary)' and isbn:0441172717
-		const res = mergeEntity(db, {
+		const res = await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ol123m',
 			source: 'openlibrary',
@@ -52,14 +54,14 @@ describe('mergeEntity', () => {
 		expect(res.pk).toBe('book-dune');
 		expect(res.conflictFields).toContain('title');
 
-		const issues = openIssuesFor(db, 'book', 'book-dune');
+		const issues = await openIssuesFor(db, 'book', 'book-dune');
 		expect(issues.some((i) => i.field === 'title' && i.incomingValue === 'Dune')).toBe(true);
 	});
 
-	it('unions identifiers on merge', () => {
-		const { db, seed } = createTestDb();
-		seed();
-		mergeEntity(db, {
+	it('unions identifiers on merge', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ol123m',
 			source: 'bookhive',
@@ -68,13 +70,13 @@ describe('mergeEntity', () => {
 			fields: { title: 'Dune (40th Anniversary)' },
 		});
 		// hiveId now resolves to book-dune
-		expect(bookIdentifiersAdapter.findByResource(db, 'hiveId:abc123')).toBe('book-dune');
+		expect(await bookIdentifiersAdapter.findByResource(db, 'hiveId:abc123')).toBe('book-dune');
 	});
 
-	it('merges a contributor via case-insensitive name fallback without spurious name conflict', () => {
-		const { db, seed } = createTestDb();
-		seed();
-		const res = mergeEntity(db, {
+	it('merges a contributor via case-insensitive name fallback without spurious name conflict', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		const res = await mergeEntity(db, {
 			entityType: 'contributor',
 			pk: 'contributors/new',
 			source: 'bookhive',
@@ -88,11 +90,11 @@ describe('mergeEntity', () => {
 		expect(res.conflictFields).toContain('bio');
 	});
 
-	it('flags ambiguous fallback when two records share matchName and stays staged', () => {
-		const { db, sqlite, seed } = createTestDb();
-		seed();
+	it('flags ambiguous fallback when two records share matchName and stays staged', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
 		// two seeded records with the same title, via matchName:null so neither merges
-		mergeEntity(db, {
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ambig-a',
 			source: 'openlibrary',
@@ -100,7 +102,7 @@ describe('mergeEntity', () => {
 			identifiers: [],
 			fields: { title: 'The Ambiguous Book' },
 		});
-		mergeEntity(db, {
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ambig-b',
 			source: 'openlibrary',
@@ -108,7 +110,7 @@ describe('mergeEntity', () => {
 			identifiers: [],
 			fields: { title: 'The Ambiguous Book' },
 		});
-		const res = mergeEntity(db, {
+		const res = await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ambig-c',
 			source: 'bookhive',
@@ -118,15 +120,16 @@ describe('mergeEntity', () => {
 		});
 		expect(res.existed).toBe(false);
 		expect(res.pk).toBe('books/ambig-c');
-		const issues = openIssuesFor(db, 'book', 'books/ambig-c');
+		const issues = await openIssuesFor(db, 'book', 'books/ambig-c');
 		expect(issues.some((i) => i.field === 'matchName')).toBe(true);
-		const row = sqlite.prepare('SELECT release_status AS rs FROM books WHERE pk = ?').get('books/ambig-c') as { rs: string };
+		const result = await db.execute(sql`SELECT release_status AS rs FROM books WHERE pk = ${'books/ambig-c'}`);
+		const row = result.rows[0] as { rs: string };
 		expect(row.rs).toBe('staged');
 	});
 
-	it('re-importing the same candidate is idempotent', () => {
-		const { db, sqlite, seed } = createTestDb();
-		seed();
+	it('re-importing the same candidate is idempotent', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
 		const candidate = {
 			entityType: 'book' as const,
 			pk: 'books/olnew',
@@ -135,19 +138,19 @@ describe('mergeEntity', () => {
 			identifiers: [{ resource: 'isbn:9789999999999', url: 'https://ol/x' }],
 			fields: { title: 'Some New Book', description: 'fresh' },
 		};
-		mergeEntity(db, candidate);
-		mergeEntity(db, candidate);
-		const bookCount = (sqlite.prepare('SELECT count(*) AS c FROM books').get() as { c: number }).c;
-		expect(bookCount).toBe(3); // 2 seed + 1 candidate
-		const idCount = (sqlite.prepare('SELECT count(*) AS c FROM book_identifiers').get() as { c: number }).c;
-		expect(idCount).toBe(2); // 1 seed + 1 candidate
-		expect(openIssuesFor(db, 'book', 'books/olnew')).toHaveLength(0);
+		await mergeEntity(db, candidate);
+		await mergeEntity(db, candidate);
+		const bookCount = (await db.execute(sql`SELECT count(*) AS c FROM books`)).rows[0] as { c: string };
+		expect(bookCount.c).toBe('3'); // 2 seed + 1 candidate
+		const idCount = (await db.execute(sql`SELECT count(*) AS c FROM book_identifiers`)).rows[0] as { c: string };
+		expect(idCount.c).toBe('2'); // 1 seed + 1 candidate
+		expect(await openIssuesFor(db, 'book', 'books/olnew')).toHaveLength(0);
 	});
 
-	it('flags a slug collision when candidate pk already exists but identifiers point elsewhere', () => {
-		const { db, sqlite, seed } = createTestDb();
-		seed();
-		const res = mergeEntity(db, {
+	it('flags a slug collision when candidate pk already exists but identifiers point elsewhere', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		const res = await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'book-dune',
 			source: 'bookhive',
@@ -157,17 +160,17 @@ describe('mergeEntity', () => {
 		});
 		expect(res.existed).toBe(false);
 		expect(res.pk).toBe('book-dune');
-		const issues = openIssuesFor(db, 'book', 'book-dune');
+		const issues = await openIssuesFor(db, 'book', 'book-dune');
 		expect(issues.some((i) => i.field === 'pk')).toBe(true);
-		const bookCount = (sqlite.prepare('SELECT count(*) AS c FROM books').get() as { c: number }).c;
-		expect(bookCount).toBe(2);
+		const bookCount = (await db.execute(sql`SELECT count(*) AS c FROM books`)).rows[0] as { c: string };
+		expect(bookCount.c).toBe('2');
 	});
 
-	it('flags an issue when a later claimed identifier is owned by another entity', () => {
-		const { db, seed } = createTestDb();
-		seed();
+	it('flags an issue when a later claimed identifier is owned by another entity', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
 		// books/ol-b owns isbn:9780000000002
-		mergeEntity(db, {
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ol-b',
 			source: 'bookhive',
@@ -177,7 +180,7 @@ describe('mergeEntity', () => {
 		});
 		// candidate claims isbn:0441172717 (owned by book-dune) first, so the merge
 		// target is book-dune; the second identifier is owned by someone else.
-		const res = mergeEntity(db, {
+		const res = await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ol-a',
 			source: 'openlibrary',
@@ -190,7 +193,7 @@ describe('mergeEntity', () => {
 		});
 		expect(res.existed).toBe(true);
 		expect(res.pk).toBe('book-dune');
-		const issues = openIssuesFor(db, 'book', 'book-dune');
+		const issues = await openIssuesFor(db, 'book', 'book-dune');
 		expect(
 			issues.some((i) => i.field === 'identifier' && i.incomingValue === 'isbn:9780000000002' && i.storedValue === 'books/ol-b'),
 		).toBe(true);
@@ -198,15 +201,15 @@ describe('mergeEntity', () => {
 });
 
 describe('mergeEntity logging', () => {
-	it('logs each merge step and warns on anomalies', () => {
-		const { db, seed } = createTestDb();
-		seed();
+	it('logs each merge step and warns on anomalies', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
 
 		const debugSpy = vi.spyOn(logger, 'debug');
 		const warnSpy = vi.spyOn(logger, 'warn');
 
 		// fresh insert path
-		mergeEntity(db, {
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ol-log-a',
 			source: 'openlibrary',
@@ -216,7 +219,7 @@ describe('mergeEntity logging', () => {
 		});
 
 		// slug collision path (candidate pk exists but nothing matched it)
-		mergeEntity(db, {
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'book-dune',
 			source: 'bookhive',
@@ -228,7 +231,7 @@ describe('mergeEntity logging', () => {
 		// establish an owner for isbn:9780000000002, then merge a candidate whose
 		// two identifiers span two different entities (0441172717 → book-dune, the
 		// other → the owner we just created)
-		mergeEntity(db, {
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ol-log-owner',
 			source: 'bookhive',
@@ -236,7 +239,7 @@ describe('mergeEntity logging', () => {
 			identifiers: [{ resource: 'isbn:9780000000002', url: 'https://ol/2' }],
 			fields: { title: 'Owner' },
 		});
-		mergeEntity(db, {
+		await mergeEntity(db, {
 			entityType: 'book',
 			pk: 'books/ol-log-b',
 			source: 'openlibrary',

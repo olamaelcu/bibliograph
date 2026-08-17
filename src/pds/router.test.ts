@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { createXrpcRouter } from '../xrpc/router.js';
 import { createTestDb, SERVICE_DID } from '../test-utils/db.js';
 import type { ViewContext } from '../xrpc/views.js';
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 
-function app() {
-	const { db, sqlite, seed } = createTestDb();
-	seed();
+async function app() {
+	const { db, seed } = await createTestDb();
+	await seed();
 	const router = createXrpcRouter(db, ctx);
 	return {
 		fetch: (path: string, init?: RequestInit) =>
 			router.fetch(new Request(`https://books.example.com${path}`, init)),
 		db,
-		sqlite,
 	};
 }
 
@@ -32,7 +32,7 @@ function getRecordUrl(collection: string, rkey: string, extra = '') {
 
 describe('com.atproto.repo.getRecord', () => {
 	it('returns a typed record value with a stable cid', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const res1 = await fetch(getRecordUrl(COLL.book, 'book-dune'));
 		expect(res1.status).toBe(200);
 		const body1 = await res1.json();
@@ -54,16 +54,15 @@ describe('com.atproto.repo.getRecord', () => {
 	});
 
 	it('persists the computed cid into the database', async () => {
-		const { fetch, sqlite } = app();
+		const { fetch, db } = await app();
 		await fetch(getRecordUrl(COLL.book, 'book-dune'));
-		const row = sqlite
-			.prepare('SELECT cid FROM books WHERE pk = ?')
-			.get('book-dune') as { cid: string };
+		const result = await db.execute(sql`SELECT cid FROM books WHERE pk = ${'book-dune'}`);
+		const row = result.rows[0] as { cid: string };
 		expect(row.cid).toMatch(/^bafy/);
 	});
 
 	it('returns RecordNotFound for a missing record', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const res = await fetch(getRecordUrl(COLL.book, 'nope'));
 		expect(res.status).toBe(400);
 		const body = await res.json();
@@ -71,7 +70,7 @@ describe('com.atproto.repo.getRecord', () => {
 	});
 
 	it('rejects a repo we do not host', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({
 			repo: 'did:web:other.example.com',
 			collection: COLL.book,
@@ -84,7 +83,7 @@ describe('com.atproto.repo.getRecord', () => {
 	});
 
 	it('rejects an unsupported collection', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({
 			repo: SERVICE_DID,
 			collection: 'net.olamaelcu.livtet.biblio.review',
@@ -95,7 +94,7 @@ describe('com.atproto.repo.getRecord', () => {
 	});
 
 	it('rejects a cid mismatch', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const res = await fetch(getRecordUrl(COLL.book, 'book-dune', 'cid=bafyreiflattest'));
 		expect(res.status).toBe(400);
 		const body = await res.json();
@@ -103,7 +102,7 @@ describe('com.atproto.repo.getRecord', () => {
 	});
 
 	it('returns other owned collections', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		for (const [collection, rkey] of [
 			[COLL.work, 'work-dune'],
 			[COLL.contributor, 'author-herbert'],
@@ -119,7 +118,7 @@ describe('com.atproto.repo.getRecord', () => {
 	});
 
 	it('genre view carries its parent uri', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const res = await fetch(getRecordUrl(COLL.genre, 'scifi'));
 		const body = await res.json();
 		expect(body.value.parent).toBe(`at://${SERVICE_DID}/${COLL.genre}/fiction`);
@@ -128,7 +127,7 @@ describe('com.atproto.repo.getRecord', () => {
 
 describe('com.atproto.repo.listRecords', () => {
 	it('lists records for a collection', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({ repo: SERVICE_DID, collection: COLL.book });
 		const res = await fetch(`/xrpc/com.atproto.repo.listRecords?${params}`);
 		expect(res.status).toBe(200);
@@ -138,7 +137,7 @@ describe('com.atproto.repo.listRecords', () => {
 	});
 
 	it('paginates with limit and cursor', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({ repo: SERVICE_DID, collection: COLL.book, limit: '1' });
 		const res1 = await fetch(`/xrpc/com.atproto.repo.listRecords?${params}`);
 		const body1 = await res1.json();
@@ -154,7 +153,7 @@ describe('com.atproto.repo.listRecords', () => {
 	});
 
 	it('reverses order with reverse=true', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({ repo: SERVICE_DID, collection: COLL.book });
 		const fwd = await fetch(`/xrpc/com.atproto.repo.listRecords?${params}`);
 		const fwdBody = await fwd.json();
@@ -166,7 +165,7 @@ describe('com.atproto.repo.listRecords', () => {
 	});
 
 	it('rejects a repo we do not host', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({
 			repo: 'did:web:other.example.com',
 			collection: COLL.book,
@@ -178,7 +177,7 @@ describe('com.atproto.repo.listRecords', () => {
 
 describe('com.atproto.repo.describeRepo', () => {
 	it('describes our repo', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({ repo: SERVICE_DID });
 		const res = await fetch(`/xrpc/com.atproto.repo.describeRepo?${params}`);
 		expect(res.status).toBe(200);
@@ -191,7 +190,7 @@ describe('com.atproto.repo.describeRepo', () => {
 	});
 
 	it('rejects a repo we do not host', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({ repo: 'did:web:other.example.com' });
 		const res = await fetch(`/xrpc/com.atproto.repo.describeRepo?${params}`);
 		expect(res.status).toBe(400);
@@ -200,7 +199,7 @@ describe('com.atproto.repo.describeRepo', () => {
 
 describe('com.atproto.identity.resolveHandle', () => {
 	it('resolves our own handle', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({ handle: 'books.example.com' });
 		const res = await fetch(`/xrpc/com.atproto.identity.resolveHandle?${params}`);
 		expect(res.status).toBe(200);
@@ -209,7 +208,7 @@ describe('com.atproto.identity.resolveHandle', () => {
 	});
 
 	it('rejects foreign handles', async () => {
-		const { fetch } = app();
+		const { fetch } = await app();
 		const params = new URLSearchParams({ handle: 'someone.example.net' });
 		const res = await fetch(`/xrpc/com.atproto.identity.resolveHandle?${params}`);
 		expect(res.status).toBe(400);

@@ -20,3 +20,4 @@ static/
 .worktrees/
 data/
 docs/superpowers/
+logs/*.log

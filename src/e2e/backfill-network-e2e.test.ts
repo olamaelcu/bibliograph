@@ -20,7 +20,7 @@ describe.skipIf(!process.env.RUN_NETWORK_TESTS)('network E2E', () => {
           `curl -sL https://openlibrary.org/data/ol_dump_editions_latest.txt.gz | zcat | head -200 | gzip > ${join(tmp, 'ol-editions.txt.gz')}`,
           { stdio: 'pipe' },
         );
-        const { db } = createTestDb();
+        const { db } = await createTestDb();
         const summary = await runDumpImport({
           db, stateName: 'ol-editions', url: 'x', dumpPath: tmp,
           noDownload: true, keepDump: true, keyOf: olKeyOf,

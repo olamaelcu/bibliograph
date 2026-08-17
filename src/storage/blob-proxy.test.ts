@@ -33,8 +33,8 @@ async function putCover(
 
 describe('blob proxy', () => {
 	it('serves a released book cover with content-type and cache headers', async () => {
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const app = makeApp(db, store);
 		const objectKey = await putCover(db, store);
@@ -47,20 +47,20 @@ describe('blob proxy', () => {
 	});
 
 	it('returns 404 when the entity is not released', async () => {
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const app = makeApp(db, store);
 		const objectKey = await putCover(db, store);
-		db.update(books).set({ releaseStatus: 'staged' }).where(eq(books.pk, 'book-dune')).run();
+		await db.update(books).set({ releaseStatus: 'staged' }).where(eq(books.pk, 'book-dune'));
 
 		const res = await app.request(`/catalog-blobs/${objectKey}`);
 		expect(res.status).toBe(404);
 	});
 
 	it('returns 404 for an unknown object key', async () => {
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const app = makeApp(db, store);
 
@@ -69,8 +69,8 @@ describe('blob proxy', () => {
 	});
 
 	it('returns 404 when the store read fails', async () => {
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const objectKey = await putCover(db, store);
 		const app = makeApp(db, { get: () => Promise.reject(new Error('storage down')) });
@@ -80,12 +80,12 @@ describe('blob proxy', () => {
 	});
 
 	it('returns 404 for an unknown entityType even when a contributor row matches', async () => {
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		// entityType 'work' is not a blob owner; entityPk deliberately matches a released
 		// contributor so a naive fallback-to-contributors lookup would wrongly authorize it.
 		const objectKey = 'catalog/work/author-herbert/cover-abc123';
-		db.insert(catalogBlobs)
+		await db.insert(catalogBlobs)
 			.values({
 				pk: 'work:author-herbert:cover',
 				entityType: 'work',
@@ -97,8 +97,7 @@ describe('blob proxy', () => {
 				objectKey,
 				source: 'openlibrary',
 				createdAt: Math.floor(Date.now() / 1000),
-			})
-			.run();
+			});
 		const app = makeApp(db, { get: async () => new Uint8Array([1, 2, 3]) });
 
 		const res = await app.request(`/catalog-blobs/${objectKey}`);

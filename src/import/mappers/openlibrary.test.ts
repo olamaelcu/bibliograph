@@ -79,35 +79,35 @@ describe('OL mappers', () => {
     expect(book?.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
   });
 
-  it('skipSeenContributors is true only for keys already in contributor identifiers', () => {
-    const { db } = createTestDb();
+  it('skipSeenContributors is true only for keys already in contributor identifiers', async () => {
+    const { db } = await createTestDb();
     const now = Math.floor(Date.now() / 1000);
-    db.insert(contributors).values({ pk: 'authors-ol1a', name: 'Alpha', createdAt: now, releaseStatus: 'staged' }).run();
-    db.insert(contributorIdentifiers).values({
+    await db.insert(contributors).values({ pk: 'authors-ol1a', name: 'Alpha', createdAt: now, releaseStatus: 'staged' });
+    await db.insert(contributorIdentifiers).values({
       contributorPk: 'authors-ol1a',
       resource: 'openlibrary:authors/OL1A',
       url: 'https://openlibrary.org/authors/OL1A',
-    }).run();
+    });
 
     const skip = skipSeenContributors(db);
-    expect(skip('/authors/OL1A', '')).toBe(true);
-    expect(skip('/authors/OLNEW', '')).toBe(false);
-    expect(skip(null, '')).toBe(false);
+    expect(await skip('/authors/OL1A', '')).toBe(true);
+    expect(await skip('/authors/OLNEW', '')).toBe(false);
+    expect(await skip(null, '')).toBe(false);
   });
 
-  it('skipSeenWorks is true only for keys already in work identifiers', () => {
-    const { db } = createTestDb();
+  it('skipSeenWorks is true only for keys already in work identifiers', async () => {
+    const { db } = await createTestDb();
     const now = Math.floor(Date.now() / 1000);
-    db.insert(works).values({ pk: 'works-ol1w', title: 'Dune', createdAt: now, releaseStatus: 'staged' }).run();
-    db.insert(workIdentifiers).values({
+    await db.insert(works).values({ pk: 'works-ol1w', title: 'Dune', createdAt: now, releaseStatus: 'staged' });
+    await db.insert(workIdentifiers).values({
       workPk: 'works-ol1w',
       resource: 'openlibrary:works/OL1W',
       url: 'https://openlibrary.org/works/OL1W',
-    }).run();
+    });
 
     const skip = skipSeenWorks(db);
-    expect(skip('/works/OL1W', '')).toBe(true);
-    expect(skip('/works/OLNEW', '')).toBe(false);
-    expect(skip(null, '')).toBe(false);
+    expect(await skip('/works/OL1W', '')).toBe(true);
+    expect(await skip('/works/OLNEW', '')).toBe(false);
+    expect(await skip(null, '')).toBe(false);
   });
 });

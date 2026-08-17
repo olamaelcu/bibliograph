@@ -31,7 +31,7 @@ describe('runDumpImport', () => {
     ];
     writeFileSync(join(dumpPath, 'ol-editions.txt.gz'), gzipSync(lines.join('\n') + '\n'));
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const summary = await runDumpImport({
       db,
       stateName: 'ol-editions',
@@ -52,7 +52,7 @@ describe('runDumpImport', () => {
       },
     });
     expect(summary.processed).toBe(2);
-    const rows = db.select().from(books).where(inArray(books.pk, ['books/olol1m', 'books/olol2m'])).all();
+    const rows = await db.select().from(books).where(inArray(books.pk, ['books/olol1m', 'books/olol2m']));
     expect(rows).toHaveLength(2);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -67,7 +67,7 @@ describe('runDumpImport', () => {
     ];
     writeFileSync(join(dumpPath, 'ol-editions.txt.gz'), gzipSync(lines.join('\n') + '\n'));
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     await runDumpImport({
       db,
       stateName: 'ol-editions',
@@ -89,7 +89,7 @@ describe('runDumpImport', () => {
       },
     });
 
-    const state = db.select().from(backfillState).where(eq(backfillState.name, 'ol-editions')).get();
+    const state = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-editions')))[0];
     expect(state?.totalRecords).toBe(2);
     expect(state?.totalProcessed).toBe(2);
     rmSync(dir, { recursive: true, force: true });
@@ -104,7 +104,7 @@ describe('runDumpImport', () => {
     ];
     writeFileSync(join(dumpPath, 'ol-editions.txt.gz'), gzipSync(lines.join('\n') + '\n'));
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const run = () =>
       runDumpImport({
         db,
@@ -143,14 +143,14 @@ describe('runDumpImport', () => {
     ];
     const dumpPath = authorFixture(dir, lines);
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const now = Math.floor(Date.now() / 1000);
-    db.insert(contributors).values({ pk: 'authors-ol1a', name: 'Alpha', createdAt: now, releaseStatus: 'staged' }).run();
-    db.insert(contributorIdentifiers).values({
+    await db.insert(contributors).values({ pk: 'authors-ol1a', name: 'Alpha', createdAt: now, releaseStatus: 'staged' });
+    await db.insert(contributorIdentifiers).values({
       contributorPk: 'authors-ol1a',
       resource: 'openlibrary:authors/OL1A',
       url: 'https://openlibrary.org/authors/OL1A',
-    }).run();
+    });
 
     const parsed: string[] = [];
     const summary = await runDumpImport({
@@ -172,7 +172,7 @@ describe('runDumpImport', () => {
     expect(summary.processed).toBe(2);
     expect(summary.skipped).toBe(1);
     expect(summary.inserted).toBe(1);
-    const row = db.select().from(contributors).where(eq(contributors.pk, 'authors-ol1a')).get();
+    const row = (await db.select().from(contributors).where(eq(contributors.pk, 'authors-ol1a')))[0];
     expect(row?.name).toBe('Alpha');
     rmSync(dir, { recursive: true, force: true });
   });
@@ -188,10 +188,10 @@ describe('runDumpImport', () => {
     mkdirSync(dumpPath, { recursive: true });
     writeFileSync(join(dumpPath, 'ol-editions.txt.gz'), gzipSync(lines.join('\n') + '\n'));
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const now = Math.floor(Date.now() / 1000);
     for (const [pk, name] of [['authors-ol1a', 'Alpha'], ['authors-ol2a', 'Beta']] as const) {
-      db.insert(contributors).values({ pk, name, createdAt: now, releaseStatus: 'staged' }).run();
+      await db.insert(contributors).values({ pk, name, createdAt: now, releaseStatus: 'staged' });
     }
 
     // Mirror the editions CLI wiring: 'parse' collects links, 'afterBatch' stages them.
@@ -218,17 +218,17 @@ describe('runDumpImport', () => {
           fields: { title: rec.title ?? null },
         }];
       },
-      afterBatch: () => {
-        stageEditionAuthors(db, pending);
+      afterBatch: async () => {
+        await stageEditionAuthors(db, pending);
         pending.length = 0;
       },
     });
 
-    expect(db.select().from(bookContributorStaging).all()).toHaveLength(2);
-    const linked = resolveBookContributors(db);
+    expect(await db.select().from(bookContributorStaging)).toHaveLength(2);
+    const linked = await resolveBookContributors(db);
     expect(linked).toBe(2);
-    expect(db.select().from(bookContributorStaging).all()).toHaveLength(0);
-    expect(db.select().from(bookContributors).all()).toHaveLength(2);
+    expect(await db.select().from(bookContributorStaging)).toHaveLength(0);
+    expect(await db.select().from(bookContributors)).toHaveLength(2);
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -241,7 +241,7 @@ describe('runDumpImport', () => {
     ];
     const dumpPath = authorFixture(dir, lines);
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const run = (onImportProgress?: (processed: number, total: number | null) => void) =>
       runDumpImport({
         db,
@@ -260,14 +260,14 @@ describe('runDumpImport', () => {
       if (processed === 1) throw new Error('simulated interrupt');
     })).rejects.toThrow('simulated interrupt');
 
-    const mid = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    const mid = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')))[0];
     expect(mid?.cursor).toBe('/authors/OL1A');
     expect(mid?.totalProcessed).toBe(1);
     expect(mid?.complete).toBe(0);
 
     const summary = await run();
     expect(summary.processed).toBe(2); // OL2A + OL3A past the cursor
-    const fin = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    const fin = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')))[0];
     expect(fin?.cursor).toBeNull();
     expect(fin?.totalProcessed).toBe(3);
     expect(fin?.complete).toBe(1);
@@ -283,7 +283,7 @@ describe('runDumpImport', () => {
     ];
     const dumpPath = authorFixture(dir, lines);
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const controller = new AbortController();
     const summary = await runDumpImport({
       db,
@@ -302,7 +302,7 @@ describe('runDumpImport', () => {
     });
 
     expect(summary.processed).toBe(1);
-    const mid = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    const mid = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')))[0];
     expect(mid?.stopped).toBe(1);
     expect(mid?.complete).toBe(0);
     expect(mid?.cursor).toBe('/authors/OL1A');
@@ -322,7 +322,7 @@ describe('runDumpImport', () => {
       parse: authorParse,
     });
     expect(finSummary.processed).toBe(2); // resumes past the cursor
-    const fin = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    const fin = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')))[0];
     expect(fin?.complete).toBe(1);
     expect(fin?.stopped).toBe(0);
     rmSync(dir, { recursive: true, force: true });
@@ -338,7 +338,7 @@ describe('runDumpImport', () => {
     const dumpPath = authorFixture(dir, lines);
     const snapshotPath = join(dumpPath, 'ol-authors.txt.gz.txt');
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const run = (onImportProgress?: (processed: number, total: number | null) => void) =>
       runDumpImport({
         db,
@@ -359,13 +359,13 @@ describe('runDumpImport', () => {
     })).rejects.toThrow('simulated interrupt');
 
     expect(existsSync(snapshotPath)).toBe(true);
-    const mid = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    const mid = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')))[0];
     expect(mid?.lastByteOffset).toBeGreaterThan(0);
     expect(mid?.cursor).toBe('/authors/OL1A');
 
     const summary = await run();
     expect(summary.processed).toBe(2); // resumes past the check-pointed byte offset
-    const fin = db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')).get();
+    const fin = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')))[0];
     expect(fin?.totalProcessed).toBe(3);
     expect(fin?.complete).toBe(1);
     rmSync(dir, { recursive: true, force: true });

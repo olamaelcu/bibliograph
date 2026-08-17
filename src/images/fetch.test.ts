@@ -21,8 +21,8 @@ describe('images', () => {
 				}),
 			),
 		);
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory', publicBaseUrl: 'https://cdn.example.com' });
 		const res = await fetchBookCover(db, store, 'book-dune', 12345);
 		expect(res.fetched).toBe(true);
@@ -39,8 +39,8 @@ describe('images', () => {
 				}),
 			),
 		);
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const res = await fetchBookCover(db, store, 'book-dune', 12345);
 		expect(res.fetched).toBe(true);
@@ -48,31 +48,33 @@ describe('images', () => {
 
 	it('flags an issue with the expected row when cover fetch fails', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 404 })));
-		const { db } = createTestDb();
+		const { db } = await createTestDb();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const res = await fetchBookCover(db, store, 'book-dune', 99999);
 		expect(res.fetched).toBe(false);
 
-		const issue = db.select().from(importIssues).get();
-		expect(issue).toMatchObject({
-			entityType: 'book',
-			entityPk: 'book-dune',
-			field: 'coverUrl',
-			source: 'openlibrary',
-			status: 'open',
+		await vi.waitFor(async () => {
+			const issue = (await db.select().from(importIssues))[0];
+			expect(issue).toMatchObject({
+				entityType: 'book',
+				entityPk: 'book-dune',
+				field: 'coverUrl',
+				source: 'openlibrary',
+				status: 'open',
+			});
 		});
 	});
 
 	it('returns fetched:false and does not fetch or write when olCoverId is null', async () => {
 		const fetchSpy = vi.fn();
 		vi.stubGlobal('fetch', fetchSpy);
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const res = await fetchBookCover(db, store, 'book-dune', undefined);
 		expect(res).toEqual({ kind: 'cover', fetched: false, url: null });
 		expect(fetchSpy).not.toHaveBeenCalled();
-		expect(db.select().from(catalogBlobs).all()).toHaveLength(0);
+		expect(await db.select().from(catalogBlobs)).toHaveLength(0);
 	});
 
 	it('rejects an oversized content-length before reading the body', async () => {
@@ -82,7 +84,7 @@ describe('images', () => {
 		});
 		const arrayBufferSpy = vi.spyOn(res, 'arrayBuffer');
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(res));
-		const { db } = createTestDb();
+		const { db } = await createTestDb();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const result = await fetchBookCover(db, store, 'book-dune', 12345);
 		expect(result.fetched).toBe(false);
@@ -97,11 +99,11 @@ describe('images', () => {
 				new Response(big, { status: 200, headers: { 'content-type': 'image/jpeg' } }),
 			),
 		);
-		const { db } = createTestDb();
+		const { db } = await createTestDb();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const result = await fetchBookCover(db, store, 'book-dune', 12345);
 		expect(result.fetched).toBe(false);
-		expect(db.select().from(catalogBlobs).all()).toHaveLength(0);
+		expect(await db.select().from(catalogBlobs)).toHaveLength(0);
 	});
 
 	it('rejects a content-type that merely contains an allowed type', async () => {
@@ -114,11 +116,11 @@ describe('images', () => {
 				}),
 			),
 		);
-		const { db } = createTestDb();
+		const { db } = await createTestDb();
 		const store = new BlobStore(db, { scheme: 'memory' });
 		const result = await fetchBookCover(db, store, 'book-dune', 12345);
 		expect(result.fetched).toBe(false);
-		expect(db.select().from(catalogBlobs).all()).toHaveLength(0);
+		expect(await db.select().from(catalogBlobs)).toHaveLength(0);
 	});
 
 	it('falls back to Wikipedia when OL has no photo', async () => {
@@ -132,8 +134,8 @@ describe('images', () => {
 			headers: { 'content-type': 'image/jpeg' },
 		});
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(olRes).mockResolvedValueOnce(wikiJson).mockResolvedValueOnce(imgRes));
-		const { db, seed } = createTestDb();
-		seed();
+		const { db, seed } = await createTestDb();
+		await seed();
 		const store = new BlobStore(db, { scheme: 'memory', publicBaseUrl: 'https://cdn.example.com' });
 		const res = await fetchContributorPortrait(db, store, 'author-herbert', 'Frank Herbert', 99999);
 		expect(res.fetched).toBe(true);

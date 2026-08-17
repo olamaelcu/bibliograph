@@ -48,7 +48,7 @@ describe('backfill E2E (committed OL fixtures)', () => {
     'imports editions, works, authors; reviews; releases; serves',
     { timeout: 180_000 },
     async () => {
-      const { db } = createTestDb();
+      const { db } = await createTestDb();
       const { dir, cleanup } = stageFixtures();
       try {
         // 1. Import the three dumps in dependency order: authors → works → editions.
@@ -57,19 +57,19 @@ describe('backfill E2E (committed OL fixtures)', () => {
         await importFixture(db, dir, 'ol-editions', (f) => mapEditionToCandidates(JSON.parse(f[4])));
 
         // 2. Everything landed staged.
-        const bookCount = db.select().from(books).all().length;
+        const bookCount = (await db.select().from(books)).length;
         expect(bookCount).toBeGreaterThan(0);
-        const stagedBooks = db.select().from(books).where(sql`release_status = 'staged'`).all().length;
+        const stagedBooks = (await db.select().from(books).where(sql`release_status = 'staged'`)).length;
         expect(stagedBooks).toBe(bookCount);
 
         // 3. No conflicts are expected from a clean import (each OL record unique),
         //    but records with issues surface via the review view.
-        const withIssues = listWithIssues(db, 'book');
+        const withIssues = await listWithIssues(db, 'book');
         expect(Array.isArray(withIssues)).toBe(true);
 
         // 4. Release one book (with --yes semantics: force past dependents).
-        const first = db.select().from(books).limit(1).get() as unknown as { pk: string };
-        setStatus(db, 'book', first.pk, 'released');
+        const first = (await db.select().from(books).limit(1))[0] as unknown as { pk: string };
+        await setStatus(db, 'book', first.pk, 'released');
 
         // 5. The released book is visible via the (gated) router; a staged one 404s.
         const { createXrpcRouter } = await import('../xrpc/router.js');
@@ -79,13 +79,13 @@ describe('backfill E2E (committed OL fixtures)', () => {
             new Request(`https://books.example.com/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(uri(collection, pk))}`),
           );
 
-        const releasedBook = db.select().from(books).where(sql`release_status = 'released'`).limit(1).get() as unknown as { pk: string };
+        const releasedBook = (await db.select().from(books).where(sql`release_status = 'released'`).limit(1))[0] as unknown as { pk: string };
         const releasedRes = await fetchUri('net.olamaelcu.livtet.biblio.book', releasedBook.pk);
         expect(releasedRes.status).toBe(200);
         const releasedBody = await releasedRes.json();
         expect(typeof releasedBody.book.title).toBe('string');
 
-        const stagedBook = db.select().from(books).where(sql`release_status = 'staged'`).limit(1).get() as unknown as { pk: string };
+        const stagedBook = (await db.select().from(books).where(sql`release_status = 'staged'`).limit(1))[0] as unknown as { pk: string };
         const stagedRes = await fetchUri('net.olamaelcu.livtet.biblio.book', stagedBook.pk);
         expect(stagedRes.status).toBe(404);
 

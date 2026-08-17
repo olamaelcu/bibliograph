@@ -31,12 +31,12 @@ describe('importBookhiveCatalog', () => {
     process.env.BOOKHIVE_CATALOG_DID = 'did:web:test';
   });
 
-  function reservationFor(db: ReturnType<typeof createTestDb>['db']) {
-    return db.select().from(backfillReservation).where(eq(backfillReservation.stateName, 'bookhive-catalog')).get();
+  async function reservationFor(db: ReturnType<typeof createTestDb>['db']) {
+    return (await db.select().from(backfillReservation).where(eq(backfillReservation.stateName, 'bookhive-catalog')))[0];
   }
 
-  function stateFor(db: ReturnType<typeof createTestDb>['db']) {
-    return db.select().from(backfillState).where(eq(backfillState.name, 'bookhive-catalog')).get();
+  async function stateFor(db: ReturnType<typeof createTestDb>['db']) {
+    return (await db.select().from(backfillState).where(eq(backfillState.name, 'bookhive-catalog')))[0];
   }
 
   // Serves the same page sequence for both the pre-count pass and the import
@@ -64,7 +64,7 @@ describe('importBookhiveCatalog', () => {
       { from: 'cursor-2', records: [], cursor: undefined },
     ]);
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
     const lockPath = join(lockDir, 'lock');
     const res = await importBookhiveCatalog({ db, lockPath });
@@ -75,22 +75,21 @@ describe('importBookhiveCatalog', () => {
     // the import pass requested the second page with the advanced cursor
     expect(listRecordsMock.mock.calls.some(([, opts]) => (opts as any)?.params?.cursor === 'cursor-2')).toBe(true);
     // progress totals were recorded for the stats page
-    const st = stateFor(db);
+    const st = await stateFor(db);
     expect(st?.totalRecords).toBe(2);
     expect(st?.totalProcessed).toBe(2);
     expect(st?.complete).toBe(1);
     expect(existsSync(lockPath)).toBe(false);
-    expect(reservationFor(db)).toBeUndefined();
+    expect(await reservationFor(db)).toBeUndefined();
     rmSync(lockDir, { recursive: true, force: true });
   });
 
   it('skips the pre-count on resume when totalRecords already exists', async () => {
     // Simulate a prior interrupted run that already recorded the total.
     const now = Math.floor(Date.now() / 1000);
-    const { db } = createTestDb();
-    db.insert(backfillState)
-      .values({ name: 'bookhive-catalog', cursor: 'cursor-2', totalProcessed: 2, totalRecords: 3, complete: 0, stopped: 1, updatedAt: now })
-      .run();
+    const { db } = await createTestDb();
+    await db.insert(backfillState)
+      .values({ name: 'bookhive-catalog', cursor: 'cursor-2', totalProcessed: 2, totalRecords: 3, complete: 0, stopped: 1, updatedAt: now });
     replayPages([
       {
         from: 'cursor-2',
@@ -106,7 +105,7 @@ describe('importBookhiveCatalog', () => {
     // no count pass: the only call starts at the stored resume cursor
     expect(listRecordsMock).toHaveBeenCalledTimes(1);
     expect(listRecordsMock.mock.calls[0]?.[1]?.params?.cursor).toBe('cursor-2');
-    const st = stateFor(db);
+    const st = await stateFor(db);
     expect(st?.totalRecords).toBe(3);
     expect(st?.totalProcessed).toBe(3);
     expect(st?.complete).toBe(1);
@@ -116,23 +115,23 @@ describe('importBookhiveCatalog', () => {
   it('marks the run stopped when interrupted during the pre-count', async () => {
     const controller = new AbortController();
     controller.abort();
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
     const lockPath = join(lockDir, 'lock');
     const res = await importBookhiveCatalog({ db, lockPath, signal: controller.signal });
     expect(res.processed).toBe(0);
     expect(listRecordsMock).not.toHaveBeenCalled();
-    const st = stateFor(db);
+    const st = await stateFor(db);
     expect(st?.stopped).toBe(1);
     expect(st?.complete).toBe(0);
     expect(existsSync(lockPath)).toBe(false);
-    expect(reservationFor(db)).toBeUndefined();
+    expect(await reservationFor(db)).toBeUndefined();
     rmSync(lockDir, { recursive: true, force: true });
   });
 
   it('skips re-import when the state is already complete unless reset', async () => {
     replayPages([{ from: null, records: [], cursor: undefined }]);
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
     const lockPath = join(lockDir, 'lock');
     await importBookhiveCatalog({ db, lockPath });
@@ -170,13 +169,13 @@ describe('importBookhiveCatalog', () => {
       },
     ]);
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
     const lockPath = join(lockDir, 'lock');
     const res = await importBookhiveCatalog({ db, lockPath });
     expect(res.failed).toBe(0);
 
-    const links = db.select().from(bookContributors).all();
+    const links = await db.select().from(bookContributors);
     expect(links).toHaveLength(3); // Ada + Grace on h1, Bob on h2
     const h1 = links.filter((l) => l.bookPk === 'h1');
     expect(h1.map((l) => l.contributorPk).sort()).toEqual(['ada-lovelace', 'grace-hopper']);
@@ -184,10 +183,10 @@ describe('importBookhiveCatalog', () => {
     expect(links.some((l) => l.bookPk === 'h2' && l.contributorPk === 'bob')).toBe(true);
 
     // The author role is seeded so the FK is satisfiable (normalize read via contributor_roles).
-    const role = db.select().from(contributorRoles).where(eq(contributorRoles.pk, 'author')).get();
+    const role = (await db.select().from(contributorRoles).where(eq(contributorRoles.pk, 'author')))[0];
     expect(role?.name).toBe('Author');
     // Contributors were created by the import as well.
-    const contributor = db.select().from(contributors).where(eq(contributors.pk, 'ada-lovelace')).get();
+    const contributor = (await db.select().from(contributors).where(eq(contributors.pk, 'ada-lovelace')))[0];
     expect(contributor?.name).toBe('Ada Lovelace');
 
     rmSync(lockDir, { recursive: true, force: true });
@@ -198,12 +197,12 @@ describe('importBookhiveCatalog', () => {
       ok: false,
       data: { error: 'AuthRequired', message: 'x' },
     });
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
     const lockPath = join(lockDir, 'lock');
     await expect(importBookhiveCatalog({ db, lockPath })).rejects.toThrow('AuthRequired');
     expect(existsSync(lockPath)).toBe(false);
-    expect(reservationFor(db)).toBeUndefined();
+    expect(await reservationFor(db)).toBeUndefined();
     rmSync(lockDir, { recursive: true, force: true });
   });
 
@@ -226,25 +225,25 @@ describe('importBookhiveCatalog', () => {
         return Promise.resolve({ ok: true, data: { records: [], cursor: undefined } });
       });
 
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
     const lockPath = join(lockDir, 'lock');
     const res = await importBookhiveCatalog({ db, lockPath });
     expect(res.processed).toBe(1);
     expect(listRecordsMock).toHaveBeenCalledTimes(3); // reject + count retry + import
     expect(existsSync(lockPath)).toBe(false);
-    expect(reservationFor(db)).toBeUndefined();
+    expect(await reservationFor(db)).toBeUndefined();
     rmSync(lockDir, { recursive: true, force: true });
   });
 
   it('rejects on a non-transient fetch failure and releases the lock and reservation', async () => {
     listRecordsMock.mockRejectedValueOnce(new TypeError('fetch failed', { cause: new Error('boom') }));
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const lockDir = mkdtempSync(join(tmpdir(), 'bookhive-lock-'));
     const lockPath = join(lockDir, 'lock');
     await expect(importBookhiveCatalog({ db, lockPath })).rejects.toThrow('fetch failed');
     expect(existsSync(lockPath)).toBe(false);
-    expect(reservationFor(db)).toBeUndefined();
+    expect(await reservationFor(db)).toBeUndefined();
     rmSync(lockDir, { recursive: true, force: true });
   });
 });

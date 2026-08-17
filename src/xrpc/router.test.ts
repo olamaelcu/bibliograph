@@ -34,9 +34,9 @@ afterAll(() => {
 });
 
 /** Bare anonymous app backed only by the local catalog DB (no user PDS). */
-function app() {
-	const { db, seed } = createTestDb();
-	seed();
+async function app() {
+	const { db, seed } = await createTestDb();
+	await seed();
 	const router = createXrpcRouter(db, ctx);
 	return {
 		db,
@@ -45,14 +45,14 @@ function app() {
 }
 
 /** Seed a Jetstream-indexed user record directly, as if ingested from the firehose. */
-function seedUserRecord(
+async function seedUserRecord(
 	db: ReturnType<typeof createTestDb>['db'],
 	did: string,
 	collection: string,
 	rkey: string,
 	value: Record<string, unknown>,
 ) {
-	db.insert(userRecords)
+	await db.insert(userRecords)
 		.values({
 			did,
 			collection,
@@ -60,17 +60,16 @@ function seedUserRecord(
 			cid: FIXED_CID,
 			record: { $type: collection, ...value },
 			indexedAt: Math.floor(Date.now() / 1000),
-		})
-		.run();
+		});
 }
 
-function seedReview(
+async function seedReview(
 	db: ReturnType<typeof createTestDb>['db'],
 	did: string,
 	rkey: string,
 	overrides: Record<string, unknown> = {},
 ) {
-	seedUserRecord(db, did, COLLECTION.review, rkey, {
+	await seedUserRecord(db, did, COLLECTION.review, rkey, {
 		book: { ref: BOOK_URI('book-dune'), title: 'Dune (40th Anniversary)' },
 		tags: [],
 		rating: 5,
@@ -81,13 +80,13 @@ function seedReview(
 	});
 }
 
-function seedShelf(
+async function seedShelf(
 	db: ReturnType<typeof createTestDb>['db'],
 	did: string,
 	rkey: string,
 	overrides: Record<string, unknown> = {},
 ) {
-	seedUserRecord(db, did, COLLECTION.shelf, rkey, {
+	await seedUserRecord(db, did, COLLECTION.shelf, rkey, {
 		name: 'Favorites',
 		description: 'Books I loved',
 		createdAt: '2024-01-01T00:00:00.000Z',
@@ -95,13 +94,13 @@ function seedShelf(
 	});
 }
 
-function seedShelving(
+async function seedShelving(
 	db: ReturnType<typeof createTestDb>['db'],
 	did: string,
 	rkey: string,
 	overrides: Record<string, unknown> = {},
 ) {
-	seedUserRecord(db, did, COLLECTION.bookShelving, rkey, {
+	await seedUserRecord(db, did, COLLECTION.bookShelving, rkey, {
 		shelf: atUri(did, COLLECTION.shelf, 'shelf-favorites'),
 		book: { ref: BOOK_URI('book-dune'), title: 'Dune (40th Anniversary)' },
 		metadata: { status: 'reading', position: 1 },
@@ -110,19 +109,18 @@ function seedShelving(
 	});
 }
 
-function releasedBooks() {
-	const a = app();
+async function releasedBooks() {
+	const a = await app();
 	const now = Math.floor(Date.now() / 1000);
 	for (let i = 0; i < 5; i++) {
-		a.db
+		await a.db
 			.insert(books)
 			.values({
 				pk: `book-page-${i}`,
 				title: `Paged Book ${String(i).padStart(2, '0')}`,
 				createdAt: now + i,
 				releaseStatus: 'released',
-			})
-			.run();
+			});
 	}
 	return a;
 }
@@ -133,8 +131,8 @@ function releasedBooks() {
 
 describe('getReview', () => {
 	it('returns a review view hydrated from the local index', async () => {
-		const a = app();
-		seedReview(a.db, USER_DID, 'rev-1', { rating: 4 });
+		const a = await app();
+		await seedReview(a.db, USER_DID, 'rev-1', { rating: 4 });
 		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getReview?uri=${encodeURIComponent(userUri(COLLECTION.review, 'rev-1'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -144,8 +142,8 @@ describe('getReview', () => {
 	});
 
 	it('serves a review indexed for any DID, not just the caller', async () => {
-		const a = app();
-		seedReview(a.db, OTHER_DID, 'rev-1');
+		const a = await app();
+		await seedReview(a.db, OTHER_DID, 'rev-1');
 		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getReview?uri=${encodeURIComponent(atUri(OTHER_DID, COLLECTION.review, 'rev-1'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -153,15 +151,15 @@ describe('getReview', () => {
 	});
 
 	it('returns NotFound for a record not yet indexed', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getReview?uri=${encodeURIComponent(userUri(COLLECTION.review, 'nope'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getReview?uri=${encodeURIComponent(userUri(COLLECTION.review, 'nope'))}`);
 		expect(res.status).toBe(404);
 	});
 });
 
 describe('getShelf', () => {
 	it('returns a shelf view', async () => {
-		const a = app();
-		seedShelf(a.db, USER_DID, 'shelf-favorites');
+		const a = await app();
+		await seedShelf(a.db, USER_DID, 'shelf-favorites');
 		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getShelf?uri=${encodeURIComponent(SHELF_URI('shelf-favorites'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -171,9 +169,9 @@ describe('getShelf', () => {
 
 describe('getBookOnShelf', () => {
 	it('hydrates the shelving with its shelf and catalog book', async () => {
-		const a = app();
-		seedShelf(a.db, USER_DID, 'shelf-favorites');
-		seedShelving(a.db, USER_DID, 'shelving-1');
+		const a = await app();
+		await seedShelf(a.db, USER_DID, 'shelf-favorites');
+		await seedShelving(a.db, USER_DID, 'shelving-1');
 		const res = await a.fetch(
 			`/xrpc/net.olamaelcu.livtet.biblio.getBookOnShelf?uri=${encodeURIComponent(userUri(COLLECTION.bookShelving, 'shelving-1'))}`,
 		);
@@ -187,11 +185,11 @@ describe('getBookOnShelf', () => {
 
 describe('getShelvingOfBook', () => {
 	it('aggregates shelvings of a book across every indexed DID', async () => {
-		const a = app();
-		seedShelf(a.db, USER_DID, 'shelf-favorites');
-		seedShelf(a.db, OTHER_DID, 'shelf-favorites');
-		seedShelving(a.db, USER_DID, 'shelving-1');
-		seedShelving(a.db, OTHER_DID, 'shelving-1');
+		const a = await app();
+		await seedShelf(a.db, USER_DID, 'shelf-favorites');
+		await seedShelf(a.db, OTHER_DID, 'shelf-favorites');
+		await seedShelving(a.db, USER_DID, 'shelving-1');
+		await seedShelving(a.db, OTHER_DID, 'shelving-1');
 		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getShelvingOfBook?book=${encodeURIComponent(BOOK_URI('book-dune'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -201,9 +199,9 @@ describe('getShelvingOfBook', () => {
 
 describe('listReviewsByBook', () => {
 	it('lists reviews of a book across every indexed DID', async () => {
-		const a = app();
-		seedReview(a.db, USER_DID, 'rev-1', { text: 'from alice' });
-		seedReview(a.db, OTHER_DID, 'rev-1', { text: 'from bob' });
+		const a = await app();
+		await seedReview(a.db, USER_DID, 'rev-1', { text: 'from alice' });
+		await seedReview(a.db, OTHER_DID, 'rev-1', { text: 'from bob' });
 		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.listReviewsByBook?book=${encodeURIComponent(BOOK_URI('book-dune'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -212,16 +210,16 @@ describe('listReviewsByBook', () => {
 	});
 
 	it('returns NotFound for an unreleased book', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listReviewsByBook?book=${encodeURIComponent(BOOK_URI('nope'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.listReviewsByBook?book=${encodeURIComponent(BOOK_URI('nope'))}`);
 		expect(res.status).toBe(404);
 	});
 });
 
 describe('listShelves', () => {
 	it('lists shelves across every indexed DID', async () => {
-		const a = app();
-		seedShelf(a.db, USER_DID, 'shelf-favorites', { name: 'Favorites' });
-		seedShelf(a.db, OTHER_DID, 'shelf-tbr', { name: 'To Be Read' });
+		const a = await app();
+		await seedShelf(a.db, USER_DID, 'shelf-favorites', { name: 'Favorites' });
+		await seedShelf(a.db, OTHER_DID, 'shelf-tbr', { name: 'To Be Read' });
 		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listShelves');
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -231,10 +229,10 @@ describe('listShelves', () => {
 
 describe('listBooksOnShelf', () => {
 	it('orders shelvings on a single shelf by position', async () => {
-		const a = app();
-		seedShelf(a.db, USER_DID, 'shelf-favorites');
-		seedShelving(a.db, USER_DID, 'shelving-2', { metadata: { status: 'to-read', position: 2 } });
-		seedShelving(a.db, USER_DID, 'shelving-1', { metadata: { status: 'reading', position: 1 } });
+		const a = await app();
+		await seedShelf(a.db, USER_DID, 'shelf-favorites');
+		await seedShelving(a.db, USER_DID, 'shelving-2', { metadata: { status: 'to-read', position: 2 } });
+		await seedShelving(a.db, USER_DID, 'shelving-1', { metadata: { status: 'reading', position: 1 } });
 		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooksOnShelf?shelf=${SHELF_URI('shelf-favorites')}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -244,10 +242,10 @@ describe('listBooksOnShelf', () => {
 
 describe('listShelvesWithBooks', () => {
 	it('nests each DID’s shelves with their own shelvings', async () => {
-		const a = app();
-		seedShelf(a.db, USER_DID, 'shelf-favorites', { name: 'Favorites' });
-		seedShelving(a.db, USER_DID, 'shelving-1');
-		seedShelf(a.db, OTHER_DID, 'shelf-favorites', { name: 'Favorites' });
+		const a = await app();
+		await seedShelf(a.db, USER_DID, 'shelf-favorites', { name: 'Favorites' });
+		await seedShelving(a.db, USER_DID, 'shelving-1');
+		await seedShelf(a.db, OTHER_DID, 'shelf-favorites', { name: 'Favorites' });
 		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listShelvesWithBooks');
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -260,9 +258,9 @@ describe('listShelvesWithBooks', () => {
 
 describe('searchReviews', () => {
 	it('matches review text across every indexed DID', async () => {
-		const a = app();
-		seedReview(a.db, USER_DID, 'rev-1', { text: 'A masterpiece of worldbuilding' });
-		seedReview(a.db, OTHER_DID, 'rev-1', { text: 'Just okay' });
+		const a = await app();
+		await seedReview(a.db, USER_DID, 'rev-1', { text: 'A masterpiece of worldbuilding' });
+		await seedReview(a.db, OTHER_DID, 'rev-1', { text: 'Just okay' });
 		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.searchReviews?q=' + encodeURIComponent('masterpiece'));
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -271,9 +269,9 @@ describe('searchReviews', () => {
 	});
 
 	it('filters by rating', async () => {
-		const a = app();
-		seedReview(a.db, USER_DID, 'rev-1', { rating: 5 });
-		seedReview(a.db, OTHER_DID, 'rev-1', { rating: 2 });
+		const a = await app();
+		await seedReview(a.db, USER_DID, 'rev-1', { rating: 5 });
+		await seedReview(a.db, OTHER_DID, 'rev-1', { rating: 2 });
 		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.searchReviews?q=%20&rating=4');
 		const body = await res.json();
 		expect(body.reviews).toHaveLength(1);
@@ -283,8 +281,8 @@ describe('searchReviews', () => {
 
 describe('getActor', () => {
 	it('returns the actor profile for an indexed DID', async () => {
-		const a = app();
-		seedUserRecord(a.db, USER_DID, COLLECTION.actor, 'self', { displayName: 'Alice' });
+		const a = await app();
+		await seedUserRecord(a.db, USER_DID, COLLECTION.actor, 'self', { displayName: 'Alice' });
 		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.getActor?actor=' + encodeURIComponent(USER_DID));
 		expect(res.status).toBe(200);
 		const body = await res.json();
@@ -293,7 +291,7 @@ describe('getActor', () => {
 	});
 
 	it('returns a bare actor view for a DID with no indexed profile record', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.getActor?actor=' + encodeURIComponent(USER_DID));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.getActor?actor=' + encodeURIComponent(USER_DID));
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.actor.did).toBe(USER_DID);
@@ -303,7 +301,7 @@ describe('getActor', () => {
 
 describe('getBook', () => {
 	it('hydrates a book view with work, format, genres, contributors', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(BOOK_URI('book-dune'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(BOOK_URI('book-dune'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.book.title).toBe('Dune (40th Anniversary)');
@@ -316,19 +314,19 @@ describe('getBook', () => {
 	});
 
 	it('returns NotFound for a missing book', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(BOOK_URI('nope'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(BOOK_URI('nope'))}`);
 		expect(res.status).toBe(404);
 	});
 
 	it('rejects a uri from a different service', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=' + encodeURIComponent('at://did:web:other.example.com/net.olamaelcu.livtet.biblio.book/x'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=' + encodeURIComponent('at://did:web:other.example.com/net.olamaelcu.livtet.biblio.book/x'));
 		expect(res.status).toBe(400);
 	});
 });
 
 describe('getWork', () => {
 	it('returns a work view', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.work.title).toBe('Dune');
@@ -336,14 +334,14 @@ describe('getWork', () => {
 	});
 
 	it('returns NotFound', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'nope'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'nope'))}`);
 		expect(res.status).toBe(404);
 	});
 });
 
 describe('getContributor', () => {
 	it('returns a contributor view', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.contributor.name).toBe('Frank Herbert');
@@ -352,14 +350,14 @@ describe('getContributor', () => {
 	});
 
 	it('returns NotFound', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'nope'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'nope'))}`);
 		expect(res.status).toBe(404);
 	});
 });
 
 describe('getGenre', () => {
 	it('returns a genre view with parent', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.genre.name).toBe('Science Fiction');
@@ -367,14 +365,14 @@ describe('getGenre', () => {
 	});
 
 	it('returns NotFound', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'nope'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'nope'))}`);
 		expect(res.status).toBe(404);
 	});
 });
 
 describe('listBooks', () => {
 	it('returns all books with a cursor only when a next page exists', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks');
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks');
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.books.map((b: { title: string }) => b.title).sort()).toEqual([
@@ -385,21 +383,21 @@ describe('listBooks', () => {
 	});
 
 	it('filters by genre', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooks?genre=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooks?genre=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
 		const body = await res.json();
 		expect(body.books).toHaveLength(1);
 		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
 	});
 
 	it('filters by work', async () => {
-		const res = await app().fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooks?work=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooks?work=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
 		const body = await res.json();
 		expect(body.books).toHaveLength(1);
 		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
 	});
 
 	it('ignores the status param (no longer a review filter)', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?status=read');
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?status=read');
 		const body = await res.json();
 		expect(body.books.map((b: { title: string }) => b.title).sort()).toEqual([
 			'Dune (40th Anniversary)',
@@ -408,14 +406,14 @@ describe('listBooks', () => {
 	});
 
 	it('paginates with a limit of 1 and returns a cursor', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?limit=1');
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?limit=1');
 		const body = await res.json();
 		expect(body.books).toHaveLength(1);
 		expect(body.cursor).toBeDefined();
 	});
 
 	it('follows the cursor to the next page without overlap', async () => {
-		const { fetch } = releasedBooks();
+		const { fetch } = await releasedBooks();
 		const first = await (await fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?limit=2')).json();
 		expect(first.books).toHaveLength(2);
 		expect(first.cursor).toBeDefined();
@@ -433,7 +431,7 @@ describe('listBooks', () => {
 	});
 
 	it('follows a searchBooks cursor to the next page without overlap', async () => {
-		const { fetch } = releasedBooks();
+		const { fetch } = await releasedBooks();
 		const q = encodeURIComponent('Paged');
 		const first = await (await fetch(`/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=${q}&limit=2`)).json();
 		expect(first.books).toHaveLength(2);
@@ -452,22 +450,20 @@ describe('listBooks', () => {
 	});
 
 	it('rejects a malformed cursor with 400', async () => {
-		const res = await app().fetch(
-			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?cursor=' + encodeURIComponent('not-a-cursor'),
-		);
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?cursor=' + encodeURIComponent('not-a-cursor'),);
 		expect(res.status).toBe(400);
 	});
 });
 
 describe('listGenres', () => {
 	it('returns all genres', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.listGenres');
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.listGenres');
 		const body = await res.json();
 		expect(body.genres.map((g: { name: string }) => g.name).sort()).toEqual(['Fiction', 'Science Fiction']);
 	});
 
 	it('filters to top-level genres', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.listGenres?topLevelOnly=true');
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.listGenres?topLevelOnly=true');
 		const body = await res.json();
 		expect(body.genres.map((g: { name: string }) => g.name)).toEqual(['Fiction']);
 	});
@@ -475,14 +471,14 @@ describe('listGenres', () => {
 
 describe('searchBooks', () => {
 	it('finds books by title', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=' + encodeURIComponent('Dune'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=' + encodeURIComponent('Dune'));
 		const body = await res.json();
 		expect(body.hitsTotal).toBe(1);
 		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
 	});
 
 	it('finds books by identifier', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=' + encodeURIComponent('isbn:0441172717'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=' + encodeURIComponent('isbn:0441172717'));
 		const body = await res.json();
 		expect(body.books).toHaveLength(1);
 		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
@@ -491,14 +487,14 @@ describe('searchBooks', () => {
 
 describe('searchContributors', () => {
 	it('finds contributors by name', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchContributors?q=' + encodeURIComponent('Frank'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchContributors?q=' + encodeURIComponent('Frank'));
 		const body = await res.json();
 		expect(body.hitsTotal).toBe(1);
 		expect(body.contributors[0].name).toBe('Frank Herbert');
 	});
 
 	it('finds contributors by sort name', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchContributors?q=' + encodeURIComponent('Herbert'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchContributors?q=' + encodeURIComponent('Herbert'));
 		const body = await res.json();
 		expect(body.contributors).toHaveLength(1);
 	});
@@ -506,21 +502,21 @@ describe('searchContributors', () => {
 
 describe('searchWorks', () => {
 	it('finds works by title', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('Dune'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('Dune'));
 		const body = await res.json();
 		expect(body.hitsTotal).toBe(1);
 		expect(body.works[0].title).toBe('Dune');
 	});
 
 	it('finds works by identifier', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('openlibrary:works/OL893423W'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('openlibrary:works/OL893423W'));
 		const body = await res.json();
 		expect(body.hitsTotal).toBe(1);
 		expect(body.works[0].identifiers[0].resource).toBe('openlibrary:works/OL893423W');
 	});
 
 	it('returns empty results for no match', async () => {
-		const res = await app().fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('nonexistent'));
+		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.searchWorks?q=' + encodeURIComponent('nonexistent'));
 		const body = await res.json();
 		expect(body.hitsTotal).toBe(0);
 		expect(body.works).toHaveLength(0);

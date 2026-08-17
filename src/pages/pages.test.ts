@@ -1,7 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderPage } from './render.js';
 import { renderStatsPage } from './stats.js';
 import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from '../lexicon-catalog.js';
+import { createTestDb } from '../test-utils/db.js';
+
+const dbHolder = vi.hoisted(() => ({
+	db: undefined as
+		| Awaited<ReturnType<typeof createTestDb>>['db']
+		| undefined,
+}));
+vi.mock('../db/connection.js', () => ({
+	get db() {
+		return dbHolder.db;
+	},
+}));
+
+beforeAll(async () => {
+	const { db } = await createTestDb();
+	dbHolder.db = db;
+});
 
 const queries = lexiconEndpoints.filter((e) => e.type === 'query');
 const procedures = lexiconEndpoints.filter((e) => e.type === 'procedure');
@@ -133,8 +150,8 @@ describe('page templates', () => {
 		expect(html).toContain('/webawesome/dist-cdn/styles/webawesome.css');
 	});
 
-	it('renders live catalog stats', () => {
-		const html = renderStatsPage();
+	it('renders live catalog stats', async () => {
+		const html = await renderStatsPage();
 		expect(html).toContain('<!doctype html>');
 		expect(html).toContain('did-ssr');
 		for (const label of ['books', 'works', 'contributors', 'formats', 'Import issues', 'Backfill state']) {
@@ -142,8 +159,8 @@ describe('page templates', () => {
 		}
 	});
 
-	it('marks cells updatable and includes the live polling script', () => {
-		const html = renderStatsPage();
+	it('marks cells updatable and includes the live polling script', async () => {
+		const html = await renderStatsPage();
 		expect(html).toContain('data-stat="total"');
 		expect(html).toContain('data-stat="openIssues"');
 		expect(html).toContain('data-stat="covers"');

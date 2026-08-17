@@ -9,10 +9,10 @@ async function* gen<T>(items: T[]): AsyncGenerator<T, void, void> {
 
 describe('importInBatches', () => {
   it('counts inserted / skipped / failed', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const summary = await importInBatches(db, gen([1, 2, 3]), {
       batchSize: 2,
-      upsert: (n) => {
+      upsert: (_tx, n) => {
         if (n === 2) throw new Error('boom');
         return { action: 'inserted' };
       },
@@ -23,19 +23,19 @@ describe('importInBatches', () => {
   });
 
   it('is atomic per record at the DB level: failing record absent, batch siblings present', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const now = Math.floor(Date.now() / 1000);
 
     const summary = await importInBatches(db, gen([{ pk: 'book-good' }, { pk: 'book-bad' }, { pk: 'book-good2' }]), {
       batchSize: 3,
-      upsert: ({ pk }) => {
+      upsert: async (tx, { pk }) => {
         if (pk === 'book-bad') throw new Error('boom');
-        db.insert(books).values({ pk, title: pk, createdAt: now, releaseStatus: 'staged' }).run();
+        await tx.insert(books).values({ pk, title: pk, createdAt: now, releaseStatus: 'staged' });
         return { action: 'inserted' };
       },
     });
 
-    const pks = db.select().from(books).all().map((r) => r.pk);
+    const pks = (await db.select().from(books)).map((r) => r.pk);
     expect(pks).toContain('book-good');
     expect(pks).toContain('book-good2');
     expect(pks).not.toContain('book-bad');
@@ -44,7 +44,7 @@ describe('importInBatches', () => {
   });
 
   it('reports progress with the known total after each flushed batch', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const calls: Array<{ processed: number; total: number | null }> = [];
     await importInBatches(db, gen([1, 2, 3, 4, 5]), {
       batchSize: 2,
@@ -61,7 +61,7 @@ describe('importInBatches', () => {
   });
 
   it('fires onCheckpoint after each flushed batch with its last item', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const calls: Array<{ processed: number; lastItem: string }> = [];
     await importInBatches(db, gen(['a', 'b', 'c', 'd', 'e']), {
       batchSize: 2,
@@ -76,7 +76,7 @@ describe('importInBatches', () => {
   });
 
   it('passes total null when unknown', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const calls: Array<{ processed: number; total: number | null }> = [];
     await importInBatches(db, gen([1]), {
       batchSize: 1,
@@ -87,7 +87,7 @@ describe('importInBatches', () => {
   });
 
   it('fires afterBatch after each flushed batch with that batch, including the trailing partial one', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const calls: string[][] = [];
     await importInBatches(db, gen(['a', 'b', 'c', 'd', 'e']), {
       batchSize: 2,
@@ -102,19 +102,19 @@ describe('importInBatches', () => {
   });
 
   it('fires afterBatch after the batch transaction commits (writes visible to it)', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const seen: string[] = [];
     const now = Math.floor(Date.now() / 1000);
     await importInBatches(db, gen([{ pk: 'book-x' }, { pk: 'book-y' }]), {
       batchSize: 2,
-      upsert: ({ pk }) => {
-        db.insert(books).values({ pk, title: pk, createdAt: now, releaseStatus: 'staged' }).run();
-        return { action: 'inserted' };
+      upsert: (tx, { pk }) => {
+        const p = tx.insert(books).values({ pk, title: pk, createdAt: now, releaseStatus: 'staged' });
+        return p.then(() => ({ action: 'inserted' as const }));
       },
-      afterBatch: (batch) => {
+      afterBatch: async (batch) => {
         seen.push(...batch.map((b) => b.pk));
         // The inserted rows must be committed and readable here (runs after the tx).
-        const rows = db.select().from(books).all();
+        const rows = await db.select().from(books);
         expect(rows.map((r) => r.pk).sort()).toEqual(['book-x', 'book-y']);
       },
     });
@@ -122,7 +122,7 @@ describe('importInBatches', () => {
   });
 
   it('stops at the next batch boundary when the signal aborts mid-stream', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const controller = new AbortController();
     const source = (async function* () {
       yield 1;
@@ -145,7 +145,7 @@ describe('importInBatches', () => {
   });
 
   it('stops before processing any item when aborted before the loop starts', async () => {
-    const { db } = createTestDb();
+    const { db } = await createTestDb();
     const controller = new AbortController();
     controller.abort(new Error('pre-aborted'));
 
