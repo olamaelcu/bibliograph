@@ -40,7 +40,6 @@ export const works = pgTable(
 	(t) => ({
 		titleIdx: index('works_title_idx').on(t.title),
 		titleLowerIdx: index('works_title_lower_idx').on(sql`lower(${t.title})`),
-		releaseStatusIdx: index('works_release_status_idx').on(t.releaseStatus),
 		releaseStatusCheck: check(
 			'works_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
@@ -63,8 +62,7 @@ export const contributors = pgTable(
 		releasedAt: integer('released_at'),
 	},
 	(t) => ({
-			releaseStatusIdx: index('contributors_release_status_idx').on(t.releaseStatus),
-		releaseStatusCheck: check(
+			releaseStatusCheck: check(
 			'contributors_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
 		),
@@ -98,7 +96,6 @@ export const genres = pgTable(
 		parentFk: foreignKey({ columns: [t.parentPk], foreignColumns: [t.pk] }).onDelete('set null'),
 		nameIdx: index('genres_name_idx').on(t.name),
 		parentPkIdx: index('genres_parent_pk_idx').on(t.parentPk),
-		releaseStatusIdx: index('genres_release_status_idx').on(t.releaseStatus),
 		releaseStatusCheck: check(
 			'genres_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
@@ -119,7 +116,6 @@ export const contributorRoles = pgTable(
 		releasedAt: integer('released_at'),
 	},
 	(t) => ({
-		releaseStatusIdx: index('contributor_roles_release_status_idx').on(t.releaseStatus),
 		releaseStatusCheck: check(
 			'contributor_roles_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
@@ -146,7 +142,6 @@ export const books = pgTable(
 	(t) => ({
 		workPkIdx: index('books_work_pk_idx').on(t.workPk),
 		formatPkIdx: index('books_format_pk_idx').on(t.formatPk),
-		releaseStatusIdx: index('books_release_status_idx').on(t.releaseStatus),
 		releaseStatusCheck: check(
 			'books_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
@@ -310,6 +305,9 @@ export const importIssues = pgTable(
 	(t) => ({
 		entityIdx: index('import_issues_entity_idx').on(t.entityType, t.entityPk),
 		statusIdx: index('import_issues_status_idx').on(t.status),
+		openDedupIdx: uniqueIndex('import_issues_open_dedup')
+			.on(t.entityType, t.entityPk, t.field, t.source)
+			.where(sql`${t.status} = 'open'`),
 		entityTypeCheck: check(
 			'import_issues_entity_type_check',
 			sql`${t.entityType} IN ('book', 'work', 'contributor', 'genre', 'contributorRole')`,

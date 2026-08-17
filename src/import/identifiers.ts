@@ -21,6 +21,10 @@ export type PkAdapter = {
 	findByResource: (db: Database, resource: string) => Promise<string | null>;
 	upsert: (db: Database, pk: string, spec: IdentifierSpec) => Promise<void>;
 	remove: (db: Database, pk: string) => Promise<void>;
+	/** The underlying identifier table; exposed for batched lookups in `mergeBatch`. */
+	readonly table: IdentifierTable;
+	/** The pk column on the table (e.g. `bookPk`, `workPk`). */
+	readonly pkCol: { pk: string };
 }
 
 export async function identifierTaken(db: Database, adapter: PkAdapter, resource: string): Promise<boolean> {
@@ -29,6 +33,8 @@ export async function identifierTaken(db: Database, adapter: PkAdapter, resource
 
 function makeAdapter(table: IdentifierTable, pkCol: { pk: string }): PkAdapter {
 	return {
+		table,
+		pkCol,
 		async findByResource(db, resource) {
 			const rows = await db.select().from(table).where(eq(table.resource, resource));
 			const row = rows[0];

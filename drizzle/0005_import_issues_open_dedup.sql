@@ -1,0 +1,13 @@
+-- Partial unique index for `import_issues` dedup.
+-- The import hot path does a SELECT-before-INSERT in `flagIssue` to dedup
+-- identical open issues. That SELECT currently bypasses the `entity_idx`
+-- (COALESCE(incoming_value,'') = COALESCE(?, '')) and seq-scans 2,684 rows
+-- 33k times during a partial import. The ON CONFLICT path eliminates the
+-- SELECT entirely; this index is what makes the conflict target concrete.
+--
+-- The index is partial (WHERE status='open') so resolved issues are
+-- exempt: a record can be re-flagged after the previous issue is
+-- resolved. `incoming_value` is excluded because callers may pass NULL
+-- (the prior COALESCE NULL-handling is replaced by storing '' in callers
+-- that currently pass NULL).
+CREATE UNIQUE INDEX "import_issues_open_dedup" ON "import_issues" ("entity_type","entity_pk","field","source") WHERE "import_issues"."status" = 'open';

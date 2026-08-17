@@ -49,7 +49,7 @@ async function runWithProgress<T>(
 }
 
 const USAGE =
-  'usage: tsx src/import/cli.ts openlibrary:dump|editions:rehydrate|works:dump|contributors:dump|contributors:enrich|works:enrich|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--snapshot] [--path=DIR] [--batch-size=N]\n\n  editions:rehydrate  re-process editions to insert only books; run AFTER works:dump so work_pks land and previously-failed FK references succeed.';
+  'usage: tsx src/import/cli.ts openlibrary:dump|editions:rehydrate|works:dump|contributors:dump|contributors:enrich|works:enrich|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--snapshot] [--path=DIR] [--batch-size=N] [--batched-merge]\n\n  editions:rehydrate  re-process editions to insert only books; run AFTER works:dump so work_pks land and previously-failed FK references succeed.\n  --batched-merge     use the B2a batched merge path (hoists identifier + row lookups to per-batch scope; opt-in for the editions path).';
 
 interface Flags {
   noDownload: boolean;
@@ -58,16 +58,19 @@ interface Flags {
   snapshot: boolean;
   dumpPath?: string;
   batchSize?: number;
+  /** Opt-in: use the batched merge path (B2a) instead of the per-record path. */
+  batchedMerge: boolean;
   unknown: string[];
 }
 
 function parseFlags(rest: string[]): Flags {
-  const f: Flags = { noDownload: false, reset: false, keepDump: false, snapshot: false, unknown: [] };
+  const f: Flags = { noDownload: false, reset: false, keepDump: false, snapshot: false, batchedMerge: false, unknown: [] };
   for (const arg of rest) {
     if (arg === '--no-download') f.noDownload = true;
     else if (arg === '--reset') f.reset = true;
     else if (arg === '--keep-dump') f.keepDump = true;
     else if (arg === '--snapshot') f.snapshot = true;
+    else if (arg === '--batched-merge') f.batchedMerge = true;
     else if (arg.startsWith('--path=')) f.dumpPath = arg.slice('--path='.length);
     else if (arg.startsWith('--batch-size=')) {
       f.batchSize = Number(arg.slice('--batch-size='.length));
@@ -104,8 +107,11 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
   if (cmd === 'openlibrary:dump') {
     // Edition→author links deferred to the staging table: collected during
     // each batch, flushed after the batch commits, and resolved into
-    // book_contributors after the whole dump is imported.
+    // book_contributors after the whole dump is imported. Every 50 batches we
+    // drain a bounded slice of staging rows so the table doesn't grow to 170M
+    // rows before the end-of-dump final resolve.
     const pending: StagedAuthorLink[] = [];
+    let batchCount = 0;
     const s = await runWithProgress('ol-editions', (onDownload, onImport) =>
       runDumpImport({
         db, stateName: 'ol-editions', url: OL_EDITIONS_URL,
@@ -116,6 +122,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         onImportProgress: onImport,
         keyOf: olKeyOf,
         skipNameFallback: true,
+        batchedMerge: flags.batchedMerge,
         parse: async (fields) => {
           const rec = JSON.parse(fields[4]) as OlEdition;
           for (const a of rec.authors ?? []) {
@@ -133,9 +140,13 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
           return cands;
         },
         afterBatch: async () => {
-          if (pending.length === 0) return;
-          await stageEditionAuthors(db, pending);
-          pending.length = 0;
+          if (pending.length > 0) {
+            await stageEditionAuthors(db, pending);
+            pending.length = 0;
+          }
+          if (++batchCount % 50 === 0) {
+            await resolveBookContributors(db, { batchSize: 10_000, maxBatches: 1 });
+          }
         },
       }),
     );
@@ -148,6 +159,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
     // work_pk doesn't exist will hit FK and be caught by the per-record
     // savepoint, so this pass is safe to run alongside a previous import run.
     const pending: StagedAuthorLink[] = [];
+    let batchCount = 0;
     const s = await runWithProgress('ol-editions-rehydrate', (onDownload, onImport) =>
       runDumpImport({
         db, stateName: 'ol-editions-rehydrate', url: OL_EDITIONS_URL,
@@ -166,9 +178,13 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
           return mapEditionToCandidates(rec).filter((c) => c.entityType === 'book');
         },
         afterBatch: async () => {
-          if (pending.length === 0) return;
-          await stageEditionAuthors(db, pending);
-          pending.length = 0;
+          if (pending.length > 0) {
+            await stageEditionAuthors(db, pending);
+            pending.length = 0;
+          }
+          if (++batchCount % 50 === 0) {
+            await resolveBookContributors(db, { batchSize: 10_000, maxBatches: 1 });
+          }
         },
       }),
     );

@@ -142,6 +142,27 @@ describe('stageEditionAuthors + resolveBookContributors', () => {
     expect(await resolveBookContributors(db)).toBe(0); // table empty -> nothing to do
     expect(await db.select().from(bookContributors)).toHaveLength(3); // 2 seeded + 1 resolved
   });
+
+  it('honors maxBatches so the periodic in-import drain does not block the import', async () => {
+    const { db, seed } = await createTestDb();
+    await seed();
+    const now = Math.floor(Date.now() / 1000);
+    for (let i = 1; i <= 6; i++) {
+      await db.insert(books).values({ pk: `books-ol${i}m`, title: `Book ${i}`, createdAt: now, releaseStatus: 'staged' });
+      await db.insert(contributors).values({ pk: `authors-ol${i}a`, name: `Author ${i}`, createdAt: now, releaseStatus: 'staged' });
+      await stageEditionAuthors(db, [
+        { editionKey: `/books/OL${i}M`, authorKey: `/authors/OL${i}A` },
+      ]);
+    }
+    // Drain only one batch (batchSize=2 leaves 4 rows behind).
+    const linked = await resolveBookContributors(db, { batchSize: 2, maxBatches: 1 });
+    expect(linked).toBe(2);
+    const remaining = await db.select().from(bookContributorStaging);
+    expect(remaining).toHaveLength(4);
+    // A follow-up unbounded resolve finishes the job.
+    const linked2 = await resolveBookContributors(db);
+    expect(linked2).toBe(4);
+  });
 });
 
 describe('ensureContributorRole', () => {

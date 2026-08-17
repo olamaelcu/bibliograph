@@ -12,6 +12,7 @@ import { splitTsv } from '../dump/tsv.js';
 import { buildSnapshot, snapshotIsCurrent, snapshotPathOf } from '../dump/snapshot.js';
 import { importInBatches, type BatchSummary } from '../dump/batched-importer.js';
 import { mergeEntity, type MergeCandidate } from './merge.js';
+import { buildMergeBatchContext, mergeBatch } from './merge-batch.js';
 import { logger } from '../logger.js';
 import { InterruptedError, abortReason } from '../dump/interrupt.js';
 
@@ -47,6 +48,13 @@ export interface DumpRunOptions {
   signal?: AbortSignal;
   /** Skip the per-record name fallback during OL backfills (521ms seq scan on 278k rows). */
   skipNameFallback?: boolean;
+  /**
+   * Use the batched merge path (`mergeBatch` from `merge-batch.ts`) instead
+   * of the per-record `mergeEntity`. B2a optimization: hoists identifier and
+   * entity row lookups to per-batch scope. The per-record path is the
+   * default and the source of truth; the batched path is opt-in.
+   */
+  batchedMerge?: boolean;
 }
 
 export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary> {
@@ -129,7 +137,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       let lastKey: string | null = null;
       let lastEndOffset = offset;
       const s = await importInBatches(opts.db, items, {
-        batchSize: opts.batchSize ?? 500,
+        batchSize: opts.batchSize ?? 2000,
         total,
         afterBatch: opts.afterBatch,
         signal: opts.signal,
@@ -141,19 +149,76 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
           lastByteOffset: lastEndOffset,
           totalProcessed: progressBase + processed,
         }),
-        upsert: async (tx, item) => {
-          if (item.key !== null) lastKey = item.key;
-          lastEndOffset = item.byteOffset + Buffer.byteLength(item.line, 'utf8') + 1;
-          if (await opts.skipIfSeen?.(item.key, item.line)) return { action: 'skipped' };
-          const fields = splitTsv(item.line, 5);
-          const cands = await opts.parse(fields);
-          let inserted = false;
-          for (const c of cands) {
-            const res = await mergeEntity(tx, c, { skipNameFallback: opts.skipNameFallback });
-            if (!res.existed) inserted = true;
-          }
-          return { action: inserted ? 'inserted' : 'skipped' };
-        },
+        upsertBatch: opts.batchedMerge
+          ? async (tx, batch) => {
+              const actions: Array<{ action: 'inserted' | 'skipped' | 'failed' }> = [];
+              const allCands: MergeCandidate[] = [];
+              const candCounts: number[] = []; // per record: how many candidates it produced
+              for (const item of batch) {
+                if (item.key !== null) lastKey = item.key;
+                lastEndOffset = item.byteOffset + Buffer.byteLength(item.line, 'utf8') + 1;
+                if (await opts.skipIfSeen?.(item.key, item.line)) {
+                  actions.push({ action: 'skipped' });
+                  candCounts.push(0);
+                  continue;
+                }
+                const fields = splitTsv(item.line, 5);
+                try {
+                  const cands = await opts.parse(fields);
+                  candCounts.push(cands.length);
+                  allCands.push(...cands);
+                  actions.push({ action: 'inserted' }); // tentative
+                } catch (err) {
+                  logger.warn({ err }, 'parse failed for batched record');
+                  candCounts.push(0);
+                  actions.push({ action: 'failed' });
+                }
+              }
+              if (allCands.length === 0) return actions;
+              const ctx = await buildMergeBatchContext(tx, allCands);
+              const results = await mergeBatch(tx, allCands, ctx, { skipNameFallback: opts.skipNameFallback });
+              // Walk actions and consume results in order. A record is
+              // "inserted" if any of its candidates was a fresh insert;
+              // otherwise "skipped" (existed or all duplicates). A record
+              // whose parse produced 0 candidates keeps its tentative
+              // 'inserted' but we re-evaluate to 'skipped' since there
+              // was nothing to do.
+              let candIdx = 0;
+              for (let i = 0; i < batch.length; i++) {
+                if (actions[i].action === 'failed' || actions[i].action === 'skipped') continue;
+                const n = candCounts[i];
+                if (n === 0) {
+                  actions[i] = { action: 'skipped' };
+                  continue;
+                }
+                let anyNew = false;
+                for (let j = 0; j < n; j++) {
+                  if (results[candIdx + j] && !results[candIdx + j].existed) {
+                    anyNew = true;
+                    break;
+                  }
+                }
+                actions[i] = { action: anyNew ? 'inserted' : 'skipped' };
+                candIdx += n;
+              }
+              return actions;
+            }
+          : undefined,
+        upsert: opts.batchedMerge
+          ? (async () => { throw new Error('upsert must not be called when batchedMerge is set'); }) as never
+          : async (tx, item) => {
+              if (item.key !== null) lastKey = item.key;
+              lastEndOffset = item.byteOffset + Buffer.byteLength(item.line, 'utf8') + 1;
+              if (await opts.skipIfSeen?.(item.key, item.line)) return { action: 'skipped' as const };
+              const fields = splitTsv(item.line, 5);
+              const cands = await opts.parse(fields);
+              let inserted = false;
+              for (const c of cands) {
+                const res = await mergeEntity(tx, c, { skipNameFallback: opts.skipNameFallback });
+                if (!res.existed) inserted = true;
+              }
+              return { action: inserted ? ('inserted' as const) : ('skipped' as const) };
+            },
       });
       return s;
     };

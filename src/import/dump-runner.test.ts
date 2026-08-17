@@ -232,6 +232,35 @@ describe('runDumpImport', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('imports via the batched merge path (batchedMerge: true)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dump-run-'));
+    const lines = [
+      '/type/author\t/authors/OL1A\t1\t2026-01-01T00:00:00Z\t{"key":"/authors/OL1A","name":"Alpha"}',
+      '/type/author\t/authors/OL2A\t1\t2026-01-01T00:00:00Z\t{"key":"/authors/OL2A","name":"Beta"}',
+      '/type/author\t/authors/OL3A\t1\t2026-01-01T00:00:00Z\t{"key":"/authors/OL3A","name":"Gamma"}',
+    ];
+    const dumpPath = authorFixture(dir, lines);
+
+    const { db } = await createTestDb();
+    const summary = await runDumpImport({
+      db,
+      stateName: 'ol-authors',
+      url: 'https://example.invalid/dump.gz',
+      dumpPath,
+      noDownload: true,
+      keepDump: true,
+      keyOf: olKeyOf,
+      batchedMerge: true,
+      parse: authorParse,
+    });
+    expect(summary.inserted).toBe(3);
+    expect(summary.skipped).toBe(0);
+    expect(summary.failed).toBe(0);
+    const names = (await db.select({ pk: contributors.pk, name: contributors.name }).from(contributors)).map((r) => `${r.pk}=${r.name}`).sort();
+    expect(names).toEqual(['authors-ol1a=Alpha', 'authors-ol2a=Beta', 'authors-ol3a=Gamma']);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('checkpoints mid-run so an interrupted import resumes from the cursor', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'dump-run-'));
     const lines = [

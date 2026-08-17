@@ -97,13 +97,16 @@ export async function stageEditionAuthors(db: Database, links: StagedAuthorLink[
  * flow every staged link's lineage exists by resolve time, or the record
  * failed to import and has nothing to link. Returns the number of links created.
  */
-export async function resolveBookContributors(db: Database, opts: { batchSize?: number } = {}): Promise<number> {
+export async function resolveBookContributors(db: Database, opts: { batchSize?: number; maxBatches?: number } = {}): Promise<number> {
   const batchSize = opts.batchSize ?? 10_000;
+  const maxBatches = opts.maxBatches;
   await ensureContributorRole(db);
   const now = Math.floor(Date.now() / 1000);
   let linked = 0;
+  let batches = 0;
 
   while (true) {
+    if (maxBatches !== undefined && ++batches > maxBatches) break;
     // Cursor on id so the delete boundary below is exact: the rows fetched
     // are exactly those with the batchSize smallest ids.
     const result = await db.execute(sql`

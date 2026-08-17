@@ -34,6 +34,15 @@ export async function importInBatches<T>(
     /** Called after the batch transaction commits, with the batch that was just flushed. */
     afterBatch?: (batch: T[]) => void | Promise<void>;
     upsert: (tx: Database, item: T) => { action: 'inserted' | 'skipped' | 'failed' } | Promise<{ action: 'inserted' | 'skipped' | 'failed' }>;
+    /**
+     * Optional batched path: when provided, takes the whole batch inside a
+     * single transaction. Returns per-item actions in the same order as
+     * `batch`. Use this when the per-record work involves many round-trip
+     * SELECTs that can be hoisted to per-batch scope (e.g. OL editions
+     * merge hot path). The per-record `upsert` is the default; only set
+     * one of them.
+     */
+    upsertBatch?: (tx: Database, batch: T[]) => Promise<Array<{ action: 'inserted' | 'skipped' | 'failed' }>>;
     /** Abort: stop cleanly at the next batch boundary. */
     signal?: AbortSignal;
   },
@@ -76,26 +85,42 @@ export async function importInBatches<T>(
   }
 
   async function flushBatch(b: T[]): Promise<void> {
-    await db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL synchronous_commit = off`);
-      for (const item of b) {
-        try {
-          // Per-record savepoint: a malformed OL row that violates a NOT NULL
-          // or CHECK constraint fails ONLY that record's subtransaction. Without
-          // this, Postgres marks the outer transaction aborted and every
-          // subsequent query in the same batch returns "current transaction is
-          // aborted" until commit, producing a flood of indistinguishable
-          // failures that mask the real one.
-          const res = await tx.transaction(async (savepoint) => opts.upsert(savepoint, item));
-          if (res.action === 'inserted') summary.inserted += 1;
-          else if (res.action === 'skipped') summary.skipped += 1;
+    if (opts.upsertBatch) {
+      // Batched path: one transaction per batch, per-record failures
+      // must be caught inside upsertBatch (the callback decides how to
+      // report failures). The whole batch is rolled back together on
+      // an uncaught error.
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL synchronous_commit = off`);
+        const results = await opts.upsertBatch!(tx, b);
+        for (const r of results) {
+          if (r.action === 'inserted') summary.inserted += 1;
+          else if (r.action === 'skipped') summary.skipped += 1;
           else summary.failed += 1;
-        } catch (err) {
-          summary.failed += 1;
-          logger.warn({ err }, 'record failed in batch');
         }
-      }
-    });
+      });
+    } else {
+      await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL synchronous_commit = off`);
+        for (const item of b) {
+          try {
+            // Per-record savepoint: a malformed OL row that violates a NOT NULL
+            // or CHECK constraint fails ONLY that record's subtransaction. Without
+            // this, Postgres marks the outer transaction aborted and every
+            // subsequent query in the same batch returns "current transaction is
+            // aborted" until commit, producing a flood of indistinguishable
+            // failures that mask the real one.
+            const res = await tx.transaction(async (savepoint) => opts.upsert(savepoint, item));
+            if (res.action === 'inserted') summary.inserted += 1;
+            else if (res.action === 'skipped') summary.skipped += 1;
+            else summary.failed += 1;
+          } catch (err) {
+            summary.failed += 1;
+            logger.warn({ err }, 'record failed in batch');
+          }
+        }
+      });
+    }
     await opts.afterBatch?.(b);
   }
 }
