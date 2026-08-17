@@ -61,7 +61,7 @@ export interface MergeResult {
  * title/name fallback → insert. Conflicting field values become open issues;
  * the stored value wins and incoming is recorded on the issue.
  */
-export async function mergeEntity(db: Database, candidate: MergeCandidate): Promise<MergeResult> {
+export async function mergeEntity(db: Database, candidate: MergeCandidate, opts?: { skipNameFallback?: boolean }): Promise<MergeResult> {
 	const table = tableFor[candidate.entityType];
 	const adapter = adapterFor[candidate.entityType];
 	const nameCol = candidate.entityType === 'book' || candidate.entityType === 'work' ? 'title' : 'name';
@@ -93,7 +93,7 @@ export async function mergeEntity(db: Database, candidate: MergeCandidate): Prom
 	// 2. Title/name fallback (case-insensitive)
 	let foundViaNameFallback = false;
 	const matchName = candidate.matchName;
-	if (pk === null && matchName) {
+	if (!opts?.skipNameFallback && pk === null && matchName) {
 		const rows = await db
 			.select()
 			.from(table)

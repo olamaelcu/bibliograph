@@ -58,6 +58,36 @@ describe('mergeEntity', () => {
 		expect(issues.some((i) => i.field === 'title' && i.incomingValue === 'Dune')).toBe(true);
 	});
 
+	it('skipNameFallback: true skips the name fallback even when matchName matches an existing row', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		const res = await mergeEntity(db, {
+			entityType: 'contributor',
+			pk: 'authors/frank-herbert-2',
+			source: 'openlibrary',
+			matchName: 'Frank Herbert',
+			identifiers: [],
+			fields: { name: 'Frank Herbert' },
+		}, { skipNameFallback: true });
+		expect(res.existed).toBe(false);
+		expect(res.pk).toBe('authors/frank-herbert-2');
+	});
+
+	it('skipNameFallback: false (default) still runs name fallback', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		const res = await mergeEntity(db, {
+			entityType: 'contributor',
+			pk: 'authors/frank-herbert-2',
+			source: 'bookhive',
+			matchName: 'Frank Herbert',
+			identifiers: [],
+			fields: { name: 'Frank Herbert' },
+		});
+		expect(res.existed).toBe(true);
+		expect(res.pk).toBe('author-herbert');
+	});
+
 	it('unions identifiers on merge', async () => {
 		const { db, seed } = await createTestDb();
 		await seed();

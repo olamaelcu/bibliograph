@@ -63,8 +63,7 @@ export const contributors = pgTable(
 		releasedAt: integer('released_at'),
 	},
 	(t) => ({
-		nameIdx: index('contributors_name_idx').on(t.name),
-		releaseStatusIdx: index('contributors_release_status_idx').on(t.releaseStatus),
+			releaseStatusIdx: index('contributors_release_status_idx').on(t.releaseStatus),
 		releaseStatusCheck: check(
 			'contributors_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
@@ -264,8 +263,7 @@ export const contributorIdentifiers = pgTable(
 			columns: [t.contributorPk],
 			foreignColumns: [contributors.pk],
 		}).onDelete('cascade'),
-		urlIdx: index('contributor_identifiers_url_idx').on(t.url),
-		resourceUnique: uniqueIndex('contributor_identifiers_resource_unique').on(t.resource),
+			resourceUnique: uniqueIndex('contributor_identifiers_resource_unique').on(t.resource),
 	}),
 );
 
@@ -404,7 +402,7 @@ export type NewUserRecord = typeof userRecords.$inferInsert;
 /** Single-row-per-consumer cursor checkpoint for resuming the Jetstream subscription. */
 export const jetstreamCursor = pgTable('jetstream_cursor', {
 	name: text('name').primaryKey(),
-	cursor: integer('cursor'),
+	cursor: bigint('cursor', { mode: 'number' }),
 	updatedAt: integer('updated_at').notNull(),
 });
 

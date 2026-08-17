@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { logger } from '../logger.js';
@@ -76,6 +77,7 @@ export async function importInBatches<T>(
 
   async function flushBatch(b: T[]): Promise<void> {
     await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL synchronous_commit = off`);
       for (const item of b) {
         try {
           // Per-record savepoint: a malformed OL row that violates a NOT NULL

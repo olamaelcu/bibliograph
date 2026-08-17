@@ -45,6 +45,8 @@ export interface DumpRunOptions {
   afterBatch?: () => void | Promise<void>;
   /** Abort: stop the import cleanly at the next safe point and mark the run stopped. */
   signal?: AbortSignal;
+  /** Skip the per-record name fallback during OL backfills (521ms seq scan on 278k rows). */
+  skipNameFallback?: boolean;
 }
 
 export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary> {
@@ -147,7 +149,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
           const cands = await opts.parse(fields);
           let inserted = false;
           for (const c of cands) {
-            const res = await mergeEntity(tx, c);
+            const res = await mergeEntity(tx, c, { skipNameFallback: opts.skipNameFallback });
             if (!res.existed) inserted = true;
           }
           return { action: inserted ? 'inserted' : 'skipped' };

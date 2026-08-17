@@ -115,6 +115,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         onProgress: onDownload,
         onImportProgress: onImport,
         keyOf: olKeyOf,
+        skipNameFallback: true,
         parse: async (fields) => {
           const rec = JSON.parse(fields[4]) as OlEdition;
           for (const a of rec.authors ?? []) {
@@ -156,6 +157,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         onProgress: onDownload,
         onImportProgress: onImport,
         keyOf: olKeyOf,
+        skipNameFallback: true,
         parse: (fields) => {
           const rec = JSON.parse(fields[4]) as OlEdition;
           for (const a of rec.authors ?? []) {
@@ -184,6 +186,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         onImportProgress: onImport,
         keyOf: olKeyOf,
         skipIfSeen: skipSeenWorks(db),
+        skipNameFallback: true,
         parse: (fields) => [mapWorkToCandidate(JSON.parse(fields[4]))],
       }),
     );
@@ -199,6 +202,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         onImportProgress: onImport,
         keyOf: olKeyOf,
         skipIfSeen: skipSeenContributors(db),
+        skipNameFallback: true,
         parse: (fields) => { const c = mapAuthorToCandidate(JSON.parse(fields[4])); return c ? [c] : []; },
       }),
     );
