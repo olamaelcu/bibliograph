@@ -104,22 +104,24 @@ export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
 		});
 	}
 
-  candidates.push({
-    entityType: 'book',
-    pk: sourceKeySlug(ed.key),
-    source: 'openlibrary',
-    matchName: ed.title ?? null,
-    identifiers: [
-      { resource: identifierResource('openlibrary', ed.key.replace(/^\//, '')), url: `https://openlibrary.org${ed.key}` },
-      ...isbnIds,
-    ],
-    fields: {
-      title: ed.title ?? null,
-      description: text(ed.description),
-      publishDate: unixSecondsOrNull(ed.publish_date),
-      workPk: workKey ? sourceKeySlug(workKey) : null,
-    },
-  });
+  if (ed.title) {
+    candidates.push({
+      entityType: 'book',
+      pk: sourceKeySlug(ed.key),
+      source: 'openlibrary',
+      matchName: ed.title,
+      identifiers: [
+        { resource: identifierResource('openlibrary', ed.key.replace(/^\//, '')), url: `https://openlibrary.org${ed.key}` },
+        ...isbnIds,
+      ],
+      fields: {
+        title: ed.title,
+        description: text(ed.description),
+        publishDate: unixSecondsOrNull(ed.publish_date),
+        workPk: workKey ? sourceKeySlug(workKey) : null,
+      },
+    });
+  }
 
   return candidates;
 }

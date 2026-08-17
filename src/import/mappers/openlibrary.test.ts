@@ -91,6 +91,11 @@ describe('OL mappers', () => {
     expect(book?.identifiers.some((i) => i.resource === 'isbn:9780441172719')).toBe(true);
   });
 
+  it('skips book candidate when title is missing', () => {
+    const cands = mapEditionToCandidates({ key: '/books/OL1M' });
+    expect(cands.find((c) => c.entityType === 'book')).toBeUndefined();
+  });
+  
   it('skipSeenContributors is true only for keys already in contributor identifiers', async () => {
     const { db } = await createTestDb();
     const now = Math.floor(Date.now() / 1000);
