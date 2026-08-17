@@ -21,8 +21,9 @@ run = [
 ]
 
 [tasks.sql]
-run = "psql"
-
-[tasks.psql]
 description = "Open a psql shell against the local Postgres database (DATABASE_URL from .env)"
-run = "psql \"$DATABASE_URL\""
+run = "psql $DATABASE_URL"
+
+[shell_alias]
+sql = "mise sql"
+dev = "mise dev"

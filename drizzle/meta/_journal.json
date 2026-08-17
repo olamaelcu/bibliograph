@@ -8,6 +8,13 @@
       "when": 1786918882258,
       "tag": "0000_tidy_grey_gargoyle",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786931748108,
+      "tag": "0001_sticky_sentinel",
+      "breakpoints": true
     }
   ]
 }
