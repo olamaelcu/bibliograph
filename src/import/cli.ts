@@ -199,7 +199,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         onImportProgress: onImport,
         keyOf: olKeyOf,
         skipIfSeen: skipSeenContributors(db),
-        parse: (fields) => [mapAuthorToCandidate(JSON.parse(fields[4]))],
+        parse: (fields) => { const c = mapAuthorToCandidate(JSON.parse(fields[4])); return c ? [c] : []; },
       }),
     );
     logger.info(s, 'contributors import done');

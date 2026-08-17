@@ -18,7 +18,7 @@ function authorFixture(dir: string, lines: string[]) {
   return dumpPath;
 }
 
-const authorParse = (fields: string[]) => [mapAuthorToCandidate(JSON.parse(fields[4]))];
+const authorParse = (fields: string[]) => { const c = mapAuthorToCandidate(JSON.parse(fields[4])); return c ? [c] : []; };
 
 describe('runDumpImport', () => {
   it('imports a real gz TSV fixture via merge', async () => {

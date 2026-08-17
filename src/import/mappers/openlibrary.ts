@@ -139,7 +139,9 @@ export function mapWorkToCandidate(w: OlWork): MergeCandidate {
   };
 }
 
-export function mapAuthorToCandidate(a: OlAuthor): MergeCandidate {
+export function mapAuthorToCandidate(a: OlAuthor): MergeCandidate | null {
+  const name = a.name ?? a.personal_name ?? null;
+  if (!name) return null;
   return {
     entityType: 'contributor',
     pk: sourceKeySlug(a.key),
@@ -147,7 +149,7 @@ export function mapAuthorToCandidate(a: OlAuthor): MergeCandidate {
     matchName: a.name ?? null,
     identifiers: [{ resource: identifierResource('openlibrary', a.key.replace(/^\//, '')), url: `https://openlibrary.org${a.key}` }],
     fields: {
-      name: a.name ?? a.personal_name ?? null,
+      name,
       sortName: a.personal_name ?? null,
       bio: text(a.bio),
     },

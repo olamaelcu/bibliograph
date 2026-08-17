@@ -55,10 +55,22 @@ describe('OL mappers', () => {
     expect(a.fields.bio).toBe('Author');
   });
 
-	it('skips contributor candidates for edition author entries without a name', () => {
-		const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', authors: [{ key: '/authors/OL1A' }] });
-		expect(cands.map((c) => c.entityType)).toEqual(['book']);
+	 it('skips contributor candidates for edition author entries without a name', () => {
+			const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', authors: [{ key: '/authors/OL1A' }] });
+			expect(cands.map((c) => c.entityType)).toEqual(['book']);
 	});
+
+	 it('returns null for authors dump entries without a name or personal_name', () => {
+			const a = mapAuthorToCandidate({ key: '/authors/OL123A' });
+			expect(a).toBeNull();
+	});
+
+	 it('maps authors with only personal_name (name fallback)', () => {
+			const a = mapAuthorToCandidate({ key: '/authors/OL123A', personal_name: 'Frank Herbert' });
+			expect(a).not.toBeNull();
+			expect(a!.fields.name).toBe('Frank Herbert');
+			expect(a!.fields.sortName).toBe('Frank Herbert');
+		});
 
 	it('nulls unparseable edition publish dates instead of writing NaN', () => {
     const cands = mapEditionToCandidates({ key: '/books/OL1M', title: 'X', publish_date: 'Not specified', works: [{ key: '/works/OL1W' }] });
