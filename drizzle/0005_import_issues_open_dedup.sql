@@ -8,6 +8,22 @@
 -- The index is partial (WHERE status='open') so resolved issues are
 -- exempt: a record can be re-flagged after the previous issue is
 -- resolved. `incoming_value` is excluded because callers may pass NULL
--- (the prior COALESCE NULL-handling is replaced by storing '' in callers
--- that currently pass NULL).
+-- (the prior COALESCE NULL-handling is preserved as a SELECT fallback in
+-- src/import/issues.ts).
+--
+-- Pre-existing rows may have duplicates of (entity_type, entity_pk, field,
+-- source) where status='open' — the prior SELECT-before-INSERT path was a
+-- best-effort dedup that could fail under concurrent inserts. Dedupe them
+-- here by keeping the row with the lowest `pk` per group, then build the
+-- unique index.
+DELETE FROM "import_issues" a
+USING "import_issues" b
+WHERE a.status = 'open'
+  AND b.status = 'open'
+  AND a.entity_type = b.entity_type
+  AND a.entity_pk = b.entity_pk
+  AND a.field = b.field
+  AND a.source = b.source
+  AND a.pk > b.pk;
+--> statement-breakpoint
 CREATE UNIQUE INDEX "import_issues_open_dedup" ON "import_issues" ("entity_type","entity_pk","field","source") WHERE "import_issues"."status" = 'open';
