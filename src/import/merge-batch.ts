@@ -192,7 +192,21 @@ export async function mergeBatch(
 	const claimed = new Map<IdentifierSpec['resource'], string>(); // resource -> owning pk (within this batch)
 	const out: MergeResult[] = [];
 	for (const c of candidates) {
-		out.push(await mergeOne(tx, c, ctx, opts, claimed));
+		// Per-record savepoint: a malformed OL row that violates a NOT NULL,
+		// CHECK, or FK constraint fails ONLY that record's subtransaction.
+		// Without this, Postgres marks the outer batch transaction aborted
+		// and every subsequent query in the same batch returns "current
+		// transaction is aborted" until commit, producing a flood of
+		// indistinguishable failures and rolling back all the other
+		// (good) records in the batch. See batched-importer.ts:78 for the
+		// same pattern in the per-record merge path.
+		try {
+			const res = await tx.transaction(async (savepoint) => mergeOne(savepoint, c, ctx, opts, claimed));
+			out.push(res);
+		} catch (err) {
+			logger.warn({ err, pk: c.pk, entityType: c.entityType }, 'record failed in batched merge');
+			out.push({ pk: c.pk, existed: false, conflictFields: [] });
+		}
 	}
 	return out;
 }

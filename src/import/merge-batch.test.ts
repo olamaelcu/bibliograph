@@ -135,6 +135,44 @@ describe('mergeBatch', () => {
 		expect(issues.some((i) => i.field === 'identifier' && i.incomingValue === 'isbn:9780000000003' && i.storedValue === 'book-flowers')).toBe(true);
 	});
 
+	it('isolates a record failure (FK violation) so the rest of the batch commits', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		// First candidate: a book pointing to a non-existent work — FK fails.
+		// Second candidate: a perfectly valid book that must commit despite the first failing.
+		const failing: MergeCandidate = {
+			entityType: 'book',
+			pk: 'books/ol-bad-fk',
+			source: 'openlibrary',
+			matchName: null,
+			identifiers: [],
+			fields: { title: 'Bad FK', workPk: 'works-does-not-exist' },
+		};
+		const good: MergeCandidate = {
+			entityType: 'book',
+			pk: 'books/ol-good-after-fk',
+			source: 'openlibrary',
+			matchName: null,
+			identifiers: [{ resource: 'isbn:9781111111124', url: 'https://ol/x' }],
+			fields: { title: 'Good book' },
+		};
+		await db.transaction(async (tx) => {
+			const ctx = await buildMergeBatchContext(tx, [failing, good]);
+			const results = await mergeBatch(tx, [failing, good], ctx);
+			// The batch must have committed (no error thrown), the good
+			// candidate must have been inserted, and the failing one
+			// must have been recorded as a failed result.
+			expect(results[0].pk).toBe('books/ol-bad-fk'); // sentinel
+			expect(results[1].existed).toBe(false);
+			expect(results[1].pk).toBe('books/ol-good-after-fk');
+		});
+		// Verify the good candidate was actually inserted (not rolled back).
+		const inserted = await db.execute(sql`SELECT title FROM books WHERE pk = ${'books/ol-good-after-fk'}`);
+		expect((inserted.rows[0] as { title: string } | undefined)?.title).toBe('Good book');
+		const badRow = await db.execute(sql`SELECT title FROM books WHERE pk = ${'books/ol-bad-fk'}`);
+		expect(badRow.rows).toHaveLength(0); // failed insert was rolled back
+	});
+
 	it('handles a mixed batch of new + existing + identifier-merge candidates', async () => {
 		const { db, seed } = await createTestDb();
 		await seed();
