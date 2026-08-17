@@ -49,7 +49,7 @@ async function runWithProgress<T>(
 }
 
 const USAGE =
-  'usage: tsx src/import/cli.ts openlibrary:dump|works:dump|contributors:dump|contributors:enrich|works:enrich|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--snapshot] [--path=DIR] [--batch-size=N]';
+  'usage: tsx src/import/cli.ts openlibrary:dump|editions:rehydrate|works:dump|contributors:dump|contributors:enrich|works:enrich|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--snapshot] [--path=DIR] [--batch-size=N]\n\n  editions:rehydrate  re-process editions to insert only books; run AFTER works:dump so work_pks land and previously-failed FK references succeed.';
 
 interface Flags {
   noDownload: boolean;
@@ -141,6 +141,38 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
     logger.info(s, 'editions import done');
     const linked = await resolveBookContributors(db, { batchSize: flags.batchSize ?? 10_000 });
     logger.info({ linked }, 'book contributors linked from staging');
+  } else if (cmd === 'editions:rehydrate') {
+    // Re-process the OL editions dump to insert only book rows; assumes the
+    // works table is already populated (run works:dump first). Records whose
+    // work_pk doesn't exist will hit FK and be caught by the per-record
+    // savepoint, so this pass is safe to run alongside a previous import run.
+    const pending: StagedAuthorLink[] = [];
+    const s = await runWithProgress('ol-editions-rehydrate', (onDownload, onImport) =>
+      runDumpImport({
+        db, stateName: 'ol-editions-rehydrate', url: OL_EDITIONS_URL,
+        noDownload: flags.noDownload, reset: flags.reset, keepDump: flags.keepDump, useSnapshot: flags.snapshot,
+        dumpPath: flags.dumpPath, batchSize: flags.batchSize,
+        signal,
+        onProgress: onDownload,
+        onImportProgress: onImport,
+        keyOf: olKeyOf,
+        parse: (fields) => {
+          const rec = JSON.parse(fields[4]) as OlEdition;
+          for (const a of rec.authors ?? []) {
+            if (a.key) pending.push({ editionKey: rec.key, authorKey: a.key });
+          }
+          return mapEditionToCandidates(rec).filter((c) => c.entityType === 'book');
+        },
+        afterBatch: async () => {
+          if (pending.length === 0) return;
+          await stageEditionAuthors(db, pending);
+          pending.length = 0;
+        },
+      }),
+    );
+    logger.info(s, 'editions rehydrate done');
+    const linked = await resolveBookContributors(db, { batchSize: flags.batchSize ?? 10_000 });
+    logger.info({ linked }, 'book contributors linked from staging (rehydrate)');
   } else if (cmd === 'works:dump') {
     const s = await runWithProgress('ol-works', (onDownload, onImport) =>
       runDumpImport({
