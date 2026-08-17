@@ -16,5 +16,13 @@ run = [
   "pnpm run dump:contributors --keep-dump --no-download",
   "pnpm run dump:works --keep-dump --no-download",
   "pnpm run dump:openlibrary --keep-dump --no-download",
-  "pnpm run imaages:refresh --keep-dump --no-download",
+  "pnpm run images:refresh --keep-dump --no-download",
+  "pnpm run dump:openlibrary:editions:rehydrate --keep-dump --no-download",
 ]
+
+[tasks.sql]
+run = "psql"
+
+[tasks.psql]
+description = "Open a psql shell against the local Postgres database (DATABASE_URL from .env)"
+run = "psql \"$DATABASE_URL\""
