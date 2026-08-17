@@ -29,7 +29,7 @@ describe('lexicon catalog', () => {
 		expect(queryCount).toBeGreaterThan(0);
 		for (const endpoint of lexiconEndpoints) {
 			expect(endpoint.type === 'query' || endpoint.type === 'procedure').toBe(true);
-			expect(endpoint.id).toMatch(/^net\.olamaelcu\.livtet\.biblio\./);
+			expect(endpoint.id).toMatch(/^(net\.olamaelcu\.livtet\.biblio\.|com\.atproto\.)/);
 		}
 	});
 

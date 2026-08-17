@@ -28,7 +28,8 @@
     "review": "tsx src/review/cli.ts",
     "lex:gen": "lex-cli generate",
     "key:generate": "node scripts/generate-atproto-key.mjs",
-    "lex:check": "atprotolex check lexicons/net/olamaelcu/livtet/biblio/*.json"
+    "lex:check": "atprotolex check lexicons/net/olamaelcu/livtet/biblio/*.json",
+    "lex:resolve": "tsx src/lex/cli.ts"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.4",
@@ -46,6 +47,7 @@
     "eta": "^4.6.0",
     "hono": "^4.13.0",
     "jose": "^6.2.8",
+    "multiformats": "13.4.2",
     "opendal": "^0.49.6",
     "pg": "^8.23.0",
     "pino": "^10.3.1",

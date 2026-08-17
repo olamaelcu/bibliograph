@@ -26,6 +26,8 @@ query, `/procedures` every procedure, and `/stats` shows live catalog counts,
 open import issues, and backfill state. Pages are server-side rendered with
 [Web Awesome](https://webawesome.com) components and hydrated on the client.
 
+For lexicon schema serving and DNS TXT record setup, see [docs/lexicon-resolution.md](docs/lexicon-resolution.md).
+
 ## Environment
 
 | Variable              | Default                       | Description                                |

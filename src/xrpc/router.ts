@@ -2,6 +2,8 @@ import { and, eq, inArray, like, or, sql, type SQL, type SQLWrapper } from 'driz
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { XRPCRouter, json, InvalidRequestError, XRPCError } from '@atcute/xrpc-server';
+import { CID, digest } from 'multiformats';
+import { loadLexiconSchema, LexiconNotFound } from '../lexicon-resolve.js';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
 import { authenticateOptional } from '../oauth/auth.js';
@@ -178,6 +180,27 @@ function paginate<T>(
 export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
   const router = new XRPCRouter();
   registerPdsHandlers(router, db, ctx);
+
+  router.addQuery(Lexicons.ComAtprotoLexiconResolveLexicon.mainSchema, {
+    async handler({ params }) {
+      let schemaNsid: string;
+      try {
+        schemaNsid = params.nsid;
+        const { json: schemaJson, bytes } = loadLexiconSchema(schemaNsid);
+        const hash = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+        const hashBytes = new Uint8Array(hash);
+        const digestObj = digest.create(0x12, hashBytes);
+        const cid = CID.createV1(0x0129, digestObj);
+        const uri = `at://${ctx.serviceDid}/com.atproto.lexicon.schema/${schemaNsid}`;
+        return json({ uri, cid: cid.toString(), schema: schemaJson as unknown as Lexicons.ComAtprotoLexiconResolveLexicon.$output['schema'] });
+      } catch (err) {
+        if (err instanceof LexiconNotFound) {
+          throw new XRPCError({ status: 400, error: 'LexiconNotFound', message: err.message });
+        }
+        throw err;
+      }
+    },
+  });
 
   router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
     async handler({ params, request }) {

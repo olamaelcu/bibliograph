@@ -12,6 +12,8 @@ import { db } from './db/connection.js';
 import { BlobStore, blobStoreConfigFromEnv } from './storage/store.js';
 import { registerBlobProxy } from './storage/blob-proxy.js';
 import { createXrpcRouter } from './xrpc/router.js';
+import { createHash } from 'node:crypto';
+import { loadLexiconSchema, LexiconNotFound } from './lexicon-resolve.js';
 import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
 import { renderStatsPage, getCatalogStats } from './pages/stats.js';
@@ -104,6 +106,27 @@ export function createApp(): Hono {
 	app.get('/health', healthCheck);
 	app.get('/.well-known/did.json', didDocumentHandler);
 	app.get('/.well-known/atproto-did', serveAtprotoDid);
+
+	const NSID_RE = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+(\.[a-z][a-z0-9-]*)$/;
+
+	app.get('/lexicon/:nsid', async (ctx) => {
+		const nsid = ctx.req.param('nsid');
+		if (!NSID_RE.test(nsid)) {
+			return ctx.json({ error: 'InvalidNsid', message: 'Invalid NSID format' }, 400);
+		}
+		try {
+			const { json, bytes } = loadLexiconSchema(nsid);
+			const etag = `W/"${createHash('sha256').update(bytes).digest('base64url')}"`;
+			ctx.header('Cache-Control', 'public, max-age=300, must-revalidate');
+			ctx.header('ETag', etag);
+			return ctx.json(json);
+		} catch (err) {
+			if (err instanceof LexiconNotFound) {
+				return ctx.json({ error: 'LexiconNotFound', message: err.message }, 404);
+			}
+			throw err;
+		}
+	});
 	app.use('/lexicons/*', lexiconsStatic);
 	app.all('/xrpc/*', (ctx) => xrpcRouter.fetch(ctx.req.raw));
 	app.onError(handleServerError);
