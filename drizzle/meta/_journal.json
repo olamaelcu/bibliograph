@@ -15,6 +15,13 @@
       "when": 1786931748108,
       "tag": "0001_sticky_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786975871725,
+      "tag": "0002_wide_gorilla_man",
+      "breakpoints": true
     }
   ]
 }
