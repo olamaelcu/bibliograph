@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+	bigint,
 	bigserial,
 	check,
 	foreignKey,
@@ -29,7 +30,7 @@ export const works = pgTable(
 		pk: text('pk').primaryKey(),
 		title: text('title').notNull(),
 		description: text('description'),
-		originalPublishDate: integer('original_publish_date'),
+		originalPublishDate: bigint('original_publish_date', { mode: 'number' }),
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
@@ -134,7 +135,7 @@ export const books = pgTable(
 		title: text('title').notNull(),
 		workPk: text('work_pk').references(() => works.pk, { onDelete: 'set null' }),
 		formatPk: text('format_pk').references(() => formats.pk, { onDelete: 'set null' }),
-		publishDate: integer('publish_date'),
+		publishDate: bigint('publish_date', { mode: 'number' }),
 		description: text('description'),
 		coverUrl: text('cover_url'),
 		cid: text('cid').notNull().default(''),
