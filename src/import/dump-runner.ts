@@ -86,6 +86,14 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
   try {
     if (opts.reset) await state.clear();
     const existing = await state.get();
+    // A previous interrupted run may have left stopped=1; a new run that
+    // has acquired the reservation is by definition the live run, so the
+    // stale flag should be cleared. The interrupt path on line 241 still
+    // sets stopped=true if THIS run is interrupted, so the meaning is
+    // preserved.
+    if (existing?.stopped) {
+      await state.set({ stopped: false });
+    }
 
     // Download unless asked to reuse the local file. The downloader resumes a
     // partial file on disk via HTTP Range (206) instead of restarting.

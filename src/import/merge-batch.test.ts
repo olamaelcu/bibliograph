@@ -201,4 +201,63 @@ describe('mergeBatch', () => {
 			expect(results[1].pk).toBe('book-dune');
 		});
 	});
+
+	it('does NOT let a work candidate claiming an edition OL key taint a later book candidate (regression for the B2a book_identifiers bug)', async () => {
+		// mapEditionToCandidates puts the edition's OL key in BOTH the work
+		// candidate's and the book candidate's identifiers. In a single
+		// batch the work is processed first and claims the resource in
+		// work_identifiers. A previous version of mergeBatch then treated
+		// the work's claim as the book candidate's effectivePk, which made
+		// the book inherit the work's pk and triggered a flood of FK
+		// errors when the book was then inserted with a work's pk as
+		// book_pk in book_identifiers.
+		const { db, seed } = await createTestDb();
+		await seed();
+		const workCand: MergeCandidate = {
+			entityType: 'work',
+			pk: 'works/OLnew1W',
+			source: 'openlibrary',
+			matchName: 'New Work',
+			identifiers: [
+				{ resource: 'openlibrary:works/OLnew1W', url: 'https://ol/works/OLnew1W' },
+				// Edition OL key also attached to the work per mapEditionToCandidates.
+				{ resource: 'openlibrary:books/OLnewE1', url: 'https://ol/books/OLnewE1' },
+			],
+			fields: { title: 'New Work', description: 'work desc' },
+		};
+		const bookCand: MergeCandidate = {
+			entityType: 'book',
+			pk: 'books/OLnewE1',
+			source: 'openlibrary',
+			matchName: 'New Edition',
+			identifiers: [
+				{ resource: 'openlibrary:books/OLnewE1', url: 'https://ol/books/OLnewE1' },
+			],
+			fields: { title: 'New Edition', workPk: 'works/OLnew1W' },
+		};
+		await db.transaction(async (tx) => {
+			const ctx = await buildMergeBatchContext(tx, [workCand, bookCand]);
+			const results = await mergeBatch(tx, [workCand, bookCand], ctx);
+			// The work claims the edition OL key in work_identifiers; the
+			// book must NOT inherit the work's pk as its effectivePk.
+			expect(results[0].pk).toBe('works/OLnew1W');
+			expect(results[1].pk).toBe('books/OLnewE1');
+		});
+		// The work's row exists, with its own pk.
+		const workRow = await db.execute(sql`SELECT pk FROM works WHERE pk = ${'works/OLnew1W'}`);
+		expect((workRow.rows[0] as { pk: string } | undefined)?.pk).toBe('works/OLnew1W');
+		// The book's row exists, with the BOOK's pk (not the work's).
+		const bookRow = await db.execute(sql`SELECT pk FROM books WHERE pk = ${'books/OLnewE1'}`);
+		expect((bookRow.rows[0] as { pk: string } | undefined)?.pk).toBe('books/OLnewE1');
+		// book_identifiers has the book's pk, not the work's.
+		const bookIds = await db.execute(sql`SELECT book_pk FROM book_identifiers WHERE resource = ${'openlibrary:books/OLnewE1'}`);
+		// book_identifiers doesn't get the resource (work owns it) and
+		// therefore the lookup returns no rows. If the bug were still
+		// present, the book_identifiers row would have book_pk =
+		// 'works/OLnew1W' and the books table would have a row with that
+		// same pk, which is a hard contradiction.
+		expect(bookIds.rows).toHaveLength(0);
+		const worksIds = await db.execute(sql`SELECT work_pk FROM work_identifiers WHERE resource = ${'openlibrary:books/OLnewE1'}`);
+		expect((worksIds.rows[0] as { work_pk: string } | undefined)?.work_pk).toBe('works/OLnew1W');
+	});
 });

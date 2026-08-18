@@ -189,7 +189,17 @@ export async function mergeBatch(
 	// Track identifiers claimed by this batch so we can detect cross-record
 	// conflicts: record A claims `isbn:123` first, record B also claims
 	// `isbn:123` and would land on A's pk if both were just looked up.
-	const claimed = new Map<IdentifierSpec['resource'], string>(); // resource -> owning pk (within this batch)
+	//
+	// The value carries entityType so a later candidate of a DIFFERENT
+	// entityType can see the claim and treat it as a cross-entity
+	// conflict rather than silently adopting the other entity's pk.
+	// Without the tag, an OL edition's work candidate (which includes
+	// the edition's OL key in its identifiers per mapEditionToCandidates)
+	// claims the resource first, then the book's lookup sees the claim
+	// and adopts the work's pk as effectivePk, which is then written
+	// as book_pk in the book_identifiers row — a work's pk as a
+	// book_pk fails the FK to books and is exactly wrong.
+	const claimed = new Map<IdentifierSpec['resource'], { entityType: MergeCandidate['entityType']; pk: string }>();
 	const out: MergeResult[] = [];
 	for (const c of candidates) {
 		// Per-record savepoint: a malformed OL row that violates a NOT NULL,
@@ -216,7 +226,7 @@ async function mergeOne(
 	candidate: MergeCandidate,
 	ctx: MergeBatchContext,
 	opts: { skipNameFallback?: boolean },
-	claimed: Map<string, string>,
+	claimed: Map<string, { entityType: MergeCandidate['entityType']; pk: string }>,
 ): Promise<MergeResult> {
 	const table = tableFor[candidate.entityType];
 	const adapter = adapterFor[candidate.entityType];
@@ -234,12 +244,20 @@ async function mergeOne(
 			matchedResource = id.resource;
 			break;
 		}
-		const claimedOwner = claimed.get(id.resource);
-		if (claimedOwner !== undefined) {
-			// A previous record in this batch already owns this identifier; merge onto it.
-			pk = claimedOwner;
-			matchedResource = id.resource;
-			break;
+		const claim = claimed.get(id.resource);
+		if (claim !== undefined) {
+			if (claim.entityType === candidate.entityType) {
+				// Same-entity-type claim from earlier in this batch: merge onto it.
+				pk = claim.pk;
+				matchedResource = id.resource;
+				break;
+			}
+			// Cross-entity-type claim (e.g. a work candidate claimed an
+			// edition's OL key earlier in this batch): the resource
+			// is owned by a different entity. Do NOT merge onto it — the
+			// candidate keeps its own pk, and the identifier conflict is
+			// surfaced later in the identifier upsert loop.
+			continue;
 		}
 	}
 
@@ -323,25 +341,38 @@ async function mergeOne(
 	}
 
 	// 3. Identifier upsert with conflict detection. Use the pre-fetched
-	// resourceMap + claimed set + a fallback SELECT to handle the case
-	// where the same identifier was claimed earlier in the same batch.
+	// resourceMap (committed rows) plus the per-batch claimed set (rows
+	// we just inserted in this same batch). The claimed set carries the
+	// claimant's entityType so a cross-entity claim surfaces as a
+	// conflict rather than silently overwriting the other entity's row.
 	for (const id of candidate.identifiers) {
-		const previousOwner = resourceMap.get(id.resource) ?? claimed.get(id.resource);
-		if (previousOwner === undefined) {
-			// New to the DB. INSERT (on conflict do nothing handles the
-			// race where another concurrent transaction inserted it).
+		const preExisting = resourceMap.get(id.resource);
+		const claim = claimed.get(id.resource);
+		// New to the DB. INSERT (on conflict do nothing handles the
+		// race where another concurrent transaction inserted it).
+		if (preExisting === undefined && claim === undefined) {
 			await adapter.upsert(tx, effectivePk, id);
-			claimed.set(id.resource, effectivePk);
-		} else if (previousOwner !== effectivePk) {
-			await flagIssue(tx, {
-				entityType: candidate.entityType as ImportIssueEntityType,
-				entityPk: effectivePk,
-				field: 'identifier',
-				incomingValue: id.resource,
-				storedValue: previousOwner,
-				source: candidate.source,
-			});
+			claimed.set(id.resource, { entityType: candidate.entityType, pk: effectivePk });
+			continue;
 		}
+		// Same-entity pre-existing row in the DB (or a same-entity
+		// claim from earlier in this batch): no-op.
+		if (preExisting === effectivePk) continue;
+		if (claim && claim.entityType === candidate.entityType && claim.pk === effectivePk) continue;
+		// Conflict: either a different entityType owns it, or a different
+		// pk of the same entityType owns it. Flag the issue and do NOT
+		// overwrite — the DB unique constraint on `resource` would also
+		// block the insert, but the per-record mergeEntity path surfaces
+		// the conflict as an import_issues row, so we match that.
+		const storedValue = preExisting ?? (claim ? `${claim.pk} (${claim.entityType})` : 'unknown');
+		await flagIssue(tx, {
+			entityType: candidate.entityType as ImportIssueEntityType,
+			entityPk: effectivePk,
+			field: 'identifier',
+			incomingValue: id.resource,
+			storedValue,
+			source: candidate.source,
+		});
 	}
 
 	logger.debug({ entityType: candidate.entityType, pk: effectivePk, existed, conflictFields }, 'merge: batch resolved');
