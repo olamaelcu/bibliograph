@@ -75,4 +75,16 @@ describe('DumpState', () => {
     await state.clear();
     expect(await state.get()).toBeNull();
   });
+
+  it('persists lastByteOffset and fileSize values beyond INT4 max', async () => {
+    // Regression for the August 2026 crash where uncompressed OL dumps
+    // exceeded 2 GB and the import checkpoint hit "value out of range for
+    // type integer" on backfill_state.last_byte_offset / file_size.
+    const { db } = await createTestDb();
+    const state = new DumpState(db, 'ol-editions');
+    await state.set({ fileSize: 4_500_000_000, lastByteOffset: 2_800_000_000 });
+    const row = await state.get();
+    expect(row?.fileSize).toBe(4_500_000_000);
+    expect(row?.lastByteOffset).toBe(2_800_000_000);
+  });
 });

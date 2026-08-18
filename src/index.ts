@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { db, closeDb } from './db/connection.js';
 import { logger } from './logger.js';
 import { createJetstreamIngestor } from './jetstream/ingest.js';
+import { assertNoDrift } from './db/schema-check.js';
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
@@ -13,6 +14,13 @@ async function main(): Promise<void> {
     logger.info('migrations applied');
   } catch (err) {
     logger.fatal({ err }, 'migrations failed');
+    process.exit(1);
+  }
+
+  try {
+    await assertNoDrift(db);
+  } catch (err) {
+    logger.fatal({ err }, 'schema drift detected');
     process.exit(1);
   }
 

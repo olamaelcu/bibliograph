@@ -92,4 +92,33 @@ describe('DumpStreamer', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('snapshot byte-seek resumes past a non-monotonic key boundary', async () => {
+    // The OL dump is sorted by last_modified with key-order inversions at every
+    // ~60k-line partition boundary (first inversion at line 59,750 in the real
+    // authors dump). When resuming from a key that was set in the previous
+    // partition, the legacy gz cursor-skip (`key <= lastKeyCursor`) silently
+    // drops the next partition's records. The snapshot path byte-seeks past
+    // the checkpoint and so yields every record after it.
+    const lines = [
+      'a\tOL3A\t0\tx\t{"name":"Charlie"}',
+      'b\tOL1A\t0\tx\t{"name":"Alpha"}',
+      'c\tOL2A\t0\tx\t{"name":"Beta"}',
+    ];
+    const { dir, path } = plainFixture(lines);
+    try {
+      const line0Bytes = Buffer.byteLength(lines[0], 'utf8') + 1;
+      const keys: string[] = [];
+      for await (const it of new DumpStreamer(path, { plain: true }).iter({
+        startByteOffset: line0Bytes,
+        lastKeyCursor: '/authors/OL3A',
+        keyOf,
+      })) {
+        keys.push(it.key!);
+      }
+      expect(keys).toEqual(['OL1A', 'OL2A']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -18,6 +18,7 @@ import { workIdentifiersAdapter } from './identifiers.js';
 import { logger } from '../logger.js';
 import { ProgressBar } from './progress.js';
 import { installInterruptHandlers, signalExitCode, InterruptedError } from '../dump/interrupt.js';
+import { assertNoDrift } from '../db/schema-check.js';
 
 const OL_EDITIONS_URL = process.env.OL_EDITIONS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
 const OL_WORKS_URL = process.env.OL_WORKS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_works_latest.txt.gz';
@@ -49,12 +50,17 @@ async function runWithProgress<T>(
 }
 
 const USAGE =
-  'usage: tsx src/import/cli.ts openlibrary:dump|editions:rehydrate|works:dump|contributors:dump|contributors:enrich|works:enrich|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--snapshot] [--path=DIR] [--batch-size=N] [--batched-merge]\n\n  editions:rehydrate  re-process editions to insert only books; run AFTER works:dump so work_pks land and previously-failed FK references succeed.\n  --batched-merge     use the B2a batched merge path (hoists identifier + row lookups to per-batch scope; opt-in for the editions path).';
+  'usage: tsx src/import/cli.ts openlibrary:dump|editions:rehydrate|works:dump|contributors:dump|contributors:enrich|works:enrich|bookhive:catalog|images:refresh [--no-download] [--reset] [--keep-dump] [--no-snapshot] [--path=DIR] [--batch-size=N] [--batched-merge]\n\n  editions:rehydrate  re-process editions to insert only books; run AFTER works:dump so work_pks land and previously-failed FK references succeed.\n  --no-snapshot       opt out of the uncompressed sidecar (default: build it). The snapshot path byte-seeks for resume; the gz cursor-skip path drops records across last_modified partition boundaries because the OL dump is not sorted by key.\n  --batched-merge     use the B2a batched merge path (hoists identifier + row lookups to per-batch scope). Default-on for works:dump and contributors:dump; opt-in elsewhere.';
 
 interface Flags {
   noDownload: boolean;
   reset: boolean;
   keepDump: boolean;
+  /**
+   * Default true: build/use an uncompressed sidecar so resume is byte-precise.
+   * Pass `--no-snapshot` to fall back to the legacy gzip replay (which silently
+   * drops records across partition boundaries on non-monotonic dumps).
+   */
   snapshot: boolean;
   dumpPath?: string;
   batchSize?: number;
@@ -64,13 +70,16 @@ interface Flags {
 }
 
 function parseFlags(rest: string[]): Flags {
-  const f: Flags = { noDownload: false, reset: false, keepDump: false, snapshot: false, batchedMerge: false, unknown: [] };
+  const f: Flags = { noDownload: false, reset: false, keepDump: false, snapshot: true, batchedMerge: false, unknown: [] };
   for (const arg of rest) {
     if (arg === '--no-download') f.noDownload = true;
     else if (arg === '--reset') f.reset = true;
     else if (arg === '--keep-dump') f.keepDump = true;
-    else if (arg === '--snapshot') f.snapshot = true;
-    else if (arg === '--batched-merge') f.batchedMerge = true;
+    else if (arg === '--no-snapshot') f.snapshot = false;
+    else if (arg === '--snapshot') {
+      // No-op: snapshot is the default. Kept for backward compatibility with
+      // existing scripts; remove once callers stop passing it.
+    } else if (arg === '--batched-merge') f.batchedMerge = true;
     else if (arg.startsWith('--path=')) f.dumpPath = arg.slice('--path='.length);
     else if (arg.startsWith('--batch-size=')) {
       f.batchSize = Number(arg.slice('--batch-size='.length));
@@ -103,6 +112,11 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
   const [cmd, ...rest] = args;
   const flags = parseFlags(rest);
   if (flags.unknown.length > 0) logger.warn({ unknown: flags.unknown }, 'ignoring unknown flags');
+
+  if (cmd === 'openlibrary:dump' || cmd === 'editions:rehydrate' || cmd === 'works:dump' || cmd === 'contributors:dump') {
+    // Fail loud on schema drift before the importer burns hours on a doomed run.
+    await assertNoDrift(db);
+  }
 
   if (cmd === 'openlibrary:dump') {
     // Edition→author links deferred to the staging table: collected during
@@ -203,6 +217,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         keyOf: olKeyOf,
         skipIfSeen: skipSeenWorks(db),
         skipNameFallback: true,
+        batchedMerge: true,
         parse: (fields) => [mapWorkToCandidate(JSON.parse(fields[4]))],
       }),
     );
@@ -219,6 +234,7 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         keyOf: olKeyOf,
         skipIfSeen: skipSeenContributors(db),
         skipNameFallback: true,
+        batchedMerge: true,
         parse: (fields) => { const c = mapAuthorToCandidate(JSON.parse(fields[4])); return c ? [c] : []; },
       }),
     );
