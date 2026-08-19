@@ -14,6 +14,7 @@ import {
   type OlEdition,
 } from './mappers/openlibrary.js';
 import { resolveBookContributors, stageEditionAuthors, type StagedAuthorLink } from './book-contributors.js';
+import { resolveBookWorks } from './book-works.js';
 import { workIdentifiersAdapter } from './identifiers.js';
 import { logger } from '../logger.js';
 import { ProgressBar } from './progress.js';
@@ -97,6 +98,17 @@ async function main(): Promise<void> {
     console.log(USAGE);
     process.exit(0);
   }
+  // Run pending migrations before dispatch. Drizzle's migrator is idempotent;
+  // this prevents the import hot path from running against a stale schema
+  // (the kind of drift that crashed the contributor import on 2026-08-18).
+  try {
+    const { migrate } = await import('drizzle-orm/node-postgres/migrator');
+    await migrate(db, { migrationsFolder: 'drizzle' });
+    logger.info('migrations applied');
+  } catch (err) {
+    logger.fatal({ err }, 'migrations failed');
+    process.exit(1);
+  }
   const interrupt = installInterruptHandlers();
   try {
     await dispatch(args, interrupt.signal);
@@ -169,12 +181,16 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
           }
           if (++batchCount % 50 === 0) {
             await resolveBookContributors(db, { batchSize: 10_000, maxBatches: 1 });
+            // Drain any deferred book→work links now that more works may have
+            // landed during the openlibrary:dump pass itself.
+            await resolveBookWorks(db, { batchSize: 10_000, maxBatches: 1 });
           }
         },
       }),
     );
     logger.info(s, 'editions import done');
     const linked = await resolveBookContributors(db, { batchSize: flags.batchSize ?? 10_000 });
+    await resolveBookWorks(db, { batchSize: flags.batchSize ?? 10_000 });
     logger.info({ linked }, 'book contributors linked from staging');
   } else if (cmd === 'editions:rehydrate') {
     // Re-process the OL editions dump to insert only book rows; assumes the
@@ -207,12 +223,14 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
           }
           if (++batchCount % 50 === 0) {
             await resolveBookContributors(db, { batchSize: 10_000, maxBatches: 1 });
+            await resolveBookWorks(db, { batchSize: 10_000, maxBatches: 1 });
           }
         },
       }),
     );
     logger.info(s, 'editions rehydrate done');
     const linked = await resolveBookContributors(db, { batchSize: flags.batchSize ?? 10_000 });
+    await resolveBookWorks(db, { batchSize: flags.batchSize ?? 10_000 });
     logger.info({ linked }, 'book contributors linked from staging (rehydrate)');
   } else if (cmd === 'works:dump') {
     const s = await runWithProgress('ol-works', (onDownload, onImport) =>

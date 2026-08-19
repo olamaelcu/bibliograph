@@ -95,15 +95,39 @@ async function main(): Promise<void> {
       .map(parseEntity);
     if (entities.length === 0) entities.push('book', 'work', 'contributor', 'genre', 'contributorRole');
 
+    const t0 = performance.now();
+    logger.info({ entities, keepIssues, limit, dryRun: !yes }, 'approve-all starting');
+
     const results = await Promise.all(entities.map((entity) =>
-      approveAll(db, entity, { keepIssues, limit, dryRun: !yes }),
+      approveAll(db, entity, {
+        keepIssues,
+        limit,
+        dryRun: !yes,
+        onProgress: (p) => {
+          if (p.phase === 'approving') {
+            logger.debug(
+              { entity: p.entity, approved: p.approved, total: p.total, chunk: p.chunk, totalChunks: p.totalChunks },
+              `approving ${p.approved}/${p.total} (chunk ${p.chunk}/${p.totalChunks})`,
+            );
+          }
+        },
+      }),
     ));
+    const durationMs = Math.round(performance.now() - t0);
+    const totals = results.reduce(
+      (acc, r) => ({ approved: acc.approved + r.approved, skippedWithIssues: acc.skippedWithIssues + r.skippedWithIssues }),
+      { approved: 0, skippedWithIssues: 0 },
+    );
     for (const r of results) {
       logger.info(
         { entity: r.entity, approved: r.approved, skippedWithIssues: r.skippedWithIssues, dryRun: !yes },
         yes ? 'mass-approved' : 'would approve (dry-run; use --yes to apply)',
       );
     }
+    logger.info(
+      { entities, totals, durationMs, dryRun: !yes },
+      yes ? 'approve-all complete' : 'approve-all dry-run complete',
+    );
     if (!yes) {
       throw new Error('dry-run: pass --yes to actually release');
     }

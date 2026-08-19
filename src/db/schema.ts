@@ -165,6 +165,16 @@ export const bookContributorStaging = pgTable(
 export type BookContributorStaging = typeof bookContributorStaging.$inferSelect;
 export type NewBookContributorStaging = typeof bookContributorStaging.$inferInsert;
 
+export const bookWorkStaging = pgTable(
+	'book_work_staging',
+	{
+		bookPk: text('book_pk').primaryKey(),
+		workOlKey: text('work_ol_key').notNull(),
+		source: text('source').notNull(),
+		createdAt: integer('created_at').notNull(),
+	},
+);
+
 export const bookContributors = pgTable(
 	'book_contributors',
 	{

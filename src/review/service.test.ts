@@ -13,6 +13,7 @@ import {
 	setStatus,
 	stagedDependents,
 } from './service.js';
+import type { ApproveAllProgress } from './service.js';
 import { flagIssue, openIssuesFor } from '../import/issues.js';
 import { coerceValue } from './fields.js';
 
@@ -254,5 +255,87 @@ describe('review service', () => {
 		const none = await approveAll(db, 'genre', { limit: 5 });
 		expect(none.approved).toBe(0);
 		expect(none.skippedWithIssues).toBe(0);
+	});
+
+	it('approveAll bulk-releases staged rows that span multiple chunks', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		await db.execute(sql`UPDATE contributors SET release_status = 'staged'`);
+		const now = Math.floor(Date.now() / 1000);
+		const TOTAL = 600;
+		const WITH_ISSUES = 50;
+		const SEED_STAGED = 2;
+		const bulk: Array<typeof contributors.$inferInsert> = [];
+		for (let i = 0; i < TOTAL; i++) {
+			bulk.push({
+				pk: `bulk-c-${i}`,
+				name: `Bulk C ${i}`,
+				sortName: null,
+				bio: null,
+				imageUrl: null,
+				createdAt: now,
+				updatedAt: null,
+				releaseStatus: 'staged',
+				releasedAt: null,
+			});
+		}
+		await db.insert(contributors).values(bulk);
+		for (let i = 0; i < WITH_ISSUES; i++) {
+			await flagIssue(db, {
+				entityType: 'contributor',
+				entityPk: `bulk-c-${i}`,
+				field: 'name',
+				incomingValue: `Bulk C ${i} alt`,
+				storedValue: `Bulk C ${i}`,
+				source: 'openlibrary',
+			});
+		}
+
+		const res = await approveAll(db, 'contributor');
+		expect(res.approved).toBe(SEED_STAGED + TOTAL - WITH_ISSUES);
+		expect(res.skippedWithIssues).toBe(WITH_ISSUES);
+
+		const stillStaged = (await db.select({ pk: contributors.pk }).from(contributors).where(eq(contributors.releaseStatus, 'staged'))).map((r) => r.pk);
+		expect(stillStaged).toEqual(Array.from({ length: WITH_ISSUES }, (_, i) => `bulk-c-${i}`));
+		expect(stillStaged).not.toContain('bulk-c-50');
+	});
+
+	it('approveAll emits progress events per chunk and at completion', async () => {
+		const { db, seed } = await createTestDb();
+		await seed();
+		await db.execute(sql`UPDATE contributors SET release_status = 'staged'`);
+		const now = Math.floor(Date.now() / 1000);
+		const TOTAL = 1200;
+		const bulk: Array<typeof contributors.$inferInsert> = [];
+		for (let i = 0; i < TOTAL; i++) {
+			bulk.push({
+				pk: `prog-${i}`,
+				name: `Prog ${i}`,
+				sortName: null,
+				bio: null,
+				imageUrl: null,
+				createdAt: now,
+				updatedAt: null,
+				releaseStatus: 'staged',
+				releasedAt: null,
+			});
+		}
+		await db.insert(contributors).values(bulk);
+
+		const events: ApproveAllProgress[] = [];
+		const res = await approveAll(db, 'contributor', {
+			onProgress: (p) => events.push(p),
+		});
+		expect(res.approved).toBe(2 + TOTAL);
+
+		const approving = events.filter((e) => e.phase === 'approving');
+		expect(approving.length).toBe(3);
+		expect(approving[0]).toMatchObject({ phase: 'approving', approved: 500, total: 2 + TOTAL, chunk: 1, totalChunks: 3, skippedWithIssues: 0 });
+		expect(approving[1]).toMatchObject({ phase: 'approving', approved: 1000, total: 2 + TOTAL, chunk: 2, totalChunks: 3, skippedWithIssues: 0 });
+		expect(approving[2]).toMatchObject({ phase: 'approving', approved: 1202, total: 2 + TOTAL, chunk: 3, totalChunks: 3, skippedWithIssues: 0 });
+
+		const complete = events.filter((e) => e.phase === 'complete');
+		expect(complete.length).toBe(1);
+		expect(complete[0]).toMatchObject({ phase: 'complete', approved: 2 + TOTAL, total: 2 + TOTAL, skippedWithIssues: 0 });
 	});
 });

@@ -46,6 +46,7 @@ type Database = NodePgDatabase<typeof schema>;
 type Tx = Database;
 
 import type { MergeCandidate, MergeResult } from './merge.js';
+import { stageBookWork } from './book-works.js';
 
 const tableFor = {
 	book: books,
@@ -323,7 +324,32 @@ async function mergeOne(
 			createdAt: now,
 			releaseStatus: 'staged',
 		};
-		const insertResult = await tx.insert(table).values(insertValues as never).onConflictDoNothing();
+		let insertResult: { rowCount: number | null };
+		try {
+			insertResult = await tx.insert(table).values(insertValues as never).onConflictDoNothing();
+		} catch (err) {
+			// Mirror merge.ts: books whose work hasn't landed yet fall back to
+			// NULL and stage the link so resolveBookWorks can fill work_pk later.
+			if (
+				candidate.entityType === 'book'
+				&& (insertValues as Record<string, unknown>).workPk != null
+				&& isForeignKeyViolation(err)
+				&& candidate.meta?.workOlKey
+			) {
+				const workOlKey = candidate.meta.workOlKey;
+				logger.warn(
+					{ bookPk: effectivePk, workPk: (insertValues as Record<string, unknown>).workPk, workOlKey, source: candidate.source },
+					'merge: batched book work_pk FK missing; staging for later resolve',
+				);
+				const deferred = { ...insertValues, workPk: null };
+				insertResult = await tx.insert(table).values(deferred as never).onConflictDoNothing();
+				if ((insertResult.rowCount ?? 0) > 0) {
+					await stageBookWork(tx, effectivePk, workOlKey, candidate.source);
+				}
+			} else {
+				throw err;
+			}
+		}
 		if (insertResult.rowCount === 0) {
 			await flagIssue(tx, {
 				entityType: candidate.entityType as ImportIssueEntityType,
@@ -413,4 +439,10 @@ async function fetchIdentifierOwners(
 		.from(adapter.table)
 		.where(inArray(adapter.table.resource, [...resources]));
 	return rows.map((r: { resource: string; pk: string }) => [r.resource, r.pk]);
+}
+
+/** True if `err` is a postgres SQLSTATE 23503 (foreign_key_violation). Mirror of merge.ts helper. */
+function isForeignKeyViolation(err: unknown): boolean {
+	const cause = (err as { cause?: { code?: string } }).cause;
+	return cause?.code === '23503';
 }

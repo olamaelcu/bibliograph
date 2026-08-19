@@ -208,6 +208,24 @@ export interface ApproveAllOptions {
 	limit?: number;
 	/** Report what would be released without writing anything. */
 	dryRun?: boolean;
+	/** Called after each chunk commits (and once at completion). */
+	onProgress?: (progress: ApproveAllProgress) => void;
+}
+
+/** Progress event emitted by `approveAll` during a bulk release. */
+export interface ApproveAllProgress {
+	entity: ReviewEntityType;
+	phase: 'approving' | 'complete';
+	/** Rows approved so far (cumulative across chunks). */
+	approved: number;
+	/** Total rows that will be approved (toRelease.length). */
+	total: number;
+	/** 1-indexed chunk number; 0 on the `complete` event. */
+	chunk: number;
+	/** Total chunks; 0 on the `complete` event. */
+	totalChunks: number;
+	/** Records skipped because of open issues; only populated on `complete`. */
+	skippedWithIssues: number;
 }
 
 export interface ApproveAllResult {
@@ -228,6 +246,7 @@ export async function approveAll(
 ): Promise<ApproveAllResult> {
 	const view = entityTable[entity];
 	const now = Math.floor(Date.now() / 1000);
+	const progress = opts.onProgress;
 
 	const staged = (await db
 		.select({ pk: view.pk })
@@ -237,24 +256,55 @@ export async function approveAll(
 	const pks = staged.map((r) => String(r.pk));
 
 	const result: ApproveAllResult = { entity, approved: 0, skippedWithIssues: 0 };
-	if (pks.length === 0) return result;
+	if (pks.length === 0) {
+		progress?.({ entity, phase: 'complete', approved: 0, total: 0, chunk: 0, totalChunks: 0, skippedWithIssues: 0 });
+		return result;
+	}
 
 	const counts = opts.keepIssues ? new Map<string, number>() : await openIssueCounts(db, entity, pks);
 
 	const toRelease = pks.filter((pk) => opts.keepIssues || (counts.get(pk) ?? 0) === 0);
 	result.skippedWithIssues = pks.length - toRelease.length;
 
-	if (!opts.dryRun && toRelease.length > 0) {
+	const batches = chunk(toRelease, SQL_VARIABLE_CHUNK_SIZE);
+	const totalChunks = batches.length;
+	let approved = 0;
+
+	if (!opts.dryRun && batches.length > 0) {
 		await db.transaction(async (tx) => {
-			for (const pk of toRelease) {
+			for (let i = 0; i < batches.length; i++) {
+				const batch = batches[i];
 				await tx
 					.update(view)
 					.set({ releaseStatus: 'released', releasedAt: now } as never)
-					.where(eq(view.pk as never, pk as never));
+					.where(inArray(view.pk as never, batch as never));
+				approved += batch.length;
+				progress?.({
+					entity,
+					phase: 'approving',
+					approved,
+					total: toRelease.length,
+					chunk: i + 1,
+					totalChunks,
+					skippedWithIssues: 0,
+				});
 			}
 		});
+	} else {
+		approved = toRelease.length;
 	}
-	result.approved = toRelease.length;
+	result.approved = approved;
+
+	progress?.({
+		entity,
+		phase: 'complete',
+		approved: result.approved,
+		total: toRelease.length,
+		chunk: totalChunks,
+		totalChunks,
+		skippedWithIssues: result.skippedWithIssues,
+	});
+
 	return result;
 }
 

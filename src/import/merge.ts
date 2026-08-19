@@ -12,6 +12,7 @@ import {
 import type { IdentifierSpec } from './identifiers.js';
 import { bookIdentifiersAdapter, contributorIdentifiersAdapter, genreIdentifiersAdapter, upsertIdentifiers, workIdentifiersAdapter } from './identifiers.js';
 import { flagIssue } from './issues.js';
+import { stageBookWork } from './book-works.js';
 import { sourceKeySlug } from './slugs.js';
 import { logger } from '../logger.js';
 
@@ -34,6 +35,10 @@ export interface MergeCandidate {
 	identifiers: IdentifierSpec[];
 	/** Field values to merge/conflict-check. Values are strings for text, unix-second strings for date columns. */
 	fields: Record<string, string | null>;
+	/** Free-form metadata; never persisted. Used to thread source-side references
+	 *  that need to survive an FK fallback (e.g. work_ol_key for a book whose
+	 *  work hasn't landed yet — see book-works.ts stageBookWork). */
+	meta?: { workOlKey?: string };
 }
 
 const tableFor = {
@@ -170,7 +175,34 @@ export async function mergeEntity(db: Database, candidate: MergeCandidate, opts?
 			createdAt: now,
 			releaseStatus: 'staged',
 		};
-		const insertResult = await db.insert(table).values(insertValues as never).onConflictDoNothing();
+		let insertResult: { rowCount: number | null };
+		try {
+			insertResult = await db.insert(table).values(insertValues as never).onConflictDoNothing();
+		} catch (err) {
+			// Books whose work hasn't landed yet (works:dump partial OR a slug
+			// mismatch) hit FK violation `books_work_pk_works_pk_fk` (SQLSTATE
+			// 23503). Land the book with work_pk=NULL and stage the link so
+			// resolveBookWorks can fill it in once the work arrives.
+			if (
+				candidate.entityType === 'book'
+				&& (insertValues as Record<string, unknown>).workPk != null
+				&& isForeignKeyViolation(err)
+				&& candidate.meta?.workOlKey
+			) {
+				const workOlKey = candidate.meta.workOlKey;
+				logger.warn(
+					{ bookPk: effectivePk, workPk: (insertValues as Record<string, unknown>).workPk, workOlKey, source: candidate.source },
+					'merge: book work_pk FK missing; staging for later resolve',
+				);
+				const deferred = { ...insertValues, workPk: null };
+				insertResult = await db.insert(table).values(deferred as never).onConflictDoNothing();
+				if ((insertResult.rowCount ?? 0) > 0) {
+					await stageBookWork(db, effectivePk, workOlKey, candidate.source);
+				}
+			} else {
+				throw err;
+			}
+		}
 		if (insertResult.rowCount === 0) {
 			// The pk already exists but nothing above matched it (slug collision); the
 			// insert silently no-op'd, so surface the collision as an issue.
@@ -212,3 +244,15 @@ export async function mergeEntity(db: Database, candidate: MergeCandidate, opts?
 
 /** Re-derive a deterministic slug from an OL-style key (compat helper). */
 export { sourceKeySlug };
+
+/** True if `err` is a postgres SQLSTATE 23503 (foreign_key_violation). Walks the
+ *  cause chain because drizzle may wrap the raw pg error in a `DrizzleQueryError`. */
+function isForeignKeyViolation(err: unknown): boolean {
+	let cur: unknown = err;
+	for (let depth = 0; depth < 4 && cur; depth++) {
+		const e = cur as { code?: string; cause?: unknown };
+		if (e.code === '23503') return true;
+		cur = e.cause;
+	}
+	return false;
+}

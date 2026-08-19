@@ -120,6 +120,9 @@ export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
         publishDate: unixSecondsOrNull(ed.publish_date),
         workPk: workKey ? sourceKeySlug(workKey) : null,
       },
+      // Threaded to mergeEntity so the FK-fallback can stage the deferred
+      // book→work link when the work hasn't yet landed. See book-works.ts.
+      ...(workKey ? { meta: { workOlKey: workKey } } : {}),
     });
   }
 
