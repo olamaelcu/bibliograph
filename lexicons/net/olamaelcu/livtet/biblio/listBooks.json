@@ -18,6 +18,11 @@
             "format": "at-uri",
             "description": "Only include books that are editions of the given work."
           },
+          "contributor": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Only include books that credit the given contributor (in any role)."
+          },
           "format": {
             "type": "string",
             "format": "at-uri",

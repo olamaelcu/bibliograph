@@ -396,6 +396,13 @@ describe('listBooks', () => {
 		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
 	});
 
+	it('filters by contributor', async () => {
+		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.listBooks?contributor=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert'))}`);
+		const body = await res.json();
+		expect(body.books).toHaveLength(1);
+		expect(body.books[0].title).toBe('Dune (40th Anniversary)');
+	});
+
 	it('ignores the status param (no longer a review filter)', async () => {
 		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?status=read');
 		const body = await res.json();

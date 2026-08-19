@@ -303,6 +303,18 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         const workPk = rkeyFromUri(ctx, COLLECTION.work, params.work);
         filters.push(eq(books.workPk, workPk));
       }
+      if (params.contributor) {
+        const contributorPk = rkeyFromUri(
+          ctx,
+          COLLECTION.contributor,
+          params.contributor,
+        );
+        const sub = db
+          .select({ bookPk: bookContributors.bookPk })
+          .from(bookContributors)
+          .where(eq(bookContributors.contributorPk, contributorPk));
+        filters.push(sql`${books.pk} in (${sub})`);
+      }
       if (params.format) {
         const formatPk = rkeyFromUri(ctx, COLLECTION.format, params.format);
         filters.push(eq(books.formatPk, formatPk));

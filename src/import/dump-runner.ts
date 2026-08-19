@@ -15,6 +15,8 @@ import { mergeEntity, type MergeCandidate } from './merge.js';
 import { buildMergeBatchContext, mergeBatch } from './merge-batch.js';
 import { logger } from '../logger.js';
 import { InterruptedError, abortReason } from '../dump/interrupt.js';
+import { stageBookWork } from './book-works.js';
+import { sourceKeySlug } from './slugs.js';
 
 type Database = NodePgDatabase<typeof schema>;
 
@@ -214,7 +216,7 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
           : undefined,
         upsert: opts.batchedMerge
           ? (async () => { throw new Error('upsert must not be called when batchedMerge is set'); }) as never
-          : async (tx, item) => {
+          : async (tx, item, batchCtx) => {
               if (item.key !== null) lastKey = item.key;
               lastEndOffset = item.byteOffset + Buffer.byteLength(item.line, 'utf8') + 1;
               if (await opts.skipIfSeen?.(item.key, item.line)) return { action: 'skipped' as const };
@@ -222,10 +224,56 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
               const cands = await opts.parse(fields);
               let inserted = false;
               for (const c of cands) {
-                const res = await mergeEntity(tx, c, { skipNameFallback: opts.skipNameFallback });
+                // Pre-insert check: if this is a book whose work hasn't landed
+                // yet, mutate the candidate to work_pk=NULL and stage the link.
+                // The batched-importer pre-fetches the workExists set once per
+                // batch via extractWorkPks; here we consult it and skip the
+                // work existence check if the work was already inserted by an
+                // earlier candidate in the same record's savepoint (the
+                // work's rowMap entry from mergeEntity won't be visible here,
+                // but if the work candidate ran first, the FK from the book
+                // insert would have passed anyway — this branch only fires
+                // for cases the work candidate didn't handle, e.g. slug
+                // mismatch with a non-existent work).
+                let candidate = c;
+                const workPk = (c.fields as Record<string, unknown>).workPk as string | null;
+                if (
+                  c.entityType === 'book'
+                  && workPk
+                  && batchCtx
+                  && !batchCtx.workExists.has(workPk)
+                  && c.meta?.workOlKey
+                ) {
+                  logger.warn(
+                    { bookPk: c.pk, workPk, workOlKey: c.meta.workOlKey, source: c.source },
+                    'merge: book work missing in batch pre-fetch; inserting with work_pk=null and staging',
+                  );
+                  candidate = {
+                    ...c,
+                    fields: { ...c.fields, workPk: null },
+                  };
+                  await stageBookWork(tx, c.pk, c.meta.workOlKey, c.source);
+                }
+                const res = await mergeEntity(tx, candidate, { skipNameFallback: opts.skipNameFallback });
                 if (!res.existed) inserted = true;
               }
               return { action: inserted ? ('inserted' as const) : ('skipped' as const) };
+            },
+        // For the per-record path, surface every work PK this item references
+        // so the batched-importer can pre-fetch them in one SELECT per batch.
+        // For OL editions, the work key lives in the JSON of field 5.
+        extractWorkPks: opts.batchedMerge
+          ? undefined
+          : (item) => {
+              const fields = item.line.split('\t', 5);
+              if (fields.length < 5) return new Set();
+              try {
+                const rec = JSON.parse(fields[4]) as { works?: Array<{ key?: string }> };
+                const workKey = rec.works?.[0]?.key;
+                return workKey ? new Set([sourceKeySlug(workKey)]) : new Set();
+              } catch {
+                return new Set();
+              }
             },
       });
       return s;

@@ -318,38 +318,35 @@ async function mergeOne(
 		}
 	} else {
 		const now = Math.floor(Date.now() / 1000);
-		const insertValues: Record<string, unknown> = {
+		let insertValues: Record<string, unknown> = {
 			...candidate.fields,
 			pk: effectivePk,
 			createdAt: now,
 			releaseStatus: 'staged',
 		};
-		let insertResult: { rowCount: number | null };
-		try {
-			insertResult = await tx.insert(table).values(insertValues as never).onConflictDoNothing();
-		} catch (err) {
-			// Mirror merge.ts: books whose work hasn't landed yet fall back to
-			// NULL and stage the link so resolveBookWorks can fill work_pk later.
-			if (
-				candidate.entityType === 'book'
-				&& (insertValues as Record<string, unknown>).workPk != null
-				&& isForeignKeyViolation(err)
-				&& candidate.meta?.workOlKey
-			) {
-				const workOlKey = candidate.meta.workOlKey;
-				logger.warn(
-					{ bookPk: effectivePk, workPk: (insertValues as Record<string, unknown>).workPk, workOlKey, source: candidate.source },
-					'merge: batched book work_pk FK missing; staging for later resolve',
-				);
-				const deferred = { ...insertValues, workPk: null };
-				insertResult = await tx.insert(table).values(deferred as never).onConflictDoNothing();
-				if ((insertResult.rowCount ?? 0) > 0) {
-					await stageBookWork(tx, effectivePk, workOlKey, candidate.source);
-				}
-			} else {
-				throw err;
-			}
+		// Pre-insert work check (uses the pre-fetched ctx.workRows from
+		// buildMergeBatchContext — zero DB cost beyond the initial batch fetch).
+		// Books whose work hasn't landed yet are inserted with work_pk=NULL and
+		// the link is staged for resolveBookWorks to fill in once the work
+		// arrives. Prevents the books_work_pk_works_pk_fk violation entirely
+		// (a catch-and-retry inside the batch's savepoint would hit
+		// "current transaction is aborted" because the connection's state
+		// stays broken until the savepoint is rolled back).
+		const workPk = (insertValues as Record<string, unknown>).workPk as string | null;
+		if (
+			candidate.entityType === 'book'
+			&& workPk
+			&& !ctx.workRows.has(workPk)
+			&& candidate.meta?.workOlKey
+		) {
+			logger.warn(
+				{ bookPk: effectivePk, workPk, workOlKey: candidate.meta.workOlKey, source: candidate.source },
+				'merge: batched book work missing; inserting with work_pk=null and staging',
+			);
+			insertValues = { ...insertValues, workPk: null };
+			await stageBookWork(tx, effectivePk, candidate.meta.workOlKey, candidate.source);
 		}
+		const insertResult = await tx.insert(table).values(insertValues as never).onConflictDoNothing();
 		if (insertResult.rowCount === 0) {
 			await flagIssue(tx, {
 				entityType: candidate.entityType as ImportIssueEntityType,
@@ -439,10 +436,4 @@ async function fetchIdentifierOwners(
 		.from(adapter.table)
 		.where(inArray(adapter.table.resource, [...resources]));
 	return rows.map((r: { resource: string; pk: string }) => [r.resource, r.pk]);
-}
-
-/** True if `err` is a postgres SQLSTATE 23503 (foreign_key_violation). Mirror of merge.ts helper. */
-function isForeignKeyViolation(err: unknown): boolean {
-	const cause = (err as { cause?: { code?: string } }).cause;
-	return cause?.code === '23503';
 }

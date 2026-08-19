@@ -59,22 +59,36 @@ describe('stageBookWork + resolveBookWorks', () => {
 		expect(staging).toHaveLength(0);
 	});
 
-	it('mergeEntity falls back to work_pk=NULL + stages when work FK fails', async () => {
+	it('mergeEntity throws FK violation when work is missing (caller must pre-check or pre-fetch)', async () => {
+		// mergeEntity is the low-level merger. It does not pre-check work
+		// existence — that responsibility lives in the upsert callback
+		// (dump-runner.ts) which uses a per-batch pre-fetched `workExists`
+		// set to mutate the candidate to workPk=null before calling here.
+		// Without that pre-check, the FK violation propagates to the
+		// batched-importer's per-record savepoint catch.
 		const { db } = await createTestDb();
-		const result = await mergeEntity(db, {
-			entityType: 'book',
-			pk: 'books-fkfallback',
-			source: 'openlibrary',
-			matchName: 'FkFallback',
-			identifiers: [{ resource: 'openlibrary:books/OL_FK_FALLBACK', url: 'https://openlibrary.org/books/OL_FK_FALLBACK' }],
-			fields: { title: 'FkFallback', publishDate: '866630400', workPk: 'works-not-yet-imported' },
-			meta: { workOlKey: '/works/OL_NOT_YET_IMPORTED' },
-		}, { skipNameFallback: true });
-		expect(result.existed).toBe(false);
+		let caught: unknown;
+		try {
+			await mergeEntity(db, {
+				entityType: 'book',
+				pk: 'books-fkfallback',
+				source: 'openlibrary',
+				matchName: 'FkFallback',
+				identifiers: [{ resource: 'openlibrary:books/OL_FK_FALLBACK', url: 'https://openlibrary.org/books/OL_FK_FALLBACK' }],
+				fields: { title: 'FkFallback', publishDate: '866630400', workPk: 'works-not-yet-imported' },
+			}, { skipNameFallback: true });
+		} catch (err) {
+			caught = err;
+		}
+		expect(caught).toBeDefined();
+		// Drizzle wraps pg errors in DrizzleQueryError; the cause carries the
+		// SQLSTATE (23503 = foreign_key_violation) and the constraint message.
+		const cause = (caught as { cause?: { code?: string; message?: string } }).cause;
+		expect(cause?.code).toBe('23503');
+		expect(cause?.message ?? '').toMatch(/foreign key constraint/);
 		const row = (await db.select().from(books).where(eq(books.pk, 'books-fkfallback')))[0];
-		expect(row?.workPk).toBeNull();
-		const staging = (await db.execute(sql`SELECT work_ol_key FROM book_work_staging WHERE book_pk = 'books-fkfallback'`)).rows;
-		expect(staging).toHaveLength(1);
-		expect(staging[0].work_ol_key).toBe('/works/OL_NOT_YET_IMPORTED');
+		expect(row).toBeUndefined();
+		const staging = (await db.execute(sql`SELECT book_pk FROM book_work_staging WHERE book_pk = 'books-fkfallback'`)).rows;
+		expect(staging).toHaveLength(0);
 	});
 });
