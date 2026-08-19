@@ -18,7 +18,7 @@ import { workIdentifiersAdapter } from './identifiers.js';
 import { logger } from '../logger.js';
 import { ProgressBar } from './progress.js';
 import { installInterruptHandlers, signalExitCode, InterruptedError } from '../dump/interrupt.js';
-import { assertNoDrift } from '../db/schema-check.js';
+import { logIfDrift } from '../db/schema-check.js';
 
 const OL_EDITIONS_URL = process.env.OL_EDITIONS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_editions_latest.txt.gz';
 const OL_WORKS_URL = process.env.OL_WORKS_DUMP_URL ?? 'https://openlibrary.org/data/ol_dump_works_latest.txt.gz';
@@ -114,8 +114,17 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
   if (flags.unknown.length > 0) logger.warn({ unknown: flags.unknown }, 'ignoring unknown flags');
 
   if (cmd === 'openlibrary:dump' || cmd === 'editions:rehydrate' || cmd === 'works:dump' || cmd === 'contributors:dump') {
-    // Fail loud on schema drift before the importer burns hours on a doomed run.
-    await assertNoDrift(db);
+    // Warn on schema drift before the importer burns hours on a doomed run.
+    // We use logIfDrift (warn, don't throw) because the CLI doesn't run
+    // migrate() first; if PG is unreachable the import will fail its own DB
+    // calls and we don't want to short-circuit on a transient outage.
+    // The web server (src/index.ts) runs assertNoDrift after migrate() and
+    // crashes loudly when there's drift after a successful migration.
+    try {
+      await logIfDrift(db);
+    } catch (err) {
+      logger.warn({ err }, 'schema drift check failed to run; continuing');
+    }
   }
 
   if (cmd === 'openlibrary:dump') {
