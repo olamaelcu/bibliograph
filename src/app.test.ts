@@ -85,11 +85,14 @@ describe('pages', () => {
     expect(body).toContain('contributors');
   });
 
-  it('serves live stats as JSON without caching', async () => {
+  it('serves live stats as JSON with short-TTL browser cache', async () => {
     const res = await app.request('/stats.json');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('application/json');
-    expect(res.headers.get('cache-control')).toBe('no-store');
+    // 60s browser cache; the server caches in-process for 60s too, so
+    // the polling client sees a fast response on the second tick and
+    // the DB sees one full count query per minute per process.
+    expect(res.headers.get('cache-control')).toBe('public, max-age=60, must-revalidate');
     const body = await res.json();
     expect(Array.isArray(body.catalog)).toBe(true);
     expect(typeof body.openIssues).toBe('number');

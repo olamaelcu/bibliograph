@@ -100,7 +100,11 @@ export function createApp(): Hono {
 		),
 	);
 	app.get('/stats.json', async (ctx) => {
-		ctx.header('Cache-Control', 'no-store');
+		// The stats page polls this endpoint every second (POLL_MS=1000 in
+		// stats.html). getCatalogStats is itself in-process cached for 60s,
+		// and the browser-side max-age lets the polling client skip the
+		// network round trip entirely on the second tick.
+		ctx.header('Cache-Control', 'public, max-age=60, must-revalidate');
 		return ctx.json(await getCatalogStats());
 	});
 	app.get('/health', healthCheck);
