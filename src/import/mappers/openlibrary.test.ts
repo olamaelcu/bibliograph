@@ -63,7 +63,20 @@ describe('OL mappers', () => {
 	 it('returns null for authors dump entries without a name or personal_name', () => {
 			const a = mapAuthorToCandidate({ key: '/authors/OL123A' });
 			expect(a).toBeNull();
-	});
+		});
+
+	 it('returns null for works dump entries without a title', () => {
+			// `works.title` is NOT NULL — a record with a null title would crash
+			// the batch insert and roll back the whole flushBatch. Returning
+			// null here keeps the record counted as `skipped` instead.
+			const w = mapWorkToCandidate({ key: '/works/OL45822042W' });
+			expect(w).toBeNull();
+		});
+
+	 it('still maps a works dump entry with an empty-string title to null (defensive)', () => {
+			const w = mapWorkToCandidate({ key: '/works/OL45822042W', title: '' });
+			expect(w).toBeNull();
+		});
 
 	 it('maps authors with only personal_name (name fallback)', () => {
 			const a = mapAuthorToCandidate({ key: '/authors/OL123A', personal_name: 'Frank Herbert' });

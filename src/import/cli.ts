@@ -245,7 +245,10 @@ async function dispatch(args: string[], signal: AbortSignal): Promise<void> {
         skipIfSeen: skipSeenWorks(db),
         skipNameFallback: true,
         batchedMerge: true,
-        parse: (fields) => [mapWorkToCandidate(JSON.parse(fields[4]))],
+        parse: (fields) => {
+          const c = mapWorkToCandidate(JSON.parse(fields[4]));
+          return c ? [c] : [];
+        },
       }),
     );
     logger.info(s, 'works import done');

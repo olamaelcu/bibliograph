@@ -129,19 +129,25 @@ export function mapEditionToCandidates(ed: OlEdition): MergeCandidate[] {
   return candidates;
 }
 
-export function mapWorkToCandidate(w: OlWork): MergeCandidate {
-  return {
-    entityType: 'work',
-    pk: sourceKeySlug(w.key),
-    source: 'openlibrary',
-    matchName: w.title ?? null,
-    identifiers: [{ resource: identifierResource('openlibrary', w.key.replace(/^\//, '')), url: `https://openlibrary.org${w.key}` }],
-    fields: {
-      title: w.title ?? null,
-      description: text(w.description),
-      originalPublishDate: unixSecondsOrNull(w.first_publish_date),
-    },
-  };
+export function mapWorkToCandidate(w: OlWork): MergeCandidate | null {
+	// `works.title` is NOT NULL — a record without a title would crash the
+	// batch insert (23502), abort the savepoint, and roll back the whole
+	// 2000-record batch. Returning null here drops it into the `skipped`
+	// bucket cleanly; the dump-runner counts `0`-candidate records as
+	// `skipped` without touching the transaction.
+	if (!w.title) return null;
+	return {
+		entityType: 'work',
+		pk: sourceKeySlug(w.key),
+		source: 'openlibrary',
+		matchName: w.title,
+		identifiers: [{ resource: identifierResource('openlibrary', w.key.replace(/^\//, '')), url: `https://openlibrary.org${w.key}` }],
+		fields: {
+			title: w.title,
+			description: text(w.description),
+			originalPublishDate: unixSecondsOrNull(w.first_publish_date),
+		},
+	};
 }
 
 export function mapAuthorToCandidate(a: OlAuthor): MergeCandidate | null {
