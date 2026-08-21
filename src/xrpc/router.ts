@@ -47,6 +47,7 @@ import type {
   ShelfWithBooksView,
 } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
 import { logger } from '../logger.js';
+import { getEngagementForSubject } from '../network/constellation.js';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -209,7 +210,12 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
       const rkey = rkeyFromUri(ctx, COLLECTION.book, params.uri);
       const row = (await db.select().from(books).where(and(eq(books.pk, rkey), releasedFilter(books))))[0];
       if (!row) notFound();
-      return json({ book: await toBookView(db, ctx, row!) });
+      const [book, bsky] = await Promise.all([
+        toBookView(db, ctx, row!),
+        getEngagementForSubject(params.uri),
+      ]);
+      if (bsky && (bsky.likeCount > 0 || bsky.quoteCount > 0)) book.bsky = bsky;
+      return json({ book });
     },
   });
 
@@ -224,7 +230,10 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         .select()
         .from(workIdentifiers)
         .where(eq(workIdentifiers.workPk, rkey));
-      return json({ work: toWorkView(ctx, row!, identifiers) });
+      const bsky = await getEngagementForSubject(params.uri);
+      const work = toWorkView(ctx, row!, identifiers);
+      if (bsky && (bsky.likeCount > 0 || bsky.quoteCount > 0)) work.bsky = bsky;
+      return json({ work });
     },
   });
 
@@ -239,7 +248,10 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         .select()
         .from(contributorIdentifiers)
         .where(eq(contributorIdentifiers.contributorPk, rkey));
-      return json({ contributor: toContributorView(ctx, row!, identifiers) });
+      const bsky = await getEngagementForSubject(params.uri);
+      const contributor = toContributorView(ctx, row!, identifiers);
+      if (bsky && (bsky.likeCount > 0 || bsky.quoteCount > 0)) contributor.bsky = bsky;
+      return json({ contributor });
     },
   });
 
@@ -281,7 +293,10 @@ export function createXrpcRouter(db: Db, ctx: ViewContext): XRPCRouter {
         .select()
         .from(genreIdentifiers)
         .where(eq(genreIdentifiers.genrePk, rkey));
-      return json({ genre: toGenreView(ctx, row!, identifiers) });
+      const bsky = await getEngagementForSubject(params.uri);
+      const genre = toGenreView(ctx, row!, identifiers);
+      if (bsky && (bsky.likeCount > 0 || bsky.quoteCount > 0)) genre.bsky = bsky;
+      return json({ genre });
     },
   });
 

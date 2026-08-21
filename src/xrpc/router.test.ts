@@ -1,8 +1,13 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createXrpcRouter } from './router.js';
 import { createTestDb, SERVICE_DID, SERVICE_HOST, uri } from '../test-utils/db.js';
 import { books, userRecords } from '../db/schema.js';
+import { getEngagementForSubject } from '../network/constellation.js';
 import type { ViewContext } from './views.js';
+
+vi.mock('../network/constellation.js', () => ({
+  getEngagementForSubject: vi.fn(),
+}));
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 
@@ -25,12 +30,15 @@ const SHELF_URI = (rkey: string) => userUri(COLLECTION.shelf, rkey);
 const FIXED_CID = 'bafyreiadsbmmn4waznesyuz3bjgrj33xzqhxrk6mz3ksq7meugrachh3qe';
 
 beforeAll(() => {
-	process.env.ATP_SERVICE_DID = SERVICE_DID;
-	process.env.ATP_SERVICE_HOST = SERVICE_HOST;
+  process.env.ATP_SERVICE_DID = SERVICE_DID;
+  process.env.ATP_SERVICE_HOST = SERVICE_HOST;
+});
+beforeEach(() => {
+  vi.mocked(getEngagementForSubject).mockReset();
 });
 afterAll(() => {
-	delete process.env.ATP_SERVICE_DID;
-	delete process.env.ATP_SERVICE_HOST;
+  delete process.env.ATP_SERVICE_DID;
+  delete process.env.ATP_SERVICE_HOST;
 });
 
 /** Bare anonymous app backed only by the local catalog DB (no user PDS). */
@@ -318,56 +326,168 @@ describe('getBook', () => {
 		expect(res.status).toBe(404);
 	});
 
-	it('rejects a uri from a different service', async () => {
-		const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=' + encodeURIComponent('at://did:web:other.example.com/net.olamaelcu.livtet.biblio.book/x'));
-		expect(res.status).toBe(400);
-	});
+it('rejects a uri from a different service', async () => {
+    const res = await (await app()).fetch('/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=' + encodeURIComponent('at://did:web:other.example.com/net.olamaelcu.livtet.biblio.book/x'));
+    expect(res.status).toBe(400);
+  });
+
+  it('attaches bsky engagement when constellation returns non-zero counts', async () => {
+    const bookUri = BOOK_URI('book-dune');
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 3, quoteCount: 1 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(bookUri)}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.book.bsky).toEqual({ likeCount: 3, quoteCount: 1 });
+    expect(vi.mocked(getEngagementForSubject)).toHaveBeenCalledWith(bookUri);
+  });
+
+  it('omits bsky when constellation returns zero counts', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 0, quoteCount: 0 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(BOOK_URI('book-dune'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.book.bsky).toBeUndefined();
+    expect('bsky' in body.book).toBe(false);
+  });
+
+  it('omits bsky when constellation fetch fails', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue(undefined);
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(BOOK_URI('book-dune'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.book.bsky).toBeUndefined();
+    expect('bsky' in body.book).toBe(false);
+  });
 });
 
 describe('getWork', () => {
-	it('returns a work view', async () => {
-		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
-		expect(res.status).toBe(200);
-		const body = await res.json();
-		expect(body.work.title).toBe('Dune');
-		expect(body.work.identifiers[0].resource).toBe('openlibrary:works/OL893423W');
-	});
+  it('returns a work view', async () => {
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.work.title).toBe('Dune');
+    expect(body.work.identifiers[0].resource).toBe('openlibrary:works/OL893423W');
+  });
 
-	it('returns NotFound', async () => {
-		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'nope'))}`);
-		expect(res.status).toBe(404);
-	});
+  it('returns NotFound', async () => {
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'nope'))}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('attaches bsky engagement when constellation returns non-zero counts', async () => {
+    const workUri = uri('net.olamaelcu.livtet.biblio.work', 'work-dune');
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 3, quoteCount: 1 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(workUri)}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.work.bsky).toEqual({ likeCount: 3, quoteCount: 1 });
+    expect(vi.mocked(getEngagementForSubject)).toHaveBeenCalledWith(workUri);
+  });
+
+  it('omits bsky when constellation returns zero counts', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 0, quoteCount: 0 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.work.bsky).toBeUndefined();
+    expect('bsky' in body.work).toBe(false);
+  });
+
+  it('omits bsky when constellation fetch fails', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue(undefined);
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getWork?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.work', 'work-dune'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.work.bsky).toBeUndefined();
+    expect('bsky' in body.work).toBe(false);
+  });
 });
 
 describe('getContributor', () => {
-	it('returns a contributor view', async () => {
-		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert'))}`);
-		expect(res.status).toBe(200);
-		const body = await res.json();
-		expect(body.contributor.name).toBe('Frank Herbert');
-		expect(body.contributor.sortName).toBe('Herbert, Frank');
-		expect(body.contributor.identifiers[0].resource).toBe('viaf:59083797');
-	});
+  it('returns a contributor view', async () => {
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contributor.name).toBe('Frank Herbert');
+    expect(body.contributor.sortName).toBe('Herbert, Frank');
+    expect(body.contributor.identifiers[0].resource).toBe('viaf:59083797');
+  });
 
-	it('returns NotFound', async () => {
-		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'nope'))}`);
-		expect(res.status).toBe(404);
-	});
+  it('returns NotFound', async () => {
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'nope'))}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('attaches bsky engagement when constellation returns non-zero counts', async () => {
+    const contributorUri = uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert');
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 3, quoteCount: 1 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(contributorUri)}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contributor.bsky).toEqual({ likeCount: 3, quoteCount: 1 });
+    expect(vi.mocked(getEngagementForSubject)).toHaveBeenCalledWith(contributorUri);
+  });
+
+  it('omits bsky when constellation returns zero counts', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 0, quoteCount: 0 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contributor.bsky).toBeUndefined();
+    expect('bsky' in body.contributor).toBe(false);
+  });
+
+  it('omits bsky when constellation fetch fails', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue(undefined);
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.contributor', 'author-herbert'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.contributor.bsky).toBeUndefined();
+    expect('bsky' in body.contributor).toBe(false);
+  });
 });
 
 describe('getGenre', () => {
-	it('returns a genre view with parent', async () => {
-		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
-		expect(res.status).toBe(200);
-		const body = await res.json();
-		expect(body.genre.name).toBe('Science Fiction');
-		expect(body.genre.parent).toBe(uri('net.olamaelcu.livtet.biblio.genre', 'fiction'));
-	});
+  it('returns a genre view with parent', async () => {
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.genre.name).toBe('Science Fiction');
+    expect(body.genre.parent).toBe(uri('net.olamaelcu.livtet.biblio.genre', 'fiction'));
+  });
 
-	it('returns NotFound', async () => {
-		const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'nope'))}`);
-		expect(res.status).toBe(404);
-	});
+  it('returns NotFound', async () => {
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'nope'))}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('attaches bsky engagement when constellation returns non-zero counts', async () => {
+    const genreUri = uri('net.olamaelcu.livtet.biblio.genre', 'scifi');
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 3, quoteCount: 1 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(genreUri)}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.genre.bsky).toEqual({ likeCount: 3, quoteCount: 1 });
+    expect(vi.mocked(getEngagementForSubject)).toHaveBeenCalledWith(genreUri);
+  });
+
+  it('omits bsky when constellation returns zero counts', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue({ likeCount: 0, quoteCount: 0 });
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.genre.bsky).toBeUndefined();
+    expect('bsky' in body.genre).toBe(false);
+  });
+
+  it('omits bsky when constellation fetch fails', async () => {
+    vi.mocked(getEngagementForSubject).mockResolvedValue(undefined);
+    const res = await (await app()).fetch(`/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=${encodeURIComponent(uri('net.olamaelcu.livtet.biblio.genre', 'scifi'))}`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.genre.bsky).toBeUndefined();
+    expect('bsky' in body.genre).toBe(false);
+  });
 });
 
 describe('listBooks', () => {

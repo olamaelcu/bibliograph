@@ -23,6 +23,7 @@
           "book": {
             "type": "ref",
             "ref": "net.olamaelcu.livtet.biblio.defs#expandedBook",
+            "strong": true,
             "description": "The book on the shelf, with embedded metadata (title, contributors, identifiers)."
           },
           "metadata": {

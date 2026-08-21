@@ -16,6 +16,7 @@
           "book": {
             "type": "ref",
             "ref": "net.olamaelcu.livtet.biblio.defs#expandedBook",
+            "strong": true,
             "description": "The book being reviewed, with embedded metadata (title, contributors, identifiers)."
           },
           "tags": {
