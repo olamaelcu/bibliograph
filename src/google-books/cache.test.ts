@@ -81,7 +81,8 @@ describe('cache round-trip', () => {
 		await setCached(db, 'searchBooks', { q: 'new' }, { v: 2 }, 3600);
 		await db.execute((await import('drizzle-orm')).sql`UPDATE gb_cache SET expires_at = 0 WHERE request_hash = ${requestHash('searchBooks', { q: 'old' })}`);
 		const removed = await pruneExpired(db);
-		expect(removed).toBe(1);
+		expect(removed.expired).toBe(1);
+		expect(removed.overCap).toBe(0);
 		const kept = await getCached(db, 'searchBooks', { q: 'new' });
 		expect(kept).toEqual({ v: 2 });
 	});
