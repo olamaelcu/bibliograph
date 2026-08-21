@@ -3,7 +3,10 @@ import { GoogleBooksClient, GoogleBooksError } from './client.js';
 
 const KEY = 'test-key';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+	vi.restoreAllMocks();
+	vi.useRealTimers();
+});
 
 function fakeFetch(impl: Parameters<typeof fetch>[1] extends infer R ? (input: Request | URL | string, init?: R) => Promise<Response> : never) {
 	return vi.fn(impl) as unknown as typeof fetch;
@@ -16,7 +19,7 @@ describe('GoogleBooksClient', () => {
 	});
 
 	describe('searchVolumes', () => {
-		it('hits the GB endpoint with q/maxResults/startIndex/key and parses items/totalItems', async () => {
+		it('hits the GB endpoint with q/maxResults/startIndex/key/fields, sends User-Agent, and parses items/totalItems', async () => {
 			let captured: { url: string; headers: Record<string, string> } | null = null;
 			const fetchImpl = fakeFetch(async (input, init) => {
 				captured = { url: String(input), headers: Object.fromEntries(new Headers(init?.headers).entries()) };
@@ -37,7 +40,10 @@ describe('GoogleBooksClient', () => {
 			expect(captured?.url).toContain('startIndex=20');
 			expect(captured?.url).toContain('maxResults=10');
 			expect(captured?.url).toContain('key=' + KEY);
+			expect(captured?.url).toMatch(/[?&]fields=items/);
+			expect(captured?.url).toContain('volumeInfo');
 			expect(captured?.headers['accept']).toBe('application/json');
+			expect(captured?.headers['user-agent']).toContain('gzip');
 		});
 
 		it('caps maxResults at GB\'s 40 limit', async () => {
@@ -64,6 +70,20 @@ describe('GoogleBooksClient', () => {
 			expect(v?.volumeInfo?.title).toBe('A');
 		});
 
+		it('requests partial-response fields=id,volumeInfo(...) for a single volume', async () => {
+			let url = '';
+			const fetchImpl = fakeFetch(async (input) => {
+				url = String(input);
+				return new Response(JSON.stringify({ id: '_abc' }), { status: 200 });
+			});
+			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+			await client.getVolume('_abc');
+			expect(url).toContain('/volumes/_abc');
+			expect(url).toContain('fields=');
+			expect(url).toContain('id,volumeInfo');
+			expect(url).toContain('title');
+		});
+
 		it('returns undefined on 404', async () => {
 			const fetchImpl = fakeFetch(async () => new Response('not found', { status: 404 }));
 			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
@@ -85,6 +105,60 @@ describe('GoogleBooksClient', () => {
 			const fetchImpl = fakeFetch(async () => new Response('rate limited', { status: 429 }));
 			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
 			await expect(client.getVolume('x')).rejects.toBeInstanceOf(GoogleBooksError);
+		});
+	});
+
+	describe('429 retry behavior', () => {
+		it('respects Retry-After: 2 and retries after ~2 seconds', async () => {
+			const callTimes: number[] = [];
+			const fetchImpl = fakeFetch(async () => {
+				callTimes.push(Date.now());
+				if (callTimes.length === 1) {
+					return new Response('rate limited', { status: 429, headers: { 'retry-after': '2' } });
+				}
+				return new Response(JSON.stringify({ id: '_abc', volumeInfo: { title: 'A' } }), { status: 200 });
+			});
+			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+			const v = await client.getVolume('_abc');
+			expect(v?.id).toBe('_abc');
+			expect(callTimes.length).toBe(2);
+			expect(callTimes[1]! - callTimes[0]!).toBeGreaterThanOrEqual(2000);
+		});
+
+		it('falls back to exponential backoff (≤4s per sleep) for 429 without Retry-After', async () => {
+			let callCount = 0;
+			const fetchImpl = fakeFetch(async () => {
+				callCount++;
+				return new Response('rate limited', { status: 429 });
+			});
+			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+			await expect(client.getVolume('x')).rejects.toBeInstanceOf(GoogleBooksError);
+			// 429 is retried up to DEFAULT_ATTEMPTS times before propagating
+			expect(callCount).toBe(3);
+		});
+
+		it('caps Retry-After larger than 60s at 60s', async () => {
+			vi.useFakeTimers();
+			try {
+				let callCount = 0;
+				const fetchImpl = fakeFetch(async () => {
+					callCount++;
+					if (callCount === 1) {
+						return new Response('rate limited', { status: 429, headers: { 'retry-after': '120' } });
+					}
+					return new Response(JSON.stringify({ id: '_abc' }), { status: 200 });
+				});
+				const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+				const promise = client.getVolume('_abc');
+				// Advance just past the 60s cap. If the cap were not applied (delay = 120s),
+				// the second fetch would not have happened yet.
+				await vi.advanceTimersByTimeAsync(60_500);
+				const v = await promise;
+				expect(v?.id).toBe('_abc');
+				expect(callCount).toBe(2);
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 	});
 });
