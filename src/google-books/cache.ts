@@ -62,7 +62,7 @@ export async function getCached<T>(
 	db: Db,
 	endpoint: string,
 	params: unknown,
-	opts: { signal?: AbortSignal } = {},
+	opts: { signal?: AbortSignal; requestId?: string } = {},
 ): Promise<T | undefined> {
 	const hash = requestHash(endpoint, params);
 	const now = Math.floor(Date.now() / 1000);
@@ -81,7 +81,7 @@ export async function setCached(
 	params: unknown,
 	response: unknown,
 	ttlSeconds: number,
-	opts: { signal?: AbortSignal } = {},
+	opts: { signal?: AbortSignal; requestId?: string } = {},
 ): Promise<void> {
 	const hash = requestHash(endpoint, params);
 	const now = Math.floor(Date.now() / 1000);

@@ -162,9 +162,10 @@ export class GoogleBooksClient {
 	private async fetchJson(
 		url: string,
 		ctx: Record<string, unknown>,
-		opts: { signal?: AbortSignal } = {},
+		opts: { signal?: AbortSignal; requestId?: string } = {},
 	): Promise<unknown> {
 		this.requireKey();
+		const ctxWithId = opts.requestId ? { ...ctx, requestId: opts.requestId } : ctx;
 		return withRetry(
 			'google books fetch failed',
 			async () => {
@@ -190,7 +191,7 @@ export class GoogleBooksClient {
 				}
 				return (await res.json()) as unknown;
 			},
-			ctx,
+			ctxWithId,
 			{ signal: opts.signal },
 		);
 	}
@@ -199,7 +200,7 @@ export class GoogleBooksClient {
 	async searchVolumes(
 		q: string,
 		opts: { startIndex?: number; maxResults?: number } = {},
-		signal?: AbortSignal,
+		context: { signal?: AbortSignal; requestId?: string } = {},
 	): Promise<GbSearchResponse> {
 		const params = new URLSearchParams({ q, key: this.apiKey });
 		if (opts.startIndex != null) params.set('startIndex', String(opts.startIndex));
@@ -209,16 +210,19 @@ export class GoogleBooksClient {
 		const body = (await this.fetchJson(
 			url,
 			{ endpoint: 'search', q },
-			{ signal },
+			context,
 		)) as GbSearchResponse;
 		return { totalItems: body.totalItems ?? 0, items: body.items ?? [] };
 	}
 
 	/** Fetch a single volume by GB volume ID. Returns undefined when 404. */
-	async getVolume(volumeId: string, signal?: AbortSignal): Promise<GbVolume | undefined> {
+	async getVolume(
+		volumeId: string,
+		context: { signal?: AbortSignal; requestId?: string } = {},
+	): Promise<GbVolume | undefined> {
 		const url = `${BASE_URL}/volumes/${encodeURIComponent(volumeId)}?key=${this.apiKey}&fields=${FIELDS_GET}`;
 		try {
-			return (await this.fetchJson(url, { endpoint: 'get', volumeId }, { signal })) as GbVolume;
+			return (await this.fetchJson(url, { endpoint: 'get', volumeId }, context)) as GbVolume;
 		} catch (err) {
 			if (err instanceof GoogleBooksError && err.status === 404) return undefined;
 			throw err;

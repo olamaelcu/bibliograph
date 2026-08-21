@@ -30,6 +30,18 @@ function stubFetch(body: unknown, status = 200): typeof fetch {
 		})) as typeof fetch;
 }
 
+function countingFetch(body: unknown): { fetch: typeof fetch; calls: { count: number } } {
+	const counter = { count: 0 };
+	const fetchImpl = (async (_input: Request | URL | string, _init?: RequestInit) => {
+		counter.count += 1;
+		return new Response(JSON.stringify(body), {
+			status: 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	}) as typeof fetch;
+	return { fetch: fetchImpl, calls: counter };
+}
+
 function appWithGb(fetchImpl: typeof fetch) {
 	const gb = new GoogleBooksClient({ apiKey: 'test', fetchImpl });
 	const r = createXrpcRouter(dbHolder.db, ctx, { client: gb });
@@ -118,6 +130,46 @@ describe('listBooks (Google Books backed)', () => {
 	});
 });
 
+describe('listBooks (Google Books backed) — P4 contributor slug', () => {
+	it('returns 400 InvalidRequest for a malformed contributor slug', async () => {
+		const a = appWithGb(stubFetch({}));
+		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/not-a-real-slug`;
+		const res = await a.fetch(
+			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?contributor=' + encodeURIComponent(uri),
+		);
+		expect(res.status).toBe(400);
+		const body = await res.json();
+		expect(body.error).toBe('InvalidRequest');
+	});
+
+	it('returns 400 when the contributor rkey is missing the gbauthors- prefix', async () => {
+		const a = appWithGb(stubFetch({}));
+		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/c-s-lewis`;
+		const res = await a.fetch(
+			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?contributor=' + encodeURIComponent(uri),
+		);
+		expect(res.status).toBe(400);
+	});
+
+	it('accepts a well-formed gbauthors- slug and forwards inauthor:"<name>" to GB', async () => {
+		let captured: { url: string } | null = null;
+		const fetchImpl = (async (input: Request | URL | string) => {
+			captured = { url: String(input) };
+			return new Response(JSON.stringify({ totalItems: 0, items: [] }), {
+				status: 200,
+				headers: { 'content-type': 'application/json' },
+			});
+		}) as typeof fetch;
+		const a = appWithGb(fetchImpl);
+		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/gbauthors-c-s-lewis`;
+		const res = await a.fetch(
+			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?contributor=' + encodeURIComponent(uri),
+		);
+		expect(res.status).toBe(200);
+		expect(captured?.url).toContain('inauthor%3A%22c+s+lewis%22');
+	});
+});
+
 describe('getContributor', () => {
 	it('returns a contributor view hydrated from the catalog', async () => {
 		const res = await router().fetch(
@@ -196,6 +248,43 @@ describe('getActor', () => {
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.actor.did).toBe(SERVICE_DID);
+	});
+});
+
+describe('searchBooks (Google Books backed) — P8 in-flight dedup', () => {
+	it('five concurrent identical searches hit Google Books once and yield equal responses', async () => {
+		const body = {
+			totalItems: 3,
+			items: [
+				{ id: '_a', volumeInfo: { title: 'A' } },
+				{ id: '_b', volumeInfo: { title: 'B' } },
+				{ id: '_c', volumeInfo: { title: 'C' } },
+			],
+		};
+		const { fetch: fetchImpl, calls } = countingFetch(body);
+		const a = appWithGb(fetchImpl);
+		const responses = await Promise.all(
+			Array.from({ length: 5 }, () => a.fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=flowers&limit=3')),
+		);
+		expect(calls.count).toBe(1);
+		expect(responses.every((r) => r.status === 200)).toBe(true);
+		const bodies = await Promise.all(responses.map((r) => r.json()));
+		expect(bodies[0]).toEqual(bodies[1]);
+		expect(bodies[0]).toEqual(bodies[4]);
+		expect(bodies[0].hitsTotal).toBe(3);
+		expect(bodies[0].books).toHaveLength(3);
+	});
+
+	it('two concurrent listBooks with identical params hit GB once', async () => {
+		const body = { totalItems: 1, items: [{ id: '_a', volumeInfo: { title: 'A' } }] };
+		const { fetch: fetchImpl, calls } = countingFetch(body);
+		const a = appWithGb(fetchImpl);
+		const responses = await Promise.all([
+			a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?q=flowers'),
+			a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?q=flowers'),
+		]);
+		expect(calls.count).toBe(1);
+		expect(responses.every((r) => r.status === 200)).toBe(true);
 	});
 });
 
