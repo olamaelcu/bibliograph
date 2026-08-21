@@ -222,16 +222,6 @@
       padding: 1.5rem 2rem 2rem;
     }
 
-    .home .stats {
-      display: flex;
-      gap: 0.5rem;
-      margin-top: 1rem;
-    }
-
-    .home .stats a {
-      text-decoration: none;
-    }
-
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(25rem, 1fr));
@@ -299,33 +289,6 @@
       text-align: right;
     }
 
-    .stats-page {
-      max-width: 60rem;
-      margin: 0 auto;
-      padding: 1.5rem 2rem 2rem;
-    }
-
-    .stats-page h2 {
-      margin: 1.5rem 0 0.5rem;
-    }
-
-    .stats-page table {
-      border-collapse: collapse;
-      width: 100%;
-    }
-
-    .stats-page th,
-    .stats-page td {
-      text-align: left;
-      padding: 0.4rem 0.75rem;
-      border-bottom: 1px solid var(--wa-form-control-border-color);
-    }
-
-    .stats-page th {
-      color: var(--wa-color-on-quiet);
-      font-weight: 600;
-    }
-
     /* ---- Footer ------------------------------------------------------- */
 
     .footer {
@@ -376,7 +339,6 @@
         <a href="/procedures" class="<%= it.title === 'Procedures' ? 'active' : '' %>">Procedures</a>
         <a href="/records" class="<%= it.title === 'Records' ? 'active' : '' %>">Records</a>
         <a href="/search" class="<%= it.title === 'Search' ? 'active' : '' %>">Search</a>
-        <a href="/stats" class="<%= it.title === 'Stats' ? 'active' : '' %>">Stats</a>
       </nav>
       <div class="topbar-actions">
         <wa-badge variant="brand" appearance="tint">read-only AppView</wa-badge>
@@ -397,7 +359,6 @@
           <a href="/procedures">Procedures</a>
           <a href="/records">Records</a>
           <a href="/search">Search</a>
-          <a href="/stats">Stats</a>
         </div>
         <div class="footer-col">
           <div class="footer-head">Project</div>

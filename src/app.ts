@@ -16,7 +16,6 @@ import { createHash } from 'node:crypto';
 import { loadLexiconSchema, LexiconNotFound } from './lexicon-resolve.js';
 import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
-import { renderStatsPage, getCatalogStats } from './pages/stats.js';
 import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from './lexicon-catalog.js';
 import type { ViewContext } from './lex/collections.js';
 
@@ -90,7 +89,6 @@ export function createApp(): Hono {
 			}),
 		),
 	);
-	app.get('/stats', async (ctx) => ctx.html(await renderStatsPage()));
 	app.get('/search', (ctx) =>
 		ctx.html(
 			renderPage('search', {
@@ -99,14 +97,6 @@ export function createApp(): Hono {
 			}),
 		),
 	);
-	app.get('/stats.json', async (ctx) => {
-		// The stats page polls this endpoint every second (POLL_MS=1000 in
-		// stats.html). getCatalogStats is itself in-process cached for 60s,
-		// and the browser-side max-age lets the polling client skip the
-		// network round trip entirely on the second tick.
-		ctx.header('Cache-Control', 'public, max-age=60, must-revalidate');
-		return ctx.json(await getCatalogStats());
-	});
 	app.get('/health', healthCheck);
 	app.get('/.well-known/did.json', didDocumentHandler);
 	app.get('/.well-known/atproto-did', serveAtprotoDid);

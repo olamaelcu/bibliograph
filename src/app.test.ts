@@ -71,29 +71,6 @@ describe('pages', () => {
     expect(body).toContain('net.olamaelcu.livtet.biblio.searchBooks');
   });
 
-  it('serves the live stats page', async () => {
-    const res = await app.request('/stats');
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/html');
-    const body = await res.text();
-    expect(body).toContain('did-ssr');
-    expect(body).toContain('books');
-    expect(body).toContain('contributors');
-  });
-
-  it('serves live stats as JSON with short-TTL browser cache', async () => {
-    const res = await app.request('/stats.json');
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('application/json');
-    // 60s browser cache; the server caches in-process for 60s too, so
-    // the polling client sees a fast response on the second tick and
-    // the DB sees one full count query per minute per process.
-    expect(res.headers.get('cache-control')).toBe('public, max-age=60, must-revalidate');
-    const body = await res.json();
-    expect(Array.isArray(body.catalog)).toBe(true);
-    expect(typeof body.openIssues).toBe('number');
-  });
-
   it('serves webawesome theme assets', async () => {
     const res = await app.request('/webawesome/dist-cdn/styles/webawesome.css');
     expect(res.status).toBe(200);

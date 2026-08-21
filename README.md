@@ -22,8 +22,7 @@ Check it's alive: `curl http://localhost:5176/health`.
 
 The web UI is served from Eta templates on disk (`src/pages/templates/`):
 `/` lists the service overview with counts, `/queries` documents every XRPC
-query, `/procedures` every procedure, and `/stats` shows live catalog counts,
-open import issues, and backfill state. Pages are server-side rendered with
+query, and `/procedures` every procedure. Pages are server-side rendered with
 [Web Awesome](https://webawesome.com) components and hydrated on the client.
 
 For lexicon schema serving and DNS TXT record setup, see [docs/lexicon-resolution.md](docs/lexicon-resolution.md).

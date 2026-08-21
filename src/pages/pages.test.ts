@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { renderPage } from './render.js';
-import { renderStatsPage } from './stats.js';
 import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from '../lexicon-catalog.js';
 import { createTestDb } from '../test-utils/db.js';
 
@@ -100,15 +99,6 @@ describe('lexicon catalog', () => {
 });
 
 describe('page templates', () => {
-	it('renders the catalog without the backfill/import state sections', () => {
-		const html = renderPage('stats', {
-			title: 'Stats',
-			description: 'd',
-			stats: { catalog: [], openIssues: 0 },
-		});
-		expect(html).toContain('<!doctype html>');
-	});
-
 	it('renders a full document with declarative shadow DOM', () => {
 		const html = renderPage('home', { title: 'Overview', description: 'd', queryCount, procedureCount });
 		expect(html).toContain('<!doctype html>');
@@ -140,25 +130,6 @@ describe('page templates', () => {
 		const html = renderPage('home', { title: 'Overview', description: 'd', queryCount, procedureCount });
 		expect(html).toContain('/webawesome/dist-cdn/webawesome.ssr-loader.js');
 		expect(html).toContain('/webawesome/dist-cdn/styles/webawesome.css');
-	});
-
-	it('renders live catalog stats', async () => {
-		const html = await renderStatsPage();
-		expect(html).toContain('<!doctype html>');
-		expect(html).toContain('did-ssr');
-		for (const label of ['books', 'contributors', 'formats', 'Import issues']) {
-			expect(html).toContain(label);
-		}
-	});
-
-	it('marks cells updatable and includes the live polling script', async () => {
-		const html = await renderStatsPage();
-		expect(html).toContain('data-stat="total"');
-		expect(html).toContain('data-stat="openIssues"');
-		expect(html).toContain('data-stat="covers"');
-		expect(html).toContain('data-catalog=');
-		expect(html).toContain("fetch('/stats.json'");
-		expect(html).toContain('setInterval(refresh, POLL_MS)');
 	});
 
 	it('lists every record lexicon on the records page, grouped by ownership', () => {
