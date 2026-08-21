@@ -45,16 +45,22 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withRetry<T>(message: string, fn: () => Promise<T>, ctx: Record<string, unknown> = {}): Promise<T> {
+async function withRetry<T>(
+	message: string,
+	fn: () => Promise<T>,
+	ctx: Record<string, unknown> = {},
+	opts: { signal?: AbortSignal } = {},
+): Promise<T> {
 	const attempts = DEFAULT_ATTEMPTS;
 	let backoffMs = BASE_BACKOFF_MS;
 	for (let attempt = 0; ; attempt += 1) {
 		try {
 			return await fn();
 		} catch (err) {
-			const retryable = isTransientNetworkError(err) && attempt < attempts - 1;
+			const retryable =
+				isTransientNetworkError(err) && attempt < attempts - 1 && !opts.signal?.aborted;
 			logger[retryable ? 'warn' : 'error'](
-				{ ...ctx, attempt: attempt + 1, err },
+				{ ...ctx, attempt: attempt + 1, aborted: opts.signal?.aborted, err },
 				retryable ? `${message}; retrying` : message,
 			);
 			if (!retryable) throw err;
@@ -120,12 +126,19 @@ export class GoogleBooksClient {
 		return this.apiKey;
 	}
 
-	private async fetchJson(url: string, ctx: Record<string, unknown>): Promise<unknown> {
+	private async fetchJson(
+		url: string,
+		ctx: Record<string, unknown>,
+		opts: { signal?: AbortSignal } = {},
+	): Promise<unknown> {
 		this.requireKey();
 		return withRetry(
 			'google books fetch failed',
 			async () => {
-				const res = await this.fetchImpl(url, { headers: { accept: 'application/json' } });
+				const res = await this.fetchImpl(url, {
+					signal: opts.signal,
+					headers: { accept: 'application/json' },
+				});
 				if (res.status === 404) {
 					throw new GoogleBooksError('not found', 404);
 				}
@@ -138,6 +151,7 @@ export class GoogleBooksClient {
 				return (await res.json()) as unknown;
 			},
 			ctx,
+			{ signal: opts.signal },
 		);
 	}
 
@@ -145,20 +159,25 @@ export class GoogleBooksClient {
 	async searchVolumes(
 		q: string,
 		opts: { startIndex?: number; maxResults?: number } = {},
+		signal?: AbortSignal,
 	): Promise<GbSearchResponse> {
 		const params = new URLSearchParams({ q, key: this.apiKey });
 		if (opts.startIndex != null) params.set('startIndex', String(opts.startIndex));
 		if (opts.maxResults != null) params.set('maxResults', String(Math.min(opts.maxResults, 40)));
 		const url = `${BASE_URL}/volumes?${params.toString()}`;
-		const body = (await this.fetchJson(url, { endpoint: 'search', q })) as GbSearchResponse;
+		const body = (await this.fetchJson(
+			url,
+			{ endpoint: 'search', q },
+			{ signal },
+		)) as GbSearchResponse;
 		return { totalItems: body.totalItems ?? 0, items: body.items ?? [] };
 	}
 
 	/** Fetch a single volume by GB volume ID. Returns undefined when 404. */
-	async getVolume(volumeId: string): Promise<GbVolume | undefined> {
+	async getVolume(volumeId: string, signal?: AbortSignal): Promise<GbVolume | undefined> {
 		const url = `${BASE_URL}/volumes/${encodeURIComponent(volumeId)}?key=${this.apiKey}`;
 		try {
-			return (await this.fetchJson(url, { endpoint: 'get', volumeId })) as GbVolume;
+			return (await this.fetchJson(url, { endpoint: 'get', volumeId }, { signal })) as GbVolume;
 		} catch (err) {
 			if (err instanceof GoogleBooksError && err.status === 404) return undefined;
 			throw err;

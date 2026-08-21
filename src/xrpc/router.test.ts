@@ -216,3 +216,60 @@ describe('stub handlers', () => {
 
 // Smoke test that nothing else in the router suite blows up.
 void sql;
+
+describe('handler timeout', () => {
+	function hangingFetch(): typeof fetch {
+		return (() => new Promise<Response>(() => {})) as typeof fetch;
+	}
+
+	function routerWithHangingGb(timeoutMs: number) {
+		const gb = new GoogleBooksClient({ apiKey: 'test', fetchImpl: hangingFetch() });
+		return createXrpcRouter(dbHolder.db, ctx, { client: gb, handlerTimeoutMs: timeoutMs });
+	}
+
+	it('searchBooks returns 504 when the handler exceeds the configured timeout', async () => {
+		const router = routerWithHangingGb(50);
+		const res = await router.fetch(
+			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=hangs'),
+		);
+		expect(res.status).toBe(504);
+		const body = await res.json();
+		expect(body.error).toBe('Timeout');
+	});
+
+	it('getBook returns 504 when the handler exceeds the configured timeout', async () => {
+		const router = routerWithHangingGb(50);
+		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.book/gb-_hangs`;
+		const res = await router.fetch(
+			new Request(`https://x/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(uri)}`),
+		);
+		expect(res.status).toBe(504);
+		const body = await res.json();
+		expect(body.error).toBe('Timeout');
+	});
+
+	it('listBooks returns 504 when the handler exceeds the configured timeout', async () => {
+		const router = routerWithHangingGb(50);
+		const res = await router.fetch(
+			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.listBooks?q=hangs'),
+		);
+		expect(res.status).toBe(504);
+		const body = await res.json();
+		expect(body.error).toBe('Timeout');
+	});
+
+	it('searchBooks completes normally when within the timeout', async () => {
+		// existing stubFetch path (50ms timeout, fetch resolves immediately)
+		const router = createXrpcRouter(dbHolder.db, ctx, {
+			client: new GoogleBooksClient({
+				apiKey: 'test',
+				fetchImpl: stubFetch({ totalItems: 0, items: [] }),
+			}),
+			handlerTimeoutMs: 50,
+		});
+		const res = await router.fetch(
+			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=fast'),
+		);
+		expect(res.status).toBe(200);
+	});
+});

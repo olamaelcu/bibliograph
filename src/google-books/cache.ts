@@ -8,7 +8,7 @@ type Db = NodePgDatabase<typeof schema>;
 
 /**
  * Stable JSON serialization for cache keys. Object keys are sorted so
- * `{a:1,b:2}` and `{b:2,a:1}` hash the same.
+ * `{a:1,b:2}` and `{b:2,a:1}` hash equal.
  */
 export function canonicalJson(value: unknown): string {
 	const seen = new WeakSet<object>();
@@ -38,13 +38,39 @@ export const TTL = {
 	getBook: 60 * 60,
 } as const;
 
-export async function getCached<T>(db: Db, endpoint: string, params: unknown): Promise<T | undefined> {
+/**
+ * Returns a promise that rejects when `signal` aborts; never settles if
+ * `signal` is undefined. Used to race drizzle query builders against the
+ * outer handler's abort signal without changing their API.
+ */
+function abortOn(signal: AbortSignal | undefined): Promise<never> {
+	if (!signal) return new Promise<never>(() => {});
+	return new Promise<never>((_, reject) => {
+		if (signal.aborted) {
+			reject(signal.reason ?? new Error('aborted'));
+			return;
+		}
+		signal.addEventListener(
+			'abort',
+			() => reject(signal.reason ?? new Error('aborted')),
+			{ once: true },
+		);
+	});
+}
+
+export async function getCached<T>(
+	db: Db,
+	endpoint: string,
+	params: unknown,
+	opts: { signal?: AbortSignal } = {},
+): Promise<T | undefined> {
 	const hash = requestHash(endpoint, params);
 	const now = Math.floor(Date.now() / 1000);
-	const rows = await db
+	const query = db
 		.select({ response: gbCache.response })
 		.from(gbCache)
 		.where(sql`${gbCache.requestHash} = ${hash} AND ${gbCache.expiresAt} > ${now}`);
+	const rows = await Promise.race([query, abortOn(opts.signal)]);
 	const row = rows[0];
 	return row ? (row.response as T) : undefined;
 }
@@ -55,10 +81,11 @@ export async function setCached(
 	params: unknown,
 	response: unknown,
 	ttlSeconds: number,
+	opts: { signal?: AbortSignal } = {},
 ): Promise<void> {
 	const hash = requestHash(endpoint, params);
 	const now = Math.floor(Date.now() / 1000);
-	await db
+	const promise = db
 		.insert(gbCache)
 		.values({
 			requestHash: hash,
@@ -70,6 +97,7 @@ export async function setCached(
 			target: gbCache.requestHash,
 			set: { response: response as never, expiresAt: now + ttlSeconds },
 		});
+	await Promise.race([promise, abortOn(opts.signal)]);
 }
 
 /** Prune expired rows. Returns the number of rows deleted. Called hourly by gb:evict. */

@@ -8,6 +8,7 @@ import { registerPdsHandlers } from '../pds/router.js';
 import { GoogleBooksClient, type GbVolume } from '../google-books/client.js';
 import { decodeGbCursor, encodeGbCursor, gbVolumeToBookView } from '../google-books/mapper.js';
 import { getCached, setCached, TTL } from '../google-books/cache.js';
+import { logger } from '../logger.js';
 import type { BookView } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
 import type { ViewContext } from '../lex/collections.js';
 
@@ -74,8 +75,70 @@ function buildGbQuery(opts: { q?: string; genre?: string; contributor?: string }
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 40;
 
+class HandlerTimeoutError extends Error {
+	constructor(readonly nsid: string, readonly timeoutMs: number) {
+		super(`${nsid} handler exceeded ${timeoutMs}ms`);
+		this.name = 'HandlerTimeoutError';
+	}
+}
+
+/**
+ * Race `work` against a timer. On expiry, abort the signal so any in-flight
+ * `fetch` / drizzle query can short-circuit, then reject so the Promise.race
+ * loser propagates the timeout upward.
+ */
+async function withHandlerTimeout<T>(
+	nsid: string,
+	work: (signal: AbortSignal) => Promise<T>,
+	timeoutMs: number,
+): Promise<T> {
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeoutPromise = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			const err = new HandlerTimeoutError(nsid, timeoutMs);
+			controller.abort(err);
+			reject(err);
+		}, timeoutMs);
+	});
+	try {
+		return await Promise.race([work(controller.signal), timeoutPromise]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/** Convert a handler-internal timeout into an XRPCError 504 with a warn log. */
+async function withTimedHandler<T>(
+	nsid: string,
+	opts: { timeoutMs: number; requestId?: string | null },
+	work: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+	try {
+		return await withHandlerTimeout(nsid, work, opts.timeoutMs);
+	} catch (err) {
+		if (err instanceof HandlerTimeoutError) {
+			logger.warn(
+				{ nsid, requestId: opts.requestId, timeoutMs: opts.timeoutMs },
+				'xrpc handler timed out',
+			);
+			throw new XRPCError({
+				status: 504,
+				error: 'Timeout',
+				message: `${nsid} exceeded ${opts.timeoutMs}ms`,
+			});
+		}
+		throw err;
+	}
+}
+
+function requestIdOf(request: Request): string | null {
+	return request.headers.get('X-Request-Id');
+}
+
 export interface RouterOptions {
 	client?: GoogleBooksClient;
+	handlerTimeoutMs?: number;
 }
 
 export function createXrpcRouter(
@@ -93,6 +156,9 @@ export function createXrpcRouter(
 		}
 		return cachedGb;
 	};
+
+	const handlerTimeoutMs =
+		opts.handlerTimeoutMs ?? parseInt(process.env.XRPC_HANDLER_TIMEOUT_MS ?? '60000', 10);
 
 	router.addQuery(Lexicons.ComAtprotoLexiconResolveLexicon.mainSchema, {
 		async handler({ params }) {
@@ -120,100 +186,109 @@ export function createXrpcRouter(
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchBooks.mainSchema, {
-		async handler({ params }) {
-			const q = params.q.trim();
-			const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
-			const cursor = decodeGbCursor(params.cursor);
-			const startIndex = cursor?.q === q ? cursor.startIndex : 0;
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.searchBooks';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async (signal) => {
+				const q = params.q.trim();
+				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
+				const cursor = decodeGbCursor(params.cursor);
+				const startIndex = cursor?.q === q ? cursor.startIndex : 0;
 
-			const cacheKey = { q, startIndex, limit };
-			const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'searchBooks', cacheKey);
-			let totalItems: number;
-			let items: GbVolume[];
-			if (cached) {
-				totalItems = cached.totalItems;
-				items = cached.items as GbVolume[];
-			} else {
-				const res = await gb().searchVolumes(q, { startIndex, maxResults: limit });
-				totalItems = res.totalItems;
-				items = res.items ?? [];
-				await setCached(db, 'searchBooks', cacheKey, { totalItems, items }, TTL.search);
-			}
+				const cacheKey = { q, startIndex, limit };
+				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'searchBooks', cacheKey, { signal });
+				let totalItems: number;
+				let items: GbVolume[];
+				if (cached) {
+					totalItems = cached.totalItems;
+					items = cached.items as GbVolume[];
+				} else {
+					const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, signal);
+					totalItems = res.totalItems;
+					items = res.items ?? [];
+					await setCached(db, 'searchBooks', cacheKey, { totalItems, items }, TTL.search, { signal });
+				}
 
-			const books: BookView[] = [];
-			for (const volume of items) {
-				const view = gbVolumeToBookView(ctx, volume);
-				if (view) books.push(view);
-			}
-			const hasMore = startIndex + books.length < totalItems;
-			const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
-			return json({ books, hitsTotal: totalItems, cursor: next });
+				const books: BookView[] = [];
+				for (const volume of items) {
+					const view = gbVolumeToBookView(ctx, volume);
+					if (view) books.push(view);
+				}
+				const hasMore = startIndex + books.length < totalItems;
+				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
+				return json({ books, hitsTotal: totalItems, cursor: next });
+			});
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
-		async handler({ params }) {
-			const volumeId = parseVolumeId(params.uri);
-			const cached = await getCached<GbVolume>(db, 'getBook', { volumeId });
-			let volume: GbVolume | undefined;
-			if (cached) {
-				volume = cached;
-			} else {
-				volume = await gb().getVolume(volumeId);
-				if (volume) await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook);
-			}
-			if (!volume) {
-				throw new XRPCError({ status: 404, error: 'NotFound', message: 'no such volume' });
-			}
-			const book = gbVolumeToBookView(ctx, volume);
-			if (!book) {
-				throw new XRPCError({ status: 404, error: 'NotFound', message: 'volume missing title' });
-			}
-			return json({ book });
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getBook';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async (signal) => {
+				const volumeId = parseVolumeId(params.uri);
+				const cached = await getCached<GbVolume>(db, 'getBook', { volumeId }, { signal });
+				let volume: GbVolume | undefined;
+				if (cached) {
+					volume = cached;
+				} else {
+					volume = await gb().getVolume(volumeId, signal);
+					if (volume) await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, { signal });
+				}
+				if (!volume) {
+					throw new XRPCError({ status: 404, error: 'NotFound', message: 'no such volume' });
+				}
+				const book = gbVolumeToBookView(ctx, volume);
+				if (!book) {
+					throw new XRPCError({ status: 404, error: 'NotFound', message: 'volume missing title' });
+				}
+				return json({ book });
+			});
 		},
 	});
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooks.mainSchema, {
-		async handler({ params }) {
-			const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
-			const q = buildGbQuery({ q: params.q, genre: params.genre, contributor: params.contributor });
-			if (!q) {
-				throw new InvalidRequestError({
-					status: 400,
-					error: 'InvalidRequest',
-					message: 'at least one of q, genre, or contributor is required',
-				});
-			}
-			if (params.format) {
-				throw new InvalidRequestError({
-					status: 400,
-					error: 'InvalidRequest',
-					message: 'format filter is unsupported for google-books-backed listBooks',
-				});
-			}
-			const cursor = decodeGbCursor(params.cursor);
-			const startIndex = cursor?.q === q ? cursor.startIndex : 0;
-			const cacheKey = { q, startIndex, limit };
-			const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'listBooks', cacheKey);
-			let totalItems: number;
-			let items: GbVolume[];
-			if (cached) {
-				totalItems = cached.totalItems;
-				items = cached.items as GbVolume[];
-			} else {
-				const res = await gb().searchVolumes(q, { startIndex, maxResults: limit });
-				totalItems = res.totalItems;
-				items = res.items ?? [];
-				await setCached(db, 'listBooks', cacheKey, { totalItems, items }, TTL.search);
-			}
-			const books: BookView[] = [];
-			for (const volume of items) {
-				const view = gbVolumeToBookView(ctx, volume);
-				if (view) books.push(view);
-			}
-			const hasMore = startIndex + books.length < totalItems;
-			const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
-			return json({ books, cursor: next });
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.listBooks';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async (signal) => {
+				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
+				const q = buildGbQuery({ q: params.q, genre: params.genre, contributor: params.contributor });
+				if (!q) {
+					throw new InvalidRequestError({
+						status: 400,
+						error: 'InvalidRequest',
+						message: 'at least one of q, genre, or contributor is required',
+					});
+				}
+				if (params.format) {
+					throw new InvalidRequestError({
+						status: 400,
+						error: 'InvalidRequest',
+						message: 'format filter is unsupported for google-books-backed listBooks',
+					});
+				}
+				const cursor = decodeGbCursor(params.cursor);
+				const startIndex = cursor?.q === q ? cursor.startIndex : 0;
+				const cacheKey = { q, startIndex, limit };
+				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'listBooks', cacheKey, { signal });
+				let totalItems: number;
+				let items: GbVolume[];
+				if (cached) {
+					totalItems = cached.totalItems;
+					items = cached.items as GbVolume[];
+				} else {
+					const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, signal);
+					totalItems = res.totalItems;
+					items = res.items ?? [];
+					await setCached(db, 'listBooks', cacheKey, { totalItems, items }, TTL.search, { signal });
+				}
+				const books: BookView[] = [];
+				for (const volume of items) {
+					const view = gbVolumeToBookView(ctx, volume);
+					if (view) books.push(view);
+				}
+				const hasMore = startIndex + books.length < totalItems;
+				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
+				return json({ books, cursor: next });
+			});
 		},
 	});
 
