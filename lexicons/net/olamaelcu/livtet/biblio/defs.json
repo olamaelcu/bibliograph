@@ -43,6 +43,11 @@
           "type": "string",
           "maxGraphemes": 256,
           "description": "Short bio of the actor."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
+          "description": "Public Bluesky engagement for the actor's DID, when non-zero."
         }
       }
     },
@@ -50,6 +55,23 @@
       "type": "string",
       "format": "datetime",
       "description": "An ISO-8601 datetime (RFC 3339)."
+    },
+    "bskyEngagement": {
+      "type": "object",
+      "description": "Public Bluesky engagement counts for an at-uri subject.",
+      "required": ["likeCount", "quoteCount"],
+      "properties": {
+        "likeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of like records referencing the subject."
+        },
+        "quoteCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of post records embedding the subject as a quoted record."
+        }
+      }
     },
     "readingStatus": {
       "type": "string",
@@ -93,7 +115,7 @@
         "iconImageUrl": {
           "type": "string",
           "format": "uri",
-          "description": "Small icon image for the format."
+          "description": "Small image URL for the format."
         },
         "unit": {
           "type": "ref",
@@ -129,7 +151,7 @@
         "iconImageUrl": {
           "type": "string",
           "format": "uri",
-          "description": "Small icon image for the genre."
+          "description": "Small icon image URL for the genre."
         },
         "identifiers": {
           "type": "array",
@@ -143,6 +165,11 @@
           "type": "string",
           "format": "at-uri",
           "description": "AT-URI of the parent genre, if any."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
+          "description": "Public Bluesky engagement for this genre, when non-zero."
         }
       }
     },
@@ -181,7 +208,7 @@
         "imageUrl": {
           "type": "string",
           "format": "uri",
-          "description": "Portrait or avatar image of the contributor."
+          "description": "Portrait or avatar image URL for the contributor."
         },
         "createdAt": {
           "type": "ref",
@@ -192,6 +219,11 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
           "description": "Timestamp of the last update to the record."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
+          "description": "Public Bluesky engagement for this contributor, when non-zero."
         }
       }
     },
@@ -283,6 +315,11 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
           "description": "Timestamp of the last update to the record."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
+          "description": "Public Bluesky engagement for this book, when non-zero."
         }
       }
     },
@@ -314,6 +351,11 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
           "description": "Timestamp of the last update to the record."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
+          "description": "Public Bluesky engagement for this shelf, when non-zero."
         }
       }
     },
@@ -352,7 +394,7 @@
         "imageUrl": {
           "type": "string",
           "format": "uri",
-          "description": "Portrait or avatar image of the contributor."
+          "description": "Portrait or avatar image URL for the contributor."
         }
       }
     },
