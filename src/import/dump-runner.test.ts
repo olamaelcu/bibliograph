@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { inArray, eq } from 'drizzle-orm';
+import { inArray, eq, sql } from 'drizzle-orm';
 import { backfillState, books, contributors, contributorIdentifiers, bookContributorStaging, bookContributors } from '../db/schema.js';
 import { createTestDb } from '../test-utils/db.js';
 import { runDumpImport } from './dump-runner.js';
@@ -397,6 +397,76 @@ describe('runDumpImport', () => {
     const fin = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-authors')))[0];
     expect(fin?.totalProcessed).toBe(3);
     expect(fin?.complete).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('resets totalProcessed when the count cache is invalidated (regression for >100% bar carry-over)', async () => {
+    // Regression for the August 2026 ol-works import where progressBase
+    // (from a previous dump's cumulative total_processed) carried forward
+    // after the dump file was re-downloaded, making the bar show >100% for the
+    // entire run. The fix: when readCountCache returns null (cache invalidated
+    // because the file/snapshot changed), reset lastByteOffset, lastKeyCursor,
+    // and totalProcessed so this run starts fresh with progressBase=0.
+    const dir = mkdtempSync(join(tmpdir(), 'dump-run-'));
+    const lines = [
+      '/type/edition\t/books/OL1M\t1\t2026-01-01T00:00:00Z\t{"key":"/books/OL1M","title":"Alpha"}',
+      '/type/edition\t/books/OL2M\t1\t2026-01-01T00:00:00Z\t{"key":"/books/OL2M","title":"Beta"}',
+    ];
+    const dumpPath = join(dir, 'dump');
+    mkdirSync(dumpPath, { recursive: true });
+    const gzPath = join(dumpPath, 'ol-editions.txt.gz');
+    writeFileSync(gzPath, gzipSync(lines.join('\n') + '\n'));
+
+    const { db } = await createTestDb();
+    const parse = (fields: string[]) => {
+      const rec = JSON.parse(fields[4]);
+      return [{
+        entityType: 'book' as const,
+        pk: `books/${rec.key.replace('/books/', 'ol').toLowerCase()}`,
+        source: 'openlibrary',
+        matchName: rec.title,
+        identifiers: [{ resource: `openlibrary:${rec.key.replace(/^\//, '')}`, url: `https://ol${rec.key}` }],
+        fields: { title: rec.title },
+      }];
+    };
+    await runDumpImport({
+      db,
+      stateName: 'ol-editions',
+      url: 'https://example.invalid/dump.gz',
+      dumpPath,
+      noDownload: true,
+      keepDump: true,
+      keyOf: olKeyOf,
+      parse,
+    });
+
+    // Simulate carry-over from a prior dump: write a high totalProcessed.
+    await db
+      .update(backfillState)
+      .set({ totalProcessed: 999_999, lastByteOffset: 999_999_999, cursor: '/books/OL99M' })
+      .where(eq(backfillState.name, 'ol-editions'));
+
+    // Invalidate the count cache (simulates a re-downloaded dump).
+    unlinkSync(join(dumpPath, 'ol-editions.txt.gz.count'));
+
+    await runDumpImport({
+      db,
+      stateName: 'ol-editions',
+      url: 'https://example.invalid/dump.gz',
+      dumpPath,
+      noDownload: true,
+      keepDump: true,
+      keyOf: olKeyOf,
+      parse,
+    });
+
+    // After the cache-invalidation reset, totalProcessed should be the new
+    // run's record count (2), not 999,999 + 2.
+    const final = (await db.select().from(backfillState).where(eq(backfillState.name, 'ol-editions')))[0];
+    expect(final?.totalProcessed).toBe(2);
+    expect(final?.totalRecords).toBe(2);
+    expect(final?.lastByteOffset).toBe(0);
+    expect(final?.cursor).toBeNull();
     rmSync(dir, { recursive: true, force: true });
   });
 });
