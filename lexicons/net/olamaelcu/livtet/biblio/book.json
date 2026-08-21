@@ -17,12 +17,6 @@
             "maxGraphemes": 300,
             "description": "Title of the edition."
           },
-          "work": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.work",
-            "strong": true,
-            "description": "The literary work this book is an edition of."
-          },
           "format": {
             "type": "ref",
             "ref": "net.olamaelcu.livtet.biblio.format",

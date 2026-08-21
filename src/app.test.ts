@@ -32,7 +32,6 @@ const LEXICON_NSIDS = [
   'genre',
   'review',
   'shelf',
-  'work',
 ];
 
 describe('pages', () => {
@@ -70,8 +69,7 @@ describe('pages', () => {
     const body = await res.text();
     expect(body).toContain('did-ssr');
     expect(body).toContain('id="search-form"');
-    expect(body).toContain('searchWorks');
-    expect(body).toContain('listBooks');
+    expect(body).toContain('net.olamaelcu.livtet.biblio.searchBooks');
   });
 
   it('serves the live stats page', async () => {
@@ -81,7 +79,6 @@ describe('pages', () => {
     const body = await res.text();
     expect(body).toContain('did-ssr');
     expect(body).toContain('books');
-    expect(body).toContain('works');
     expect(body).toContain('contributors');
   });
 
@@ -96,7 +93,6 @@ describe('pages', () => {
     const body = await res.json();
     expect(Array.isArray(body.catalog)).toBe(true);
     expect(typeof body.openIssues).toBe('number');
-    expect(Array.isArray(body.backfill)).toBe(true);
   });
 
   it('serves webawesome theme assets', async () => {

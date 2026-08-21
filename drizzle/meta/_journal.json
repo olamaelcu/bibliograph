@@ -50,6 +50,13 @@
       "when": 1787109204869,
       "tag": "0007_sparkling_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1763788800000,
+      "tag": "0008_collapse_work_and_add_gb_cache",
+      "breakpoints": true
     }
   ]
 }

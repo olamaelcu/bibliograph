@@ -44,7 +44,6 @@ async function main(): Promise<void> {
 
   const catalog: Array<{ label: string; table: string; collection?: string }> = [
     { label: 'books', table: 'books' },
-    { label: 'works', table: 'works' },
     { label: 'contributors', table: 'contributors' },
     { label: 'genres', table: 'genres' },
     { label: 'contributor roles', table: 'contributor_roles' },
@@ -74,34 +73,6 @@ async function main(): Promise<void> {
   const openIssuesRes = await db.execute(sql`SELECT COUNT(*) c FROM import_issues WHERE status = 'open'`);
   const openIssues = Number(openIssuesRes.rows[0]?.c ?? 0);
   console.log(`Open import issues: ${openIssues.toLocaleString()}`);
-
-  const states = (
-    await db.execute(
-      sql`SELECT name, complete, stopped, total_processed, total_records, file_size FROM backfill_state ORDER BY name`,
-    )
-  ).rows as Array<{
-    name: string;
-    complete: number;
-    stopped: number;
-    total_processed: number | null;
-    total_records: number | null;
-    file_size: number | null;
-  }>;
-  if (states.length > 0) {
-    console.log('');
-    console.log('Backfill state:');
-    for (const s of states) {
-      const sizeMb = s.file_size ? `${(s.file_size / 1024 / 1024).toFixed(0)} MB` : '-';
-      const processed = s.total_processed ?? 0;
-      const of = s.total_records
-        ? ` of ${s.total_records.toLocaleString()} (${Math.round((processed / s.total_records) * 100).toLocaleString()}%)`
-        : '';
-      const status = s.complete ? 'complete' : s.stopped ? 'stopped' : 'in progress';
-      console.log(
-        `  ${pad(s.name)}${status}   processed: ${processed.toLocaleString()}${of}   dump: ${sizeMb}`,
-      );
-    }
-  }
 }
 
 main()

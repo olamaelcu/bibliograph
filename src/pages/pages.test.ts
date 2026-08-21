@@ -62,7 +62,7 @@ describe('lexicon catalog', () => {
 
 	describe('record lexicons', () => {
 		it('extracts every record-type lexicon', () => {
-			expect(recordLexicons.length).toBeGreaterThanOrEqual(11);
+			expect(recordLexicons.length).toBeGreaterThanOrEqual(10);
 			for (const record of recordLexicons) {
 				expect(record.type).toBe('record');
 				expect(record.id).toMatch(/^net\.olamaelcu\.livtet\.biblio\./);
@@ -79,7 +79,6 @@ describe('lexicon catalog', () => {
 			'contributorRole',
 			'format',
 			'genre',
-			'work',
 		]);
 		expect(users.map((r) => r.name).sort()).toEqual([
 			'actor',
@@ -102,19 +101,13 @@ describe('lexicon catalog', () => {
 });
 
 describe('page templates', () => {
-	it('renders backfill progress as X of Y records with a percentage', () => {
+	it('renders the catalog without the backfill/import state sections', () => {
 		const html = renderPage('stats', {
 			title: 'Stats',
 			description: 'd',
-			stats: {
-				catalog: [],
-				openIssues: 0,
-				backfill: [
-					{ name: 'ol-works', complete: false, totalProcessed: 20_000_000, totalRecords: 40_000_000, fileSize: null },
-				],
-			},
+			stats: { catalog: [], openIssues: 0 },
 		});
-		expect(html).toContain('of 40,000,000 (50%)');
+		expect(html).toContain('<!doctype html>');
 	});
 
 	it('renders a full document with declarative shadow DOM', () => {
@@ -154,7 +147,7 @@ describe('page templates', () => {
 		const html = await renderStatsPage();
 		expect(html).toContain('<!doctype html>');
 		expect(html).toContain('did-ssr');
-		for (const label of ['books', 'works', 'contributors', 'formats', 'Import issues', 'Backfill state']) {
+		for (const label of ['books', 'contributors', 'formats', 'Import issues']) {
 			expect(html).toContain(label);
 		}
 	});
@@ -165,7 +158,6 @@ describe('page templates', () => {
 		expect(html).toContain('data-stat="openIssues"');
 		expect(html).toContain('data-stat="covers"');
 		expect(html).toContain('data-catalog=');
-		expect(html).toContain('id="backfill-container"');
 		expect(html).toContain("fetch('/stats.json'");
 		expect(html).toContain('setInterval(refresh, POLL_MS)');
 	});
@@ -187,14 +179,13 @@ describe('page templates', () => {
 		}
 	});
 
-	it('renders the search page with a form and both XRPC queries', () => {
+	it('renders the search page with a form and the searchBooks XRPC query', () => {
 		const html = renderPage('search', { title: 'Search', description: 'd' });
 		expect(html).toContain('id="search-form"');
 		expect(html).toContain('id="search-q"');
-		expect(html).toContain('/xrpc/net.olamaelcu.livtet.biblio.searchWorks');
-		expect(html).toContain('/xrpc/net.olamaelcu.livtet.biblio.listBooks');
-		expect(html).toContain('c.contributor?.name');
-		expect(html).toContain('e.coverUrl');
+		expect(html).toContain('/xrpc/net.olamaelcu.livtet.biblio.searchBooks');
+		expect(html).toContain('bc.contributor?.name');
+		expect(html).toContain('book.coverUrl');
 	});
 
 	it('wires up cursor-based load-more pagination in the search script', () => {
@@ -204,6 +195,6 @@ describe('page templates', () => {
 		expect(html).toContain('cursor: currentCursor');
 		expect(html).toContain('appendLoadMore');
 		expect(html).toContain('load-more-btn');
-		expect(html).toContain('All works loaded');
+		expect(html).toContain('End of results');
 	});
 });

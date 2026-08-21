@@ -23,7 +23,7 @@ import {
 	type OwnedCollection,
 } from './records.js';
 import { buildDidDocument } from '../did.js';
-import { contributors, contributorRoles, formats, genres, works, books } from '../db/schema.js';
+import { contributors, contributorRoles, formats, genres, books } from '../db/schema.js';
 import { releasedFilter } from '../xrpc/gate.js';
 import type { ViewContext } from '../lex/collections.js';
 
@@ -213,8 +213,6 @@ function tableFor(collection: OwnedCollection) {
 	switch (collection) {
 		case COLLECTIONS.book:
 			return books;
-		case COLLECTIONS.work:
-			return works;
 		case COLLECTIONS.contributor:
 			return contributors;
 		case COLLECTIONS.contributorRole:

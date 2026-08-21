@@ -95,7 +95,7 @@ export function createApp(): Hono {
 		ctx.html(
 			renderPage('search', {
 				title: 'Search',
-				description: 'Search the Bibliograph catalog for works, their editions, and covers.',
+				description: 'Search the Bibliograph catalog for books and covers.',
 			}),
 		),
 	);

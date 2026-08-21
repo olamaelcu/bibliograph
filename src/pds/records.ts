@@ -4,7 +4,6 @@ import type * as schema from '../db/schema.js';
 import type * as Lexicons from '../lexicons/index.js';
 
 type Book = Lexicons.NetOlamaelcuLivtetBiblioBook.Main;
-type Work = Lexicons.NetOlamaelcuLivtetBiblioWork.Main;
 type Contributor = Lexicons.NetOlamaelcuLivtetBiblioContributor.Main;
 type ContributorRole = Lexicons.NetOlamaelcuLivtetBiblioContributorRole.Main;
 type Format = Lexicons.NetOlamaelcuLivtetBiblioFormat.Main;
@@ -20,13 +19,10 @@ import {
 	formats,
 	genreIdentifiers,
 	genres,
-	workIdentifiers,
-	works,
 } from '../db/schema.js';
 import { releasedFilter } from '../xrpc/gate.js';
 
 export const COLLECTIONS = {
-	work: 'net.olamaelcu.livtet.biblio.work',
 	book: 'net.olamaelcu.livtet.biblio.book',
 	contributor: 'net.olamaelcu.livtet.biblio.contributor',
 	contributorRole: 'net.olamaelcu.livtet.biblio.contributorRole',
@@ -77,34 +73,6 @@ export function serializeFormat(row: {
 		unit: row.unit,
 	};
 	if (row.iconImageUrl) value.iconImageUrl = uri(row.iconImageUrl);
-	return value;
-}
-
-// ─── Work ───────────────────────────────────────────────────────────────────
-
-export function serializeWork(
-	row: {
-		pk: string;
-		title: string;
-		description: string | null;
-		originalPublishDate: number | null;
-		createdAt: number;
-	},
-	identifiers: IdentifierRow[],
-): Work {
-	const value: Work = {
-		$type: 'net.olamaelcu.livtet.biblio.work',
-		title: row.title,
-	};
-	if (identifiers.length) {
-		value.identifiers = identifiers.map((id) => ({
-			resource: id.resource,
-			url: uri(id.url),
-		}));
-	}
-	if (row.description) value.description = row.description;
-	if (row.originalPublishDate != null) value.originalPublishDate = toIso(row.originalPublishDate);
-	if (row.createdAt != null) value.createdAt = toIso(row.createdAt);
 	return value;
 }
 
@@ -194,7 +162,6 @@ export function serializeContributorRole(row: {
 
 export interface SerializeBookOptions {
 	serviceDid: string;
-	work?: { pk: string; title: string; description: string | null; originalPublishDate: number | null; createdAt: number };
 	format?: { pk: string; description: string; emoji: string; iconImageUrl: string | null; unit: string };
 	genres?: Array<{ pk: string; name: string; emoji: string; description: string; iconImageUrl: string | null; parentPk: string | null }>;
 	identifiers?: IdentifierRow[];
@@ -215,9 +182,6 @@ export function serializeBook(
 		$type: 'net.olamaelcu.livtet.biblio.book',
 		title: row.title,
 	};
-	if (opts.work) {
-		value.work = serializeWork(opts.work, []);
-	}
 	if (opts.format) {
 		value.format = serializeFormat(opts.format);
 	}
@@ -253,13 +217,6 @@ async function loadIdentifiers(db: Db, table: any, pkCol: any, pk: string): Prom
 export async function hydrateFormat(db: Db, pk: string) {
 	const row = (await db.select().from(formats).where(eq(formats.pk, pk)))[0];
 	return row ? serializeFormat(row) : undefined;
-}
-
-export async function hydrateWork(db: Db, pk: string): Promise<Work | undefined> {
-	const row = (await db.select().from(works).where(and(eq(works.pk, pk), releasedFilter(works))))[0];
-	if (!row) return undefined;
-	const identifiers = await loadIdentifiers(db, workIdentifiers, workIdentifiers.workPk, pk);
-	return serializeWork(row, identifiers);
 }
 
 export async function hydrateGenre(
@@ -301,23 +258,19 @@ export async function hydrateBook(db: Db, ctx: PdsContext, pk: string): Promise<
 		loadIdentifiers(db, bookIdentifiers, bookIdentifiers.bookPk, pk),
 	]);
 
-	const work = row.workPk
-		? (await db.select().from(works).where(eq(works.pk, row.workPk)))[0]
-		: undefined;
 	const format = row.formatPk
 		? (await db.select().from(formats).where(eq(formats.pk, row.formatPk)))[0]
 		: undefined;
 
 	return serializeBook(row, {
 		serviceDid: ctx.serviceDid,
-		work,
 		format,
 		genres: genreRows.map((j) => j.genre),
 		identifiers: identifierRows,
 	});
 }
 
-export type SerializedRecord = Book | Contributor | ContributorRole | Format | Genre | Work;
+export type SerializedRecord = Book | Contributor | ContributorRole | Format | Genre;
 
 export async function loadRecord(
 	db: Db,
@@ -328,8 +281,6 @@ export async function loadRecord(
 	switch (collection) {
 		case COLLECTIONS.book:
 			return hydrateBook(db, ctx, pk);
-		case COLLECTIONS.work:
-			return hydrateWork(db, pk);
 		case COLLECTIONS.contributor:
 			return hydrateContributor(db, pk);
 		case COLLECTIONS.contributorRole:
@@ -362,8 +313,6 @@ function tableFor(collection: OwnedCollection) {
 	switch (collection) {
 		case COLLECTIONS.book:
 			return books;
-		case COLLECTIONS.work:
-			return works;
 		case COLLECTIONS.contributor:
 			return contributors;
 		case COLLECTIONS.contributorRole:

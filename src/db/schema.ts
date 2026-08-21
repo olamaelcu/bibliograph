@@ -17,35 +17,16 @@ import {
 /**
  * Bibliograph relational schema.
  *
- * Normalized (no JSON columns) model for an ATProto book/metadata PDS.
+ * Owned record tables back the PDS (com.atproto.repo.{getRecord,listRecords}).
+ * Reads served over the AppView's net.olamaelcu.livtet.biblio.* XRPC are now
+ * backed by Google Books (see src/google-books/) and no longer touch these
+ * tables — only the PDS write/read paths do.
+ *
  * Every primary key is a `text` value: ATProto record keys (TIDs), ULIDs,
  * or lexical slugs. Timestamps are unix seconds (`integer`). Many-to-many
  * and identifier relationships live in dedicated join tables so that rows
  * can be referenced by foreign keys.
  */
-
-export const works = pgTable(
-	'works',
-	{
-		pk: text('pk').primaryKey(),
-		title: text('title').notNull(),
-		description: text('description'),
-		originalPublishDate: bigint('original_publish_date', { mode: 'number' }),
-		cid: text('cid').notNull().default(''),
-		createdAt: integer('created_at').notNull(),
-		updatedAt: integer('updated_at'),
-		releaseStatus: text('release_status').notNull().default('staged'),
-		releasedAt: integer('released_at'),
-	},
-	(t) => ({
-		titleIdx: index('works_title_idx').on(t.title),
-		titleLowerIdx: index('works_title_lower_idx').on(sql`lower(${t.title})`),
-		releaseStatusCheck: check(
-			'works_release_status_check',
-			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
-		),
-	}),
-);
 
 export const contributors = pgTable(
 	'contributors',
@@ -62,7 +43,7 @@ export const contributors = pgTable(
 		releasedAt: integer('released_at'),
 	},
 	(t) => ({
-			releaseStatusCheck: check(
+		releaseStatusCheck: check(
 			'contributors_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
 		),
@@ -128,7 +109,6 @@ export const books = pgTable(
 	{
 		pk: text('pk').primaryKey(),
 		title: text('title').notNull(),
-		workPk: text('work_pk').references(() => works.pk, { onDelete: 'set null' }),
 		formatPk: text('format_pk').references(() => formats.pk, { onDelete: 'set null' }),
 		publishDate: bigint('publish_date', { mode: 'number' }),
 		description: text('description'),
@@ -140,39 +120,12 @@ export const books = pgTable(
 		releasedAt: integer('released_at'),
 	},
 	(t) => ({
-		workPkIdx: index('books_work_pk_idx').on(t.workPk),
 		formatPkIdx: index('books_format_pk_idx').on(t.formatPk),
 		releaseStatusCheck: check(
 			'books_release_status_check',
 			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
 		),
 	}),
-);
-
-export const bookContributorStaging = pgTable(
-	'book_contributor_staging',
-	{
-		id: bigserial('id', { mode: 'number' }),
-		editionOlKey: text('edition_ol_key').notNull(),
-		authorOlKey: text('author_ol_key').notNull(),
-		rolePk: text('role_pk').notNull().default('author'),
-	},
-	(t) => ({
-		pk: primaryKey({ columns: [t.editionOlKey, t.authorOlKey, t.rolePk] }),
-	}),
-);
-
-export type BookContributorStaging = typeof bookContributorStaging.$inferSelect;
-export type NewBookContributorStaging = typeof bookContributorStaging.$inferInsert;
-
-export const bookWorkStaging = pgTable(
-	'book_work_staging',
-	{
-		bookPk: text('book_pk').primaryKey(),
-		workOlKey: text('work_ol_key').notNull(),
-		source: text('source').notNull(),
-		createdAt: integer('created_at').notNull(),
-	},
 );
 
 export const bookContributors = pgTable(
@@ -240,21 +193,6 @@ export const bookIdentifiers = pgTable(
 	}),
 );
 
-export const workIdentifiers = pgTable(
-	'work_identifiers',
-	{
-		workPk: text('work_pk').notNull(),
-		resource: text('resource').notNull(),
-		url: text('url').notNull(),
-	},
-	(t) => ({
-		pk: primaryKey({ columns: [t.workPk, t.resource] }),
-		workFk: foreignKey({ columns: [t.workPk], foreignColumns: [works.pk] }).onDelete('cascade'),
-		urlIdx: index('work_identifiers_url_idx').on(t.url),
-		resourceUnique: uniqueIndex('work_identifiers_resource_unique').on(t.resource),
-	}),
-);
-
 export const contributorIdentifiers = pgTable(
 	'contributor_identifiers',
 	{
@@ -268,7 +206,7 @@ export const contributorIdentifiers = pgTable(
 			columns: [t.contributorPk],
 			foreignColumns: [contributors.pk],
 		}).onDelete('cascade'),
-			resourceUnique: uniqueIndex('contributor_identifiers_resource_unique').on(t.resource),
+		resourceUnique: uniqueIndex('contributor_identifiers_resource_unique').on(t.resource),
 	}),
 );
 
@@ -292,7 +230,7 @@ export const genreIdentifiers = pgTable(
 export const releaseStatuses = ['staged', 'released', 'rejected'] as const;
 export type ReleaseStatus = (typeof releaseStatuses)[number];
 
-export const importIssueEntityTypes = ['book', 'work', 'contributor', 'genre', 'contributorRole'] as const;
+export const importIssueEntityTypes = ['book', 'contributor', 'genre', 'contributorRole'] as const;
 export type ImportIssueEntityType = (typeof importIssueEntityTypes)[number];
 
 export const importIssueStatuses = ['open', 'resolved', 'dismissed'] as const;
@@ -320,7 +258,7 @@ export const importIssues = pgTable(
 			.where(sql`${t.status} = 'open'`),
 		entityTypeCheck: check(
 			'import_issues_entity_type_check',
-			sql`${t.entityType} IN ('book', 'work', 'contributor', 'genre', 'contributorRole')`,
+			sql`${t.entityType} IN ('book', 'contributor', 'genre', 'contributorRole')`,
 		),
 		statusCheck: check(
 			'import_issues_status_check',
@@ -331,31 +269,6 @@ export const importIssues = pgTable(
 
 export type ImportIssue = typeof importIssues.$inferSelect;
 export type NewImportIssue = typeof importIssues.$inferInsert;
-
-	export const backfillState = pgTable('backfill_state', {
-		name: text('name').primaryKey(),
-		url: text('url'),
-		filePath: text('file_path'),
-		lastModified: text('last_modified'),
-		fileSize: bigint('file_size', { mode: 'number' }),
-		lastByteOffset: bigint('last_byte_offset', { mode: 'number' }),
-		cursor: text('cursor'),
-		totalProcessed: integer('total_processed'),
-		totalRecords: integer('total_records'),
-		complete: integer('complete').notNull().default(0),
-		stopped: integer('stopped').notNull().default(0),
-		updatedAt: integer('updated_at').notNull(),
-	});
-
-export type BackfillState = typeof backfillState.$inferSelect;
-
-export const backfillReservation = pgTable('backfill_reservation', {
-	stateName: text('state_name').primaryKey(),
-	pid: integer('pid').notNull(),
-	startedAt: integer('started_at').notNull(),
-});
-
-export type BackfillReservation = typeof backfillReservation.$inferSelect;
 
 export const catalogBlobs = pgTable(
 	'catalog_blobs',
@@ -415,3 +328,29 @@ export const jetstreamCursor = pgTable('jetstream_cursor', {
 });
 
 export type JetstreamCursor = typeof jetstreamCursor.$inferSelect;
+
+// ─── Google Books response cache ─────────────────────────────────────────────
+
+/**
+ * Postgres-backed HTTP response cache for Google Books queries. Keyed on a
+ * hash of `(endpoint, canonical-json(params))`; an entry is valid until
+ * `expires_at` is past. Pruned by the hourly `pnpm run gb:evict` script
+ * declared as a worker in the Procfile and scheduled by dokku-cron.
+ */
+export const gbCache = pgTable(
+	'gb_cache',
+	{
+		requestHash: text('request_hash').primaryKey(),
+		endpoint: text('endpoint').notNull(),
+		response: jsonb('response').notNull(),
+		expiresAt: integer('expires_at').notNull(),
+		createdAt: integer('created_at').notNull().default(sql`extract(epoch from now())::int`),
+	},
+	(t) => ({
+		expiresAtIdx: index('gb_cache_expires_at_idx').on(t.expiresAt),
+		endpointIdx: index('gb_cache_endpoint_idx').on(t.endpoint),
+	}),
+);
+
+export type GbCache = typeof gbCache.$inferSelect;
+export type NewGbCache = typeof gbCache.$inferInsert;

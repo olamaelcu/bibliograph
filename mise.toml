@@ -11,15 +11,6 @@ run = "pnpm run dev"
 [tasks.migrate]
 run = "pnpm exec drizzle-kit migrate"
 
-[tasks.import]
-run = [
-  "pnpm run dump:works --keep-dump --no-download",
-  "pnpm run dump:contributors --keep-dump --no-download",
-  "pnpm run dump:openlibrary --keep-dump --no-download",
-  "pnpm run dump:openlibrary:editions:rehydrate --keep-dump --no-download",
-  "pnpm run images:refresh --keep-dump --no-download",
-]
-
 [tasks.sql]
 description = "Open a psql shell against the local Postgres database (DATABASE_URL from .env)"
 run = "psql $DATABASE_URL"

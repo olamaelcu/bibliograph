@@ -136,50 +136,6 @@
         }
       }
     },
-    "workView": {
-      "type": "object",
-      "required": ["uri", "title"],
-      "properties": {
-        "uri": {
-          "type": "string",
-          "format": "at-uri",
-          "description": "AT-URI of the work record."
-        },
-        "title": {
-          "type": "string",
-          "maxGraphemes": 300,
-          "description": "Title of the work."
-        },
-        "identifiers": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
-          },
-          "description": "External identifiers for the work."
-        },
-        "description": {
-          "type": "string",
-          "maxGraphemes": 8192,
-          "description": "Description or synopsis of the work."
-        },
-        "originalPublishDate": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Date of first publication of the work."
-        },
-        "createdAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp when the record was originally created."
-        },
-        "updatedAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp of the last update to the record."
-        }
-      }
-    },
     "genreView": {
       "type": "object",
       "required": ["uri", "name", "description", "emoji"],
@@ -307,11 +263,6 @@
           "type": "string",
           "maxGraphemes": 300,
           "description": "Title of the edition."
-        },
-        "work": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#workView",
-          "description": "The literary work this book is an edition of."
         },
         "format": {
           "type": "ref",
