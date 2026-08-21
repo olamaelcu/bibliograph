@@ -14,8 +14,6 @@ import {
 	formats,
 	genreIdentifiers,
 	genres,
-	workIdentifiers,
-	works,
 } from '../db/schema.js';
 
 export const SERVICE_DID = 'did:web:books.example.com';
@@ -23,12 +21,10 @@ export const SERVICE_HOST = 'books.example.com';
 
 const COLLECTION = {
 	book: 'net.olamaelcu.livtet.biblio.book',
-	work: 'net.olamaelcu.livtet.biblio.work',
 	contributor: 'net.olamaelcu.livtet.biblio.contributor',
 	contributorRole: 'net.olamaelcu.livtet.biblio.contributorRole',
 	format: 'net.olamaelcu.livtet.biblio.format',
 	genre: 'net.olamaelcu.livtet.biblio.genre',
-	review: 'net.olamaelcu.livtet.biblio.review',
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
 	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
 } as const;
@@ -135,21 +131,17 @@ async function seed(db: Database) {
 		{ pk: 'author', name: 'Author', description: 'Wrote the book', iconImageUrl: null, createdAt: now, releaseStatus: 'released', releasedAt: now },
 		{ pk: 'translator', name: 'Translator', description: 'Translated the book', iconImageUrl: null, createdAt: now, releaseStatus: 'released', releasedAt: now },
 	];
-	const workRows = [
-		{ pk: 'work-dune', title: 'Dune', description: 'A desert planet saga', originalPublishDate: 1119484800, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
-	];
 	const contributorRows = [
 		{ pk: 'author-herbert', name: 'Frank Herbert', sortName: 'Herbert, Frank', bio: 'American author', imageUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
 		{ pk: 'author-algernon', name: 'Daniel Keyes', sortName: 'Keyes, Daniel', bio: 'American writer', imageUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
 	];
 	const bookRows = [
-		{ pk: 'book-dune', title: 'Dune (40th Anniversary)', workPk: 'work-dune', formatPk: 'paperback', publishDate: 1119484800, description: 'The classic', coverUrl: 'https://cdn.example.com/dune.jpg', createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
-		{ pk: 'book-flowers', title: 'Flowers for Algernon', workPk: null, formatPk: 'ebook', publishDate: 1119484800, description: 'A touching story', coverUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
+		{ pk: 'book-dune', title: 'Dune (40th Anniversary)', formatPk: 'paperback', publishDate: 1119484800, description: 'The classic', coverUrl: 'https://cdn.example.com/dune.jpg', createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
+		{ pk: 'book-flowers', title: 'Flowers for Algernon', formatPk: 'ebook', publishDate: 1119484800, description: 'A touching story', coverUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
 	];
 	await db.insert(formats).values(formatRows);
 	await db.insert(genres).values(genreRows);
 	await db.insert(contributorRoles).values(roleRows);
-	await db.insert(works).values(workRows);
 	await db.insert(contributors).values(contributorRows);
 	await db.insert(books).values(bookRows);
 
@@ -163,9 +155,6 @@ async function seed(db: Database) {
 	]);
 	await db.insert(bookIdentifiers).values([
 		{ bookPk: 'book-dune', resource: 'isbn:0441172717', url: 'https://isbn.example.com/0441172717' },
-	]);
-	await db.insert(workIdentifiers).values([
-		{ workPk: 'work-dune', resource: 'openlibrary:works/OL893423W', url: 'https://openlibrary.example.com/works/OL893423W' },
 	]);
 	await db.insert(contributorIdentifiers).values([
 		{ contributorPk: 'author-herbert', resource: 'viaf:59083797', url: 'https://viaf.example.com/59083797' },

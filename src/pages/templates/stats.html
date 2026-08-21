@@ -54,27 +54,6 @@
     open issues
     &mdash; flagged rows awaiting review before release.
   </p>
-  <h2>Backfill state</h2>
-  <div id="backfill-container">
-    <% if (it.stats.backfill.length===0) { %>
-      <p class="muted">No backfill state recorded.</p>
-      <% } else { %>
-        <ul class="spec">
-          <% for (const b of it.stats.backfill) { %>
-            <li>
-              <code>
-                <%= b.name %>
-              </code> &mdash; <%= b.complete ? 'complete' : (b.stopped ? 'stopped' : 'in progress') %>
-                · <%= b.totalProcessed.toLocaleString() %> processed
-                  <% if (b.totalRecords) { %> of <%= b.totalRecords.toLocaleString() %> (<%=
-                        Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString() %>%)<% } %>
-                          <% if (b.fileSize) { %> · <%= Math.round(b.fileSize / 1024 / 1024).toLocaleString() %> MB dump
-                              <% } %>
-            </li>
-            <% } %>
-        </ul>
-        <% } %>
-  </div>
 </main>
 <script type="module">
   const POLL_MS = 1000;
@@ -82,23 +61,6 @@
   function setStat(el, name, value) {
     const cell = el.querySelector(`[data-stat="${name}"]`);
     if (cell) cell.textContent = value;
-  }
-
-  function renderBackfill(backfill) {
-    const container = document.getElementById('backfill-container');
-    if (!container) return;
-    if (backfill.length === 0) {
-      container.innerHTML = '<p class="muted">No backfill state recorded.</p>';
-      return;
-    }
-    const lis = backfill.map((b) => {
-    const total = b.totalProcessed.toLocaleString();
-    const of = b.totalRecords ? ` of ${b.totalRecords.toLocaleString()} (${Math.round((b.totalProcessed / b.totalRecords) * 100).toLocaleString()}%)` : '';
-    const size = b.fileSize ? ` · ${Math.round(b.fileSize / 1024 / 1024).toLocaleString()} MB dump` : '';
-    const status = b.complete ? 'complete' : b.stopped ? 'stopped' : 'in progress';
-    return `<li><code>${b.name}</code> &mdash; ${status} · ${total} processed${of}${size}</li>`;
-    });
-    container.innerHTML = `<ul class="spec">${lis.join('')}</ul>`;
   }
 
   async function refresh() {
@@ -123,7 +85,6 @@
         }
       }
       setStat(document, 'openIssues', data.openIssues.toLocaleString());
-      renderBackfill(data.backfill);
     } catch {
       // Keep last values; retry on the next tick.
     }

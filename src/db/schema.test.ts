@@ -63,7 +63,7 @@ describe('staged-release schema', () => {
 		).rejects.toThrow();
 	});
 
-	it('exposes review views with aggregated open issues', async () => {
+	it('exposes the book import-issues view with aggregated open issues', async () => {
 		const { db, seed } = await createTestDb();
 		await seed();
 		const now = Math.floor(Date.now() / 1000);
@@ -96,17 +96,16 @@ describe('staged-release schema', () => {
 		expect(rows[0].release_status).toBe('staged');
 	});
 
-	it('creates the backfill and catalog tables', async () => {
+	it('creates the catalog tables', async () => {
 		const { db } = await createTestDb();
 		const names = (
 			await db.execute(
-				sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('import_issues', 'backfill_state', 'backfill_reservation', 'catalog_blobs')`,
+				sql`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('import_issues', 'catalog_blobs', 'gb_cache')`,
 			)
 		).rows as Array<{ table_name: string }>;
 		expect(names.map((r) => r.table_name).sort()).toEqual([
-			'backfill_reservation',
-			'backfill_state',
 			'catalog_blobs',
+			'gb_cache',
 			'import_issues',
 		]);
 	});
@@ -122,7 +121,7 @@ describe('staged-release schema', () => {
 			),
 		).rejects.toThrow();
 
-		// The review view aggregates over the seeded graph.
+		// The book_import_issues view aggregates over the seeded graph.
 		const now = Math.floor(Date.now() / 1000);
 		await db.insert(importIssues).values({
 			entityType: 'book',

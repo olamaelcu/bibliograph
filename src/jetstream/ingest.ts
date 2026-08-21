@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { jetstreamCursor, userRecords } from '../db/schema.js';
-import { COLLECTION } from '../xrpc/views.js';
+import { COLLECTION } from '../lex/collections.js';
 import { logger } from '../logger.js';
 
 /**
@@ -16,7 +16,7 @@ import { logger } from '../logger.js';
 type Db = NodePgDatabase<typeof schema>;
 
 const CURSOR_NAME = 'default';
-const WANTED_COLLECTIONS = [COLLECTION.review, COLLECTION.shelf, COLLECTION.bookShelf, COLLECTION.actor] as const;
+const WANTED_COLLECTIONS = [COLLECTION.shelf, COLLECTION.bookShelf, COLLECTION.actor] as const;
 const MIN_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 

@@ -8,15 +8,14 @@
       "parameters": {
         "type": "params",
         "properties": {
+          "q": {
+            "type": "string",
+            "description": "Free-text search passed through to Google Books."
+          },
           "genre": {
             "type": "string",
             "format": "at-uri",
             "description": "Only include books in the given genre."
-          },
-          "work": {
-            "type": "string",
-            "format": "at-uri",
-            "description": "Only include books that are editions of the given work."
           },
           "contributor": {
             "type": "string",
@@ -36,7 +35,7 @@
               "dnf",
               "read"
             ],
-            "description": "Only include books with reviews in the given reading status."
+            "description": "Only include books with the given reading status."
           },
           "limit": {
             "type": "integer",

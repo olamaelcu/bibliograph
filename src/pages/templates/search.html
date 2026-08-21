@@ -27,12 +27,12 @@
     margin: 1.25rem 0 0.75rem;
   }
 
-  .work-card {
+  .book-card {
     width: auto;
     margin: 0 0 0.75rem;
   }
 
-  .work-card-header {
+  .book-card-header {
     display: flex;
     flex-direction: column;
     align-items: baseline;
@@ -41,26 +41,26 @@
     flex-wrap: wrap;
   }
 
-  .work-title {
+  .book-title {
     margin: 0;
     font-size: 1.05rem;
     font-weight: 600;
   }
 
-  .work-id {
+  .book-id {
     font-family: var(--wa-font-family-code), monospace;
     font-size: 0.8rem;
     color: var(--wa-color-on-quiet);
     word-break: break-all;
   }
 
-  .work-authors {
+  .book-authors {
     margin: 0.25rem 0 0;
     color: var(--wa-color-on-quiet);
     font-size: 0.9rem;
   }
 
-  .work-desc {
+  .book-desc {
     margin: 0.5rem 0 0.75rem;
     font-size: 0.9rem;
     line-height: 1.5;
@@ -70,15 +70,9 @@
     overflow: hidden;
   }
 
-  .work-covers {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-
-  .work-cover {
-    width: 2.6rem;
-    height: 4rem;
+  .book-cover {
+    width: 4rem;
+    height: 6rem;
     object-fit: cover;
     border-radius: 4px;
     border: 1px solid var(--wa-form-control-border-color);
@@ -100,9 +94,9 @@
   <div class="page-intro" style="margin:0;padding:0">
     <h2>Search</h2>
     <p class="muted">
-      Search the catalog for works and browse their editions, contributors, and covers.
-      This page is a live client of the <code>searchWorks</code> and
-      <code>listBooks</code> queries served over <code>/xrpc</code>.
+      Search the catalog for books and browse their contributors and covers.
+      This page is a live client of the <code>net.olamaelcu.livtet.biblio.searchBooks</code> query
+      served over <code>/xrpc</code>, backed by Google Books.
     </p>
   </div>
   <form id="search-form" class="search-form">
@@ -115,10 +109,8 @@
 </main>
 
 <script type="module">
-  const SEARCH_WORKS = '/xrpc/net.olamaelcu.livtet.biblio.searchWorks';
-  const LIST_BOOKS = '/xrpc/net.olamaelcu.livtet.biblio.listBooks';
-  const WORKS_LIMIT = 20;
-  const EDITIONS_PER_WORK = 5;
+  const SEARCH_BOOKS = '/xrpc/net.olamaelcu.livtet.biblio.searchBooks';
+  const PAGE_LIMIT = 20;
 
   const form = document.getElementById('search-form');
   const input = document.getElementById('search-q');
@@ -142,64 +134,44 @@
     return trimmed.slice(0, max).trimEnd() + '&hellip;';
   }
 
-  async function listBooksForWork(uri) {
-    const qs = new URLSearchParams({work: uri, limit: String(EDITIONS_PER_WORK)});
-    const res = await fetch(`${LIST_BOOKS}?${qs}`, {headers: {accept: 'application/json'}});
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.books ?? [];
-  }
+  function renderCard(book) {
+    const authors = (book.contributors ?? [])
+      .map((bc) => bc.contributor?.name)
+      .filter(Boolean)
+      .join(', ');
+    const coverHtml = book.coverUrl
+      ? `<img class="book-cover" loading="lazy" src="${escapeHtml(book.coverUrl)}" alt="" />`
+      : '<p class="no-covers">No cover.</p>';
 
-  function renderCard(work, editions) {
-    const byName = new Map();
-    for (const edition of editions) {
-      for (const c of edition.contributors ?? []) {
-        const name = c.contributor?.name;
-        if (!name) continue;
-        const role = String(c.role ?? '').split('/').pop();
-        const entry = byName.get(name) ?? {name, roles: new Set()};
-        if (role) entry.roles.add(role);
-        byName.set(name, entry);
-      }
-    }
-    const people = [...byName.values()].map(({name, roles}) =>
-      roles.size ? `${name} (${[...roles].join(', ')})` : name,
-    );
-    const covers = editions.map((e) => e.coverUrl).filter(Boolean);
-    const coversHtml = covers.length
-      ? `<div class="work-covers">${covers.map((u) => `<img class="work-cover" loading="lazy" src="${escapeHtml(u)}" alt="" />`).join('')}</div>`
-      : `<p class="no-covers">No covers on its editions.</p>`;
-
-    return `<wa-card class="work-card"><div slot="header" class="work-card-header">
-          <h3 class="work-title">${escapeHtml(work.title)}</h3>
-          <span class="work-id">${escapeHtml(work.uri)}</span>
+    return `<wa-card class="book-card"><div slot="header" class="book-card-header">
+          <h3 class="book-title">${escapeHtml(book.title)}</h3>
+          <span class="book-id">${escapeHtml(book.uri)}</span>
         </div>
-        <p class="work-authors">${people.length ? `Contributed by ${escapeHtml(people.join(', '))}` : 'No contributors.'}</p>
-        <p class="work-desc">${work.description ? `${snippet(work.description, 200)}` : 'No description'}</p>
-        ${coversHtml}
+        <p class="book-authors">${authors ? `By ${escapeHtml(authors)}` : 'No contributors listed.'}</p>
+        <p class="book-desc">${book.description ? `${snippet(book.description, 200)}` : 'No description.'}</p>
+        ${coverHtml}
       </wa-card>`;
   }
 
   async function runSearch(q) {
     currentQuery = q;
     currentCursor = null;
-    const qs = new URLSearchParams({q, limit: String(WORKS_LIMIT)});
-    const res = await fetch(`${SEARCH_WORKS}?${qs}`, {headers: {accept: 'application/json'}});
+    const qs = new URLSearchParams({q, limit: String(PAGE_LIMIT)});
+    const res = await fetch(`${SEARCH_BOOKS}?${qs}`, {headers: {accept: 'application/json'}});
     if (!res.ok) {
       results.innerHTML = `<p class="muted">Search failed (HTTP ${res.status}).</p>`;
       return;
     }
     const data = await res.json();
     currentCursor = data.cursor ?? null;
-    const works = data.works ?? [];
-    if (works.length === 0) {
-      results.innerHTML = '<p class="muted">No works matched your query.</p>';
+    const books = data.books ?? [];
+    if (books.length === 0) {
+      results.innerHTML = '<p class="muted">No books matched your query.</p>';
       return;
     }
     const total = data.hitsTotal != null ? ` of ${data.hitsTotal.toLocaleString()}` : '';
-    results.innerHTML = `<p class="muted search-count">${works.length}${total} works found.</p>`;
-    const editionLists = await Promise.all(works.map((w) => listBooksForWork(w.uri)));
-    const cards = works.map((w, i) => renderCard(w, editionLists[i]));
+    results.innerHTML = `<p class="muted search-count">${books.length}${total} books found.</p>`;
+    const cards = books.map((b) => renderCard(b));
     results.insertAdjacentHTML('beforeend', cards.join(''));
     appendLoadMore();
     history.replaceState(null, '', `?q=${encodeURIComponent(q)}`);
@@ -209,17 +181,16 @@
     if (!currentCursor) return;
     const btn = document.getElementById('load-more-btn');
     if (btn) btn.loading = true;
-    const qs = new URLSearchParams({q: currentQuery, limit: String(WORKS_LIMIT), cursor: currentCursor});
-    const res = await fetch(`${SEARCH_WORKS}?${qs}`, {headers: {accept: 'application/json'}});
+    const qs = new URLSearchParams({q: currentQuery, limit: String(PAGE_LIMIT), cursor: currentCursor});
+    const res = await fetch(`${SEARCH_BOOKS}?${qs}`, {headers: {accept: 'application/json'}});
     if (!res.ok) {
       if (btn) btn.loading = false;
       return;
     }
     const data = await res.json();
     currentCursor = data.cursor ?? null;
-    const works = data.works ?? [];
-    const editionLists = await Promise.all(works.map((w) => listBooksForWork(w.uri)));
-    const cards = works.map((w, i) => renderCard(w, editionLists[i]));
+    const books = data.books ?? [];
+    const cards = books.map((b) => renderCard(b));
     document.querySelector('.load-more')?.remove();
     results.insertAdjacentHTML('beforeend', cards.join(''));
     appendLoadMore();
@@ -228,10 +199,10 @@
 
   function appendLoadMore() {
     if (currentCursor) {
-      results.insertAdjacentHTML('beforeend', '<div class="load-more"><wa-button id="load-more-btn">Load more works</wa-button></div>');
+      results.insertAdjacentHTML('beforeend', '<div class="load-more"><wa-button id="load-more-btn">Load more</wa-button></div>');
       document.getElementById('load-more-btn').addEventListener('click', loadMore);
     } else {
-      results.insertAdjacentHTML('beforeend', '<p class="muted load-more">All works loaded.</p>');
+      results.insertAdjacentHTML('beforeend', '<p class="muted load-more">End of results.</p>');
     }
   }
 

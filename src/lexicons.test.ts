@@ -90,11 +90,8 @@ describe('book lexicon', () => {
     expect(record.required).toContain('title');
   });
 
-  it('work is a strong ref', () => {
-    const work = properties.work as { type: string; ref: string; strong?: boolean };
-    expect(work.type).toBe('ref');
-    expect(work.ref).toBe(`${NSID_BASE}work`);
-    expect(work.strong).toBe(true);
+  it('has no work field (work concept collapsed)', () => {
+    expect(properties.work).toBeUndefined();
   });
 
   it('format is a strong ref', () => {

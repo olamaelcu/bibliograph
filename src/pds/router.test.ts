@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createXrpcRouter } from '../xrpc/router.js';
 import { createTestDb, SERVICE_DID } from '../test-utils/db.js';
-import type { ViewContext } from '../xrpc/views.js';
+import type { ViewContext } from '../lex/collections.js';
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 
@@ -19,7 +19,6 @@ async function app() {
 
 const COLL = {
 	book: 'net.olamaelcu.livtet.biblio.book',
-	work: 'net.olamaelcu.livtet.biblio.work',
 	contributor: 'net.olamaelcu.livtet.biblio.contributor',
 	format: 'net.olamaelcu.livtet.biblio.format',
 	genre: 'net.olamaelcu.livtet.biblio.genre',
@@ -39,8 +38,6 @@ describe('com.atproto.repo.getRecord', () => {
 		expect(body1.uri).toBe(`at://${SERVICE_DID}/${COLL.book}/book-dune`);
 		expect(body1.value.$type).toBe(COLL.book);
 		expect(body1.value.title).toBe('Dune (40th Anniversary)');
-		expect(body1.value.work.$type).toBe(COLL.work);
-		expect(body1.value.work.title).toBe('Dune');
 		expect(body1.value.format.$type).toBe(COLL.format);
 		expect(body1.value.format.unit).toBe('pages');
 		expect(body1.value.genres).toHaveLength(2);
@@ -86,8 +83,8 @@ describe('com.atproto.repo.getRecord', () => {
 		const { fetch } = await app();
 		const params = new URLSearchParams({
 			repo: SERVICE_DID,
-			collection: 'net.olamaelcu.livtet.biblio.review',
-			rkey: 'review-1',
+			collection: 'net.olamaelcu.livtet.biblio.nonsense',
+			rkey: 'x-1',
 		});
 		const res = await fetch(`/xrpc/com.atproto.repo.getRecord?${params}`);
 		expect(res.status).toBe(400);
@@ -104,7 +101,6 @@ describe('com.atproto.repo.getRecord', () => {
 	it('returns other owned collections', async () => {
 		const { fetch } = await app();
 		for (const [collection, rkey] of [
-			[COLL.work, 'work-dune'],
 			[COLL.contributor, 'author-herbert'],
 			[COLL.format, 'paperback'],
 			[COLL.genre, 'scifi'],

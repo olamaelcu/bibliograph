@@ -20,7 +20,7 @@
 <p class="page-intro muted">Record types in the <code>net.olamaelcu.livtet.biblio</code> namespace that land on the Jetstream firehose. Bibliograph writes its catalog to its own PDS and indexes user-owned records written to end-user PDSes.</p>
 <section class="records-section">
   <h2>AppView catalog records</h2>
-  <p class="muted">Written to the AppView&rsquo;s own PDS during backfill.</p>
+  <p class="muted">Owned by the AppView's own PDS.</p>
   <div class="inner-grid">
     <% for (const r of it.catalog) { %>
       <%~ include('partials/record-card.html', { ...r }) %>

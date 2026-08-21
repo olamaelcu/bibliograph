@@ -18,7 +18,7 @@ import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
 import { renderStatsPage, getCatalogStats } from './pages/stats.js';
 import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from './lexicon-catalog.js';
-import type { ViewContext } from './xrpc/views.js';
+import type { ViewContext } from './lex/collections.js';
 
 export function createApp(): Hono {
 	const app = new Hono();
@@ -95,7 +95,7 @@ export function createApp(): Hono {
 		ctx.html(
 			renderPage('search', {
 				title: 'Search',
-				description: 'Search the Bibliograph catalog for works, their editions, and covers.',
+				description: 'Search the Bibliograph catalog for books and covers.',
 			}),
 		),
 	);

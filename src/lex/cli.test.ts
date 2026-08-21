@@ -56,7 +56,7 @@ describe('lex cli', () => {
 
   describe('nsid parsing', () => {
     it('reverses authority segments correctly', async () => {
-      const { stdout, stderr, exitCode } = await runCli(['resolve', 'net.olamaelcu.livtet.biblio.review', '--verbose']);
+      const { stdout, stderr, exitCode } = await runCli(['resolve', 'net.olamaelcu.livtet.biblio.book', '--verbose']);
       const output = stdout + stderr;
       if (exitCode === 0) {
         expect(stdout).toBeDefined();
