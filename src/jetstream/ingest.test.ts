@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../test-utils/db.js';
 import { userRecords } from '../db/schema.js';
-import { COLLECTION } from '../xrpc/views.js';
+import { COLLECTION } from '../lex/collections.js';
 import { applyJetstreamEvent, createJetstreamIngestor, loadCursor, type JetstreamEvent } from './ingest.js';
 
 async function testDb(): Promise<ReturnType<typeof createTestDb>['db']> {

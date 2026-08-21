@@ -18,7 +18,7 @@ import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
 import { renderStatsPage, getCatalogStats } from './pages/stats.js';
 import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from './lexicon-catalog.js';
-import type { ViewContext } from './xrpc/views.js';
+import type { ViewContext } from './lex/collections.js';
 
 export function createApp(): Hono {
 	const app = new Hono();

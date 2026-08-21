@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 import { sql } from 'drizzle-orm';
 import { db, closeDb } from './connection.js';
-import { COLLECTION } from '../xrpc/views.js';
+import { COLLECTION } from '../lex/collections.js';
 
 function dbLabel(): string {
   const url = process.env.DATABASE_URL;

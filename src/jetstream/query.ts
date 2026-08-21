@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { userRecords } from '../db/schema.js';
-import type { PdsRecord } from '../xrpc/views.js';
+import type { PdsRecord } from '../lex/collections.js';
 
 type Db = NodePgDatabase<typeof schema>;
 

@@ -25,7 +25,7 @@ import {
 import { buildDidDocument } from '../did.js';
 import { contributors, contributorRoles, formats, genres, works, books } from '../db/schema.js';
 import { releasedFilter } from '../xrpc/gate.js';
-import type { ViewContext } from '../xrpc/views.js';
+import type { ViewContext } from '../lex/collections.js';
 
 type Db = NodePgDatabase<typeof schema>;
 

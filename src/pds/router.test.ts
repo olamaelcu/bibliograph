@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { createXrpcRouter } from '../xrpc/router.js';
 import { createTestDb, SERVICE_DID } from '../test-utils/db.js';
-import type { ViewContext } from '../xrpc/views.js';
+import type { ViewContext } from '../lex/collections.js';
 
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 

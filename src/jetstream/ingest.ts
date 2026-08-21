@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { jetstreamCursor, userRecords } from '../db/schema.js';
-import { COLLECTION } from '../xrpc/views.js';
+import { COLLECTION } from '../lex/collections.js';
 import { logger } from '../logger.js';
 
 /**
