@@ -121,11 +121,11 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       await buildSnapshot(gzPath, snapshotPath, opts.signal);
     }
 
-    const lastKeyCursor = existing?.cursor ?? null;
     const lastByteOffset = existing?.lastByteOffset ?? 0;
+    let lastKeyCursor: string | null = existing?.cursor ?? null;
     // Continue the progress bar from where the previous run left off instead of
     // restarting at 0 (records already processed are skipped, not replayed).
-    const progressBase = existing?.totalProcessed ?? 0;
+    let progressBase = existing?.totalProcessed ?? 0;
 
     // Resolve the total record count for progress: reuse the sidecar cache when
     // the file is unchanged, otherwise one pass to count lines exactly. A plain
@@ -141,6 +141,15 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
       const countedOnSnapshot = useSnapshot && existsSync(snapshotPath);
       const snapSize = countedOnSnapshot ? statSync(snapshotPath).size : undefined;
       writeCountCache(gzPath, total, snapSize);
+      // The cache invalidation means the dump file changed (re-downloaded, or
+      // re-snapshot). Carry-over from a previous dump's cumulative would make
+      // progressBase exceed the new total_records and the bar would show
+      // >100% for the entire run. Reset the resume state so this run starts
+      // from byte 0 with progressBase=0. url/fileSize/lastModified are
+      // preserved (the dump-runner already wrote them above when applicable).
+      await state.set({ lastByteOffset: 0, lastKeyCursor: null, totalProcessed: 0 });
+      lastKeyCursor = null;
+      progressBase = 0;
     }
     logger.info({ stateName: opts.stateName, totalRecords: total }, 'dump record count');
     await state.set({ totalRecords: total });
