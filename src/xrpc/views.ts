@@ -1,6 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
+import type { BskyEngagement } from '../network/constellation.js';
 import * as Lexicons from '../lexicons/index.js';
 import type {
 	ActorView,
@@ -210,6 +211,7 @@ export async function toBookView(
 		createdAt: number;
 		updatedAt: number | null;
 	},
+	bsky?: BskyEngagement,
 ): Promise<BookView> {
 	const [workRow, formatRow, genreRows, contributorRows, identifierRows] = await Promise.all([
 		b.workPk
@@ -291,6 +293,7 @@ export async function toBookView(
 		coverUrl: b.coverUrl ? toUri(b.coverUrl) : undefined,
 		createdAt: toIso(b.createdAt),
 		updatedAt: toIso(b.updatedAt),
+		...(bsky && (bsky.likeCount > 0 || bsky.quoteCount > 0) ? { bsky } : {}),
 	};
 }
 

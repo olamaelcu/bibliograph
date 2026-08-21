@@ -2,6 +2,14 @@
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.defs",
   "defs": {
+    "bskyEngagement": {
+      "type": "object",
+      "description": "Public Bluesky engagement (likes and quote-posts) targeting this record.",
+      "properties": {
+        "likeCount":  { "type": "integer", "minimum": 0 },
+        "quoteCount": { "type": "integer", "minimum": 0 }
+      }
+    },
     "identifier": {
       "type": "object",
       "description": "An external identifier for a record, such as an ISBN or Open Library key.",
@@ -177,6 +185,10 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
           "description": "Timestamp of the last update to the record."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement"
         }
       }
     },
@@ -221,6 +233,10 @@
           "type": "string",
           "format": "at-uri",
           "description": "AT-URI of the parent genre, if any."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement"
         }
       }
     },
@@ -270,6 +286,10 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
           "description": "Timestamp of the last update to the record."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement"
         }
       }
     },
@@ -366,6 +386,10 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
           "description": "Timestamp of the last update to the record."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement"
         }
       }
     },
