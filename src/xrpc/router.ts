@@ -6,7 +6,7 @@ import { CID, digest } from 'multiformats';
 import { loadLexiconSchema, LexiconNotFound } from '../lexicon-resolve.js';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
-import { GoogleBooksClient, type GbVolume } from '../google-books/client.js';
+import { GoogleBooksClient, GoogleBooksError, type GbVolume } from '../google-books/client.js';
 import { decodeGbCursor, encodeGbCursor, gbVolumeToBookView } from '../google-books/mapper.js';
 import { getCached, setCached, TTL } from '../google-books/cache.js';
 import { logger } from '../logger.js';
@@ -143,21 +143,45 @@ async function withHandlerTimeout<T>(
 
 async function withTimedHandler<T>(
 	nsid: string,
-	opts: { timeoutMs: number; requestId?: string | null },
+	opts: { timeoutMs: number; requestId?: string | null; params?: Record<string, unknown> },
 	work: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
+	const t0 = Date.now();
+	logger.info(
+		{ nsid, requestId: opts.requestId, params: opts.params, timeoutMs: opts.timeoutMs },
+		'xrpc handler started',
+	);
 	try {
-		return await withHandlerTimeout(nsid, work, opts.timeoutMs);
+		const result = await withHandlerTimeout(nsid, work, opts.timeoutMs);
+		logger.info(
+			{ nsid, requestId: opts.requestId, durationMs: Date.now() - t0 },
+			'xrpc handler completed',
+		);
+		return result;
 	} catch (err) {
 		if (err instanceof HandlerTimeoutError) {
 			logger.warn(
-				{ nsid, requestId: opts.requestId, timeoutMs: opts.timeoutMs },
+				{ nsid, requestId: opts.requestId, timeoutMs: opts.timeoutMs, durationMs: Date.now() - t0 },
 				'xrpc handler timed out',
 			);
 			throw new XRPCError({
 				status: 504,
 				error: 'Timeout',
 				message: `${nsid} exceeded ${opts.timeoutMs}ms`,
+			});
+		}
+		// Surface the stack for unhandled throws (e.g. Google Books 4xx, drizzle
+		// errors, constellation failures). Map well-known upstream errors to
+		// typed XRPCErrors so clients see something better than the generic 500.
+		logger.error(
+			{ nsid, requestId: opts.requestId, durationMs: Date.now() - t0, err },
+			'xrpc handler threw',
+		);
+		if (err instanceof GoogleBooksError) {
+			throw new XRPCError({
+				status: 502,
+				error: 'UpstreamFailure',
+				message: `google books returned ${err.status}`,
 			});
 		}
 		throw err;
@@ -222,7 +246,7 @@ export function createXrpcRouter(
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchBooks.mainSchema, {
 		async handler({ params, request }) {
 			const nsid = 'net.olamaelcu.livtet.biblio.searchBooks';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async (signal) => {
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasCursor: !!params.cursor } }, async (signal) => {
 				const q = params.q.trim();
 				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
 				const cursor = decodeGbCursor(params.cursor);
@@ -233,19 +257,27 @@ export function createXrpcRouter(
 				let totalItems: number;
 				let items: GbVolume[];
 				if (cached) {
+					logger.info({ nsid: 'searchBooks', stage: 'cache', hit: true, cachedItems: cached.items.length }, 'cache hit');
 					totalItems = cached.totalItems;
 					items = cached.items as GbVolume[];
 				} else {
+					logger.info({ nsid: 'searchBooks', stage: 'cache', hit: false }, 'cache miss; calling google books');
 					const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, signal);
 					totalItems = res.totalItems;
 					items = res.items ?? [];
+					logger.info({ nsid: 'searchBooks', stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
 					await setCached(db, 'searchBooks', cacheKey, { totalItems, items }, TTL.search, { signal });
 				}
 
 				const books: BookView[] = [];
+				let dropped = 0;
 				for (const volume of items) {
 					const view = await gbVolumeToBookView(ctx, volume);
 					if (view) books.push(view);
+					else dropped += 1;
+				}
+				if (dropped > 0) {
+					logger.warn({ nsid: 'searchBooks', stage: 'map', dropped, kept: books.length }, 'volumes dropped during mapping');
 				}
 				const hasMore = startIndex + books.length < totalItems;
 				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
@@ -257,15 +289,22 @@ export function createXrpcRouter(
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
 		async handler({ params, request }) {
 			const nsid = 'net.olamaelcu.livtet.biblio.getBook';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async (signal) => {
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { uri: params.uri } }, async (signal) => {
 				const volumeId = parseVolumeId(params.uri);
 				const cached = await getCached<GbVolume>(db, 'getBook', { volumeId }, { signal });
 				let volume: GbVolume | undefined;
 				if (cached) {
+					logger.info({ nsid: 'getBook', stage: 'cache', hit: true, volumeId }, 'cache hit');
 					volume = cached;
 				} else {
+					logger.info({ nsid: 'getBook', stage: 'cache', hit: false, volumeId }, 'cache miss; calling google books');
 					volume = await gb().getVolume(volumeId, signal);
-					if (volume) await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, { signal });
+					if (volume) {
+						logger.info({ nsid: 'getBook', stage: 'google', volumeId, returned: true }, 'google books response');
+						await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, { signal });
+					} else {
+						logger.info({ nsid: 'getBook', stage: 'google', volumeId, returned: false }, 'google books returned no volume');
+					}
 				}
 				if (!volume) {
 					throw new XRPCError({ status: 404, error: 'NotFound', message: 'no such volume' });
@@ -282,7 +321,7 @@ export function createXrpcRouter(
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooks.mainSchema, {
 		async handler({ params, request }) {
 			const nsid = 'net.olamaelcu.livtet.biblio.listBooks';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async (signal) => {
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasGenre: !!params.genre, hasContributor: !!params.contributor, hasFormat: !!params.format } }, async (signal) => {
 				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
 				const q = buildGbQuery({ q: params.q, genre: params.genre, contributor: params.contributor });
 				if (!q) {
@@ -306,18 +345,26 @@ export function createXrpcRouter(
 				let totalItems: number;
 				let items: GbVolume[];
 				if (cached) {
+					logger.info({ nsid: 'listBooks', stage: 'cache', hit: true, cachedItems: cached.items.length }, 'cache hit');
 					totalItems = cached.totalItems;
 					items = cached.items as GbVolume[];
 				} else {
+					logger.info({ nsid: 'listBooks', stage: 'cache', hit: false, q }, 'cache miss; calling google books');
 					const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, signal);
 					totalItems = res.totalItems;
 					items = res.items ?? [];
+					logger.info({ nsid: 'listBooks', stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
 					await setCached(db, 'listBooks', cacheKey, { totalItems, items }, TTL.search, { signal });
 				}
 				const booksOut: BookView[] = [];
+				let dropped = 0;
 				for (const volume of items) {
 					const view = await gbVolumeToBookView(ctx, volume);
 					if (view) booksOut.push(view);
+					else dropped += 1;
+				}
+				if (dropped > 0) {
+					logger.warn({ nsid: 'listBooks', stage: 'map', dropped, kept: booksOut.length }, 'volumes dropped during mapping');
 				}
 				const hasMore = startIndex + booksOut.length < totalItems;
 				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + booksOut.length }) : undefined;
@@ -485,6 +532,7 @@ export function createXrpcRouter(
 					if (!shelfRec) continue;
 					views.push(toBookShelfView(rec, owner, await withShelfBsky(toShelfView(shelfRec)), book));
 				}
+				logger.info({ nsid: 'listBooksOnShelf', stage: 'list', count: views.length, shelf: params.shelf }, 'list books on shelf');
 				return json({ bookShelves: views });
 			});
 		},
@@ -507,6 +555,7 @@ export function createXrpcRouter(
 					if (!shelfRec) continue;
 					views.push(toBookShelfView(rec, owner, await withShelfBsky(toShelfView(shelfRec)), book));
 				}
+				logger.info({ nsid: 'getShelvingOfBook', stage: 'list', count: views.length, book: params.book }, 'shelving of book');
 				return json({ bookShelves: views });
 			});
 		},
