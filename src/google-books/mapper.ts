@@ -1,4 +1,5 @@
 import type { BookContributorView, BookView, ContributorView, Identifier } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
+import { getEngagementForSubject } from '../network/constellation.js';
 import type { GbVolume, GbVolumeInfo } from './client.js';
 import type { ViewContext } from '../lex/collections.js';
 import { COLLECTION } from '../lex/collections.js';
@@ -81,7 +82,7 @@ function gbCoverUrl(info: GbVolumeInfo): string | undefined {
 	return info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail;
 }
 
-export function gbVolumeToBookView(ctx: ViewContext, volume: GbVolume): BookView | undefined {
+export async function gbVolumeToBookView(ctx: ViewContext, volume: GbVolume): Promise<BookView | undefined> {
 	const info = volume.volumeInfo;
 	if (!info?.title) return undefined;
 	const slug = `gb-${volume.id}`;
@@ -97,6 +98,13 @@ export function gbVolumeToBookView(ctx: ViewContext, volume: GbVolume): BookView
 	if (info.description) view.description = info.description;
 	const cover = gbCoverUrl(info);
 	if (cover) view.coverUrl = asUri(cover);
+	// Attach bsky engagement using the canonical at-uri of this GB-backed book.
+	// People who post about the book would use this URI shape, so constellation
+	// hits resolve naturally.
+	const bsky = await getEngagementForSubject(bookUri);
+	if (bsky && (bsky.likeCount > 0 || bsky.quoteCount > 0)) {
+		view.bsky = { likeCount: bsky.likeCount, quoteCount: bsky.quoteCount };
+	}
 	return view;
 }
 

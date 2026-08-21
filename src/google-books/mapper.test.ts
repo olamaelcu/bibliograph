@@ -26,8 +26,8 @@ const SAMPLE: GbVolume = {
 };
 
 describe('gbVolumeToBookView', () => {
-	it('maps a full volume to a BookView', () => {
-		const view = gbVolumeToBookView(ctx, SAMPLE);
+	it('maps a full volume to a BookView', async () => {
+		const view = await gbVolumeToBookView(ctx, SAMPLE);
 		expect(view).toBeDefined();
 		expect(view?.uri).toBe(`at://${ctx.serviceDid}/${COLLECTION.book}/gb-_LettPDhwR0C`);
 		expect(view?.title).toBe('The Google Story');
@@ -43,12 +43,12 @@ describe('gbVolumeToBookView', () => {
 		expect(view?.contributors?.[0].role).toContain('contributorRole/author');
 	});
 
-	it('returns undefined when title is missing', () => {
-		expect(gbVolumeToBookView(ctx, { id: 'x', volumeInfo: {} })).toBeUndefined();
+	it('returns undefined when title is missing', async () => {
+		expect(await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: {} })).toBeUndefined();
 	});
 
-	it('handles minimal volumeInfo gracefully', () => {
-		const v = gbVolumeToBookView(ctx, { id: 'a_b-1', volumeInfo: { title: 'Minimal' } });
+	it('handles minimal volumeInfo gracefully', async () => {
+		const v = await gbVolumeToBookView(ctx, { id: 'a_b-1', volumeInfo: { title: 'Minimal' } });
 		expect(v?.title).toBe('Minimal');
 		expect(v?.identifiers).toEqual([]);
 		expect(v?.contributors).toEqual([]);
@@ -57,28 +57,28 @@ describe('gbVolumeToBookView', () => {
 		expect(v?.description).toBeUndefined();
 	});
 
-	it('falls back to smallThumbnail when thumbnail is absent', () => {
-		const v = gbVolumeToBookView(ctx, {
+	it('falls back to smallThumbnail when thumbnail is absent', async () => {
+		const v = await gbVolumeToBookView(ctx, {
 			id: 'x',
 			volumeInfo: { title: 'T', imageLinks: { smallThumbnail: 'https://example.com/small.jpg' } },
 		});
 		expect(v?.coverUrl).toBe('https://example.com/small.jpg');
 	});
 
-	it('parses partial publish dates (YYYY and YYYY-MM)', () => {
-		const v1 = gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '1890' } });
+	it('parses partial publish dates (YYYY and YYYY-MM)', async () => {
+		const v1 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '1890' } });
 		expect(v1?.publishDate).toBe('1890-01-01T00:00:00.000Z');
-		const v2 = gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2010-05' } });
+		const v2 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2010-05' } });
 		expect(v2?.publishDate).toBe('2010-05-01T00:00:00.000Z');
 	});
 
-	it('omits publishDate for unparseable dates', () => {
-		const v = gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: 'sometime' } });
+	it('omits publishDate for unparseable dates', async () => {
+		const v = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: 'sometime' } });
 		expect(v?.publishDate).toBeUndefined();
 	});
 
-	it('slugs authors deterministically and falls back to a hash for non-ASCII names', () => {
-		const a = gbVolumeToBookView(ctx, {
+	it('slugs authors deterministically and falls back to a hash for non-ASCII names', async () => {
+		const a = await gbVolumeToBookView(ctx, {
 			id: 'x',
 			volumeInfo: { title: 'T', authors: ['Tolkien, J.R.R.', '村上春樹'] },
 		});

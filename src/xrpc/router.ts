@@ -1,3 +1,4 @@
+import { and, eq, isNull, like, or } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { XRPCRouter, json, XRPCError, InvalidRequestError } from '@atcute/xrpc-server';
@@ -9,8 +10,27 @@ import { GoogleBooksClient, type GbVolume } from '../google-books/client.js';
 import { decodeGbCursor, encodeGbCursor, gbVolumeToBookView } from '../google-books/mapper.js';
 import { getCached, setCached, TTL } from '../google-books/cache.js';
 import { logger } from '../logger.js';
-import type { BookView } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
-import type { ViewContext } from '../lex/collections.js';
+import { releasedFilter } from './gate.js';
+import {
+	hydrateBook,
+	toActorView,
+	toBookShelfView,
+	toContributorView,
+	toGenreView,
+	toShelfView,
+	toShelfWithBooksView,
+	withActorBsky,
+	withShelfBsky,
+} from './hydrate.js';
+import { listByCollection, getUserRecord } from '../jetstream/query.js';
+import { contributors, genres } from '../db/schema.js';
+import { COLLECTION, type PdsRecord, type ViewContext } from '../lex/collections.js';
+import type {
+	BookShelfView,
+	BookView,
+	GenreView,
+	ShelfWithBooksView,
+} from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -23,20 +43,38 @@ function parseRkey(uri: string): { did: string; collection: string; rkey: string
 	return { did, collection, rkey };
 }
 
-function notImplemented(nsid: string): never {
-	throw new XRPCError({
-		status: 501,
-		error: 'NotImplementedError',
-		message: `${nsid} is not implemented`,
-	});
+function rkeyFromUri(uri: string, expectedCollection: string): string {
+	const { collection, rkey } = parseRkey(uri);
+	if (collection !== expectedCollection) {
+		throw new InvalidRequestError({
+			status: 400,
+			error: 'InvalidRequest',
+			message: `expected collection '${expectedCollection}', got '${collection}'`,
+		});
+	}
+	return rkey;
 }
 
-/**
- * Pull a `gb-` rkey out of an at-uri. Throws 400 if the rkey doesn't carry
- * the `gb-` prefix or the embedded volume ID is malformed (rkey is
- * `gb-{volumeId}` — see memory #125 on rkey-safety; GB volume IDs only
- * contain `[A-Za-z0-9_-]{1,64}`).
- */
+function didAndRkeyFromUri(uri: string, expectedCollection: string): { did: string; rkey: string } {
+	const { did, collection, rkey } = parseRkey(uri);
+	if (collection !== expectedCollection) {
+		throw new InvalidRequestError({
+			status: 400,
+			error: 'InvalidRequest',
+			message: `expected collection '${expectedCollection}', got '${collection}'`,
+		});
+	}
+	return { did, rkey };
+}
+
+function didFromUri(uri: string): string {
+	return parseRkey(uri).did;
+}
+
+function notFound(): never {
+	throw new XRPCError({ status: 404, error: 'NotFound', message: 'record not found' });
+}
+
 function parseVolumeId(uri: string): string {
 	const { rkey } = parseRkey(uri);
 	if (!rkey.startsWith('gb-')) {
@@ -82,11 +120,6 @@ class HandlerTimeoutError extends Error {
 	}
 }
 
-/**
- * Race `work` against a timer. On expiry, abort the signal so any in-flight
- * `fetch` / drizzle query can short-circuit, then reject so the Promise.race
- * loser propagates the timeout upward.
- */
 async function withHandlerTimeout<T>(
 	nsid: string,
 	work: (signal: AbortSignal) => Promise<T>,
@@ -108,7 +141,6 @@ async function withHandlerTimeout<T>(
 	}
 }
 
-/** Convert a handler-internal timeout into an XRPCError 504 with a warn log. */
 async function withTimedHandler<T>(
 	nsid: string,
 	opts: { timeoutMs: number; requestId?: string | null },
@@ -185,6 +217,8 @@ export function createXrpcRouter(
 		},
 	});
 
+	// ─── GB-backed handlers ────────────────────────────────────────────────
+
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchBooks.mainSchema, {
 		async handler({ params, request }) {
 			const nsid = 'net.olamaelcu.livtet.biblio.searchBooks';
@@ -210,7 +244,7 @@ export function createXrpcRouter(
 
 				const books: BookView[] = [];
 				for (const volume of items) {
-					const view = gbVolumeToBookView(ctx, volume);
+					const view = await gbVolumeToBookView(ctx, volume);
 					if (view) books.push(view);
 				}
 				const hasMore = startIndex + books.length < totalItems;
@@ -236,7 +270,7 @@ export function createXrpcRouter(
 				if (!volume) {
 					throw new XRPCError({ status: 404, error: 'NotFound', message: 'no such volume' });
 				}
-				const book = gbVolumeToBookView(ctx, volume);
+				const book = await gbVolumeToBookView(ctx, volume);
 				if (!book) {
 					throw new XRPCError({ status: 404, error: 'NotFound', message: 'volume missing title' });
 				}
@@ -280,50 +314,236 @@ export function createXrpcRouter(
 					items = res.items ?? [];
 					await setCached(db, 'listBooks', cacheKey, { totalItems, items }, TTL.search, { signal });
 				}
-				const books: BookView[] = [];
+				const booksOut: BookView[] = [];
 				for (const volume of items) {
-					const view = gbVolumeToBookView(ctx, volume);
-					if (view) books.push(view);
+					const view = await gbVolumeToBookView(ctx, volume);
+					if (view) booksOut.push(view);
 				}
-				const hasMore = startIndex + books.length < totalItems;
-				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
-				return json({ books, cursor: next });
+				const hasMore = startIndex + booksOut.length < totalItems;
+				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + booksOut.length }) : undefined;
+				return json({ books: booksOut, cursor: next });
 			});
 		},
 	});
 
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetActor.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getActor'),
-	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getBookOnShelf'),
-	});
+	// ─── catalog endpoints (local DB) ──────────────────────────────────────
+
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetContributor.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getContributor'),
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getContributor';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const rkey = rkeyFromUri(params.uri, COLLECTION.contributor);
+				const row = (await db
+					.select()
+					.from(contributors)
+					.where(and(eq(contributors.pk, rkey), releasedFilter(contributors))))[0];
+				if (!row) notFound();
+				return json({ contributor: await toContributorView(db, ctx, row) });
+			});
+		},
 	});
+
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetGenre.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getGenre'),
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getGenre';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const rkey = rkeyFromUri(params.uri, COLLECTION.genre);
+				const row = (await db
+					.select()
+					.from(genres)
+					.where(and(eq(genres.pk, rkey), releasedFilter(genres))))[0];
+				if (!row) notFound();
+				return json({ genre: await toGenreView(db, ctx, row) });
+			});
+		},
 	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getShelf'),
-	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getShelvingOfBook'),
-	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.listBooksOnShelf'),
-	});
+
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListGenres.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.listGenres'),
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.listGenres';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const limit = Math.min(100, Math.max(1, params.limit ?? 50));
+				const filters = [releasedFilter(genres)];
+				if (params.topLevelOnly) filters.push(isNull(genres.parentPk));
+				const rows = await db
+					.select()
+					.from(genres)
+					.where(and(...filters))
+					.orderBy(genres.name)
+					.limit(limit);
+				const genreViews: GenreView[] = rows.map((g) => ({
+					uri: `at://${ctx.serviceDid}/${COLLECTION.genre}/${g.pk}` as GenreView['uri'],
+					name: g.name,
+					description: g.description,
+					emoji: g.emoji,
+					identifiers: [],
+				}));
+				return json({ genres: genreViews });
+			});
+		},
 	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.listShelves'),
-	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.listShelvesWithBooks'),
-	});
+
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchContributors.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.searchContributors'),
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.searchContributors';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const q = params.q.trim();
+				const term = `%${q}%`;
+				const limit = Math.min(100, Math.max(1, params.limit ?? 25));
+				const rows = await db
+					.select()
+					.from(contributors)
+					.where(
+						and(
+							releasedFilter(contributors),
+							or(like(contributors.name, term), like(contributors.sortName, term)),
+						),
+					)
+					.limit(limit);
+				const contributorViews = await Promise.all(rows.map((r) => toContributorView(db, ctx, r)));
+				return json({ contributors: contributorViews });
+			});
+		},
+	});
+
+	// ─── per-user PDS endpoints (Jetstream-indexed) ─────────────────────────
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetActor.mainSchema, {
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getActor';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const rec = await getUserRecord(db, params.actor, COLLECTION.actor, 'self');
+				return json({ actor: await withActorBsky(toActorView(rec, params.actor)) });
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getShelf';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const { did, rkey } = didAndRkeyFromUri(params.uri, COLLECTION.shelf);
+				const rec = await getUserRecord(db, did, COLLECTION.shelf, rkey);
+				if (!rec) notFound();
+				return json({ shelf: await withShelfBsky(toShelfView(rec)) });
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
+		async handler({ request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.listShelves';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const records = await listByCollection(db, COLLECTION.shelf);
+				return json({ shelves: records.map((r) => toShelfView(r)) });
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getBookOnShelf';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const { did, rkey } = didAndRkeyFromUri(params.uri, COLLECTION.bookShelf);
+				const rec = await getUserRecord(db, did, COLLECTION.bookShelf, rkey);
+				if (!rec) notFound();
+				const value = rec.value as { shelf: string; book: { ref: string } };
+				const book = await hydrateBook(db, ctx, value.book.ref);
+				if (!book) notFound();
+				const shelfParsed = parseRkey(String(value.shelf));
+				const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
+				if (!shelfRec) notFound();
+				const view = toBookShelfView(rec, did, await withShelfBsky(toShelfView(shelfRec)), book);
+				return json({ bookShelf: view });
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.listBooksOnShelf';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const records = await listByCollection(db, COLLECTION.bookShelf);
+				const matching = records
+					.filter((r) => (r.value as { shelf: string }).shelf === params.shelf)
+					.sort((a, b) => {
+						const pa = (a.value as { metadata?: { position?: number } }).metadata?.position;
+						const pb = (b.value as { metadata?: { position?: number } }).metadata?.position;
+						if (pa == null && pb == null) return 0;
+						if (pa == null) return 1;
+						if (pb == null) return -1;
+						return pa - pb;
+					});
+				const views: BookShelfView[] = [];
+				for (const rec of matching) {
+					const value = rec.value as { shelf: string; book: { ref: string } };
+					const owner = didFromUri(rec.uri);
+					const book = await hydrateBook(db, ctx, value.book.ref);
+					if (!book) continue;
+					const shelfParsed = parseRkey(String(value.shelf));
+					const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
+					if (!shelfRec) continue;
+					views.push(toBookShelfView(rec, owner, await withShelfBsky(toShelfView(shelfRec)), book));
+				}
+				return json({ bookShelves: views });
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getShelvingOfBook';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const records = await listByCollection(db, COLLECTION.bookShelf);
+				const matching = records.filter((r) => (r.value as { book: { ref: string } }).book.ref === params.book);
+				const views: BookShelfView[] = [];
+				for (const rec of matching) {
+					const value = rec.value as { shelf: string; book: { ref: string } };
+					const owner = didFromUri(rec.uri);
+					const book = await hydrateBook(db, ctx, value.book.ref);
+					if (!book) continue;
+					const shelfParsed = parseRkey(String(value.shelf));
+					const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
+					if (!shelfRec) continue;
+					views.push(toBookShelfView(rec, owner, await withShelfBsky(toShelfView(shelfRec)), book));
+				}
+				return json({ bookShelves: views });
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
+		async handler({ request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.listShelvesWithBooks';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+				const [shelfRecords, shelvingRecords] = await Promise.all([
+					listByCollection(db, COLLECTION.shelf),
+					listByCollection(db, COLLECTION.bookShelf),
+				]);
+				const shelvingsByShelf = new Map<string, PdsRecord[]>();
+				for (const rec of shelvingRecords) {
+					const shelfUri = String((rec.value as { shelf: string }).shelf);
+					const list = shelvingsByShelf.get(shelfUri) ?? [];
+					list.push(rec);
+					shelvingsByShelf.set(shelfUri, list);
+				}
+				const views: ShelfWithBooksView[] = [];
+				for (const shelfRec of shelfRecords) {
+					const shelfView = await withShelfBsky(toShelfView(shelfRec));
+					const shelvingsForShelf = shelvingsByShelf.get(shelfRec.uri) ?? [];
+					const booksView: BookShelfView[] = [];
+					for (const rec of shelvingsForShelf) {
+						const value = rec.value as { book: { ref: string } };
+						const owner = didFromUri(rec.uri);
+						const book = await hydrateBook(db, ctx, value.book.ref);
+						if (!book) continue;
+						booksView.push(toBookShelfView(rec, owner, shelfView, book));
+					}
+					views.push(toShelfWithBooksView(shelfView, booksView));
+				}
+				return json({ shelves: views });
+			});
+		},
 	});
 
 	return router;
