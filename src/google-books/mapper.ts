@@ -8,7 +8,9 @@ import { COLLECTION } from '../lex/collections.js';
  * Normalize a free-form author name into a stable rkey slug. Lowercases,
  * strips diacritics, replaces non-alphanumerics with `-`, collapses runs.
  * Empty/Unicode-only names fall back to a deterministic FNV-1a hash prefixed
- * with `c-` (see memory #146 on the sourceKeySlug fallback).
+ * with `xn-` (Punycode-style "this is an encoded name"). The `xn-` marker
+ * avoids collisions with real names that legitimately slugify to a `c-...`
+ * shape (e.g., "C. S. Lewis" → `gbauthors-c-s-lewis`).
  */
 function authorSlug(name: string): string {
 	const ascii = name
@@ -23,7 +25,21 @@ function authorSlug(name: string): string {
 		h ^= ch.charCodeAt(0);
 		h = Math.imul(h, 0x01000193);
 	}
-	return `gbauthors-c-${(h >>> 0).toString(36)}`;
+	return `gbauthors-xn-${(h >>> 0).toString(36)}`;
+}
+
+/**
+ * Inverse of {@link authorSlug}. Strips the `gbauthors-` prefix and the
+ * optional `xn-` hash-fallback marker, then maps `-` back to spaces.
+ *
+ * Throws on malformed slugs that aren't `gbauthors-{...}` so callers can
+ * fail loudly rather than emit garbage queries.
+ */
+export function gbAuthorSlugToName(slug: string): string {
+	const match = slug.match(/^gbauthors-(?:xn-([a-z0-9]+)|(.+))$/);
+	if (!match) throw new Error(`not a gbauthor slug: ${slug}`);
+	const body = match[1] ?? match[2] ?? '';
+	return body.replace(/-/g, ' ');
 }
 
 function asUri(value: string): `${string}:${string}` {
@@ -75,11 +91,22 @@ function parsePublishedDate(value: string | undefined): number | undefined {
 	if (!match) return undefined;
 	const [, y, m = '01', d = '01'] = match;
 	const ms = Date.UTC(Number(y), Number(m) - 1, Number(d));
+	// Reject silent rollovers: Feb 30, Apr 31, month 13, etc. Date.UTC happily
+	// spills these into the next month/year; round-trip and compare.
+	const back = new Date(ms);
+	if (
+		back.getUTCFullYear() !== Number(y) ||
+		back.getUTCMonth() !== Number(m) - 1 ||
+		back.getUTCDate() !== Number(d)
+	) {
+		return undefined;
+	}
 	return Math.floor(ms / 1000);
 }
 
 function gbCoverUrl(info: GbVolumeInfo): string | undefined {
-	return info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail;
+	const normalize = (u?: string) => u?.replace(/^http:\/\//, 'https://');
+	return normalize(info.imageLinks?.thumbnail) ?? normalize(info.imageLinks?.smallThumbnail);
 }
 
 export async function gbVolumeToBookView(ctx: ViewContext, volume: GbVolume): Promise<BookView | undefined> {

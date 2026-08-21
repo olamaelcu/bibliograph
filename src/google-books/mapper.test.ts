@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GbVolume } from './client.js';
 import { COLLECTION } from '../lex/collections.js';
-import { decodeGbCursor, encodeGbCursor, gbVolumeToBookView } from './mapper.js';
+import { decodeGbCursor, encodeGbCursor, gbAuthorSlugToName, gbVolumeToBookView } from './mapper.js';
 
 const ctx = { serviceDid: 'did:web:books.example.com' };
 
@@ -11,17 +11,13 @@ const SAMPLE: GbVolume = {
 		title: 'The Google Story',
 		subtitle: 'Inside the Hottest Business, Media, and Technology Success of Our Time',
 		authors: ['David A. Vise', 'Mark Malseed'],
-		publisher: 'Random House Digital, Inc.',
 		publishedDate: '2005-11-15',
 		description: 'A story about Google.',
 		industryIdentifiers: [
 			{ type: 'ISBN_10', identifier: '055380457X' },
 			{ type: 'ISBN_13', identifier: '9780553804577' },
 		],
-		pageCount: 207,
-		categories: ['Business & Economics / Entrepreneurship', 'Browsers (Computer programs)'],
 		imageLinks: { thumbnail: 'https://example.com/cover.jpg' },
-		language: 'en',
 	},
 };
 
@@ -77,6 +73,17 @@ describe('gbVolumeToBookView', () => {
 		expect(v?.publishDate).toBeUndefined();
 	});
 
+	it('rejects publishDate rollovers (Feb 30, Apr 31, month 13)', async () => {
+		const v1 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2024-02-30' } });
+		expect(v1?.publishDate).toBeUndefined();
+		const v2 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2024-04-31' } });
+		expect(v2?.publishDate).toBeUndefined();
+		const v3 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2024-13-01' } });
+		expect(v3?.publishDate).toBeUndefined();
+		const v4 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2023-02-29' } });
+		expect(v4?.publishDate).toBeUndefined();
+	});
+
 	it('slugs authors deterministically and falls back to a hash for non-ASCII names', async () => {
 		const a = await gbVolumeToBookView(ctx, {
 			id: 'x',
@@ -84,7 +91,68 @@ describe('gbVolumeToBookView', () => {
 		});
 		const names = a?.contributors?.map((c) => c.contributor.uri.split('/').pop());
 		expect(names?.[0]).toMatch(/^gbauthors-tolkien-j-r-r$/);
-		expect(names?.[1]).toMatch(/^gbauthors-c-[a-z0-9]+$/);
+		expect(names?.[1]).toMatch(/^gbauthors-xn-[a-z0-9]+$/);
+	});
+
+	it('does not collide with names whose slug starts with c-', async () => {
+		// "C. S. Lewis" must slug to a real-name shape, NOT the xn- hash fallback.
+		// The old `c-` prefix on the hash fallback would have produced
+		// `gbauthors-c-s-lewis` and collided with this real name.
+		const a = await gbVolumeToBookView(ctx, {
+			id: 'x',
+			volumeInfo: { title: 'T', authors: ['C. S. Lewis'] },
+		});
+		const slug = a?.contributors?.[0].contributor.uri.split('/').pop();
+		expect(slug).toBe('gbauthors-c-s-lewis');
+		expect(slug).not.toMatch(/^gbauthors-xn-/);
+	});
+
+	it('upgrades http cover URLs to https', async () => {
+		const v = await gbVolumeToBookView(ctx, {
+			id: 'x',
+			volumeInfo: { title: 'T', imageLinks: { thumbnail: 'http://example.com/cover.jpg' } },
+		});
+		expect(v?.coverUrl).toBe('https://example.com/cover.jpg');
+	});
+
+	it('upgrades http smallThumbnail when thumbnail is absent', async () => {
+		const v = await gbVolumeToBookView(ctx, {
+			id: 'x',
+			volumeInfo: { title: 'T', imageLinks: { smallThumbnail: 'http://example.com/small.jpg' } },
+		});
+		expect(v?.coverUrl).toBe('https://example.com/small.jpg');
+	});
+
+	it('passes https URLs through unchanged', async () => {
+		const v = await gbVolumeToBookView(ctx, {
+			id: 'x',
+			volumeInfo: { title: 'T', imageLinks: { thumbnail: 'https://example.com/cover.jpg' } },
+		});
+		expect(v?.coverUrl).toBe('https://example.com/cover.jpg');
+	});
+});
+
+describe('gbAuthorSlugToName', () => {
+	it('maps a real-name slug back to its space-joined form', () => {
+		expect(gbAuthorSlugToName('gbauthors-c-s-lewis')).toBe('c s lewis');
+		expect(gbAuthorSlugToName('gbauthors-tolkien-j-r-r')).toBe('tolkien j r r');
+	});
+
+	it('passes through a hash-fallback slug as the base36 token', () => {
+		// Hash is opaque; just verify shape and that no `-` rewriting happens
+		// inside the token.
+		const result = gbAuthorSlugToName('gbauthors-xn-1abc23');
+		expect(result).toBe('1abc23');
+	});
+
+	it('throws on a slug that lacks the gbauthors- prefix', () => {
+		expect(() => gbAuthorSlugToName('tolkien-j-r-r')).toThrow(/not a gbauthor slug/);
+		expect(() => gbAuthorSlugToName('other-authors-tolkien')).toThrow(/not a gbauthor slug/);
+	});
+
+	it('throws on empty or whitespace input', () => {
+		expect(() => gbAuthorSlugToName('')).toThrow(/not a gbauthor slug/);
+		expect(() => gbAuthorSlugToName('gbauthors-')).toThrow(/not a gbauthor slug/);
 	});
 });
 
