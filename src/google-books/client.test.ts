@@ -161,4 +161,56 @@ describe('GoogleBooksClient', () => {
 			}
 		});
 	});
+
+	describe('P11 context parameter', () => {
+		it('searchVolumes accepts a context argument with requestId and succeeds', async () => {
+			const fetchImpl = fakeFetch(async () =>
+				new Response(JSON.stringify({ totalItems: 0, items: [] }), { status: 200 }),
+			);
+			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+			const res = await client.searchVolumes('flowers', {}, { requestId: 'req-search' });
+			expect(res.totalItems).toBe(0);
+		});
+
+		it('getVolume accepts a context argument with requestId and returns the volume', async () => {
+			const fetchImpl = fakeFetch(async () =>
+				new Response(JSON.stringify({ id: '_abc', volumeInfo: { title: 'A' } }), { status: 200 }),
+			);
+			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+			const v = await client.getVolume('_abc', { requestId: 'req-get' });
+			expect(v?.id).toBe('_abc');
+		});
+
+		it('getVolume accepts a context argument with signal and aborts the fetch', async () => {
+			const controller = new AbortController();
+			controller.abort();
+			const fetchImpl = fakeFetch(async (_input, init) => {
+				if (init?.signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+				return new Response('{}', { status: 200 });
+			});
+			const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+			await expect(client.getVolume('_abc', { signal: controller.signal })).rejects.toBeDefined();
+		});
+
+		it('propagates requestId into the retry log context', async () => {
+			const loggerModule = await import('../logger.js');
+			const spy = vi.spyOn(loggerModule.logger, 'warn').mockImplementation(() => loggerModule.logger);
+			try {
+				let calls = 0;
+				const fetchImpl = fakeFetch(async () => {
+					calls += 1;
+					return new Response('rate limited', { status: 429 });
+				});
+				const client = new GoogleBooksClient({ apiKey: KEY, fetchImpl });
+				await expect(
+					client.searchVolumes('flowers', {}, { requestId: 'req-trace' }),
+				).rejects.toBeInstanceOf(GoogleBooksError);
+				expect(spy).toHaveBeenCalled();
+				const ctx = spy.mock.calls[0]?.[0] as Record<string, unknown>;
+				expect(ctx.requestId).toBe('req-trace');
+			} finally {
+				spy.mockRestore();
+			}
+		});
+	});
 });

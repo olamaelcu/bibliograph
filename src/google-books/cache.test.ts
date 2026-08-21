@@ -87,3 +87,23 @@ describe('cache round-trip', () => {
 		expect(kept).toEqual({ v: 2 });
 	});
 });
+
+describe('cache opts — P11 requestId passthrough', () => {
+	it('getCached accepts a requestId in opts', async () => {
+		const db = dbHolder.db!;
+		const params = { q: 'with-request-id' };
+		await setCached(db, 'searchBooks', params, { hello: 'world' }, 3600);
+		const result = await getCached<{ hello: string }>(db, 'searchBooks', params, { requestId: 'req-xyz' });
+		expect(result).toEqual({ hello: 'world' });
+	});
+
+	it('setCached accepts a requestId in opts', async () => {
+		const db = dbHolder.db!;
+		const params = { q: 'set-with-request-id' };
+		await expect(
+			setCached(db, 'searchBooks', params, { ok: 1 }, 3600, { requestId: 'req-abc' }),
+		).resolves.toBeUndefined();
+		const result = await getCached<{ ok: number }>(db, 'searchBooks', params);
+		expect(result).toEqual({ ok: 1 });
+	});
+});

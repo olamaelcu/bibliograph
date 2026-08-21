@@ -7,8 +7,8 @@ import { loadLexiconSchema, LexiconNotFound } from '../lexicon-resolve.js';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
 import { GoogleBooksClient, GoogleBooksError, type GbVolume } from '../google-books/client.js';
-import { decodeGbCursor, encodeGbCursor, gbVolumeToBookView } from '../google-books/mapper.js';
-import { getCached, setCached, TTL } from '../google-books/cache.js';
+import { decodeGbCursor, encodeGbCursor, gbAuthorSlugToName, gbVolumeToBookView } from '../google-books/mapper.js';
+import { getCached, requestHash, setCached, TTL } from '../google-books/cache.js';
 import { logger } from '../logger.js';
 import { releasedFilter } from './gate.js';
 import {
@@ -99,7 +99,16 @@ function buildGbQuery(opts: { q?: string; genre?: string; contributor?: string }
 	const terms: string[] = [];
 	if (opts.contributor) {
 		const slug = parseRkey(opts.contributor).rkey;
-		const authorName = slug.replace(/^gbauthors-/, '').replace(/^c-/, '').replace(/-/g, ' ');
+		let authorName: string;
+		try {
+			authorName = gbAuthorSlugToName(slug);
+		} catch {
+			throw new InvalidRequestError({
+				status: 400,
+				error: 'InvalidRequest',
+				message: `invalid contributor slug: '${slug}'`,
+			});
+		}
 		terms.push(`inauthor:"${authorName.replace(/"/g, '')}"`);
 	}
 	if (opts.genre) {
@@ -205,6 +214,18 @@ export function createXrpcRouter(
 	const router = new XRPCRouter();
 	registerPdsHandlers(router, db, ctx);
 
+	if (!process.env.GOOGLE_BOOKS_API_KEY) {
+		logger.warn(
+			{ stage: 'config' },
+			'GOOGLE_BOOKS_API_KEY is not set; google-books-backed queries will fail with 502',
+		);
+	}
+
+	// Map<string, Promise<unknown>> dedupes concurrent identical cache-miss
+	// calls in `searchBooks` and `listBooks` so N parallel requests share a
+	// single Google Books round-trip and a single cache write.
+	const inflight = new Map<string, Promise<unknown>>();
+
 	let cachedGb: GoogleBooksClient | undefined = opts.client;
 	const gb = () => {
 		if (!cachedGb) {
@@ -247,37 +268,56 @@ export function createXrpcRouter(
 		async handler({ params, request }) {
 			const nsid = 'net.olamaelcu.livtet.biblio.searchBooks';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasCursor: !!params.cursor } }, async (signal) => {
+				const requestId = requestIdOf(request) ?? undefined;
 				const q = params.q.trim();
 				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
 				const cursor = decodeGbCursor(params.cursor);
 				const startIndex = cursor?.q === q ? cursor.startIndex : 0;
 
 				const cacheKey = { q, startIndex, limit };
-				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'searchBooks', cacheKey, { signal });
+				const hash = requestHash('searchBooks', cacheKey);
+				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'searchBooks', cacheKey, { signal, requestId });
 				let totalItems: number;
 				let items: GbVolume[];
 				if (cached) {
-					logger.info({ nsid: 'searchBooks', stage: 'cache', hit: true, cachedItems: cached.items.length }, 'cache hit');
+					logger.info({ nsid, requestId, stage: 'cache', hit: true, cachedItems: cached.items.length }, 'cache hit');
 					totalItems = cached.totalItems;
 					items = cached.items as GbVolume[];
 				} else {
-					logger.info({ nsid: 'searchBooks', stage: 'cache', hit: false }, 'cache miss; calling google books');
-					const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, signal);
-					totalItems = res.totalItems;
-					items = res.items ?? [];
-					logger.info({ nsid: 'searchBooks', stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
-					await setCached(db, 'searchBooks', cacheKey, { totalItems, items }, TTL.search, { signal });
+					const existing = inflight.get(hash);
+					if (existing) {
+						const shared = (await existing) as { totalItems: number; items: unknown[] };
+						logger.info({ nsid, requestId, stage: 'inflight', hit: true }, 'shared in-flight google books response');
+						totalItems = shared.totalItems;
+						items = shared.items as GbVolume[];
+					} else {
+						logger.info({ nsid, requestId, stage: 'cache', hit: false }, 'cache miss; calling google books');
+						const work = (async () => {
+							const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, { signal, requestId });
+							return { totalItems: res.totalItems, items: res.items ?? [] };
+						})();
+						inflight.set(hash, work);
+						try {
+							const result = await work;
+							totalItems = result.totalItems;
+							items = result.items as GbVolume[];
+							logger.info({ nsid, requestId, stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
+							await setCached(db, 'searchBooks', cacheKey, { totalItems, items }, TTL.search, { signal, requestId });
+						} finally {
+							inflight.delete(hash);
+						}
+					}
 				}
 
+				const views = await Promise.all(items.map((v) => gbVolumeToBookView(ctx, v)));
 				const books: BookView[] = [];
 				let dropped = 0;
-				for (const volume of items) {
-					const view = await gbVolumeToBookView(ctx, volume);
+				for (const view of views) {
 					if (view) books.push(view);
 					else dropped += 1;
 				}
 				if (dropped > 0) {
-					logger.warn({ nsid: 'searchBooks', stage: 'map', dropped, kept: books.length }, 'volumes dropped during mapping');
+					logger.warn({ nsid, requestId, stage: 'map', dropped, kept: books.length }, 'volumes dropped during mapping');
 				}
 				const hasMore = startIndex + books.length < totalItems;
 				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
@@ -290,20 +330,21 @@ export function createXrpcRouter(
 		async handler({ params, request }) {
 			const nsid = 'net.olamaelcu.livtet.biblio.getBook';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { uri: params.uri } }, async (signal) => {
+				const requestId = requestIdOf(request) ?? undefined;
 				const volumeId = parseVolumeId(params.uri);
-				const cached = await getCached<GbVolume>(db, 'getBook', { volumeId }, { signal });
+				const cached = await getCached<GbVolume>(db, 'getBook', { volumeId }, { signal, requestId });
 				let volume: GbVolume | undefined;
 				if (cached) {
-					logger.info({ nsid: 'getBook', stage: 'cache', hit: true, volumeId }, 'cache hit');
+					logger.info({ nsid, requestId, stage: 'cache', hit: true, volumeId }, 'cache hit');
 					volume = cached;
 				} else {
-					logger.info({ nsid: 'getBook', stage: 'cache', hit: false, volumeId }, 'cache miss; calling google books');
-					volume = await gb().getVolume(volumeId, signal);
+					logger.info({ nsid, requestId, stage: 'cache', hit: false, volumeId }, 'cache miss; calling google books');
+					volume = await gb().getVolume(volumeId, { signal, requestId });
 					if (volume) {
-						logger.info({ nsid: 'getBook', stage: 'google', volumeId, returned: true }, 'google books response');
-						await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, { signal });
+						logger.info({ nsid, requestId, stage: 'google', volumeId, returned: true }, 'google books response');
+						await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, { signal, requestId });
 					} else {
-						logger.info({ nsid: 'getBook', stage: 'google', volumeId, returned: false }, 'google books returned no volume');
+						logger.info({ nsid, requestId, stage: 'google', volumeId, returned: false }, 'google books returned no volume');
 					}
 				}
 				if (!volume) {
@@ -322,6 +363,7 @@ export function createXrpcRouter(
 		async handler({ params, request }) {
 			const nsid = 'net.olamaelcu.livtet.biblio.listBooks';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasGenre: !!params.genre, hasContributor: !!params.contributor, hasFormat: !!params.format } }, async (signal) => {
+				const requestId = requestIdOf(request) ?? undefined;
 				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
 				const q = buildGbQuery({ q: params.q, genre: params.genre, contributor: params.contributor });
 				if (!q) {
@@ -341,30 +383,48 @@ export function createXrpcRouter(
 				const cursor = decodeGbCursor(params.cursor);
 				const startIndex = cursor?.q === q ? cursor.startIndex : 0;
 				const cacheKey = { q, startIndex, limit };
-				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'listBooks', cacheKey, { signal });
+				const hash = requestHash('listBooks', cacheKey);
+				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'listBooks', cacheKey, { signal, requestId });
 				let totalItems: number;
 				let items: GbVolume[];
 				if (cached) {
-					logger.info({ nsid: 'listBooks', stage: 'cache', hit: true, cachedItems: cached.items.length }, 'cache hit');
+					logger.info({ nsid, requestId, stage: 'cache', hit: true, cachedItems: cached.items.length }, 'cache hit');
 					totalItems = cached.totalItems;
 					items = cached.items as GbVolume[];
 				} else {
-					logger.info({ nsid: 'listBooks', stage: 'cache', hit: false, q }, 'cache miss; calling google books');
-					const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, signal);
-					totalItems = res.totalItems;
-					items = res.items ?? [];
-					logger.info({ nsid: 'listBooks', stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
-					await setCached(db, 'listBooks', cacheKey, { totalItems, items }, TTL.search, { signal });
+					const existing = inflight.get(hash);
+					if (existing) {
+						const shared = (await existing) as { totalItems: number; items: unknown[] };
+						logger.info({ nsid, requestId, stage: 'inflight', hit: true }, 'shared in-flight google books response');
+						totalItems = shared.totalItems;
+						items = shared.items as GbVolume[];
+					} else {
+						logger.info({ nsid, requestId, stage: 'cache', hit: false, q }, 'cache miss; calling google books');
+						const work = (async () => {
+							const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, { signal, requestId });
+							return { totalItems: res.totalItems, items: res.items ?? [] };
+						})();
+						inflight.set(hash, work);
+						try {
+							const result = await work;
+							totalItems = result.totalItems;
+							items = result.items as GbVolume[];
+							logger.info({ nsid, requestId, stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
+							await setCached(db, 'listBooks', cacheKey, { totalItems, items }, TTL.search, { signal, requestId });
+						} finally {
+							inflight.delete(hash);
+						}
+					}
 				}
+				const viewsOut = await Promise.all(items.map((v) => gbVolumeToBookView(ctx, v)));
 				const booksOut: BookView[] = [];
 				let dropped = 0;
-				for (const volume of items) {
-					const view = await gbVolumeToBookView(ctx, volume);
+				for (const view of viewsOut) {
 					if (view) booksOut.push(view);
 					else dropped += 1;
 				}
 				if (dropped > 0) {
-					logger.warn({ nsid: 'listBooks', stage: 'map', dropped, kept: booksOut.length }, 'volumes dropped during mapping');
+					logger.warn({ nsid, requestId, stage: 'map', dropped, kept: booksOut.length }, 'volumes dropped during mapping');
 				}
 				const hasMore = startIndex + booksOut.length < totalItems;
 				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + booksOut.length }) : undefined;
