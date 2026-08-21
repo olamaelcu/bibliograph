@@ -61,34 +61,6 @@
       ],
       "description": "Reading status for a book."
     },
-    "progress": {
-      "type": "object",
-      "required": ["format"],
-      "properties": {
-        "format": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.format",
-          "strong": true,
-          "description": "The format being read; its unit defines how progress is measured."
-        },
-        "progress": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Progress value measured in the format's unit, e.g. 30 for 30 pages into a physical book."
-        },
-        "unit": {
-          "type": "string",
-          "knownValues": [
-            "other",
-            "pages",
-            "seconds",
-            "percent"
-          ],
-          "description": "Optional unit override; defaults to the format's unit."
-        }
-      },
-      "description": "Optional progress indicator."
-    },
     "progressUnit": {
       "type": "string",
       "knownValues": [
@@ -98,12 +70,6 @@
         "percent"
       ],
       "description": "The unit a progress value is measured in."
-    },
-    "rating": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 5,
-      "description": "Rating from 1 to 5."
     },
     "formatView": {
       "type": "object",
@@ -338,65 +304,6 @@
           "type": "string",
           "maxGraphemes": 8192,
           "description": "Description of the shelf."
-        },
-        "createdAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp when the record was originally created."
-        },
-        "updatedAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp of the last update to the record."
-        }
-      }
-    },
-    "reviewView": {
-      "type": "object",
-      "required": ["uri", "book", "status"],
-      "properties": {
-        "uri": {
-          "type": "string",
-          "format": "at-uri",
-          "description": "AT-URI of the review record."
-        },
-        "book": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#bookView",
-          "description": "The book being reviewed."
-        },
-        "did": {
-          "type": "string",
-          "format": "did",
-          "description": "DID of the account that wrote the review."
-        },
-        "tags": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "maxGraphemes": 64
-          },
-          "description": "Tags associated with this review."
-        },
-        "rating": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#rating",
-          "description": "Optional rating from 1 to 5."
-        },
-        "status": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#readingStatus",
-          "description": "Reading status for the book at the time of this review."
-        },
-        "progress": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#progress",
-          "description": "Progress indicator."
-        },
-        "text": {
-          "type": "string",
-          "maxGraphemes": 65536,
-          "description": "The review prose."
         },
         "createdAt": {
           "type": "ref",

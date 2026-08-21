@@ -16,7 +16,7 @@ import { logger } from '../logger.js';
 type Db = NodePgDatabase<typeof schema>;
 
 const CURSOR_NAME = 'default';
-const WANTED_COLLECTIONS = [COLLECTION.review, COLLECTION.shelf, COLLECTION.bookShelf, COLLECTION.actor] as const;
+const WANTED_COLLECTIONS = [COLLECTION.shelf, COLLECTION.bookShelf, COLLECTION.actor] as const;
 const MIN_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 

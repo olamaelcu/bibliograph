@@ -229,9 +229,6 @@ export function createXrpcRouter(
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetGenre.mainSchema, {
 		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getGenre'),
 	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetReview.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getReview'),
-	});
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
 		handler: () => notImplemented('net.olamaelcu.livtet.biblio.getShelf'),
 	});
@@ -244,9 +241,6 @@ export function createXrpcRouter(
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListGenres.mainSchema, {
 		handler: () => notImplemented('net.olamaelcu.livtet.biblio.listGenres'),
 	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListReviewsByBook.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.listReviewsByBook'),
-	});
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
 		handler: () => notImplemented('net.olamaelcu.livtet.biblio.listShelves'),
 	});
@@ -255,9 +249,6 @@ export function createXrpcRouter(
 	});
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchContributors.mainSchema, {
 		handler: () => notImplemented('net.olamaelcu.livtet.biblio.searchContributors'),
-	});
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchReviews.mainSchema, {
-		handler: () => notImplemented('net.olamaelcu.livtet.biblio.searchReviews'),
 	});
 
 	return router;

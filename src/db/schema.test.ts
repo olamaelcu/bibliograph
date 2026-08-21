@@ -63,7 +63,7 @@ describe('staged-release schema', () => {
 		).rejects.toThrow();
 	});
 
-	it('exposes review views with aggregated open issues', async () => {
+	it('exposes the book import-issues view with aggregated open issues', async () => {
 		const { db, seed } = await createTestDb();
 		await seed();
 		const now = Math.floor(Date.now() / 1000);
@@ -121,7 +121,7 @@ describe('staged-release schema', () => {
 			),
 		).rejects.toThrow();
 
-		// The review view aggregates over the seeded graph.
+		// The book_import_issues view aggregates over the seeded graph.
 		const now = Math.floor(Date.now() / 1000);
 		await db.insert(importIssues).values({
 			entityType: 'book',

@@ -43,16 +43,16 @@ export interface LexiconRecordProperty {
 }
 
 export interface LexiconRecord {
-  /** Full lexicon NSID, e.g. `net.olamaelcu.livtet.biblio.review`. */
+  /** Full lexicon NSID, e.g. `net.olamaelcu.livtet.biblio.book`. */
   id: string;
-  /** Last segment of the NSID, e.g. `review`. */
+  /** Last segment of the NSID, e.g. `book`. */
   name: string;
   type: 'record';
   description?: string;
   /** Record key constraint, e.g. `any`, `tid`. */
   key: string;
   properties: LexiconRecordProperty[];
-  /** Path relative to the project root, e.g. `lexicons/net/.../review.json`. */
+  /** Path relative to the project root, e.g. `lexicons/net/.../book.json`. */
   lexiconPath: string;
 }
 
@@ -279,9 +279,8 @@ function parseLexiconRecord(file: string): LexiconRecord | null {
 
 /**
  * Record collections written by the AppView itself: the catalog proper plus
- * the book↔contributor join, all populated from the backfill dumps. Everything
- * else (`review`, `shelf`, `actor`, `bookShelving`) is written by clients to
- * the user's own PDS.
+ * the book↔contributor join. Everything else (`shelf`, `actor`,
+ * `bookShelving`) is written by clients to the user's own PDS.
  */
 export const catalogRecordNsids: ReadonlySet<string> = new Set([
   'net.olamaelcu.livtet.biblio.book',

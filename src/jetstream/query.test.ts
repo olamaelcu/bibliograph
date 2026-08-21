@@ -33,7 +33,7 @@ async function seed(db: ReturnType<typeof createTestDb>['db'], did: string, coll
 		const db = await testDb();
 		await seed(db, 'did:web:alice.example.com', COLLECTION.shelf, 'x', { name: 'Alice shelf' });
 		await seed(db, 'did:web:bob.example.com', COLLECTION.shelf, 'x', { name: 'Bob shelf' });
-		await seed(db, 'did:web:alice.example.com', COLLECTION.review, 'x', { status: 'read' });
+		await seed(db, 'did:web:alice.example.com', COLLECTION.bookShelf, 'x', { position: 1 });
 
 		const aliceShelf = await getUserRecord(db, 'did:web:alice.example.com', COLLECTION.shelf, 'x');
 		expect((aliceShelf?.value as { name: string }).name).toBe('Alice shelf');
@@ -43,15 +43,15 @@ async function seed(db: ReturnType<typeof createTestDb>['db'], did: string, coll
 describe('listByCollection', () => {
 	it('lists every indexed record in a collection across all DIDs', async () => {
 		const db = await testDb();
-		await seed(db, 'did:web:alice.example.com', COLLECTION.review, 'rev-1', { status: 'read' });
-		await seed(db, 'did:web:bob.example.com', COLLECTION.review, 'rev-1', { status: 'reading' });
-		await seed(db, 'did:web:alice.example.com', COLLECTION.shelf, 'shelf-1', { name: 'Favorites' });
+		await seed(db, 'did:web:alice.example.com', COLLECTION.bookShelf, 'shelf-1', { position: 1 });
+		await seed(db, 'did:web:bob.example.com', COLLECTION.bookShelf, 'shelf-1', { position: 2 });
+		await seed(db, 'did:web:alice.example.com', COLLECTION.shelf, 'shelf-2', { name: 'Favorites' });
 
-		const reviews = await listByCollection(db, COLLECTION.review);
-		expect(reviews).toHaveLength(2);
-		expect(reviews.map((r) => r.uri).sort()).toEqual([
-			'at://did:web:alice.example.com/net.olamaelcu.livtet.biblio.review/rev-1',
-			'at://did:web:bob.example.com/net.olamaelcu.livtet.biblio.review/rev-1',
+		const shelvings = await listByCollection(db, COLLECTION.bookShelf);
+		expect(shelvings).toHaveLength(2);
+		expect(shelvings.map((r) => r.uri).sort()).toEqual([
+			'at://did:web:alice.example.com/net.olamaelcu.livtet.biblio.bookShelving/shelf-1',
+			'at://did:web:bob.example.com/net.olamaelcu.livtet.biblio.bookShelving/shelf-1',
 		]);
 	});
 

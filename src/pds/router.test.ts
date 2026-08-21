@@ -83,8 +83,8 @@ describe('com.atproto.repo.getRecord', () => {
 		const { fetch } = await app();
 		const params = new URLSearchParams({
 			repo: SERVICE_DID,
-			collection: 'net.olamaelcu.livtet.biblio.review',
-			rkey: 'review-1',
+			collection: 'net.olamaelcu.livtet.biblio.nonsense',
+			rkey: 'x-1',
 		});
 		const res = await fetch(`/xrpc/com.atproto.repo.getRecord?${params}`);
 		expect(res.status).toBe(400);

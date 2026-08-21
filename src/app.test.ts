@@ -30,7 +30,6 @@ const LEXICON_NSIDS = [
   'defs',
   'format',
   'genre',
-  'review',
   'shelf',
 ];
 

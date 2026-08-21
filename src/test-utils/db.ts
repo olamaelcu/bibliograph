@@ -25,7 +25,6 @@ const COLLECTION = {
 	contributorRole: 'net.olamaelcu.livtet.biblio.contributorRole',
 	format: 'net.olamaelcu.livtet.biblio.format',
 	genre: 'net.olamaelcu.livtet.biblio.genre',
-	review: 'net.olamaelcu.livtet.biblio.review',
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
 	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
 } as const;

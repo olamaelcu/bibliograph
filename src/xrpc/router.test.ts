@@ -197,16 +197,13 @@ describe('stub handlers', () => {
 			{ nsid: 'getBookOnShelf', path: `?uri=${encodeURIComponent(uri)}` },
 			{ nsid: 'getContributor', path: `?uri=${encodeURIComponent(uri)}` },
 			{ nsid: 'getGenre', path: `?uri=${encodeURIComponent(uri)}` },
-			{ nsid: 'getReview', path: `?uri=${encodeURIComponent(uri)}` },
 			{ nsid: 'getShelf', path: `?uri=${encodeURIComponent(uri)}` },
 			{ nsid: 'getShelvingOfBook', path: `?book=${encodeURIComponent(uri)}` },
 			{ nsid: 'listBooksOnShelf', path: `?shelf=${encodeURIComponent(uri)}` },
 			{ nsid: 'listGenres', path: '' },
-			{ nsid: 'listReviewsByBook', path: `?book=${encodeURIComponent(uri)}` },
 			{ nsid: 'listShelves', path: '' },
 			{ nsid: 'listShelvesWithBooks', path: '' },
 			{ nsid: 'searchContributors', path: '?q=x' },
-			{ nsid: 'searchReviews', path: '?q=x' },
 		];
 		for (const { nsid, path } of cases) {
 			const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.${nsid}${path}`);

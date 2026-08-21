@@ -49,7 +49,6 @@ async function main(): Promise<void> {
     { label: 'contributor roles', table: 'contributor_roles' },
     { label: 'formats', table: 'formats' },
     { label: 'shelves', table: 'user_records', collection: COLLECTION.shelf },
-    { label: 'reviews', table: 'user_records', collection: COLLECTION.review },
   ];
 
   console.log('Catalog counts:');

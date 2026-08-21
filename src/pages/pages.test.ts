@@ -62,7 +62,7 @@ describe('lexicon catalog', () => {
 
 	describe('record lexicons', () => {
 		it('extracts every record-type lexicon', () => {
-			expect(recordLexicons.length).toBeGreaterThanOrEqual(10);
+			expect(recordLexicons.length).toBeGreaterThanOrEqual(9);
 			for (const record of recordLexicons) {
 				expect(record.type).toBe('record');
 				expect(record.id).toMatch(/^net\.olamaelcu\.livtet\.biblio\./);
@@ -83,19 +83,18 @@ describe('lexicon catalog', () => {
 		expect(users.map((r) => r.name).sort()).toEqual([
 			'actor',
 			'bookShelving',
-			'review',
 			'shelf',
 		]);
 		});
 
 		it('captures schema constraints on record properties', () => {
-			const review = recordLexicons.find((r) => r.name === 'review');
-			expect(review).toBeDefined();
-			const blobs = review?.properties.find((p) => p.name === 'blobs');
-			expect(blobs).toMatchObject({ type: 'array<blob>', required: false });
-			expect(blobs?.constraints.join(' ')).toMatch(/accept image\/\*/);
-			const text = review?.properties.find((p) => p.name === 'text');
-			expect(text?.constraints.join(' ')).toMatch(/max 65536 graphemes/);
+			const bookShelving = recordLexicons.find((r) => r.name === 'bookShelving');
+			expect(bookShelving).toBeDefined();
+			const shelf = bookShelving?.properties.find((p) => p.name === 'shelf');
+			expect(shelf?.type).toMatch(/^ref /);
+			expect(shelf?.required).toBe(true);
+			const metadata = bookShelving?.properties.find((p) => p.name === 'metadata');
+			expect(metadata?.type).toMatch(/^ref/);
 		});
 	});
 });

@@ -20,43 +20,43 @@ function commitEvent(overrides: Partial<JetstreamEvent> & { commit?: Partial<Non
 		commit: overrides.commit && {
 			rev: 'rev-1',
 			operation: 'create',
-			collection: COLLECTION.review,
-			rkey: 'rev-1',
+			collection: COLLECTION.shelf,
+			rkey: 'shelf-1',
 			cid: 'bafyreicid1',
-			record: { $type: COLLECTION.review, status: 'read' },
+			record: { $type: COLLECTION.shelf, name: 'Favorites' },
 			...overrides.commit,
 		},
 	} as JetstreamEvent;
 }
 
 	describe('applyJetstreamEvent', () => {
-	it('upserts a create commit into user_records', async () => {
-		const db = await testDb();
-		await applyJetstreamEvent(db, commitEvent({ commit: {} }));
-		const rows = await db.select().from(userRecords);
-		const row = rows[0];
-		expect(row?.did).toBe(DID);
-		expect(row?.collection).toBe(COLLECTION.review);
-		expect(row?.rkey).toBe('rev-1');
-		expect(row?.cid).toBe('bafyreicid1');
-		expect((row?.record as { status: string }).status).toBe('read');
-	});
+		it('upserts a create commit into user_records', async () => {
+			const db = await testDb();
+			await applyJetstreamEvent(db, commitEvent({ commit: {} }));
+			const rows = await db.select().from(userRecords);
+			const row = rows[0];
+			expect(row?.did).toBe(DID);
+			expect(row?.collection).toBe(COLLECTION.shelf);
+			expect(row?.rkey).toBe('shelf-1');
+			expect(row?.cid).toBe('bafyreicid1');
+			expect((row?.record as { name: string }).name).toBe('Favorites');
+		});
 
-	it('overwrites the record on an update commit for the same identity', async () => {
-		const db = await testDb();
-		await applyJetstreamEvent(db, commitEvent({ commit: {} }));
-		await applyJetstreamEvent(
-			db,
-			commitEvent({
-				time_us: 2_000,
-				commit: { operation: 'update', cid: 'bafyreicid2', record: { $type: COLLECTION.review, status: 'reading' } },
-			}),
-		);
-		const rows = await db.select().from(userRecords);
-		expect(rows).toHaveLength(1);
-		expect(rows[0].cid).toBe('bafyreicid2');
-		expect((rows[0].record as { status: string }).status).toBe('reading');
-	});
+		it('overwrites the record on an update commit for the same identity', async () => {
+			const db = await testDb();
+			await applyJetstreamEvent(db, commitEvent({ commit: {} }));
+			await applyJetstreamEvent(
+				db,
+				commitEvent({
+					time_us: 2_000,
+					commit: { operation: 'update', cid: 'bafyreicid2', record: { $type: COLLECTION.shelf, name: 'Renamed' } },
+				}),
+			);
+			const rows = await db.select().from(userRecords);
+			expect(rows).toHaveLength(1);
+			expect(rows[0].cid).toBe('bafyreicid2');
+			expect((rows[0].record as { name: string }).name).toBe('Renamed');
+		});
 
 	it('removes the record on a delete commit', async () => {
 		const db = await testDb();
@@ -131,7 +131,6 @@ describe('createJetstreamIngestor', () => {
 		expect(url.host).toBe('jetstream.test');
 		expect(url.pathname).toBe('/subscribe');
 		expect(url.searchParams.getAll('wantedCollections')).toEqual([
-			COLLECTION.review,
 			COLLECTION.shelf,
 			COLLECTION.bookShelf,
 			COLLECTION.actor,

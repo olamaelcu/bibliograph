@@ -35,7 +35,7 @@
               "dnf",
               "read"
             ],
-            "description": "Only include books with reviews in the given reading status."
+            "description": "Only include books with the given reading status."
           },
           "limit": {
             "type": "integer",
