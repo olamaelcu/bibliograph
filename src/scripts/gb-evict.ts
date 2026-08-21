@@ -4,8 +4,8 @@ import { pruneExpired } from '../google-books/cache.js';
 import { logger } from '../logger.js';
 
 async function main(): Promise<void> {
-	const removed = await pruneExpired(db);
-	logger.info({ removed }, 'gb_cache: pruned expired rows');
+	const { expired, overCap } = await pruneExpired(db);
+	logger.info({ expired, overCap }, 'gb_cache: pruned');
 	await closeDb();
 }
 

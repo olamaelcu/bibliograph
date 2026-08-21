@@ -12,7 +12,7 @@ const USER_AGENT = 'bibliograph/0.1 (atproto; google-books-cache; gzip)';
 
 const MAX_RETRY_AFTER_MS = 60_000;
 
-const TRANSIENT_CODES = new Set([
+export const TRANSIENT_CODES = new Set([
 	'ECONNRESET',
 	'ECONNREFUSED',
 	'ETIMEDOUT',
@@ -45,7 +45,7 @@ function parseRetryAfter(value: string | null): number | undefined {
 	return undefined;
 }
 
-function collectCodes(err: unknown, out: Set<string>): void {
+export function collectCodes(err: unknown, out: Set<string>): void {
 	if (err == null || typeof err !== 'object') return;
 	const code = (err as { code?: unknown }).code;
 	if (typeof code === 'string') out.add(code);
@@ -57,7 +57,7 @@ function collectCodes(err: unknown, out: Set<string>): void {
 	if (cause !== undefined && cause !== err) collectCodes(cause, out);
 }
 
-function isTransientNetworkError(err: unknown): boolean {
+export function isTransientNetworkError(err: unknown): boolean {
 	const codes = new Set<string>();
 	collectCodes(err, codes);
 	for (const c of codes) {
@@ -70,7 +70,7 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withRetry<T>(
+export async function withRetry<T>(
 	message: string,
 	fn: () => Promise<T>,
 	ctx: Record<string, unknown> = {},
