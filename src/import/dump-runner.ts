@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { DumpState } from '../dump/state.js';
@@ -134,7 +134,13 @@ export async function runDumpImport(opts: DumpRunOptions): Promise<BatchSummary>
     if (total === null) {
       logger.info({ stateName: opts.stateName, gzPath }, 'counting dump records');
       total = await countDumpLines(useSnapshot ? snapshotPath : gzPath, { plain: useSnapshot, signal: opts.signal });
-      writeCountCache(gzPath, total);
+      // Snapshot the on-disk snapshot size alongside the line count so the
+      // cache can detect a re-downloaded gz that happens to match (size,
+      // mtime) but has different content. Falls through as undefined when no
+      // snapshot exists (snapshot will be rebuilt before the first read).
+      const countedOnSnapshot = useSnapshot && existsSync(snapshotPath);
+      const snapSize = countedOnSnapshot ? statSync(snapshotPath).size : undefined;
+      writeCountCache(gzPath, total, snapSize);
     }
     logger.info({ stateName: opts.stateName, totalRecords: total }, 'dump record count');
     await state.set({ totalRecords: total });
