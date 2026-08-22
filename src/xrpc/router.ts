@@ -75,10 +75,6 @@ function notFound(): never {
   throw new XRPCError({ status: 404, error: 'NotFound', message: 'record not found' });
 }
 
-function notSupported(nsid: string): never {
-  throw new XRPCError({ status: 501, error: 'NotSupported', message: `${nsid} is not implemented by this AppView` });
-}
-
 class HandlerTimeoutError extends Error {
   constructor(readonly nsid: string, readonly timeoutMs: number) {
     super(`${nsid} handler exceeded ${timeoutMs}ms`);
@@ -128,7 +124,7 @@ async function withTimedHandler<T>(
     if (err instanceof HandlerTimeoutError) {
       logger.warn(
         { nsid, requestId: opts.requestId, timeoutMs: opts.timeoutMs, durationMs: Date.now() - t0 },
-        'xrpc handler timed out',
+        `xrpc handler timed out after ${opts.timeoutMs} milliseconds`,
       );
       throw new XRPCError({
         status: 504,
@@ -144,7 +140,7 @@ async function withTimedHandler<T>(
       throw new XRPCError({
         status: 502,
         error: 'UpstreamFailure',
-        message: `google books returned ${err.status}`,
+        message: `Google Books API returned ${err.status}`,
       });
     }
     throw err;

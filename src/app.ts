@@ -11,6 +11,7 @@ import { lexiconsStatic } from './lexicons.js';
 import { logger } from './logger.js';
 import { db } from './db/connection.js';
 import { createXrpcRouter } from './xrpc/router.js';
+import { GoogleBooksClient } from './google-books/client.js';
 import { createHash } from 'node:crypto';
 import { loadLexiconSchema, LexiconNotFound } from './lexicon-resolve.js';
 import { dpopNonceMiddleware } from './oauth/nonce.js';
@@ -29,7 +30,8 @@ export function createApp(): Hono {
 	const viewCtx: ViewContext = {
 		serviceDid: getServiceDid(),
 	};
-	const xrpcRouter = createXrpcRouter(db, viewCtx);
+	const gbClient = new GoogleBooksClient({ apiKey: process.env.GOOGLE_BOOKS_API_KEY ?? '' });
+	const xrpcRouter = createXrpcRouter(db, viewCtx, { client: gbClient });
 
 	const webAwesomeRoot = dirname(
 		createRequire(import.meta.url).resolve('@awesome.me/webawesome/package.json'),
