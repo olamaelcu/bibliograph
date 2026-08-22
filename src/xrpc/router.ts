@@ -108,7 +108,7 @@ async function withTimedHandler<T>(
   opts: { timeoutMs: number; requestId?: string | null; params?: Record<string, unknown> },
   work: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  const t0 = Date.now();
+  const timeStart = Date.now();
   logger.info(
     { nsid, requestId: opts.requestId, params: opts.params, timeoutMs: opts.timeoutMs },
     'xrpc handler started',
@@ -116,14 +116,14 @@ async function withTimedHandler<T>(
   try {
     const result = await withHandlerTimeout(nsid, work, opts.timeoutMs);
     logger.info(
-      { nsid, requestId: opts.requestId, durationMs: Date.now() - t0 },
+      { nsid, requestId: opts.requestId, durationMs: Date.now() - timeStart },
       'xrpc handler completed',
     );
     return result;
   } catch (err) {
     if (err instanceof HandlerTimeoutError) {
       logger.warn(
-        { nsid, requestId: opts.requestId, timeoutMs: opts.timeoutMs, durationMs: Date.now() - t0 },
+        { nsid, requestId: opts.requestId, timeoutMs: opts.timeoutMs, durationMs: Date.now() - timeStart },
         `xrpc handler timed out after ${opts.timeoutMs} milliseconds`,
       );
       throw new XRPCError({
@@ -133,7 +133,7 @@ async function withTimedHandler<T>(
       });
     }
     logger.error(
-      { nsid, requestId: opts.requestId, durationMs: Date.now() - t0, err },
+      { nsid, requestId: opts.requestId, durationMs: Date.now() - timeStart, err },
       'xrpc handler threw',
     );
     if (err instanceof GoogleBooksError) {
@@ -159,22 +159,10 @@ export interface RouterOptions {
 /** Static list of NSIDs this AppView advertises in its `compatibility` response. */
 function compatibilityQueries(): { nsid: string; type?: string }[] {
   return [
-    { nsid: 'community.lexicon.book.searchEditions', type: 'query' },
-    { nsid: 'community.lexicon.book.getEdition', type: 'query' },
-    { nsid: 'community.lexicon.book.getContributor', type: 'query' },
-    { nsid: 'community.lexicon.book.searchContributors', type: 'query' },
-    { nsid: 'community.lexicon.book.searchWorks', type: 'query' },
-    { nsid: 'community.lexicon.book.searchPublishers', type: 'query' },
-    { nsid: 'community.lexicon.book.compatibility', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.getImageForBook', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.getImageForContributor', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.getActor', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.getShelf', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.listShelves', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.getBookOnShelf', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.listBooksOnShelf', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.getShelvingOfBook', type: 'query' },
-    { nsid: 'net.olamaelcu.livtet.biblio.listShelvesWithBooks', type: 'query' },
+    { nsid: 'book.searchEditions', type: 'query' },
+    { nsid: 'book.searchContributors', type: 'query' },
+    { nsid: 'book.searchWorks', type: 'query' },
+    { nsid: 'book.searchPublishers', type: 'query' },
   ];
 }
 
