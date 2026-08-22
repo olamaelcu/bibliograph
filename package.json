@@ -21,7 +21,6 @@
     "gb:evict": "tsx src/scripts/gb-evict.ts",
     "lex:gen": "lex-cli generate",
     "key:generate": "node scripts/generate-atproto-key.mjs",
-    "lex:check": "atprotolex check lexicons/net/olamaelcu/livtet/biblio/*.json",
     "lex:resolve": "tsx src/lex/cli.ts"
   },
   "dependencies": {
