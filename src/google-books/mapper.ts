@@ -105,7 +105,8 @@ function parsePublishedDate(value: string | undefined): number | undefined {
 }
 
 function gbCoverUrl(info: GbVolumeInfo): string | undefined {
-	const normalize = (u?: string) => u?.replace(/^http:\/\//, 'https://');
+	const normalize = (u?: string) =>
+		u?.replace(/^http:\/\//, 'https://').replace(/&edge=curl/g, '');
 	return normalize(info.imageLinks?.thumbnail) ?? normalize(info.imageLinks?.smallThumbnail);
 }
 

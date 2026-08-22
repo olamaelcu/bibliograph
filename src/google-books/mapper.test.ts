@@ -130,6 +130,48 @@ describe('gbVolumeToBookView', () => {
 		});
 		expect(v?.coverUrl).toBe('https://example.com/cover.jpg');
 	});
+
+	it('strips &edge=curl from cover URLs', async () => {
+		const v = await gbVolumeToBookView(ctx, {
+			id: 'x',
+			volumeInfo: {
+				title: 'T',
+				imageLinks: {
+					thumbnail:
+						'https://books.google.com/books?id=X&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api',
+				},
+			},
+		});
+		expect(v?.coverUrl).toBe(
+			'https://books.google.com/books?id=X&printsec=frontcover&img=1&zoom=1&source=gbs_api',
+		);
+	});
+
+	it('strips &edge=curl when it is the last query param', async () => {
+		const v = await gbVolumeToBookView(ctx, {
+			id: 'x',
+			volumeInfo: {
+				title: 'T',
+				imageLinks: { thumbnail: 'https://books.google.com/books?id=X&edge=curl' },
+			},
+		});
+		expect(v?.coverUrl).toBe('https://books.google.com/books?id=X');
+	});
+
+	it('strips &edge=curl from smallThumbnail fallback too', async () => {
+		const v = await gbVolumeToBookView(ctx, {
+			id: 'x',
+			volumeInfo: {
+				title: 'T',
+				imageLinks: {
+					smallThumbnail: 'https://books.google.com/books?id=X&printsec=frontcover&edge=curl',
+				},
+			},
+		});
+		expect(v?.coverUrl).toBe(
+			'https://books.google.com/books?id=X&printsec=frontcover',
+		);
+	});
 });
 
 describe('gbAuthorSlugToName', () => {
