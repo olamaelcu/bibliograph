@@ -21,6 +21,9 @@ import {
 	genres,
 } from '../db/schema.js';
 import { releasedFilter } from '../xrpc/gate.js';
+import { GoogleBooksClient, GoogleBooksError, type GbVolume } from '../google-books/client.js';
+import { gbVolumeToBookRecord } from '../google-books/mapper.js';
+import { getCached, setCached, TTL } from '../google-books/cache.js';
 
 export const COLLECTIONS = {
 	book: 'net.olamaelcu.livtet.biblio.book',
@@ -322,4 +325,122 @@ function tableFor(collection: OwnedCollection) {
 		case COLLECTIONS.genre:
 			return genres;
 	}
+}
+
+// ─── Lazy GB-backed import ──────────────────────────────────────────────────────────
+
+const GB_VOLUME_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+export class InvalidGbRkeyError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'InvalidGbRkeyError';
+	}
+}
+
+export class UpstreamUnavailableError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'UpstreamUnavailableError';
+	}
+}
+
+/**
+ * Idempotently write a GB-backed book row and its identifier rows. Wrapped in a
+ * single transaction so a half-written state can never appear. ON CONFLICT DO
+ * NOTHING on both inserts makes concurrent first-time imports safe: the losing
+ * insert is a no-op and the caller re-reads from the DB if it needs the
+ * canonical row.
+ *
+ * Release status is forced to 'released' so the row is visible to subsequent
+ * hydrateBook calls (which apply releasedFilter) and to AppView join queries
+ * like getBookOnShelf. GB data is canonical and skips the importer review
+ * lifecycle.
+ */
+export async function persistGbBackedBook(db: Db, value: Book, pk: string): Promise<void> {
+	const now = Math.floor(Date.now() / 1000);
+	await db.transaction(async (tx) => {
+		await tx
+			.insert(books)
+			.values({
+				pk,
+				title: value.title,
+				publishDate: value.publishDate ? Math.floor(Date.parse(value.publishDate) / 1000) : null,
+				description: value.description ?? null,
+				coverUrl: value.coverUrl ?? null,
+				createdAt: now,
+				updatedAt: null,
+				releaseStatus: 'released',
+				releasedAt: now,
+			})
+			.onConflictDoNothing({ target: books.pk });
+
+		if (value.identifiers?.length) {
+			await tx
+				.insert(bookIdentifiers)
+				.values(
+					value.identifiers.map((id) => ({
+						bookPk: pk,
+						resource: id.resource,
+						url: id.url,
+					})),
+				)
+				.onConflictDoNothing();
+		}
+	});
+}
+
+export interface LookupGbBookOptions {
+	signal?: AbortSignal;
+	requestId?: string;
+}
+
+/**
+ * Lazy-import a `gb-` prefixed book: cache → GB upstream → map → persist →
+ * return. Returns undefined when GB has no such volume or when the volume has
+ * no title. Throws {@link InvalidGbRkeyError} for malformed rkeys (caller maps
+ * to 400) and {@link UpstreamUnavailableError} for GB failures other than 404
+ * (caller maps to 502).
+ */
+export async function lookupAndImportGbBook(
+	db: Db,
+	client: GoogleBooksClient,
+	rkey: string,
+	opts: LookupGbBookOptions = {},
+): Promise<Book | undefined> {
+	if (!rkey.startsWith('gb-')) {
+		throw new InvalidGbRkeyError(`rkey must start with 'gb-', got '${rkey}'`);
+	}
+	const volumeId = rkey.slice(3);
+	if (!GB_VOLUME_ID_RE.test(volumeId)) {
+		throw new InvalidGbRkeyError(`invalid google books volume id: '${volumeId}'`);
+	}
+
+	let volume = await getCached<GbVolume>(db, 'getBook', { volumeId }, opts);
+	if (!volume) {
+		try {
+			volume = (await client.getVolume(volumeId, opts)) ?? undefined;
+		} catch (err) {
+			if (err instanceof GoogleBooksError && err.status === 404) return undefined;
+			throw new UpstreamUnavailableError(
+				err instanceof GoogleBooksError
+					? `google books returned ${err.status}`
+					: 'google books request failed',
+			);
+		}
+		if (volume) {
+			try {
+				await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, opts);
+			} catch {
+				// Cache write failures must not block record import.
+			}
+		}
+	}
+	if (!volume) return undefined;
+
+	const value = gbVolumeToBookRecord(volume);
+	if (!value) return undefined;
+
+	await persistGbBackedBook(db, value, rkey);
+	return value;
 }

@@ -212,7 +212,7 @@ export function createXrpcRouter(
 	opts: RouterOptions = {},
 ): XRPCRouter {
 	const router = new XRPCRouter();
-	registerPdsHandlers(router, db, ctx);
+	registerPdsHandlers(router, db, ctx, { client: opts.client });
 
 	if (!process.env.GOOGLE_BOOKS_API_KEY) {
 		logger.warn(

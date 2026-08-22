@@ -1,4 +1,5 @@
 import type { BookContributorView, BookView, ContributorView, Identifier } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
+import type { Main as Book } from '../lexicons/types/net/olamaelcu/livtet/biblio/book.js';
 import { getEngagementForSubject } from '../network/constellation.js';
 import type { GbVolume, GbVolumeInfo } from './client.js';
 import type { ViewContext } from '../lex/collections.js';
@@ -108,6 +109,31 @@ function gbCoverUrl(info: GbVolumeInfo): string | undefined {
 	const normalize = (u?: string) =>
 		u?.replace(/^http:\/\//, 'https://').replace(/&edge=curl/g, '');
 	return normalize(info.imageLinks?.thumbnail) ?? normalize(info.imageLinks?.smallThumbnail);
+}
+
+/**
+ * Map a Google Books volume to a raw `net.olamaelcu.livtet.biblio.book` record
+ * value (the shape persisted in the PDS), as opposed to the AppView's BookView
+ * returned by {@link gbVolumeToBookView}. Skips `format` and `genres` because
+ * GB's vocabulary doesn't map cleanly to the curated local sets. Returns
+ * undefined when the volume has no title (matches gbVolumeToBookView's contract).
+ */
+export function gbVolumeToBookRecord(volume: GbVolume): Book | undefined {
+	const info = volume.volumeInfo;
+	if (!info?.title) return undefined;
+	const value: Book = {
+		$type: 'net.olamaelcu.livtet.biblio.book',
+		title: info.title,
+	};
+	const identifiers = gbIdentifiersToIdentifiers(volume.id, info);
+	if (identifiers.length) value.identifiers = identifiers;
+	const published = parsePublishedDate(info.publishedDate);
+	if (published != null) value.publishDate = new Date(published * 1000).toISOString();
+	if (info.description) value.description = info.description;
+	const cover = gbCoverUrl(info);
+	if (cover) value.coverUrl = asUri(cover);
+	value.createdAt = new Date().toISOString();
+	return value;
 }
 
 export async function gbVolumeToBookView(ctx: ViewContext, volume: GbVolume): Promise<BookView | undefined> {

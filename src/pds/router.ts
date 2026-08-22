@@ -16,9 +16,12 @@ import {
 import { cidForRecord } from './cid.js';
 import {
 	COLLECTIONS,
+	InvalidGbRkeyError,
+	UpstreamUnavailableError,
 	isOwnedCollection,
 	loadCid,
 	loadRecord,
+	lookupAndImportGbBook,
 	persistCid,
 	type OwnedCollection,
 } from './records.js';
@@ -26,6 +29,7 @@ import { buildDidDocument } from '../did.js';
 import { contributors, contributorRoles, formats, genres, books } from '../db/schema.js';
 import { releasedFilter } from '../xrpc/gate.js';
 import type { ViewContext } from '../lex/collections.js';
+import type { GoogleBooksClient } from '../google-books/client.js';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -68,7 +72,16 @@ function errorRecordNotFound(message: string): never {
 	throw new XRPCError({ status: 400, error: 'RecordNotFound', message });
 }
 
-export function registerPdsHandlers(router: XRPCRouter, db: Db, ctx: ViewContext): void {
+export interface RegisterPdsHandlersOptions {
+	client?: GoogleBooksClient;
+}
+
+export function registerPdsHandlers(
+	router: XRPCRouter,
+	db: Db,
+	ctx: ViewContext,
+	opts: RegisterPdsHandlersOptions = {},
+): void {
 	// ─── getRecord ────────────────────────────────────────────────────────
 	router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
 		async handler({ params, request }) {
@@ -81,9 +94,44 @@ export function registerPdsHandlers(router: XRPCRouter, db: Db, ctx: ViewContext
 			}
 			const rkey = rkeyFromParam(params.rkey);
 
-			const value = await loadRecord(db, ctx, params.collection, rkey);
-			if (!value) {
-				errorRecordNotFound(`record not found: ${params.repo}/${params.collection}/${rkey}`);
+			let value: Awaited<ReturnType<typeof loadRecord>>;
+			if (params.collection === COLLECTIONS.book && rkey.startsWith('gb-')) {
+				if (!opts.client) {
+					throw new XRPCError({
+						status: 502,
+						error: 'UpstreamFailure',
+						message: 'GOOGLE_BOOKS_API_KEY is not set; google-books-backed queries will fail',
+					});
+				}
+				try {
+					value = await lookupAndImportGbBook(db, opts.client, rkey, {
+						signal: request.signal,
+					});
+				} catch (err) {
+					if (err instanceof InvalidGbRkeyError) {
+						throw new InvalidRequestError({
+							status: 400,
+							error: 'InvalidRequest',
+							message: err.message,
+						});
+					}
+					if (err instanceof UpstreamUnavailableError) {
+						throw new XRPCError({
+							status: 502,
+							error: 'UpstreamFailure',
+							message: err.message,
+						});
+					}
+					throw err;
+				}
+				if (!value) {
+					errorRecordNotFound(`record not found: ${params.repo}/${params.collection}/${rkey}`);
+				}
+			} else {
+				value = await loadRecord(db, ctx, params.collection, rkey);
+				if (!value) {
+					errorRecordNotFound(`record not found: ${params.repo}/${params.collection}/${rkey}`);
+				}
 			}
 
 			let cid = await loadCid(db, params.collection, rkey);
