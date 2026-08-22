@@ -5,6 +5,10 @@
  * from a single XRPC query and writes entity-appropriate Web Awesome markup
  * into `container`. All user-supplied strings are escaped through the
  * `escapeHtml` helper from `examples-client.js`.
+ *
+ * Note: covers / avatars are NOT in record shapes (community.lexicon.book
+ * record schema has no cover/image field). Use `getImageForBook` /
+ * `getImageForContributor` XRPC queries to fetch cover URLs.
  */
 
 import { escapeHtml, snippet } from './examples-client.js';
@@ -12,44 +16,54 @@ import { escapeHtml, snippet } from './examples-client.js';
 const MAX_DESC = 280;
 const PAGE_LIMIT = 20;
 
-export function renderBook(data, container) {
-	const book = data?.book;
-	if (!book) {
-		container.insertAdjacentHTML('beforeend', '<p class="empty muted">No book in response.</p>');
+export async function renderEdition(data, container) {
+	const edition = data?.edition;
+	if (!edition) {
+		container.insertAdjacentHTML('beforeend', '<p class="empty muted">No edition in response.</p>');
 		return;
 	}
-	const authors = (book.contributors ?? [])
-		.map((bc) => bc.contributor?.name)
+	const authors = (edition.contributors ?? [])
+		.map((c) => c.name ?? c.subject)
 		.filter(Boolean)
 		.join(', ');
-	const coverHtml = book.coverUrl
-		? `<img class="book-cover" loading="lazy" src="${escapeHtml(book.coverUrl)}" alt="" />`
-		: '';
-	const identifiersHtml = renderIdentifiers(book.identifiers);
+	const identifiersHtml = renderIdentifiers(edition.identifiers);
+	const coverHtml = await renderEditionCover(edition);
 	container.insertAdjacentHTML(
 		'beforeend',
 		`<wa-card class="book-card">
 			<div slot="header" class="book-card-header">
-				<h3 class="book-title">${escapeHtml(book.title)}</h3>
-				<span class="at-uri">${escapeHtml(book.uri)}</span>
+				<h3 class="book-title">${escapeHtml(edition.title)}</h3>
+				<span class="at-uri">${escapeHtml(edition.uri)}</span>
 			</div>
 			<p class="muted" style="margin:0">${authors ? `By ${escapeHtml(authors)}` : 'No contributors listed.'}</p>
-			${book.description ? `<p class="book-desc">${escapeHtml(snippet(book.description, MAX_DESC))}</p>` : ''}
+			${edition.description ? `<p class="book-desc">${escapeHtml(snippet(edition.description, MAX_DESC))}</p>` : ''}
 			${identifiersHtml}
 			${coverHtml}
 		</wa-card>`,
 	);
 }
 
-export function renderContributor(data, container) {
+/** Fetch cover URL via getImageForBook and render an <img>. */
+async function renderEditionCover(edition) {
+	if (!edition.uri) return '';
+	try {
+		const res = await fetch(`/xrpc/net.olamaelcu.livtet.biblio.getImageForBook?uri=${encodeURIComponent(edition.uri)}`);
+		if (!res.ok) return '';
+		const data = await res.json();
+		if (!data.url) return '';
+		return `<img class="book-cover" loading="lazy" src="${escapeHtml(data.url)}" alt="" />`;
+	} catch {
+		return '';
+	}
+}
+
+export async function renderContributor(data, container) {
 	const c = data?.contributor;
 	if (!c) {
 		container.insertAdjacentHTML('beforeend', '<p class="empty muted">No contributor in response.</p>');
 		return;
 	}
-	const imageHtml = c.imageUrl
-		? `<img class="book-cover" loading="lazy" src="${escapeHtml(c.imageUrl)}" alt="" />`
-		: '';
+	const identifiersHtml = renderIdentifiers(c.identifiers);
 	container.insertAdjacentHTML(
 		'beforeend',
 		`<wa-card class="contributor-card">
@@ -57,30 +71,38 @@ export function renderContributor(data, container) {
 				<h3 class="contributor-name">${escapeHtml(c.name)}</h3>
 				<span class="at-uri">${escapeHtml(c.uri)}</span>
 			</div>
-			${c.sortName && c.sortName !== c.name ? `<p class="muted" style="margin:0">sort: ${escapeHtml(c.sortName)}</p>` : ''}
 			${c.bio ? `<p class="contributor-bio">${escapeHtml(snippet(c.bio, MAX_DESC))}</p>` : ''}
-			${renderIdentifiers(c.identifiers)}
-			${imageHtml}
+			${identifiersHtml}
 		</wa-card>`,
 	);
 }
 
-export function renderGenre(data, container) {
-	const g = data?.genre;
-	if (!g) {
-		container.insertAdjacentHTML('beforeend', '<p class="empty muted">No genre in response.</p>');
+export async function renderImageForBook(data, container) {
+	const { url } = data ?? {};
+	if (!url) {
+		container.insertAdjacentHTML('beforeend', '<p class="empty muted">No cover URL available.</p>');
 		return;
 	}
 	container.insertAdjacentHTML(
 		'beforeend',
-		`<wa-card class="genre-card">
-			<div slot="header" class="genre-card-header">
-				<h3 class="genre-name">${escapeHtml(g.emoji || '')} ${escapeHtml(g.name)}</h3>
-				<span class="at-uri">${escapeHtml(g.uri)}</span>
-			</div>
-			${g.description ? `<p class="genre-desc">${escapeHtml(snippet(g.description, MAX_DESC))}</p>` : ''}
-			${g.parent ? `<p class="muted" style="margin:0">parent: <code>${escapeHtml(g.parent)}</code></p>` : ''}
-			${renderIdentifiers(g.identifiers)}
+		`<wa-card class="book-card">
+			<img class="book-cover" loading="lazy" src="${escapeHtml(url)}" alt="cover" />
+				<p class="muted"><code>${escapeHtml(url)}</code></p>
+		</wa-card>`,
+	);
+}
+
+export async function renderImageForContributor(data, container) {
+	const { url } = data ?? {};
+	if (!url) {
+		container.insertAdjacentHTML('beforeend', '<p class="empty muted">No avatar URL available.</p>');
+		return;
+	}
+	container.insertAdjacentHTML(
+		'beforeend',
+		`<wa-card class="contributor-card">
+			<img class="book-cover" loading="lazy" src="${escapeHtml(url)}" alt="avatar" />
+				<p class="muted"><code>${escapeHtml(url)}</code></p>
 		</wa-card>`,
 	);
 }
@@ -116,10 +138,9 @@ export function renderActor(data, container) {
 		'beforeend',
 		`<wa-card class="actor-card">
 			<div slot="header" class="actor-card-header">
-				<h3 class="actor-name">${escapeHtml(a.displayName || a.handle || a.did)}</h3>
+				<h3 class="actor-name">${escapeHtml(a.displayName || a.did)}</h3>
 				<span class="at-uri">${escapeHtml(a.did)}</span>
 			</div>
-			${a.handle ? `<p class="muted" style="margin:0">@${escapeHtml(a.handle)}</p>` : ''}
 			${a.description ? `<p class="actor-desc">${escapeHtml(snippet(a.description, MAX_DESC))}</p>` : ''}
 			${bsky}
 		</wa-card>`,
@@ -149,14 +170,14 @@ export function renderBookShelf(data, container) {
 }
 
 /**
- * Renders the array-keyed lists: searchBooks/searchContributors (with
- * `hitsTotal`) and the cursor-paginated list* queries.
+ * Renders the array-keyed lists: searchEditions/searchContributors (with
+ * `total`) and the cursor-paginated list* queries.
  */
-export function renderSearchResults(data, container) {
-	renderListResults(data, container);
+export async function renderSearchResults(data, container) {
+	await renderListResults(data, container);
 }
 
-export function renderListResults(data, container) {
+export async function renderListResults(data, container) {
 	if (!data || typeof data !== 'object') {
 		container.insertAdjacentHTML('beforeend', '<p class="empty muted">Empty response.</p>');
 		return;
@@ -171,15 +192,15 @@ export function renderListResults(data, container) {
 		container.insertAdjacentHTML('beforeend', '<p class="empty muted">No results.</p>');
 		return;
 	}
-	const total = typeof data.hitsTotal === 'number'
-		? ` of ${data.hitsTotal.toLocaleString()}`
+	const total = typeof data.total === 'number'
+		? ` of ${data.total.toLocaleString()}`
 		: '';
 	container.insertAdjacentHTML(
 		'beforeend',
 		`<p class="muted results-meta">${items.length}${total} ${escapeHtml(arrayKey)} returned.</p>`,
 	);
 	for (const item of items) {
-		renderListItem(item, arrayKey, container);
+		await renderListItem(item, arrayKey, container);
 	}
 	if (data.cursor) {
 		container.insertAdjacentHTML(
@@ -189,17 +210,11 @@ export function renderListResults(data, container) {
 	}
 }
 
-function renderListItem(item, arrayKey, container) {
-	if (arrayKey === 'books') {
-		renderBook({ book: item }, container);
-		return;
-	}
-	if (arrayKey === 'contributors') {
-		renderContributor({ contributor: item }, container);
-		return;
-	}
-	if (arrayKey === 'genres') {
-		renderGenre({ genre: item }, container);
+async function renderListItem(item, arrayKey, container) {
+	if (arrayKey === 'items') {
+		// searchEditions returns items[] — each is a community edition record.
+		// Has $type=community.lexicon.book.edition and a `uri` field.
+		await renderEdition({ edition: item }, container);
 		return;
 	}
 	if (arrayKey === 'shelves') {
@@ -225,7 +240,7 @@ function renderListItem(item, arrayKey, container) {
 function renderIdentifiers(identifiers) {
 	if (!Array.isArray(identifiers) || identifiers.length === 0) return '';
 	const items = identifiers
-		.map((i) => `<li><code>${escapeHtml(i.resource)}</code>${i.url ? ` &rarr; <a href="${escapeHtml(i.url)}" target="_blank" rel="noopener">source</a>` : ''}</li>`)
+		.map((i) => `<li><code>${escapeHtml(i.resource)}</code> &rarr; <a href="${escapeHtml(i.uri)}" target="_blank" rel="noopener">source</a></li>`)
 		.join('');
 	return `<ul class="identifiers">${items}</ul>`;
 }

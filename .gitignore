@@ -14,6 +14,8 @@ src/lexicons/
 coverage/
 docs/superpowers/
 .opencode/
+drizzle/schema.ts
+drizzle/relations.ts
 db.sqlite*
 static/
 .cortexkit/

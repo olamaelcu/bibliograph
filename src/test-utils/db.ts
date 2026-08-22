@@ -6,27 +6,19 @@ import * as schema from '../db/schema.js';
 import {
 	contributors,
 	contributorIdentifiers,
-	bookContributors,
-	bookGenres,
+	editions,
 	bookIdentifiers,
-	books,
-	contributorRoles,
-	formats,
-	genreIdentifiers,
-	genres,
 } from '../db/schema.js';
 
 export const SERVICE_DID = 'did:web:books.example.com';
 export const SERVICE_HOST = 'books.example.com';
 
-const COLLECTION = {
-	book: 'net.olamaelcu.livtet.biblio.book',
-	contributor: 'net.olamaelcu.livtet.biblio.contributor',
-	contributorRole: 'net.olamaelcu.livtet.biblio.contributorRole',
-	format: 'net.olamaelcu.livtet.biblio.format',
-	genre: 'net.olamaelcu.livtet.biblio.genre',
+export const COLLECTION = {
+	edition: 'community.lexicon.book.edition',
+	contributor: 'community.lexicon.book.contributor',
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
 	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
+	actor: 'net.olamaelcu.livtet.biblio.actor',
 } as const;
 
 export function uri(collection: string, pk: string): string {
@@ -80,10 +72,6 @@ export async function createTestDb(): Promise<TestDb> {
 		};
 		TEST_DB_CACHE.set(dbName, testDb);
 	}
-	// The cached handle is shared across all createTestDb calls in this test file
-	// (one process per file under vitest forks). Re-establish the SQLite :memory:
-	// contract — every call returns tables in a pristine state, not whatever a
-	// previous test left behind.
 	await testDb.reset();
 	return testDb;
 }
@@ -119,49 +107,66 @@ async function truncateAll(db: Database): Promise<void> {
 async function seed(db: Database) {
 	const now = Math.floor(Date.now() / 1000);
 
-	const formatRows = [
-		{ pk: 'paperback', description: 'Paperback', emoji: '📖', iconImageUrl: 'https://cdn.example.com/fmt-paperback.png', unit: 'pages' },
-		{ pk: 'ebook', description: 'E-book', emoji: '📱', iconImageUrl: null, unit: 'percent' },
-	];
-	const genreRows = [
-		{ pk: 'fiction', name: 'Fiction', description: 'Imaginary narratives', emoji: '📚', iconImageUrl: null, parentPk: null, createdAt: now },
-		{ pk: 'scifi', name: 'Science Fiction', description: 'Speculative futures', emoji: '🚀', iconImageUrl: null, parentPk: 'fiction', createdAt: now },
-	];
-	const roleRows = [
-		{ pk: 'author', name: 'Author', description: 'Wrote the book', iconImageUrl: null, createdAt: now },
-		{ pk: 'translator', name: 'Translator', description: 'Translated the book', iconImageUrl: null, createdAt: now },
-	];
 	const contributorRows = [
-		{ pk: 'author-herbert', name: 'Frank Herbert', sortName: 'Herbert, Frank', bio: 'American author', imageUrl: null, createdAt: now, updatedAt: null },
-		{ pk: 'author-algernon', name: 'Daniel Keyes', sortName: 'Keyes, Daniel', bio: 'American writer', imageUrl: null, createdAt: now, updatedAt: null },
+		{ pk: 'ctest-author-herbert', name: 'Frank Herbert', sortName: 'Herbert, Frank', bio: 'American author', createdAt: now, updatedAt: null },
+		{ pk: 'ctest-author-algernon', name: 'Daniel Keyes', sortName: 'Keyes, Daniel', bio: 'American writer', createdAt: now, updatedAt: null },
 	];
-	const bookRows = [
-		{ pk: 'book-dune', title: 'Dune (40th Anniversary)', formatPk: 'paperback', publishDate: 1119484800, description: 'The classic', coverUrl: 'https://cdn.example.com/dune.jpg', createdAt: now, updatedAt: null },
-		{ pk: 'book-flowers', title: 'Flowers for Algernon', formatPk: 'ebook', publishDate: 1119484800, description: 'A touching story', coverUrl: null, createdAt: now, updatedAt: null },
-	];
-	await db.insert(formats).values(formatRows);
-	await db.insert(genres).values(genreRows);
-	await db.insert(contributorRoles).values(roleRows);
 	await db.insert(contributors).values(contributorRows);
-	await db.insert(books).values(bookRows);
 
-	await db.insert(bookGenres).values([
-		{ bookPk: 'book-dune', genrePk: 'fiction' },
-		{ bookPk: 'book-dune', genrePk: 'scifi' },
-	]);
-	await db.insert(bookContributors).values([
-		{ bookPk: 'book-dune', contributorPk: 'author-herbert', rolePk: 'author', createdAt: now },
-		{ bookPk: 'book-flowers', contributorPk: 'author-algernon', rolePk: 'author', createdAt: now },
-	]);
+	// GB lazy-load rkey (`gb-*`) for one edition, plus a TID rkey for another.
+	// Lets image-lookup tests cover both paths.
+	const duneTid = 'test-edition-dune';
+	const duneGb = 'gb-dune';
+	const duneRkey = duneTid; // GB lazy-load keyed by `gb-<volumeId>`
+	const flowersTid = 'test-edition-flowers';
+	void duneGb;
+
+	const editionRows = [
+		{
+			pk: duneTid,
+			title: 'Dune (40th Anniversary)',
+			subtitle: null,
+			language: 'en',
+			place: null,
+			workUri: null,
+			publisherUri: null,
+			publishedYear: 2005,
+			description: 'The classic.',
+			contributors: [
+				{ subject: 'ctest-author-herbert', role: 'author' },
+			],
+			cid: '',
+			createdAt: now,
+			updatedAt: null,
+		},
+		{
+			pk: flowersTid,
+			title: 'Flowers for Algernon',
+			subtitle: null,
+			language: 'en',
+			place: null,
+			workUri: null,
+			publisherUri: null,
+			publishedYear: 1966,
+			description: 'A touching story.',
+			contributors: [
+				{ subject: 'ctest-author-algernon', role: 'author' },
+			],
+			cid: '',
+			createdAt: now,
+			updatedAt: null,
+		},
+	];
+	await db.insert(editions).values(editionRows);
+
 	await db.insert(bookIdentifiers).values([
-		{ bookPk: 'book-dune', resource: 'isbn:0441172717', url: 'https://isbn.example.com/0441172717' },
+		{ bookPk: duneTid, valueScheme: 'isbn13', value: '9780441172719', uri: 'urn:isbn:9780441172719' },
+		{ bookPk: duneTid, valueScheme: 'googleBooks', value: 'dune-vol', uri: 'https://www.googleapis.com/books/v1/volumes/dune-vol' },
+		{ bookPk: flowersTid, valueScheme: 'isbn10', value: '0156030083', uri: 'urn:isbn:0156030083' },
 	]);
-	await db.insert(contributorIdentifiers).values([
-		{ contributorPk: 'author-herbert', resource: 'viaf:59083797', url: 'https://viaf.example.com/59083797' },
-	]);
-	await db.insert(genreIdentifiers).values([
-		{ genrePk: 'scifi', resource: 'babelio:science-fiction', url: 'https://babelio.example.com/science-fiction' },
-	]);
-}
 
-export { COLLECTION };
+	await db.insert(contributorIdentifiers).values([
+		{ contributorPk: 'ctest-author-herbert', valueScheme: 'viaf', value: '59083797', uri: 'https://viaf.example.com/59083797' },
+	]);
+	void duneRkey;
+}

@@ -96,6 +96,7 @@ identifiers: IdentifierRow[],
 	const value: ContributorRecord = {
 		$type: COLLECTIONS.contributor,
 		name: row.name,
+		createdAt: toIso(row.createdAt) ?? new Date().toISOString(),
 	};
 	if (identifiers.length) {
 		value.identifiers = identifiers.map((id) => ({
@@ -277,6 +278,7 @@ name: string,
  */
 export async function persistGbBackedEdition(db: Db, volume: GbVolume): Promise<string> {
 	const info = volume.volumeInfo;
+	if (!info) throw new UpstreamUnavailableError('volume missing volumeInfo');
 	const editionTid = mintTid();
 	const now = Math.floor(Date.now() / 1000);
 
@@ -309,15 +311,15 @@ export async function persistGbBackedEdition(db: Db, volume: GbVolume): Promise<
 	await db.transaction(async (tx) => {
 		await tx.insert(editions).values({
 			pk: editionTid,
-			title: info.title,
+			title: info.title ?? '',
 			subtitle: info.subtitle ?? null,
-			language: info.language ?? null,
+			language: null,
 			publishedYear: parseYear(info.publishedDate),
 			description: info.description ?? null,
 			contributors: subjectsForJson as unknown as typeof editions.$inferSelect.contributors,
 			createdAt: now,
 			updatedAt: now,
-		}).onConflictDoNothing({ target: editions.pk });
+		} as typeof editions.$inferInsert).onConflictDoNothing({ target: editions.pk });
 
 		const identifiers: { valueScheme: string; value: string; uri: string }[] = [];
 		for (const ident of info.industryIdentifiers ?? []) {

@@ -60,9 +60,9 @@ Options:
   --verbose            Print each resolution hop to stderr
   --help, -h           Show this help message
 Examples:
-  tsx src/lex/cli.ts resolve net.olamaelcu.livtet.biblio.book
-  tsx src/lex/cli.ts resolve net.olamaelcu.livtet.biblio.book --host=http://localhost:3000/xrpc
-  tsx src/lex/cli.ts resolve net.olamaelcu.livtet.biblio.book --expect-nsid=net.olamaelcu.livtet.biblio.book --verbose`);
+  tsx src/lex/cli.ts resolve community.lexicon.book.edition
+  tsx src/lex/cli.ts resolve community.lexicon.book.searchEditions --host=http://localhost:3000/xrpc
+  tsx src/lex/cli.ts resolve community.lexicon.book.searchEditions --expect-nsid=community.lexicon.book.searchEditions --verbose`);
 }
 
 function nsidToAuthority(nsid: string): string {

@@ -146,7 +146,7 @@ export function registerPdsHandlers(
 			return json({
 				uri: recordKeyUri(ctx.serviceDid, params.collection, rkey) as ComAtprotoRepoGetRecord.$output['uri'],
 				cid,
-				value: value!,
+				value: value! as unknown as ComAtprotoRepoGetRecord.$output['value'],
 			});
 		},
 	});
@@ -187,7 +187,7 @@ export function registerPdsHandlers(
 				out.push({
 					uri: recordKeyUri(ctx.serviceDid, params.collection, pk) as ComAtprotoRepoListRecords.$output['records'][number]['uri'],
 					cid,
-					value,
+					value: value as unknown as ComAtprotoRepoListRecords.$output['records'][number]['value'],
 				});
 			}
 

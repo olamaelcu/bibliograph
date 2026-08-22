@@ -89,7 +89,6 @@ volume: GbVolume,
 		const year = parseYear(info.publishedDate);
 		if (year != null) record.publishedYear = year;
 	}
-	if (info.language) record.language = info.language;
 	if (info.description) record.description = info.description;
 	if (info.authors?.length) {
 		record.contributors = info.authors.map((name) => ({ name, role: 'author' }));

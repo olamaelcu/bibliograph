@@ -214,46 +214,9 @@ function compatibilityQueries(): { nsid: string; type?: string }[] {
  * contributor rows for display. Single DB query for identifiers; per-contributor
  * fetches are batched.
  */
-async function toEditionViewFromRow(db: Db, ctx: ViewContext, row: typeof editions.$inferSelect): Promise<EditionView> {
-	const identifiersRows = await db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, row.pk));
-	const subjects = (row.contributors ?? []) as { subject: string; role: string }[];
-	const contributorRkeys = subjects
-		.map((s) => s.subject.split('/').pop())
-		.filter((s): s is string => !!s);
-	const contributorRows = contributorRkeys.length
-		? await db.select().from(contributors).where(or(...contributorRkeys.map((k) => eq(contributors.pk, k))) as SQL)
-		: [];
-	const contributorRowsByPk = new Map(contributorRows.map((c) => [c.pk, c]));
-	const contributorViews: ContributorView[] = subjects
-		.map((s) => {
-			const rkey = s.subject.split('/').pop()!;
-			const c = contributorRowsByPk.get(rkey);
-			if (!c) return null;
-			return {
-				uri: s.subject as ContributorView['uri'],
-				name: c.name,
-				role: s.role,
-			};
-		})
-		.filter((v): v is ContributorView => v !== null);
-	const view: EditionView = {
-		uri: `at://${ctx.serviceDid}/${COLLECTION.edition}/${row.pk}`,
-		title: row.title,
-		identifiers: identifiersRows.map((i) => ({
-			uri: i.uri as `${string}:${string}`,
-			resource: i.valueScheme,
-		})),
-		contributors: contributorViews,
-	};
-	if (row.subtitle) view.subtitle = row.subtitle;
-	if (row.publishedYear != null) view.publishedYear = row.publishedYear;
-	if (row.language) view.language = row.language;
-	if (row.place) view.place = row.place;
-	if (row.description) view.description = row.description;
-	view.createdAt = new Date(row.createdAt * 1000).toISOString();
-	if (row.updatedAt != null) view.updatedAt = new Date(row.updatedAt * 1000).toISOString();
-	return view;
-}
+// Removed: duplicated by `toEditionView` in hydrate.ts. Kept here for callers
+// that need a one-shot row → EditionView without going through the
+// `hydrateEdition` helper.
 
 export function createXrpcRouter(
 db: Db,
@@ -382,7 +345,7 @@ opts: RouterOptions = {},
 				}
 				const hasMore = startIndex + items_out.length < totalItems;
 				const next = hasMore ? encodeGbCursor({ q: combinedQ, startIndex: startIndex + items_out.length }) : undefined;
-				return json({ items: items_out, total: totalItems, cursor: next });
+				return json({ items: items_out as unknown as Lexicons.CommunityLexiconBookSearchEditions.$output['items'], total: totalItems, cursor: next });
 			});
 		},
 	});
@@ -412,11 +375,13 @@ opts: RouterOptions = {},
 						if (volume) await setCached(db, 'getEdition', { volumeId }, volume, TTL.getBook, { signal, requestId });
 					}
 					if (!volume) throw new XRPCError({ status: 404, error: 'NotFound', message: 'no such volume' });
-					return json({ edition: gbVolumeToEditionRecord(ctx, volume) });
+					const rec = gbVolumeToEditionRecord(ctx, volume);
+					return json({ edition: rec as unknown as Lexicons.CommunityLexiconBookGetEdition.$output['edition'] });
 				}
 				const row = (await db.select().from(editions).where(eq(editions.pk, rkey)))[0];
 				if (!row) notFound();
-				return json({ edition: gbVolumeToEditionRecord(ctx, { id: row.pk, volumeInfo: rowToVolumeInfo(row) } as GbVolume) });
+				const rec = gbVolumeToEditionRecord(ctx, { id: row.pk, volumeInfo: rowToVolumeInfo(row) } as GbVolume);
+				return json({ edition: rec as unknown as Lexicons.CommunityLexiconBookGetEdition.$output['edition'] });
 			});
 		},
 	});
@@ -428,7 +393,8 @@ opts: RouterOptions = {},
 				const rkey = rkeyFromUri(params.uri, COLLECTION.contributor);
 				const row = (await db.select().from(contributors).where(eq(contributors.pk, rkey)))[0];
 				if (!row) notFound();
-				return json({ contributor: await toContributorView(db, ctx, row) });
+				const view = await toContributorView(db, ctx, row);
+				return json({ contributor: view as unknown as Lexicons.CommunityLexiconBookGetContributor.$output['contributor'] });
 			});
 		},
 	});
@@ -449,7 +415,7 @@ opts: RouterOptions = {},
 				const hasMore = rows.length > limit;
 				const page = rows.slice(0, limit);
 				const items = await Promise.all(page.map((r) => toContributorView(db, ctx, r)));
-				return json({ items, total: hasMore ? undefined : items.length, cursor: undefined });
+				return json({ items: items as unknown as Lexicons.CommunityLexiconBookSearchContributors.$output['items'], total: hasMore ? undefined : items.length, cursor: undefined });
 			});
 		},
 	});
@@ -498,13 +464,13 @@ opts: RouterOptions = {},
 					}
 				}
 
-				if (!volumeId) return json({ url: undefined });
+				if (!volumeId) return json({ url: undefined as unknown as `${string}:${string}` | undefined });
 
 				const cached = await getCached<GbVolume>(db, 'getVolume', { volumeId }, { signal, requestId });
 				const volume = cached ?? (await gb().getVolume(volumeId, { signal, requestId }));
 				if (volume) await setCached(db, 'getVolume', { volumeId }, volume, TTL.getBook, { signal, requestId });
 				const url = volume?.volumeInfo?.imageLinks?.thumbnail ?? volume?.volumeInfo?.imageLinks?.smallThumbnail;
-				return json({ url });
+				return json({ url: url as unknown as `${string}:${string}` | undefined });
 			});
 		},
 	});
@@ -512,7 +478,7 @@ opts: RouterOptions = {},
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetImageForContributor.mainSchema, {
 		async handler() {
 			// TODO: implement OL cover lookup via openlibrary.org/authors/<id>.json
-			return json({ url: undefined });
+			return json({ url: undefined as unknown as `${string}:${string}` | undefined });
 		},
 	});
 
@@ -523,7 +489,7 @@ opts: RouterOptions = {},
 			const nsid = 'net.olamaelcu.livtet.biblio.getActor';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
 				const rec = await getUserRecord(db, params.actor, COLLECTION.actor, 'self');
-				return json({ actor: await withActorBsky(toActorView(rec, params.actor)) });
+				return json({ actor: (await withActorBsky(toActorView(rec, params.actor))) as unknown as Lexicons.NetOlamaelcuLivtetBiblioGetActor.$output['actor'] });
 			});
 		},
 	});
@@ -535,7 +501,7 @@ opts: RouterOptions = {},
 				const { did, rkey } = didAndRkeyFromUri(params.uri, COLLECTION.shelf);
 				const rec = await getUserRecord(db, did, COLLECTION.shelf, rkey);
 				if (!rec) notFound();
-				return json({ shelf: await withShelfBsky(toShelfView(rec)) });
+				return json({ shelf: (await withShelfBsky(toShelfView(rec))) as unknown as Lexicons.NetOlamaelcuLivtetBiblioGetShelf.$output['shelf'] });
 			});
 		},
 	});
@@ -545,7 +511,7 @@ opts: RouterOptions = {},
 			const nsid = 'net.olamaelcu.livtet.biblio.listShelves';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
 				const records = await listByCollection(db, COLLECTION.shelf);
-				return json({ shelves: records.map((r) => toShelfView(r)) });
+				return json({ shelves: records.map((r) => toShelfView(r) as unknown as Lexicons.NetOlamaelcuLivtetBiblioListShelves.$output['shelves'][number]) });
 			});
 		},
 	});
@@ -564,7 +530,7 @@ opts: RouterOptions = {},
 				const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
 				if (!shelfRec) notFound();
 				const view = toBookShelfView(rec, did, await withShelfBsky(toShelfView(shelfRec)), book);
-				return json({ bookShelf: view });
+				return json({ bookShelf: view as unknown as Lexicons.NetOlamaelcuLivtetBiblioGetBookOnShelf.$output['bookShelf'] });
 			});
 		},
 	});
@@ -596,7 +562,7 @@ opts: RouterOptions = {},
 					views.push(toBookShelfView(rec, owner, await withShelfBsky(toShelfView(shelfRec)), book));
 				}
 				logger.info({ nsid: 'listBooksOnShelf', stage: 'list', count: views.length, shelf: params.shelf }, 'list books on shelf');
-				return json({ bookShelves: views });
+				return json({ bookShelves: views as unknown as Lexicons.NetOlamaelcuLivtetBiblioListBooksOnShelf.$output['bookShelves'] });
 			});
 		},
 	});
@@ -619,7 +585,7 @@ opts: RouterOptions = {},
 					views.push(toBookShelfView(rec, owner, await withShelfBsky(toShelfView(shelfRec)), book));
 				}
 				logger.info({ nsid: 'getShelvingOfBook', stage: 'list', count: views.length, book: params.book }, 'shelving of book');
-				return json({ bookShelves: views });
+				return json({ bookShelves: views as unknown as Lexicons.NetOlamaelcuLivtetBiblioGetShelvingOfBook.$output['bookShelves'] });
 			});
 		},
 	});
@@ -653,7 +619,7 @@ opts: RouterOptions = {},
 					}
 					views.push(toShelfWithBooksView(shelfView, booksView));
 				}
-				return json({ shelves: views });
+				return json({ shelves: views as unknown as Lexicons.NetOlamaelcuLivtetBiblioListShelvesWithBooks.$output['shelves'] });
 			});
 		},
 	});
@@ -664,14 +630,13 @@ opts: RouterOptions = {},
 // ─── Helpers used by router.ts ──────────────────────────────────────────────
 
 /** Map an `editions` DB row into a fake GB volume so `gbVolumeToEditionRecord` can render it. */
-function rowToVolumeInfo(row: typeof editions.$inferSelect): { title: string; subtitle?: string; publishedDate?: string; description?: string; language?: string; imageLinks?: { thumbnail?: string; smallThumbnail?: string }; authors?: string[] } {
-	const vi: { title: string; subtitle?: string; publishedDate?: string; description?: string; language?: string; imageLinks?: { thumbnail?: string; smallThumbnail?: string }; authors?: string[] } = {
+function rowToVolumeInfo(row: typeof editions.$inferSelect): { title: string; subtitle?: string; publishedDate?: string; description?: string; imageLinks?: { thumbnail?: string; smallThumbnail?: string }; authors?: string[] } {
+	const vi: { title: string; subtitle?: string; publishedDate?: string; description?: string; imageLinks?: { thumbnail?: string; smallThumbnail?: string }; authors?: string[] } = {
 		title: row.title,
 	};
 	if (row.subtitle) vi.subtitle = row.subtitle;
 	if (row.publishedYear != null) vi.publishedDate = String(row.publishedYear);
 	if (row.description) vi.description = row.description;
-	if (row.language) vi.language = row.language;
 	return vi;
 }
 
@@ -680,10 +645,13 @@ function rowToVolumeInfo(row: typeof editions.$inferSelect): { title: string; su
  * (the shape that gets persisted in the PDS and returned by AppView queries).
  */
 export function gbVolumeToEditionRecord(
-ctx: ViewContext,
-volume: GbVolume,
+	ctx: ViewContext,
+	volume: GbVolume,
 ): Record<string, unknown> {
 	const info = volume.volumeInfo;
+	if (!info) {
+		return { $type: COLLECTION.edition, title: '', createdAt: new Date().toISOString() };
+	}
 	const rkey = `gb-${volume.id}`;
 	const record: Record<string, unknown> = {
 		$type: 'community.lexicon.book.edition',
@@ -695,7 +663,6 @@ volume: GbVolume,
 		const year = parseYear(info.publishedDate);
 		if (year != null) record.publishedYear = year;
 	}
-	if (info.language) record.language = info.language;
 	if (info.description) record.description = info.description;
 	if (info.authors?.length) {
 		record.contributors = info.authors.map((name) => ({

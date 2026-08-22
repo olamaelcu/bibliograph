@@ -56,7 +56,7 @@ export function createApp(): Hono {
 		ctx.html(
 			renderPage('home', {
 				title: 'Overview',
-				description: 'Bibliograph AT Protocol AppView: procedures and queries served by the net.olamaelcu.livtet.biblio lexicon.',
+				description: 'Bibliograph AT Protocol AppView: catalog (community.lexicon.book.*) and app-private (net.olamaelcu.livtet.biblio.*) queries and procedures.',
 				queryCount,
 				procedureCount,
 			}),
@@ -94,7 +94,7 @@ export function createApp(): Hono {
 		ctx.html(
 			renderPage('search', {
 				title: 'Search',
-				description: 'Search the Bibliograph catalog for books and covers.',
+				description: 'Search the Bibliograph catalog for editions. Covers fetched via getImageForBook.',
 			}),
 		),
 	);

@@ -278,18 +278,18 @@ function parseLexiconRecord(file: string): LexiconRecord | null {
 }
 
 /**
- * Record collections written by the AppView itself: the catalog proper plus
- * the book↔contributor join. Everything else (`shelf`, `actor`,
- * `bookShelving`) is written by clients to the user's own PDS.
+ * Record collections written by the AppView itself (community catalog) and the
+ * user-owned records (shelves, book shelvings, actor profiles). Everything
+ * else is written by clients to the user's own PDS and surfaced via
+ * Jetstream indexing (`user_records`).
  */
 export const catalogRecordNsids: ReadonlySet<string> = new Set([
-  'net.olamaelcu.livtet.biblio.book',
-  'net.olamaelcu.livtet.biblio.bookContributor',
-  'net.olamaelcu.livtet.biblio.contributor',
-  'net.olamaelcu.livtet.biblio.contributorRole',
-  'net.olamaelcu.livtet.biblio.format',
-  'net.olamaelcu.livtet.biblio.genre',
-  'net.olamaelcu.livtet.biblio.work',
+  'community.lexicon.book.edition',
+  'community.lexicon.book.contributor',
+  // App-private user-owned records:
+  'net.olamaelcu.livtet.biblio.shelf',
+  'net.olamaelcu.livtet.biblio.bookShelving',
+  'net.olamaelcu.livtet.biblio.actor',
 ]);
 
 /** All xrpc `query`/`procedure` endpoints, sorted by NSID. Built once at module load. */

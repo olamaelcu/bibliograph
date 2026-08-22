@@ -98,7 +98,7 @@ row: typeof editions.$inferSelect,
 			const rkey = s.subject.split('/').pop()!;
 			const c = contributorsByPk.get(rkey);
 			if (!c) return null;
-			return { uri: s.subject, name: c.name, role: s.role } satisfies ContributorView;
+			return { uri: s.subject, name: c.name, role: s.role } as ContributorView;
 		})
 		.filter((v): v is ContributorView => v !== null);
 	const view: EditionView = {
@@ -143,9 +143,9 @@ row: { pk: string; title: string },
 		title: row.title,
 		identifiers: identifiersRows.map((i) => ({ uri: i.uri, resource: i.valueScheme })),
 		contributors: contributorName
-			? [{ uri: subjects[0]!.subject, name: contributorName, role: subjects[0]!.role }]
+			? [{ uri: subjects[0]!.subject, name: contributorName, role: subjects[0]!.role } as ContributorView]
 			: [],
-	};
+	} as EditionView;
 }
 
 /** Look up an edition by its local-canonical at-uri rkey and hydrate an EditionView. */

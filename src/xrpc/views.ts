@@ -19,7 +19,7 @@ export interface ContributorView {
 	role?: string;
 	sortName?: string;
 	bio?: string;
-	identifiers: Identifier[];
+	identifiers?: Identifier[];
 	createdAt?: string;
 	updatedAt?: string;
 }

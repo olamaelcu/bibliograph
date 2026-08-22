@@ -11,15 +11,16 @@ export interface CategorizedExample {
 
 /**
  * Names of queries grouped by demo category. Anything not listed here
- * (e.g. `com.atproto.lexicon.resolveLexicon`) is intentionally excluded
- * from `/examples`.
+ * (e.g. `com.atproto.lexicon.resolveLexicon`, `community.lexicon.book.searchWorks`
+ * which returns 501) is intentionally excluded from `/examples`.
  */
 const INDEPENDENT = new Set<string>([
 	'getActor',
-	'getBook',
 	'getBookOnShelf',
 	'getContributor',
-	'getGenre',
+	'getEdition',
+	'getImageForBook',
+	'getImageForContributor',
 	'getShelf',
 ]);
 
@@ -29,30 +30,27 @@ const COMPOSITE = new Set<string>([
 ]);
 
 const LIST = new Set<string>([
-	'listBooks',
-	'listGenres',
 	'listShelves',
 	'listShelvesWithBooks',
-	'searchBooks',
 	'searchContributors',
+	'searchEditions',
 ]);
 
 /** Map from the lexicon's last-segment name to the renderer fn in `src/public/renderers.js`. */
 const RENDERER: Readonly<Record<string, string>> = {
 	getActor: 'renderActor',
-	getBook: 'renderBook',
 	getBookOnShelf: 'renderBookShelf',
 	getContributor: 'renderContributor',
-	getGenre: 'renderGenre',
+	getEdition: 'renderEdition',
+	getImageForBook: 'renderImageForBook',
+	getImageForContributor: 'renderImageForContributor',
 	getShelf: 'renderShelf',
 	getShelvingOfBook: 'renderListResults',
-	listBooks: 'renderListResults',
 	listBooksOnShelf: 'renderListResults',
-	listGenres: 'renderListResults',
 	listShelves: 'renderListResults',
 	listShelvesWithBooks: 'renderListResults',
-	searchBooks: 'renderSearchResults',
 	searchContributors: 'renderSearchResults',
+	searchEditions: 'renderSearchResults',
 };
 
 function categoryOf(name: string): ExampleCategory | undefined {
