@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { GbVolume } from './client.js';
 import { COLLECTION } from '../lex/collections.js';
-import { decodeGbCursor, encodeGbCursor, gbAuthorSlugToName, gbVolumeToBookView } from './mapper.js';
+import {
+	decodeGbCursor,
+	encodeGbCursor,
+	gbIdentifiersToIdentifiers,
+	gbVolumeToEditionRecord,
+} from './mapper.js';
 
 const ctx = { serviceDid: 'did:web:books.example.com' };
 
@@ -17,197 +22,73 @@ const SAMPLE: GbVolume = {
 			{ type: 'ISBN_10', identifier: '055380457X' },
 			{ type: 'ISBN_13', identifier: '9780553804577' },
 		],
-		imageLinks: { thumbnail: 'https://example.com/cover.jpg' },
 	},
 };
 
-describe('gbVolumeToBookView', () => {
-	it('maps a full volume to a BookView', async () => {
-		const view = await gbVolumeToBookView(ctx, SAMPLE);
-		expect(view).toBeDefined();
-		expect(view?.uri).toBe(`at://${ctx.serviceDid}/${COLLECTION.book}/gb-_LettPDhwR0C`);
-		expect(view?.title).toBe('The Google Story');
-		expect(view?.identifiers).toEqual([
-			{ resource: 'isbn_10:055380457X', url: 'https://books.google.com/books?id=_LettPDhwR0C' },
-			{ resource: 'isbn_13:9780553804577', url: 'https://books.google.com/books?id=_LettPDhwR0C' },
-		]);
-		expect(view?.coverUrl).toBe('https://example.com/cover.jpg');
-		expect(view?.publishDate).toBe('2005-11-15T00:00:00.000Z');
-		expect(view?.description).toBe('A story about Google.');
-		expect(view?.contributors).toHaveLength(2);
-		expect(view?.contributors?.[0].contributor.name).toBe('David A. Vise');
-		expect(view?.contributors?.[0].role).toContain('contributorRole/author');
+describe('gbIdentifiersToIdentifiers', () => {
+	it('maps ISBN_10 to isbn10 + urn:isbn URI', () => {
+		const out = gbIdentifiersToIdentifiers(SAMPLE.volumeInfo);
+		expect(out).toContainEqual({ uri: 'urn:isbn:055380457X', resource: 'isbn10' });
+		expect(out).toContainEqual({ uri: 'urn:isbn:9780553804577', resource: 'isbn13' });
+	});
+});
+
+describe('gbVolumeToEditionRecord', () => {
+	it('maps a full volume to a community edition record', () => {
+		const rec = gbVolumeToEditionRecord(ctx, SAMPLE);
+		expect(rec).toBeDefined();
+		expect(rec?.$type).toBe(COLLECTION.edition);
+		expect(rec?.title).toBe('The Google Story');
+		expect(rec?.subtitle).toBe('Inside the Hottest Business, Media, and Technology Success of Our Time');
+		expect(rec?.publishedYear).toBe(2005);
+		expect(rec?.description).toBe('A story about Google.');
+		const identifiers = rec?.identifiers as Array<{ uri: string; resource: string }>;
+		expect(identifiers).toContainEqual({ uri: 'urn:isbn:055380457X', resource: 'isbn10' });
+		expect(identifiers).toContainEqual({ uri: 'urn:isbn:9780553804577', resource: 'isbn13' });
 	});
 
-	it('returns undefined when title is missing', async () => {
-		expect(await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: {} })).toBeUndefined();
+	it('returns undefined when title is missing', () => {
+		expect(gbVolumeToEditionRecord(ctx, { id: 'x', volumeInfo: {} })).toBeUndefined();
 	});
 
-	it('handles minimal volumeInfo gracefully', async () => {
-		const v = await gbVolumeToBookView(ctx, { id: 'a_b-1', volumeInfo: { title: 'Minimal' } });
+	it('handles minimal volumeInfo gracefully', () => {
+		const v = gbVolumeToEditionRecord(ctx, {
+			id: 'a_b-1',
+			volumeInfo: { title: 'Minimal' },
+		});
 		expect(v?.title).toBe('Minimal');
-		expect(v?.identifiers).toEqual([]);
-		expect(v?.contributors).toEqual([]);
-		expect(v?.coverUrl).toBeUndefined();
-		expect(v?.publishDate).toBeUndefined();
-		expect(v?.description).toBeUndefined();
+		expect(v?.identifiers ?? []).toEqual([]);
 	});
 
-	it('falls back to smallThumbnail when thumbnail is absent', async () => {
-		const v = await gbVolumeToBookView(ctx, {
+	it('omits publishedYear for unparseable dates', () => {
+		const v = gbVolumeToEditionRecord(ctx, {
 			id: 'x',
-			volumeInfo: { title: 'T', imageLinks: { smallThumbnail: 'https://example.com/small.jpg' } },
+			volumeInfo: { title: 'T', publishedDate: 'banana' },
 		});
-		expect(v?.coverUrl).toBe('https://example.com/small.jpg');
+		expect(v?.publishedYear).toBeUndefined();
 	});
 
-	it('parses partial publish dates (YYYY and YYYY-MM)', async () => {
-		const v1 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '1890' } });
-		expect(v1?.publishDate).toBe('1890-01-01T00:00:00.000Z');
-		const v2 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2010-05' } });
-		expect(v2?.publishDate).toBe('2010-05-01T00:00:00.000Z');
-	});
-
-	it('omits publishDate for unparseable dates', async () => {
-		const v = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: 'sometime' } });
-		expect(v?.publishDate).toBeUndefined();
-	});
-
-	it('rejects publishDate rollovers (Feb 30, Apr 31, month 13)', async () => {
-		const v1 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2024-02-30' } });
-		expect(v1?.publishDate).toBeUndefined();
-		const v2 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2024-04-31' } });
-		expect(v2?.publishDate).toBeUndefined();
-		const v3 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2024-13-01' } });
-		expect(v3?.publishDate).toBeUndefined();
-		const v4 = await gbVolumeToBookView(ctx, { id: 'x', volumeInfo: { title: 'T', publishedDate: '2023-02-29' } });
-		expect(v4?.publishDate).toBeUndefined();
-	});
-
-	it('slugs authors deterministically and falls back to a hash for non-ASCII names', async () => {
-		const a = await gbVolumeToBookView(ctx, {
-			id: 'x',
-			volumeInfo: { title: 'T', authors: ['Tolkien, J.R.R.', '村上春樹'] },
-		});
-		const names = a?.contributors?.map((c) => c.contributor.uri.split('/').pop());
-		expect(names?.[0]).toMatch(/^gbauthors-tolkien-j-r-r$/);
-		expect(names?.[1]).toMatch(/^gbauthors-xn-[a-z0-9]+$/);
-	});
-
-	it('does not collide with names whose slug starts with c-', async () => {
-		// "C. S. Lewis" must slug to a real-name shape, NOT the xn- hash fallback.
-		// The old `c-` prefix on the hash fallback would have produced
-		// `gbauthors-c-s-lewis` and collided with this real name.
-		const a = await gbVolumeToBookView(ctx, {
-			id: 'x',
-			volumeInfo: { title: 'T', authors: ['C. S. Lewis'] },
-		});
-		const slug = a?.contributors?.[0].contributor.uri.split('/').pop();
-		expect(slug).toBe('gbauthors-c-s-lewis');
-		expect(slug).not.toMatch(/^gbauthors-xn-/);
-	});
-
-	it('upgrades http cover URLs to https', async () => {
-		const v = await gbVolumeToBookView(ctx, {
-			id: 'x',
-			volumeInfo: { title: 'T', imageLinks: { thumbnail: 'http://example.com/cover.jpg' } },
-		});
-		expect(v?.coverUrl).toBe('https://example.com/cover.jpg');
-	});
-
-	it('upgrades http smallThumbnail when thumbnail is absent', async () => {
-		const v = await gbVolumeToBookView(ctx, {
-			id: 'x',
-			volumeInfo: { title: 'T', imageLinks: { smallThumbnail: 'http://example.com/small.jpg' } },
-		});
-		expect(v?.coverUrl).toBe('https://example.com/small.jpg');
-	});
-
-	it('passes https URLs through unchanged', async () => {
-		const v = await gbVolumeToBookView(ctx, {
+	it('emits no coverUrl in the record (covers live in getImageForBook)', () => {
+		const v = gbVolumeToEditionRecord(ctx, {
 			id: 'x',
 			volumeInfo: { title: 'T', imageLinks: { thumbnail: 'https://example.com/cover.jpg' } },
 		});
-		expect(v?.coverUrl).toBe('https://example.com/cover.jpg');
-	});
-
-	it('strips &edge=curl from cover URLs', async () => {
-		const v = await gbVolumeToBookView(ctx, {
-			id: 'x',
-			volumeInfo: {
-				title: 'T',
-				imageLinks: {
-					thumbnail:
-						'https://books.google.com/books?id=X&printsec=frontcover&img=1&zoom=1&edge=curl&source=gbs_api',
-				},
-			},
-		});
-		expect(v?.coverUrl).toBe(
-			'https://books.google.com/books?id=X&printsec=frontcover&img=1&zoom=1&source=gbs_api',
-		);
-	});
-
-	it('strips &edge=curl when it is the last query param', async () => {
-		const v = await gbVolumeToBookView(ctx, {
-			id: 'x',
-			volumeInfo: {
-				title: 'T',
-				imageLinks: { thumbnail: 'https://books.google.com/books?id=X&edge=curl' },
-			},
-		});
-		expect(v?.coverUrl).toBe('https://books.google.com/books?id=X');
-	});
-
-	it('strips &edge=curl from smallThumbnail fallback too', async () => {
-		const v = await gbVolumeToBookView(ctx, {
-			id: 'x',
-			volumeInfo: {
-				title: 'T',
-				imageLinks: {
-					smallThumbnail: 'https://books.google.com/books?id=X&printsec=frontcover&edge=curl',
-				},
-			},
-		});
-		expect(v?.coverUrl).toBe(
-			'https://books.google.com/books?id=X&printsec=frontcover',
-		);
+		expect((v as Record<string, unknown>)?.coverUrl).toBeUndefined();
 	});
 });
 
-describe('gbAuthorSlugToName', () => {
-	it('maps a real-name slug back to its space-joined form', () => {
-		expect(gbAuthorSlugToName('gbauthors-c-s-lewis')).toBe('c s lewis');
-		expect(gbAuthorSlugToName('gbauthors-tolkien-j-r-r')).toBe('tolkien j r r');
-	});
-
-	it('passes through a hash-fallback slug as the base36 token', () => {
-		// Hash is opaque; just verify shape and that no `-` rewriting happens
-		// inside the token.
-		const result = gbAuthorSlugToName('gbauthors-xn-1abc23');
-		expect(result).toBe('1abc23');
-	});
-
-	it('throws on a slug that lacks the gbauthors- prefix', () => {
-		expect(() => gbAuthorSlugToName('tolkien-j-r-r')).toThrow(/not a gbauthor slug/);
-		expect(() => gbAuthorSlugToName('other-authors-tolkien')).toThrow(/not a gbauthor slug/);
-	});
-
-	it('throws on empty or whitespace input', () => {
-		expect(() => gbAuthorSlugToName('')).toThrow(/not a gbauthor slug/);
-		expect(() => gbAuthorSlugToName('gbauthors-')).toThrow(/not a gbauthor slug/);
-	});
-});
-
-describe('cursor codec', () => {
+describe('gb cursor', () => {
 	it('round-trips a cursor', () => {
-		const c = { q: 'flowers', startIndex: 40 };
-		expect(decodeGbCursor(encodeGbCursor(c))).toEqual(c);
+		const c = { q: 'foo', startIndex: 20 };
+		const encoded = encodeGbCursor(c);
+		expect(decodeGbCursor(encoded)).toEqual(c);
 	});
 
-	it('returns undefined for missing/invalid input', () => {
+	it('returns undefined for missing cursor', () => {
 		expect(decodeGbCursor(undefined)).toBeUndefined();
-		expect(decodeGbCursor('')).toBeUndefined();
-		expect(decodeGbCursor('not-base64!')).toBeUndefined();
-		expect(decodeGbCursor(Buffer.from('{}', 'utf8').toString('base64url'))).toBeUndefined();
+	});
+
+	it('returns undefined for invalid cursor', () => {
+		expect(decodeGbCursor('not-base64!!')).toBeUndefined();
 	});
 });

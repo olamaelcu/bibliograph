@@ -28,7 +28,7 @@ describe('lexicon catalog', () => {
 		expect(queryCount).toBeGreaterThan(0);
 		for (const endpoint of lexiconEndpoints) {
 			expect(endpoint.type === 'query' || endpoint.type === 'procedure').toBe(true);
-			expect(endpoint.id).toMatch(/^(net\.olamaelcu\.livtet\.biblio\.|com\.atproto\.)/);
+			expect(endpoint.id).toMatch(/^(net\.olamaelcu\.livtet\.biblio\.|community\.lexicon\.book\.|com\.atproto\.)/);
 		}
 	});
 
@@ -44,46 +44,35 @@ describe('lexicon catalog', () => {
 		}
 	});
 
-	it('documents parameters and output of searchBooks', () => {
-		const search = lexiconEndpoints.find((e) => e.name === 'searchBooks');
+	it('documents parameters and output of searchEditions', () => {
+		const search = lexiconEndpoints.find((e) => e.name === 'searchEditions');
 		expect(search).toBeDefined();
-		expect(search?.params.some((p) => p.name === 'q' && p.required)).toBe(true);
-		expect(search?.output?.properties.some((p) => p.name === 'books')).toBe(true);
+		expect(search?.params.some((p) => p.name === 'q')).toBe(true);
+		expect(search?.output?.properties.some((p) => p.name === 'items')).toBe(true);
 	});
 
 	it('marks params required/optional and includes descriptions', () => {
-		const getBook = lexiconEndpoints.find((e) => e.name === 'getBook');
-		expect(getBook?.params).toEqual([
+		const getEdition = lexiconEndpoints.find((e) => e.name === 'getEdition');
+		expect(getEdition?.params).toEqual([
 			expect.objectContaining({ name: 'uri', type: 'string', required: true }),
 		]);
-		expect(getBook?.description).toMatch(/hydrated view/);
+		expect(getEdition?.description).toBeDefined();
 	});
 
 	describe('record lexicons', () => {
 		it('extracts every record-type lexicon', () => {
-			expect(recordLexicons.length).toBeGreaterThanOrEqual(9);
+			expect(recordLexicons.length).toBeGreaterThanOrEqual(5);
 			for (const record of recordLexicons) {
 				expect(record.type).toBe('record');
-				expect(record.id).toMatch(/^net\.olamaelcu\.livtet\.biblio\./);
+				expect(record.id).toMatch(/^net\.olamaelcu\.livtet\.biblio\.|community\.lexicon\.book\./);
 			}
 		});
 
 		it('classifies the catalog records by ownership', () => {
 			const catalog = recordLexicons.filter((r) => catalogRecordNsids.has(r.id));
 			const users = recordLexicons.filter((r) => !catalogRecordNsids.has(r.id));
-		expect(catalog.map((r) => r.name).sort()).toEqual([
-			'book',
-			'bookContributor',
-			'contributor',
-			'contributorRole',
-			'format',
-			'genre',
-		]);
-		expect(users.map((r) => r.name).sort()).toEqual([
-			'actor',
-			'bookShelving',
-			'shelf',
-		]);
+			expect(catalog.map((r) => r.name).sort()).toEqual(['contributor', 'edition']);
+			expect(users.map((r) => r.name).sort()).toEqual(['actor', 'bookShelving', 'shelf']);
 		});
 
 		it('captures schema constraints on record properties', () => {
@@ -149,23 +138,11 @@ describe('page templates', () => {
 		}
 	});
 
-	it('renders the search page with a form and the searchBooks XRPC query', () => {
+	it('renders the search page with a form and the searchEditions XRPC query', () => {
 		const html = renderPage('search', { title: 'Search', description: 'd' });
 		expect(html).toContain('id="search-form"');
 		expect(html).toContain('id="search-q"');
-		expect(html).toContain('/xrpc/net.olamaelcu.livtet.biblio.searchBooks');
-		expect(html).toContain('bc.contributor?.name');
-		expect(html).toContain('book.coverUrl');
-	});
-
-	it('wires up cursor-based load-more pagination in the search script', () => {
-		const html = renderPage('search', { title: 'Search', description: 'd' });
-		expect(html).toContain('let currentCursor = null');
-		expect(html).toContain('currentCursor = data.cursor');
-		expect(html).toContain('cursor: currentCursor');
-		expect(html).toContain('appendLoadMore');
-		expect(html).toContain('load-more-btn');
-		expect(html).toContain('End of results');
+		expect(html).toContain('/xrpc/community.lexicon.book.searchEditions');
 	});
 
 	it('renders the examples index with one section per category and every query NSID', async () => {
@@ -185,10 +162,10 @@ describe('page templates', () => {
 
 	it('renders a per-query example page with form, output container, and renderer import', async () => {
 		const { findExample } = await import('./categories.js');
-		const entry = findExample(lexiconEndpoints, 'getBook');
+		const entry = findExample(lexiconEndpoints, 'getEdition');
 		expect(entry).toBeDefined();
-		const html = renderPage('examples/getBook', {
-			title: 'getBook',
+		const html = renderPage('examples/getEdition', {
+			title: 'getEdition',
 			description: 'd',
 			nsid: entry!.endpoint.id,
 			renderer: entry!.renderer,
@@ -197,10 +174,10 @@ describe('page templates', () => {
 		expect(html).toContain('id="example-form"');
 		expect(html).toContain('id="example-output"');
 		expect(html).toContain('id="param-uri"');
-		expect(html).toContain('net.olamaelcu.livtet.biblio.getBook');
+		expect(html).toContain('community.lexicon.book.getEdition');
 		expect(html).toContain('/static/examples-client.js');
 		expect(html).toContain('/static/renderers.js');
-		expect(html).toContain('renderBook');
+		expect(html).toContain('renderEdition');
 	});
 
 	it('includes the active nav marker on the Examples page', () => {

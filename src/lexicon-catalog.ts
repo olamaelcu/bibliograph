@@ -283,13 +283,17 @@ function parseLexiconRecord(file: string): LexiconRecord | null {
  * else is written by clients to the user's own PDS and surfaced via
  * Jetstream indexing (`user_records`).
  */
+/**
+ * AppView-owned catalog records: `community.lexicon.book.*` (we publish these).
+ * App-private user-owned records (shelf, bookShelving, actor) live under
+ * `net.olamaelcu.livtet.biblio.*` and are Jetstream-indexed; they're surfaced
+ * separately on the records page.
+ */
 export const catalogRecordNsids: ReadonlySet<string> = new Set([
   'community.lexicon.book.edition',
   'community.lexicon.book.contributor',
-  // App-private user-owned records:
-  'net.olamaelcu.livtet.biblio.shelf',
-  'net.olamaelcu.livtet.biblio.bookShelving',
-  'net.olamaelcu.livtet.biblio.actor',
+  'community.lexicon.book.publisher',
+  'community.lexicon.book.work',
 ]);
 
 /** All xrpc `query`/`procedure` endpoints, sorted by NSID. Built once at module load. */

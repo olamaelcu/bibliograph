@@ -9,7 +9,7 @@ export const COLLECTION = {
 	contributor: 'community.lexicon.book.contributor',
 	// App-private user-owned collections (Jetstream-indexed):
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
-	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelf',
+	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
 	actor: 'net.olamaelcu.livtet.biblio.actor',
 } as const;
 

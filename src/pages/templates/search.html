@@ -95,7 +95,7 @@
     <h2>Search</h2>
     <p class="muted">
       Search the catalog for books and browse their contributors and covers.
-      This page is a live client of the <code>net.olamaelcu.livtet.biblio.searchBooks</code> query
+      This page is a live client of the <code>community.lexicon.book.searchEditions</code> query
       served over <code>/xrpc</code>, backed by Google Books.
     </p>
   </div>
@@ -109,7 +109,7 @@
 </main>
 
 <script type="module">
-  const SEARCH_BOOKS = '/xrpc/net.olamaelcu.livtet.biblio.searchBooks';
+  const SEARCH_BOOKS = '/xrpc/community.lexicon.book.searchEditions';
   const PAGE_LIMIT = 20;
 
   const form = document.getElementById('search-form');
@@ -134,23 +134,41 @@
     return trimmed.slice(0, max).trimEnd() + '&hellip;';
   }
 
-  function renderCard(book) {
-    const authors = (book.contributors ?? [])
-      .map((bc) => bc.contributor?.name)
+  function renderCard(edition) {
+    const authors = (edition.contributors ?? [])
+      .map((c) => c.name ?? c.subject)
       .filter(Boolean)
       .join(', ');
-    const coverHtml = book.coverUrl
-      ? `<img class="book-cover" loading="lazy" src="${escapeHtml(book.coverUrl)}" alt="" />`
+    // Fetch cover via getImageForBook (separate XRPC; covers are not in the record).
+    const coverHtml = edition.uri
+      ? `<img class="book-cover" loading="lazy" data-cover-uri="${escapeHtml(edition.uri)}" alt="" />`
       : '<p class="no-covers">No cover.</p>';
 
     return `<wa-card class="book-card"><div slot="header" class="book-card-header">
-          <h3 class="book-title">${escapeHtml(book.title)}</h3>
-          <span class="book-id">${escapeHtml(book.uri)}</span>
+          <h3 class="book-title">${escapeHtml(edition.title)}</h3>
+          <span class="book-id">${escapeHtml(edition.uri)}</span>
         </div>
         <p class="book-authors">${authors ? `By ${escapeHtml(authors)}` : 'No contributors listed.'}</p>
-        <p class="book-desc">${book.description ? `${snippet(book.description, 200)}` : 'No description.'}</p>
+        <p class="book-desc">${edition.description ? `${snippet(edition.description, 200)}` : 'No description.'}</p>
         ${coverHtml}
       </wa-card>`;
+  }
+
+  async function loadCovers() {
+    const imgs = document.querySelectorAll('img[data-cover-uri]');
+    for (const img of imgs) {
+      const uri = img.getAttribute('data-cover-uri');
+      if (!uri) continue;
+      try {
+        const res = await fetch(`/xrpc/net.olamaelcu.livtet.biblio.getImageForBook?uri=${encodeURIComponent(uri)}`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data.url) img.src = data.url;
+        else img.replaceWith(Object.assign(document.createElement('p'), { className: 'no-covers', textContent: 'No cover.' }));
+      } catch {
+        // leave the placeholder
+      }
+    }
   }
 
   async function runSearch(q) {
@@ -164,15 +182,16 @@
     }
     const data = await res.json();
     currentCursor = data.cursor ?? null;
-    const books = data.books ?? [];
-    if (books.length === 0) {
-      results.innerHTML = '<p class="muted">No books matched your query.</p>';
+    const items = data.items ?? [];
+    if (items.length === 0) {
+      results.innerHTML = '<p class="muted">No editions matched your query.</p>';
       return;
     }
-    const total = data.hitsTotal != null ? ` of ${data.hitsTotal.toLocaleString()}` : '';
-    results.innerHTML = `<p class="muted search-count">${books.length}${total} books found.</p>`;
-    const cards = books.map((b) => renderCard(b));
+    const total = data.total != null ? ` of ${data.total.toLocaleString()}` : '';
+    results.innerHTML = `<p class="muted search-count">${items.length}${total} editions found.</p>`;
+    const cards = items.map((b) => renderCard(b));
     results.insertAdjacentHTML('beforeend', cards.join(''));
+    loadCovers();
     appendLoadMore();
     history.replaceState(null, '', `?q=${encodeURIComponent(q)}`);
   }
@@ -189,10 +208,11 @@
     }
     const data = await res.json();
     currentCursor = data.cursor ?? null;
-    const books = data.books ?? [];
-    const cards = books.map((b) => renderCard(b));
+    const items = data.items ?? [];
+    const cards = items.map((b) => renderCard(b));
     document.querySelector('.load-more')?.remove();
     results.insertAdjacentHTML('beforeend', cards.join(''));
+    loadCovers();
     appendLoadMore();
     if (btn) btn.loading = false;
   }

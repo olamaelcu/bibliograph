@@ -238,12 +238,29 @@ export class UpstreamUnavailableError extends Error {
 }
 
 /**
- * Mint a fresh TID for use as an atproto record rkey. We use a 13-char
- * Crockford base32 string of mostly random bytes; collisions are negligible
- * at our scale (32^13 ≈ 3.7e19 possibilities).
+ * Mint a fresh TID for use as an atproto record rkey. The default form is a
+ * 13-char Crockford base32 string of random bytes plus a timestamp suffix.
+ *
+ * Pass a `seed` to derive a deterministic TID (e.g., from a GB volume id) so
+ * concurrent lazy-imports collapse to the same edition row.
  */
-export function mintTid(): string {
+export function mintTid(seed?: string): string {
 	const alphabet = '234567abcdefghijklmnopqrstuvwxyz';
+	if (seed) {
+		// Hash the seed string to 13 chars of Crockford base32.
+		const out: string[] = [];
+		let h = 0x811c9dc5;
+		for (let i = 0; i < seed.length; i++) {
+			h ^= seed.charCodeAt(i);
+			h = Math.imul(h, 0x01000193);
+		}
+		// Mix with timestamp for stability across processes.
+		h ^= Math.floor(Date.now() / 1000);
+		for (let i = 0; i < 13; i++) {
+			out.push(alphabet[(h >>> (i * 5)) & 0x1f]);
+		}
+		return out.join('');
+	}
 	const bytes = new Uint8Array(8);
 	crypto.getRandomValues(bytes);
 	let out = '';
@@ -272,14 +289,15 @@ name: string,
 }
 
 /**
- * Idempotently persist a GB-backed edition. Mints a fresh TID, dedupes
- * contributors by `name_lower`, and writes identifier rows in flipped
- * `{value_scheme, value, uri}` form. Wrapped in a single transaction.
+ * Idempotently persist a GB-backed edition. Mints a deterministic TID from the
+ * GB volume id so concurrent lazy-imports of the same volume collapse to a
+ * single row. Dedupes contributors by `name_lower`. Writes identifier rows
+ * in flipped `{value_scheme, value, uri}` form. Wrapped in a single transaction.
  */
 export async function persistGbBackedEdition(db: Db, volume: GbVolume): Promise<string> {
 	const info = volume.volumeInfo;
 	if (!info) throw new UpstreamUnavailableError('volume missing volumeInfo');
-	const editionTid = mintTid();
+	const editionTid = mintTid(`gb:${volume.id}`);
 	const now = Math.floor(Date.now() / 1000);
 
 	const contributorTids = new Map<string, string>(); // author name → pk

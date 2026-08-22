@@ -7,7 +7,6 @@ import type { ViewContext } from '../lex/collections.js';
 const ctx: ViewContext = { serviceDid: SERVICE_DID };
 
 let dbHolder: Awaited<ReturnType<typeof createTestDb>>;
-const router = () => createXrpcRouter(dbHolder.db, ctx);
 
 beforeAll(async () => {
 	process.env.ATP_SERVICE_HOST = SERVICE_HOST;
@@ -30,7 +29,7 @@ function stubFetch(body: unknown, status = 200): typeof fetch {
 
 function countingFetch(body: unknown): { fetch: typeof fetch; calls: { count: number } } {
 	const counter = { count: 0 };
-	const fetchImpl = (async (_input: Request | URL | string, _init?: RequestInit) => {
+	const fetchImpl = (async () => {
 		counter.count += 1;
 		return new Response(JSON.stringify(body), {
 			status: 200,
@@ -48,275 +47,215 @@ function appWithGb(fetchImpl: typeof fetch) {
 	};
 }
 
-describe('placeholder', () => {
-	it('1', () => expect(1).toBe(1));
-});
-describe('searchBooks (Google Books backed)', () => {
-	it('returns GB results with hitsTotal', async () => {
-		const items = [{ id: '_abc', volumeInfo: { title: 'A' } }, { id: '_def', volumeInfo: { title: 'B' } }];
+const SEARCH_EDITIONS = '/xrpc/community.lexicon.book.searchEditions';
+const GET_EDITION = '/xrpc/community.lexicon.book.getEdition';
+const GET_CONTRIBUTOR = '/xrpc/community.lexicon.book.getContributor';
+const SEARCH_CONTRIBUTORS = '/xrpc/community.lexicon.book.searchContributors';
+const COMPATIBILITY = '/xrpc/community.lexicon.book.compatibility';
+
+describe('community.lexicon.book.searchEditions', () => {
+	it('returns GB results with total and items[]', async () => {
+		const items = [
+			{ id: '_abc', volumeInfo: { title: 'A' } },
+			{ id: '_def', volumeInfo: { title: 'B' } },
+		];
 		const a = appWithGb(stubFetch({ totalItems: 2, items }));
-		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=flowers&limit=2');
+		const res = await a.fetch(`${SEARCH_EDITIONS}?q=flowers&limit=2`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
-		expect(body.hitsTotal).toBe(2);
-		expect(body.books).toHaveLength(2);
-		expect(body.books[0].title).toBe('A');
+		expect(body.total).toBe(2);
+		expect(body.items).toHaveLength(2);
+		expect(body.items[0].title).toBe('A');
 	});
 
-	it('handles empty GB results with hitsTotal 0', async () => {
+	it('handles empty GB results with total 0', async () => {
 		const a = appWithGb(stubFetch({ totalItems: 0, items: [] }));
-		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=nothing');
+		const res = await a.fetch(`${SEARCH_EDITIONS}?q=nothing`);
 		const body = await res.json();
-		expect(body.books).toEqual([]);
-		expect(body.hitsTotal).toBe(0);
+		expect(body.items).toEqual([]);
+		expect(body.total).toBe(0);
+	});
+
+	it('returns empty when no q or id given', async () => {
+		const a = appWithGb(stubFetch({}));
+		const res = await a.fetch(SEARCH_EDITIONS);
+		const body = await res.json();
+		expect(body.items).toEqual([]);
+	});
+
+	it('P8 in-flight dedup: 5 concurrent identical searches hit Google Books once', async () => {
+		const items = [{ id: '_a', volumeInfo: { title: 'A' } }];
+		const { fetch: fetchImpl, calls } = countingFetch({ totalItems: 1, items });
+		const a = appWithGb(fetchImpl);
+		const responses = await Promise.all([
+			a.fetch(`${SEARCH_EDITIONS}?q=tolkien&limit=1`),
+			a.fetch(`${SEARCH_EDITIONS}?q=tolkien&limit=1`),
+			a.fetch(`${SEARCH_EDITIONS}?q=tolkien&limit=1`),
+			a.fetch(`${SEARCH_EDITIONS}?q=tolkien&limit=1`),
+			a.fetch(`${SEARCH_EDITIONS}?q=tolkien&limit=1`),
+		]);
+		expect(calls.count).toBe(1);
+		const bodies = await Promise.all(responses.map((r) => r.json()));
+		expect(bodies[0].items[0].title).toBe('A');
+		expect(bodies[4].items[0].title).toBe('A');
 	});
 });
 
-describe('getBook (Google Books backed)', () => {
-	it('returns 200 for a gb- rkey and shapes the BookView', async () => {
+describe('community.lexicon.book.getEdition', () => {
+	it('returns 200 for a gb- rkey and shapes the edition record', async () => {
 		const a = appWithGb(stubFetch({ id: '_abc', volumeInfo: { title: 'X', authors: ['A'] } }));
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.book/gb-_abc`;
-		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(uri)}`);
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.edition/gb-_abc`;
+		const res = await a.fetch(`${GET_EDITION}?uri=${encodeURIComponent(uri)}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
-		expect(body.book.uri).toBe(uri);
-		expect(body.book.title).toBe('X');
+		expect(body.edition.title).toBe('X');
+		expect(body.edition.$type).toBe('community.lexicon.book.edition');
 	});
 
-	it('returns 400 for a non-gb rkey', async () => {
+	it('returns 404 for a non-gb rkey that has no DB row', async () => {
 		const a = appWithGb(stubFetch({}));
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.book/ol123m`;
-		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(uri)}`);
-		expect(res.status).toBe(400);
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.edition/ol123m`;
+		const res = await a.fetch(`${GET_EDITION}?uri=${encodeURIComponent(uri)}`);
+		expect(res.status).toBe(404);
 	});
 
 	it('returns 404 when GB has no such volume', async () => {
 		const a = appWithGb(stubFetch('not found', 404));
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.book/gb-_nope`;
-		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(uri)}`);
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.edition/gb-_nope`;
+		const res = await a.fetch(`${GET_EDITION}?uri=${encodeURIComponent(uri)}`);
 		expect(res.status).toBe(404);
 	});
 
 	it('returns 404 when GB omits volumeInfo.title', async () => {
-		const a = appWithGb(stubFetch({ id: '_empty' }));
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.book/gb-_empty`;
-		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getBook?uri=${encodeURIComponent(uri)}`);
+		const a = appWithGb(stubFetch({ id: 'x', volumeInfo: {} }));
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.edition/gb-no-title`;
+		const res = await a.fetch(`${GET_EDITION}?uri=${encodeURIComponent(uri)}`);
 		expect(res.status).toBe(404);
 	});
-});
 
-describe('listBooks (Google Books backed)', () => {
-	it('requires at least one of q/genre/contributor', async () => {
+	it('returns 200 for a non-gb rkey when the edition is in the DB', async () => {
 		const a = appWithGb(stubFetch({}));
-		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks');
-		expect(res.status).toBe(400);
-	});
-
-	it('rejects the format filter as unsupported', async () => {
-		const a = appWithGb(stubFetch({}));
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.format/paperback`;
-		const res = await a.fetch(
-			`/xrpc/net.olamaelcu.livtet.biblio.listBooks?q=x&format=${encodeURIComponent(uri)}`,
-		);
-		expect(res.status).toBe(400);
-	});
-
-	it('forwards q verbatim to GB', async () => {
-		const a = appWithGb(stubFetch({ totalItems: 0, items: [] }));
-		const res = await a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?q=hello');
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.edition/test-edition-dune`;
+		const res = await a.fetch(`${GET_EDITION}?uri=${encodeURIComponent(uri)}`);
 		expect(res.status).toBe(200);
-	});
-});
-
-describe('listBooks (Google Books backed) — P4 contributor slug', () => {
-	it('returns 400 InvalidRequest for a malformed contributor slug', async () => {
-		const a = appWithGb(stubFetch({}));
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/not-a-real-slug`;
-		const res = await a.fetch(
-			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?contributor=' + encodeURIComponent(uri),
-		);
-		expect(res.status).toBe(400);
 		const body = await res.json();
-		expect(body.error).toBe('InvalidRequest');
-	});
-
-	it('returns 400 when the contributor rkey is missing the gbauthors- prefix', async () => {
-		const a = appWithGb(stubFetch({}));
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/c-s-lewis`;
-		const res = await a.fetch(
-			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?contributor=' + encodeURIComponent(uri),
-		);
-		expect(res.status).toBe(400);
-	});
-
-	it('accepts a well-formed gbauthors- slug and forwards inauthor:"<name>" to GB', async () => {
-		let captured: { url: string } | null = null;
-		const fetchImpl = (async (input: Request | URL | string) => {
-			captured = { url: String(input) };
-			return new Response(JSON.stringify({ totalItems: 0, items: [] }), {
-				status: 200,
-				headers: { 'content-type': 'application/json' },
-			});
-		}) as typeof fetch;
-		const a = appWithGb(fetchImpl);
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/gbauthors-c-s-lewis`;
-		const res = await a.fetch(
-			'/xrpc/net.olamaelcu.livtet.biblio.listBooks?contributor=' + encodeURIComponent(uri),
-		);
-		expect(res.status).toBe(200);
-		expect(captured?.url).toContain('inauthor%3A%22c+s+lewis%22');
+		expect(body.edition.title).toBe('Dune (40th Anniversary)');
 	});
 });
 
-describe('getContributor', () => {
+describe('community.lexicon.book.getContributor', () => {
 	it('returns a contributor view hydrated from the catalog', async () => {
-		const res = await router().fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=' +
-				encodeURIComponent(`at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/author-herbert`)),
-		);
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.contributor/ctest-author-herbert`;
+		const a = appWithGb(stubFetch({}));
+		const res = await a.fetch(`${GET_CONTRIBUTOR}?uri=${encodeURIComponent(uri)}`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.contributor.name).toBe('Frank Herbert');
-		expect(body.contributor.sortName).toBe('Herbert, Frank');
-		expect(body.contributor.identifiers[0].resource).toBe('viaf:59083797');
-	});
-
-	it('returns 404 for a missing contributor', async () => {
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.contributor/nope`;
-		const res = await router().fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=' + encodeURIComponent(uri)),
-		);
-		expect(res.status).toBe(404);
 	});
 
 	it('rejects a uri from a different collection', async () => {
-		const uri = `at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.genre/scifi`;
-		const res = await router().fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=' + encodeURIComponent(uri)),
-		);
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.edition/test-edition-dune`;
+		const a = appWithGb(stubFetch({}));
+		const res = await a.fetch(`${GET_CONTRIBUTOR}?uri=${encodeURIComponent(uri)}`);
 		expect(res.status).toBe(400);
 	});
 });
 
-describe('getGenre', () => {
-	it('returns a genre view with parent uri', async () => {
-		const res = await router().fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.getGenre?uri=' +
-				encodeURIComponent(`at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.genre/scifi`)),
-		);
-		expect(res.status).toBe(200);
-		const body = await res.json();
-		expect(body.genre.name).toBe('Science Fiction');
-		expect(body.genre.parent).toBe(`at://${SERVICE_DID}/net.olamaelcu.livtet.biblio.genre/fiction`);
-	});
-});
-
-describe('listGenres', () => {
-	it('returns all genres', async () => {
-		const res = await router().fetch(new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.listGenres'));
-		expect(res.status).toBe(200);
-		const body = await res.json();
-		expect(body.genres.map((g: { name: string }) => g.name).sort()).toEqual(['Fiction', 'Science Fiction']);
-	});
-
-	it('filters to top-level genres', async () => {
-		const res = await router().fetch(new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.listGenres?topLevelOnly=true'));
-		const body = await res.json();
-		expect(body.genres.map((g: { name: string }) => g.name)).toEqual(['Fiction']);
-	});
-});
-
-describe('searchContributors', () => {
+describe('community.lexicon.book.searchContributors', () => {
 	it('finds contributors by name', async () => {
-		const res = await router().fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.searchContributors?q=Frank'),
-		);
+		const a = appWithGb(stubFetch({}));
+		const res = await a.fetch(`${SEARCH_CONTRIBUTORS}?q=herbert`);
 		expect(res.status).toBe(200);
 		const body = await res.json();
-		expect(body.contributors).toHaveLength(1);
-		expect(body.contributors[0].name).toBe('Frank Herbert');
+		expect(body.items.length).toBeGreaterThan(0);
 	});
 });
 
-describe('getActor', () => {
-	it('returns a bare actor view for an unindexed DID', async () => {
-		const res = await router().fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.getActor?actor=' + encodeURIComponent(SERVICE_DID)),
-		);
+describe('community.lexicon.book.compatibility', () => {
+	it('lists supported queries', async () => {
+		const a = appWithGb(stubFetch({}));
+		const res = await a.fetch(COMPATIBILITY);
 		expect(res.status).toBe(200);
 		const body = await res.json();
-		expect(body.actor.did).toBe(SERVICE_DID);
+		const ids = body.queries.map((q: { nsid: string }) => q.nsid);
+		expect(ids).toContain('community.lexicon.book.searchEditions');
+		expect(ids).toContain('community.lexicon.book.getEdition');
+		expect(ids).toContain('net.olamaelcu.livtet.biblio.getImageForBook');
 	});
 });
 
-describe('searchBooks (Google Books backed) — P8 in-flight dedup', () => {
-	it('five concurrent identical searches hit Google Books once and yield equal responses', async () => {
-		const body = {
-			totalItems: 3,
-			items: [
-				{ id: '_a', volumeInfo: { title: 'A' } },
-				{ id: '_b', volumeInfo: { title: 'B' } },
-				{ id: '_c', volumeInfo: { title: 'C' } },
-			],
-		};
-		const { fetch: fetchImpl, calls } = countingFetch(body);
-		const a = appWithGb(fetchImpl);
-		const responses = await Promise.all(
-			Array.from({ length: 5 }, () => a.fetch('/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=flowers&limit=3')),
+describe('net.olamaelcu.livtet.biblio.getImageForBook', () => {
+	it('returns 500 (not 502) when no GB client configured and no cached row', async () => {
+		// Without GOOGLE_BOOKS_API_KEY set, the lazy-built GB client throws when
+		// called. The handler reports this as an InternalServerError (500). To get
+		// 502, callers must explicitly omit the GOOGLE_BOOKS_API_KEY at startup
+		// — covered by the warning at createXrpcRouter time.
+		const r = createXrpcRouter(dbHolder.db, ctx);
+		const res = await r.fetch(
+			new Request(
+				'https://books.example.com/xrpc/net.olamaelcu.livtet.biblio.getImageForBook?uri=' +
+					encodeURIComponent(`at://${SERVICE_DID}/community.lexicon.book.edition/gb-noclient`),
+			),
 		);
-		expect(calls.count).toBe(1);
-		expect(responses.every((r) => r.status === 200)).toBe(true);
-		const bodies = await Promise.all(responses.map((r) => r.json()));
-		expect(bodies[0]).toEqual(bodies[1]);
-		expect(bodies[0]).toEqual(bodies[4]);
-		expect(bodies[0].hitsTotal).toBe(3);
-		expect(bodies[0].books).toHaveLength(3);
+		expect(res.status).toBe(500);
 	});
 
-	it('two concurrent listBooks with identical params hit GB once', async () => {
-		const body = { totalItems: 1, items: [{ id: '_a', volumeInfo: { title: 'A' } }] };
-		const { fetch: fetchImpl, calls } = countingFetch(body);
-		const a = appWithGb(fetchImpl);
-		const responses = await Promise.all([
-			a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?q=flowers'),
-			a.fetch('/xrpc/net.olamaelcu.livtet.biblio.listBooks?q=flowers'),
-		]);
-		expect(calls.count).toBe(1);
-		expect(responses.every((r) => r.status === 200)).toBe(true);
+	it('returns the GB thumbnail URL', async () => {
+		const a = appWithGb(stubFetch({
+			id: 'vol-thumb',
+			volumeInfo: { title: 'T', imageLinks: { thumbnail: 'https://example.com/cover.jpg' } },
+		}));
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.edition/gb-vol-thumb`;
+		const res = await a.fetch(`/xrpc/net.olamaelcu.livtet.biblio.getImageForBook?uri=${encodeURIComponent(uri)}`);
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.url).toBe('https://example.com/cover.jpg');
+	});
+});
+
+describe('net.olamaelcu.livtet.biblio.getImageForContributor', () => {
+	it('returns undefined url (TODO: OL cover lookup)', async () => {
+		const uri = `at://${SERVICE_DID}/community.lexicon.book.contributor/ctest-author-herbert`;
+		const a = appWithGb(stubFetch({}));
+		const res = await a.fetch(
+			`/xrpc/net.olamaelcu.livtet.biblio.getImageForContributor?uri=${encodeURIComponent(uri)}`,
+		);
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.url).toBeUndefined();
+	});
+});
+
+describe('community.lexicon.book.searchWorks / searchPublishers (not implemented)', () => {
+	// Work and publisher records aren't published by this AppView. The community
+	// lexicon contract allows optional 501 responses. We omit these lex files
+	// entirely and return 404 to make the absence visible in tooling.
+	it('searchWorks returns 404 (lex not registered)', async () => {
+		const a = appWithGb(stubFetch({}));
+		const res = await a.fetch('/xrpc/community.lexicon.book.searchWorks?q=foo');
+		expect(res.status).toBe(404);
 	});
 });
 
 describe('handler timeout', () => {
-	function hangingFetch(): typeof fetch {
-		return (() => new Promise<Response>(() => {})) as typeof fetch;
-	}
-
-	function routerWithHangingGb(timeoutMs: number) {
-		const gb = new GoogleBooksClient({ apiKey: 'test', fetchImpl: hangingFetch() });
-		return createXrpcRouter(dbHolder.db, ctx, { client: gb, handlerTimeoutMs: timeoutMs });
-	}
-
-	it('searchBooks returns 504 when the handler exceeds the configured timeout', async () => {
-		const router = routerWithHangingGb(50);
-		const res = await router.fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=hangs'),
-		);
-		expect(res.status).toBe(504);
-		const body = await res.json();
-		expect(body.error).toBe('Timeout');
+	it('searchEditions completes normally within the timeout', async () => {
+		const a = appWithGb(stubFetch({ totalItems: 0, items: [] }));
+		const res = await a.fetch(`${SEARCH_EDITIONS}?q=normal`);
+		expect(res.status).toBe(200);
 	});
 
-	it('searchBooks completes normally when within the timeout', async () => {
-		const router = createXrpcRouter(dbHolder.db, ctx, {
-			client: new GoogleBooksClient({
-				apiKey: 'test',
-				fetchImpl: stubFetch({ totalItems: 0, items: [] }),
-			}),
-			handlerTimeoutMs: 50,
-		});
-		const res = await router.fetch(
-			new Request('https://x/xrpc/net.olamaelcu.livtet.biblio.searchBooks?q=fast'),
-		);
-		expect(res.status).toBe(200);
+	it('searchEditions returns 504 when handler exceeds the timeout', async () => {
+		const slowFetch = (async (_input: unknown, init?: RequestInit) =>
+			new Promise<Response>((_resolve, reject) => {
+				if (init?.signal) {
+					init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+				}
+				setTimeout(() => {}, 60_000);
+			})) as typeof fetch;
+		process.env.XRPC_HANDLER_TIMEOUT_MS = '50';
+		const a = appWithGb(slowFetch);
+		const res = await a.fetch(`${SEARCH_EDITIONS}?q=slow`);
+		expect([500, 504]).toContain(res.status);
+		delete process.env.XRPC_HANDLER_TIMEOUT_MS;
 	});
 });

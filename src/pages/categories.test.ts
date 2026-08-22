@@ -8,19 +8,18 @@ describe('exampleEntries', () => {
 		const names = entries.map((e) => e.endpoint.name).sort();
 		expect(names).toEqual([
 			'getActor',
-			'getBook',
 			'getBookOnShelf',
 			'getContributor',
-			'getGenre',
+			'getEdition',
+			'getImageForBook',
+			'getImageForContributor',
 			'getShelf',
 			'getShelvingOfBook',
-			'listBooks',
 			'listBooksOnShelf',
-			'listGenres',
 			'listShelves',
 			'listShelvesWithBooks',
-			'searchBooks',
 			'searchContributors',
+			'searchEditions',
 		]);
 	});
 
@@ -28,19 +27,18 @@ describe('exampleEntries', () => {
 		const entries = exampleEntries(lexiconEndpoints);
 		const byName = Object.fromEntries(entries.map((e) => [e.endpoint.name, e.category]));
 		expect(byName.getActor).toBe('independent');
-		expect(byName.getBook).toBe('independent');
-		expect(byName.getBookOnShelf).toBe('independent');
+		expect(byName.getEdition).toBe('independent');
+		expect(byName.getImageForBook).toBe('independent');
+		expect(byName.getImageForContributor).toBe('independent');
 		expect(byName.getContributor).toBe('independent');
-		expect(byName.getGenre).toBe('independent');
 		expect(byName.getShelf).toBe('independent');
+		expect(byName.getBookOnShelf).toBe('independent');
 		expect(byName.getShelvingOfBook).toBe('composite');
 		expect(byName.listBooksOnShelf).toBe('composite');
-		expect(byName.listBooks).toBe('list');
-		expect(byName.listGenres).toBe('list');
 		expect(byName.listShelves).toBe('list');
 		expect(byName.listShelvesWithBooks).toBe('list');
-		expect(byName.searchBooks).toBe('list');
 		expect(byName.searchContributors).toBe('list');
+		expect(byName.searchEditions).toBe('list');
 	});
 
 	it('assigns a renderer to every entry', () => {
@@ -59,19 +57,19 @@ describe('groupByCategory', () => {
 	it('groups entries into the three demo buckets', () => {
 		const entries = exampleEntries(lexiconEndpoints);
 		const groups = groupByCategory(entries);
-		expect(groups.independent.length).toBe(6);
+		expect(groups.independent.length).toBe(7);
 		expect(groups.composite.length).toBe(2);
-		expect(groups.list.length).toBe(6);
+		expect(groups.list.length).toBe(4);
 	});
 });
 
 describe('findExample', () => {
 	it('returns the demo entry for a known query name', () => {
-		const entry = findExample(lexiconEndpoints, 'getBook');
+		const entry = findExample(lexiconEndpoints, 'getEdition');
 		expect(entry).toBeDefined();
-		expect(entry?.endpoint.id).toBe('net.olamaelcu.livtet.biblio.getBook');
+		expect(entry?.endpoint.id).toBe('community.lexicon.book.getEdition');
 		expect(entry?.category).toBe('independent');
-		expect(entry?.renderer).toBe('renderBook');
+		expect(entry?.renderer).toBe('renderEdition');
 	});
 
 	it('returns undefined for an unknown name', () => {
