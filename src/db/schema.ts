@@ -1,15 +1,12 @@
 import { sql } from 'drizzle-orm';
 import {
 	bigint,
-	bigserial,
-	check,
 	foreignKey,
 	index,
 	integer,
 	jsonb,
 	pgTable,
 	primaryKey,
-	serial,
 	text,
 	uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -28,27 +25,16 @@ import {
  * can be referenced by foreign keys.
  */
 
-export const contributors = pgTable(
-	'contributors',
-	{
-		pk: text('pk').primaryKey(),
-		name: text('name').notNull(),
-		sortName: text('sort_name'),
-		bio: text('bio'),
-		imageUrl: text('image_url'),
-		cid: text('cid').notNull().default(''),
-		createdAt: integer('created_at').notNull(),
-		updatedAt: integer('updated_at'),
-		releaseStatus: text('release_status').notNull().default('staged'),
-		releasedAt: integer('released_at'),
-	},
-	(t) => ({
-		releaseStatusCheck: check(
-			'contributors_release_status_check',
-			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
-		),
-	}),
-);
+export const contributors = pgTable('contributors', {
+	pk: text('pk').primaryKey(),
+	name: text('name').notNull(),
+	sortName: text('sort_name'),
+	bio: text('bio'),
+	imageUrl: text('image_url'),
+	cid: text('cid').notNull().default(''),
+	createdAt: integer('created_at').notNull(),
+	updatedAt: integer('updated_at'),
+});
 
 export const formats = pgTable('formats', {
 	pk: text('pk').primaryKey(),
@@ -70,39 +56,22 @@ export const genres = pgTable(
 		parentPk: text('parent_pk'),
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
-		releaseStatus: text('release_status').notNull().default('staged'),
-		releasedAt: integer('released_at'),
 	},
 	(t) => ({
 		parentFk: foreignKey({ columns: [t.parentPk], foreignColumns: [t.pk] }).onDelete('set null'),
 		nameIdx: index('genres_name_idx').on(t.name),
 		parentPkIdx: index('genres_parent_pk_idx').on(t.parentPk),
-		releaseStatusCheck: check(
-			'genres_release_status_check',
-			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
-		),
 	}),
 );
 
-export const contributorRoles = pgTable(
-	'contributor_roles',
-	{
-		pk: text('pk').primaryKey(),
-		name: text('name').notNull(),
-		description: text('description').notNull(),
-		iconImageUrl: text('icon_image_url'),
-		cid: text('cid').notNull().default(''),
-		createdAt: integer('created_at').notNull(),
-		releaseStatus: text('release_status').notNull().default('staged'),
-		releasedAt: integer('released_at'),
-	},
-	(t) => ({
-		releaseStatusCheck: check(
-			'contributor_roles_release_status_check',
-			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
-		),
-	}),
-);
+export const contributorRoles = pgTable('contributor_roles', {
+	pk: text('pk').primaryKey(),
+	name: text('name').notNull(),
+	description: text('description').notNull(),
+	iconImageUrl: text('icon_image_url'),
+	cid: text('cid').notNull().default(''),
+	createdAt: integer('created_at').notNull(),
+});
 
 export const books = pgTable(
 	'books',
@@ -116,15 +85,9 @@ export const books = pgTable(
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
-		releaseStatus: text('release_status').notNull().default('staged'),
-		releasedAt: integer('released_at'),
 	},
 	(t) => ({
 		formatPkIdx: index('books_format_pk_idx').on(t.formatPk),
-		releaseStatusCheck: check(
-			'books_release_status_check',
-			sql`${t.releaseStatus} IN ('staged', 'released', 'rejected')`,
-		),
 	}),
 );
 
@@ -224,73 +187,6 @@ export const genreIdentifiers = pgTable(
 		resourceUnique: uniqueIndex('genre_identifiers_resource_unique').on(t.resource),
 	}),
 );
-
-// ─── Staged-release lifecycle ────────────────────────────────────────────────
-
-export const releaseStatuses = ['staged', 'released', 'rejected'] as const;
-export type ReleaseStatus = (typeof releaseStatuses)[number];
-
-export const importIssueEntityTypes = ['book', 'contributor', 'genre', 'contributorRole'] as const;
-export type ImportIssueEntityType = (typeof importIssueEntityTypes)[number];
-
-export const importIssueStatuses = ['open', 'resolved', 'dismissed'] as const;
-export type ImportIssueStatus = (typeof importIssueStatuses)[number];
-
-export const importIssues = pgTable(
-	'import_issues',
-	{
-		pk: serial('pk').primaryKey(),
-		entityType: text('entity_type').notNull(),
-		entityPk: text('entity_pk').notNull(),
-		field: text('field').notNull(),
-		incomingValue: text('incoming_value'),
-		storedValue: text('stored_value'),
-		source: text('source').notNull(),
-		status: text('status').notNull().default('open'),
-		createdAt: integer('created_at').notNull(),
-		resolvedAt: integer('resolved_at'),
-	},
-	(t) => ({
-		entityIdx: index('import_issues_entity_idx').on(t.entityType, t.entityPk),
-		statusIdx: index('import_issues_status_idx').on(t.status),
-		openDedupIdx: uniqueIndex('import_issues_open_dedup')
-			.on(t.entityType, t.entityPk, t.field, t.source)
-			.where(sql`${t.status} = 'open'`),
-		entityTypeCheck: check(
-			'import_issues_entity_type_check',
-			sql`${t.entityType} IN ('book', 'contributor', 'genre', 'contributorRole')`,
-		),
-		statusCheck: check(
-			'import_issues_status_check',
-			sql`${t.status} IN ('open', 'resolved', 'dismissed')`,
-		),
-	}),
-);
-
-export type ImportIssue = typeof importIssues.$inferSelect;
-export type NewImportIssue = typeof importIssues.$inferInsert;
-
-export const catalogBlobs = pgTable(
-	'catalog_blobs',
-	{
-		pk: text('pk').primaryKey(),
-		entityType: text('entity_type').notNull(),
-		entityPk: text('entity_pk').notNull(),
-		kind: text('kind').notNull(),
-		cid: text('cid').notNull(),
-		mimeType: text('mime_type'),
-		size: integer('size'),
-		objectKey: text('object_key').notNull(),
-		source: text('source').notNull(),
-		createdAt: integer('created_at').notNull(),
-	},
-	(t) => ({
-		entityIdx: index('catalog_blobs_entity_idx').on(t.entityType, t.entityPk),
-	}),
-);
-
-export type CatalogBlob = typeof catalogBlobs.$inferSelect;
-export type NewCatalogBlob = typeof catalogBlobs.$inferInsert;
 
 // ─── Jetstream-indexed user content ──────────────────────────────────────────
 

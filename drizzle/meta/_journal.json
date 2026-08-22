@@ -57,6 +57,13 @@
       "when": 1763788800000,
       "tag": "0008_collapse_work_and_add_gb_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787367940306,
+      "tag": "0009_slimy_rocket_racer",
+      "breakpoints": true
     }
   ]
 }

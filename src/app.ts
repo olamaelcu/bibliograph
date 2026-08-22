@@ -10,8 +10,6 @@ import { didDocumentHandler, getServiceDid } from './did.js';
 import { lexiconsStatic } from './lexicons.js';
 import { logger } from './logger.js';
 import { db } from './db/connection.js';
-import { BlobStore, blobStoreConfigFromEnv } from './storage/store.js';
-import { registerBlobProxy } from './storage/blob-proxy.js';
 import { createXrpcRouter } from './xrpc/router.js';
 import { createHash } from 'node:crypto';
 import { loadLexiconSchema, LexiconNotFound } from './lexicon-resolve.js';
@@ -32,14 +30,6 @@ export function createApp(): Hono {
 		serviceDid: getServiceDid(),
 	};
 	const xrpcRouter = createXrpcRouter(db, viewCtx);
-
-	// Serve catalog blobs (covers/portraits) through the app. The BlobStore falls
-	// back to memory when s3 is unconfigured, so registration only matters once a
-	// real store is opted into; guard to keep the dev boot path lean.
-	if (process.env.BLOB_STORE_SCHEME === 's3' || process.env.AWS_BUCKET) {
-		const blobStore = new BlobStore(db, blobStoreConfigFromEnv());
-		registerBlobProxy(app, db, blobStore);
-	}
 
 	const webAwesomeRoot = dirname(
 		createRequire(import.meta.url).resolve('@awesome.me/webawesome/package.json'),

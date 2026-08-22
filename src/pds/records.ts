@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import type * as Lexicons from '../lexicons/index.js';
@@ -20,7 +20,6 @@ import {
 	genreIdentifiers,
 	genres,
 } from '../db/schema.js';
-import { releasedFilter } from '../xrpc/gate.js';
 import { GoogleBooksClient, GoogleBooksError, type GbVolume } from '../google-books/client.js';
 import { gbVolumeToBookRecord } from '../google-books/mapper.js';
 import { getCached, setCached, TTL } from '../google-books/cache.js';
@@ -227,7 +226,7 @@ export async function hydrateGenre(
 	ctx: PdsContext,
 	pk: string,
 ): Promise<Genre | undefined> {
-	const row = (await db.select().from(genres).where(and(eq(genres.pk, pk), releasedFilter(genres))))[0];
+	const row = (await db.select().from(genres).where(eq(genres.pk, pk)))[0];
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, genreIdentifiers, genreIdentifiers.genrePk, pk);
 	return serializeGenre(ctx, row, identifiers);
@@ -237,19 +236,19 @@ export async function hydrateContributor(
 	db: Db,
 	pk: string,
 ): Promise<Contributor | undefined> {
-	const row = (await db.select().from(contributors).where(and(eq(contributors.pk, pk), releasedFilter(contributors))))[0];
+	const row = (await db.select().from(contributors).where(eq(contributors.pk, pk)))[0];
 	if (!row) return undefined;
 	const identifiers = await loadIdentifiers(db, contributorIdentifiers, contributorIdentifiers.contributorPk, pk);
 	return serializeContributor(row, identifiers);
 }
 
 export async function hydrateContributorRole(db: Db, pk: string) {
-	const row = (await db.select().from(contributorRoles).where(and(eq(contributorRoles.pk, pk), releasedFilter(contributorRoles))))[0];
+	const row = (await db.select().from(contributorRoles).where(eq(contributorRoles.pk, pk)))[0];
 	return row ? serializeContributorRole(row) : undefined;
 }
 
 export async function hydrateBook(db: Db, ctx: PdsContext, pk: string): Promise<Book | undefined> {
-	const row = (await db.select().from(books).where(and(eq(books.pk, pk), releasedFilter(books))))[0];
+	const row = (await db.select().from(books).where(eq(books.pk, pk)))[0];
 	if (!row) return undefined;
 
 	const [genreRows, identifierRows] = await Promise.all([
@@ -352,10 +351,7 @@ export class UpstreamUnavailableError extends Error {
  * insert is a no-op and the caller re-reads from the DB if it needs the
  * canonical row.
  *
- * Release status is forced to 'released' so the row is visible to subsequent
- * hydrateBook calls (which apply releasedFilter) and to AppView join queries
- * like getBookOnShelf. GB data is canonical and skips the importer review
- * lifecycle.
+ * GB data is canonical and skips the importer review lifecycle.
  */
 export async function persistGbBackedBook(db: Db, value: Book, pk: string): Promise<void> {
 	const now = Math.floor(Date.now() / 1000);
@@ -370,8 +366,6 @@ export async function persistGbBackedBook(db: Db, value: Book, pk: string): Prom
 				coverUrl: value.coverUrl ?? null,
 				createdAt: now,
 				updatedAt: null,
-				releaseStatus: 'released',
-				releasedAt: now,
 			})
 			.onConflictDoNothing({ target: books.pk });
 

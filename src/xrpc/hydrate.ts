@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import {
@@ -13,7 +13,6 @@ import {
 	genreIdentifiers,
 	genres,
 } from '../db/schema.js';
-import { releasedFilter } from './gate.js';
 import { getEngagementForSubject } from '../network/constellation.js';
 import type { PdsRecord, ViewContext } from '../lex/collections.js';
 import { COLLECTION } from '../lex/collections.js';
@@ -202,13 +201,13 @@ export async function toBookView(
 			.select({ genre: genres })
 			.from(bookGenres)
 			.innerJoin(genres, eq(bookGenres.genrePk, genres.pk))
-			.where(and(eq(bookGenres.bookPk, row.pk), releasedFilter(genres))),
+			.where(eq(bookGenres.bookPk, row.pk)),
 		db
 			.select({ contributor: contributors, role: contributorRoles })
 			.from(bookContributors)
 			.innerJoin(contributors, eq(bookContributors.contributorPk, contributors.pk))
 			.innerJoin(contributorRoles, eq(bookContributors.rolePk, contributorRoles.pk))
-			.where(and(eq(bookContributors.bookPk, row.pk), releasedFilter(contributors))),
+			.where(eq(bookContributors.bookPk, row.pk)),
 		loadIdentifiers(db, bookIdentifiers, bookIdentifiers.bookPk, row.pk),
 	]);
 
@@ -338,7 +337,7 @@ export async function hydrateBook(
 	const row = (await db
 		.select()
 		.from(books)
-		.where(and(eq(books.pk, rkey), releasedFilter(books))))[0];
+		.where(eq(books.pk, rkey)))[0];
 	if (!row) return undefined;
 	return toBookView(db, ctx, row);
 }

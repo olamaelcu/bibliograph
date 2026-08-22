@@ -1,4 +1,4 @@
-import { and, eq, isNull, like, or } from 'drizzle-orm';
+import { and, eq, isNull, like, or, type SQL } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { XRPCRouter, json, XRPCError, InvalidRequestError } from '@atcute/xrpc-server';
@@ -10,7 +10,6 @@ import { GoogleBooksClient, GoogleBooksError, type GbVolume } from '../google-bo
 import { decodeGbCursor, encodeGbCursor, gbAuthorSlugToName, gbVolumeToBookView } from '../google-books/mapper.js';
 import { getCached, requestHash, setCached, TTL } from '../google-books/cache.js';
 import { logger } from '../logger.js';
-import { releasedFilter } from './gate.js';
 import {
 	hydrateBook,
 	toActorView,
@@ -440,10 +439,7 @@ export function createXrpcRouter(
 			const nsid = 'net.olamaelcu.livtet.biblio.getContributor';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
 				const rkey = rkeyFromUri(params.uri, COLLECTION.contributor);
-				const row = (await db
-					.select()
-					.from(contributors)
-					.where(and(eq(contributors.pk, rkey), releasedFilter(contributors))))[0];
+				const row = (await db.select().from(contributors).where(eq(contributors.pk, rkey)))[0];
 				if (!row) notFound();
 				return json({ contributor: await toContributorView(db, ctx, row) });
 			});
@@ -455,10 +451,7 @@ export function createXrpcRouter(
 			const nsid = 'net.olamaelcu.livtet.biblio.getGenre';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
 				const rkey = rkeyFromUri(params.uri, COLLECTION.genre);
-				const row = (await db
-					.select()
-					.from(genres)
-					.where(and(eq(genres.pk, rkey), releasedFilter(genres))))[0];
+				const row = (await db.select().from(genres).where(eq(genres.pk, rkey)))[0];
 				if (!row) notFound();
 				return json({ genre: await toGenreView(db, ctx, row) });
 			});
@@ -470,12 +463,12 @@ export function createXrpcRouter(
 			const nsid = 'net.olamaelcu.livtet.biblio.listGenres';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
 				const limit = Math.min(100, Math.max(1, params.limit ?? 50));
-				const filters = [releasedFilter(genres)];
+				const filters: SQL[] = [];
 				if (params.topLevelOnly) filters.push(isNull(genres.parentPk));
 				const rows = await db
 					.select()
 					.from(genres)
-					.where(and(...filters))
+					.where(filters.length ? and(...filters) : undefined)
 					.orderBy(genres.name)
 					.limit(limit);
 				const genreViews: GenreView[] = rows.map((g) => ({
@@ -500,12 +493,7 @@ export function createXrpcRouter(
 				const rows = await db
 					.select()
 					.from(contributors)
-					.where(
-						and(
-							releasedFilter(contributors),
-							or(like(contributors.name, term), like(contributors.sortName, term)),
-						),
-					)
+					.where(or(like(contributors.name, term), like(contributors.sortName, term)))
 					.limit(limit);
 				const contributorViews = await Promise.all(rows.map((r) => toContributorView(db, ctx, r)));
 				return json({ contributors: contributorViews });

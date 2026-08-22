@@ -4,6 +4,7 @@ pnpm = "11.13.1"
 
 [env]
 _.file = ".env"
+ALLOW_DEV_DID = 1
 
 [tasks.dev]
 run = "pnpm run dev"

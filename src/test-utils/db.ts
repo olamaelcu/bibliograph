@@ -124,20 +124,20 @@ async function seed(db: Database) {
 		{ pk: 'ebook', description: 'E-book', emoji: '📱', iconImageUrl: null, unit: 'percent' },
 	];
 	const genreRows = [
-		{ pk: 'fiction', name: 'Fiction', description: 'Imaginary narratives', emoji: '📚', iconImageUrl: null, parentPk: null, createdAt: now, releaseStatus: 'released', releasedAt: now },
-		{ pk: 'scifi', name: 'Science Fiction', description: 'Speculative futures', emoji: '🚀', iconImageUrl: null, parentPk: 'fiction', createdAt: now, releaseStatus: 'released', releasedAt: now },
+		{ pk: 'fiction', name: 'Fiction', description: 'Imaginary narratives', emoji: '📚', iconImageUrl: null, parentPk: null, createdAt: now },
+		{ pk: 'scifi', name: 'Science Fiction', description: 'Speculative futures', emoji: '🚀', iconImageUrl: null, parentPk: 'fiction', createdAt: now },
 	];
 	const roleRows = [
-		{ pk: 'author', name: 'Author', description: 'Wrote the book', iconImageUrl: null, createdAt: now, releaseStatus: 'released', releasedAt: now },
-		{ pk: 'translator', name: 'Translator', description: 'Translated the book', iconImageUrl: null, createdAt: now, releaseStatus: 'released', releasedAt: now },
+		{ pk: 'author', name: 'Author', description: 'Wrote the book', iconImageUrl: null, createdAt: now },
+		{ pk: 'translator', name: 'Translator', description: 'Translated the book', iconImageUrl: null, createdAt: now },
 	];
 	const contributorRows = [
-		{ pk: 'author-herbert', name: 'Frank Herbert', sortName: 'Herbert, Frank', bio: 'American author', imageUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
-		{ pk: 'author-algernon', name: 'Daniel Keyes', sortName: 'Keyes, Daniel', bio: 'American writer', imageUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
+		{ pk: 'author-herbert', name: 'Frank Herbert', sortName: 'Herbert, Frank', bio: 'American author', imageUrl: null, createdAt: now, updatedAt: null },
+		{ pk: 'author-algernon', name: 'Daniel Keyes', sortName: 'Keyes, Daniel', bio: 'American writer', imageUrl: null, createdAt: now, updatedAt: null },
 	];
 	const bookRows = [
-		{ pk: 'book-dune', title: 'Dune (40th Anniversary)', formatPk: 'paperback', publishDate: 1119484800, description: 'The classic', coverUrl: 'https://cdn.example.com/dune.jpg', createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
-		{ pk: 'book-flowers', title: 'Flowers for Algernon', formatPk: 'ebook', publishDate: 1119484800, description: 'A touching story', coverUrl: null, createdAt: now, updatedAt: null, releaseStatus: 'released', releasedAt: now },
+		{ pk: 'book-dune', title: 'Dune (40th Anniversary)', formatPk: 'paperback', publishDate: 1119484800, description: 'The classic', coverUrl: 'https://cdn.example.com/dune.jpg', createdAt: now, updatedAt: null },
+		{ pk: 'book-flowers', title: 'Flowers for Algernon', formatPk: 'ebook', publishDate: 1119484800, description: 'A touching story', coverUrl: null, createdAt: now, updatedAt: null },
 	];
 	await db.insert(formats).values(formatRows);
 	await db.insert(genres).values(genreRows);

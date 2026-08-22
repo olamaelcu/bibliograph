@@ -277,11 +277,10 @@ describe('com.atproto.repo.getRecord (gb- lazy import)', () => {
 		expect(body.cid).toMatch(/^bafy/);
 
 		const persisted = await db.execute(
-			sql`SELECT pk, title, description, cover_url, release_status FROM books WHERE pk = ${'gb-lazyVol'}`,
+			sql`SELECT pk, title, description, cover_url FROM books WHERE pk = ${'gb-lazyVol'}`,
 		);
 		const row = (persisted.rows[0] ?? {}) as Record<string, unknown>;
 		expect(row.title).toBe('Lazy Title');
-		expect(row.release_status).toBe('released');
 		expect(row.description).toBe('A description.');
 		expect(row.cover_url).toBe('https://books.google.com/img.jpg');
 
