@@ -26,7 +26,7 @@ import {
 	type OwnedCollection,
 } from './records.js';
 import { buildDidDocument } from '../did.js';
-import { contributors, contributorRoles, formats, genres, books } from '../db/schema.js';
+import { contributors, editions } from '../db/schema.js';
 import type { ViewContext } from '../lex/collections.js';
 import type { GoogleBooksClient } from '../google-books/client.js';
 
@@ -94,7 +94,7 @@ export function registerPdsHandlers(
 			const rkey = rkeyFromParam(params.rkey);
 
 			let value: Awaited<ReturnType<typeof loadRecord>>;
-			if (params.collection === COLLECTIONS.book && rkey.startsWith('gb-')) {
+			if (params.collection === COLLECTIONS.edition && rkey.startsWith('gb-')) {
 				if (!opts.client) {
 					throw new XRPCError({
 						status: 502,
@@ -255,16 +255,10 @@ async function listPage(
 
 function tableFor(collection: OwnedCollection) {
 	switch (collection) {
-		case COLLECTIONS.book:
-			return books;
+		case COLLECTIONS.edition:
+			return editions;
 		case COLLECTIONS.contributor:
 			return contributors;
-		case COLLECTIONS.contributorRole:
-			return contributorRoles;
-		case COLLECTIONS.format:
-			return formats;
-		case COLLECTIONS.genre:
-			return genres;
 	}
 }
 

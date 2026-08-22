@@ -64,6 +64,13 @@
       "when": 1787367940306,
       "tag": "0009_slimy_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788000000000,
+      "tag": "0010_community_lexicon_book",
+      "breakpoints": true
     }
   ]
 }

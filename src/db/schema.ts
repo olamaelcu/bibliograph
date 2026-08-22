@@ -14,130 +14,54 @@ import {
 /**
  * Bibliograph relational schema.
  *
- * Owned record tables back the PDS (com.atproto.repo.{getRecord,listRecords}).
- * Reads served over the AppView's net.olamaelcu.livtet.biblio.* XRPC are now
- * backed by Google Books (see src/google-books/) and no longer touch these
- * tables — only the PDS write/read paths do.
+ * Catalog records (editions, contributors) back the PDS at
+ * `community.lexicon.book.*`. User-owned records (shelves, book shelvings,
+ * actor profiles) are Jetstream-indexed via the `user_records` table and
+ * served under `net.olamaelcu.livtet.biblio.*` as app-private extensions.
  *
- * Every primary key is a `text` value: ATProto record keys (TIDs), ULIDs,
- * or lexical slugs. Timestamps are unix seconds (`integer`). Many-to-many
- * and identifier relationships live in dedicated join tables so that rows
- * can be referenced by foreign keys.
+ * Every primary key is a `text` value: ATProto record keys (TIDs) or
+ * grandfathered slugs (in transition). Timestamps are unix seconds
+ * (`integer`). Many-to-many relationships are inlined as JSON (e.g.
+ * `editions.contributors`).
  */
 
-export const contributors = pgTable('contributors', {
-	pk: text('pk').primaryKey(),
-	name: text('name').notNull(),
-	sortName: text('sort_name'),
-	bio: text('bio'),
-	imageUrl: text('image_url'),
-	cid: text('cid').notNull().default(''),
-	createdAt: integer('created_at').notNull(),
-	updatedAt: integer('updated_at'),
-});
-
-export const formats = pgTable('formats', {
-	pk: text('pk').primaryKey(),
-	description: text('description').notNull(),
-	emoji: text('emoji').notNull(),
-	iconImageUrl: text('icon_image_url'),
-	unit: text('unit').notNull(),
-	cid: text('cid').notNull().default(''),
-});
-
-export const genres = pgTable(
-	'genres',
+export const contributors = pgTable(
+	'contributors',
 	{
 		pk: text('pk').primaryKey(),
 		name: text('name').notNull(),
-		description: text('description').notNull(),
-		emoji: text('emoji').notNull(),
-		iconImageUrl: text('icon_image_url'),
-		parentPk: text('parent_pk'),
-		cid: text('cid').notNull().default(''),
-		createdAt: integer('created_at').notNull(),
-	},
-	(t) => ({
-		parentFk: foreignKey({ columns: [t.parentPk], foreignColumns: [t.pk] }).onDelete('set null'),
-		nameIdx: index('genres_name_idx').on(t.name),
-		parentPkIdx: index('genres_parent_pk_idx').on(t.parentPk),
-	}),
-);
-
-export const contributorRoles = pgTable('contributor_roles', {
-	pk: text('pk').primaryKey(),
-	name: text('name').notNull(),
-	description: text('description').notNull(),
-	iconImageUrl: text('icon_image_url'),
-	cid: text('cid').notNull().default(''),
-	createdAt: integer('created_at').notNull(),
-});
-
-export const books = pgTable(
-	'books',
-	{
-		pk: text('pk').primaryKey(),
-		title: text('title').notNull(),
-		formatPk: text('format_pk').references(() => formats.pk, { onDelete: 'set null' }),
-		publishDate: bigint('publish_date', { mode: 'number' }),
-		description: text('description'),
-		coverUrl: text('cover_url'),
+		nameLower: text('name_lower'),
+		sortName: text('sort_name'),
+		bio: text('bio'),
 		cid: text('cid').notNull().default(''),
 		createdAt: integer('created_at').notNull(),
 		updatedAt: integer('updated_at'),
 	},
 	(t) => ({
-		formatPkIdx: index('books_format_pk_idx').on(t.formatPk),
+		nameLowerIdx: index('contributors_name_lower_idx').on(t.nameLower),
 	}),
 );
 
-export const bookContributors = pgTable(
-	'book_contributors',
+export const editions = pgTable(
+	'editions',
 	{
-		bookPk: text('book_pk').notNull(),
-		contributorPk: text('contributor_pk').notNull(),
-		rolePk: text('role_pk').notNull(),
-		createdAt: integer('created_at'),
+		pk: text('pk').primaryKey(),
+		title: text('title').notNull(),
+		subtitle: text('subtitle'),
+		language: text('language'),
+		place: text('place'),
+		workUri: text('work_uri'),
+		publisherUri: text('publisher_uri'),
+		publishedYear: integer('published_year'),
+		description: text('description'),
+		contributors: jsonb('contributors').notNull().default(sql`'[]'::jsonb`),
+		cid: text('cid').notNull().default(''),
+		createdAt: integer('created_at').notNull(),
+		updatedAt: integer('updated_at'),
 	},
 	(t) => ({
-		pk: primaryKey({ columns: [t.bookPk, t.contributorPk] }),
-		bookFk: foreignKey({ columns: [t.bookPk], foreignColumns: [books.pk] }).onDelete('cascade'),
-		contributorFk: foreignKey({
-			columns: [t.contributorPk],
-			foreignColumns: [contributors.pk],
-		}).onDelete('cascade'),
-		roleFk: foreignKey({
-			columns: [t.rolePk],
-			foreignColumns: [contributorRoles.pk],
-		}).onDelete('cascade'),
-	}),
-);
-
-export const bookGenres = pgTable(
-	'book_genres',
-	{
-		bookPk: text('book_pk').notNull(),
-		genrePk: text('genre_pk').notNull(),
-	},
-	(t) => ({
-		pk: primaryKey({ columns: [t.bookPk, t.genrePk] }),
-		bookFk: foreignKey({ columns: [t.bookPk], foreignColumns: [books.pk] }).onDelete('cascade'),
-		genreFk: foreignKey({ columns: [t.genrePk], foreignColumns: [genres.pk] }).onDelete('cascade'),
-		genrePkIdx: index('book_genres_genre_pk_idx').on(t.genrePk),
-	}),
-);
-
-export const genreChildren = pgTable(
-	'genre_children',
-	{
-		parentPk: text('parent_pk').notNull(),
-		childPk: text('child_pk').notNull(),
-	},
-	(t) => ({
-		pk: primaryKey({ columns: [t.parentPk, t.childPk] }),
-		parentFk: foreignKey({ columns: [t.parentPk], foreignColumns: [genres.pk] }).onDelete('cascade'),
-		childFk: foreignKey({ columns: [t.childPk], foreignColumns: [genres.pk] }).onDelete('cascade'),
-		childPkIdx: index('genre_children_child_pk_idx').on(t.childPk),
+		titleIdx: index('editions_title_idx').on(t.title),
+		createdAtIdx: index('editions_created_at_idx').on(t.createdAt),
 	}),
 );
 
@@ -145,14 +69,15 @@ export const bookIdentifiers = pgTable(
 	'book_identifiers',
 	{
 		bookPk: text('book_pk').notNull(),
-		resource: text('resource').notNull(),
-		url: text('url').notNull(),
+		valueScheme: text('value_scheme').notNull(),
+		value: text('value').notNull(),
+		uri: text('uri').notNull(),
 	},
 	(t) => ({
-		pk: primaryKey({ columns: [t.bookPk, t.resource] }),
-		bookFk: foreignKey({ columns: [t.bookPk], foreignColumns: [books.pk] }).onDelete('cascade'),
-		urlIdx: index('book_identifiers_url_idx').on(t.url),
-		resourceUnique: uniqueIndex('book_identifiers_resource_unique').on(t.resource),
+		pk: primaryKey({ columns: [t.bookPk, t.valueScheme, t.value] }),
+		bookFk: foreignKey({ columns: [t.bookPk], foreignColumns: [editions.pk] }).onDelete('cascade'),
+		uriIdx: index('book_identifiers_uri_idx').on(t.uri),
+		valueUnique: uniqueIndex('book_identifiers_value_unique').on(t.valueScheme, t.value),
 	}),
 );
 
@@ -160,31 +85,17 @@ export const contributorIdentifiers = pgTable(
 	'contributor_identifiers',
 	{
 		contributorPk: text('contributor_pk').notNull(),
-		resource: text('resource').notNull(),
-		url: text('url').notNull(),
+		valueScheme: text('value_scheme').notNull(),
+		value: text('value').notNull(),
+		uri: text('uri').notNull(),
 	},
 	(t) => ({
-		pk: primaryKey({ columns: [t.contributorPk, t.resource] }),
+		pk: primaryKey({ columns: [t.contributorPk, t.valueScheme, t.value] }),
 		contributorFk: foreignKey({
 			columns: [t.contributorPk],
 			foreignColumns: [contributors.pk],
 		}).onDelete('cascade'),
-		resourceUnique: uniqueIndex('contributor_identifiers_resource_unique').on(t.resource),
-	}),
-);
-
-export const genreIdentifiers = pgTable(
-	'genre_identifiers',
-	{
-		genrePk: text('genre_pk').notNull(),
-		resource: text('resource').notNull(),
-		url: text('url').notNull(),
-	},
-	(t) => ({
-		pk: primaryKey({ columns: [t.genrePk, t.resource] }),
-		genreFk: foreignKey({ columns: [t.genrePk], foreignColumns: [genres.pk] }).onDelete('cascade'),
-		urlIdx: index('genre_identifiers_url_idx').on(t.url),
-		resourceUnique: uniqueIndex('genre_identifiers_resource_unique').on(t.resource),
+		valueUnique: uniqueIndex('contributor_identifiers_value_unique').on(t.valueScheme, t.value),
 	}),
 );
 

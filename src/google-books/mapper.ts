@@ -1,40 +1,33 @@
-import type { BookContributorView, BookView, ContributorView, Identifier } from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
-import type { Main as Book } from '../lexicons/types/net/olamaelcu/livtet/biblio/book.js';
-import { getEngagementForSubject } from '../network/constellation.js';
 import type { GbVolume, GbVolumeInfo } from './client.js';
 import type { ViewContext } from '../lex/collections.js';
 import { COLLECTION } from '../lex/collections.js';
 
 /**
- * Normalize a free-form author name into a stable rkey slug. Lowercases,
- * strips diacritics, replaces non-alphanumerics with `-`, collapses runs.
- * Empty/Unicode-only names fall back to a deterministic FNV-1a hash prefixed
- * with `xn-` (Punycode-style "this is an encoded name"). The `xn-` marker
- * avoids collisions with real names that legitimately slugify to a `c-...`
- * shape (e.g., "C. S. Lewis" → `gbauthors-c-s-lewis`).
+ * Convert a GB `industryIdentifiers` array to the community `{uri, resource}`
+ * identifier shape. ISBNs become URN-style URIs; everything else stays
+ * vendor-URL.
  */
-function authorSlug(name: string): string {
-	const ascii = name
-		.normalize('NFKD')
-		.replace(/[\u0300-\u036f]/g, '')
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, '-')
-		.replace(/^-+|-+$/g, '');
-	if (ascii.length > 0) return `gbauthors-${ascii}`;
-	let h = 0x811c9dc5;
-	for (const ch of name) {
-		h ^= ch.charCodeAt(0);
-		h = Math.imul(h, 0x01000193);
+export function gbIdentifiersToIdentifiers(info: GbVolumeInfo): { uri: string; resource: string }[] {
+	const items: { uri: string; resource: string }[] = [];
+	if (info.industryIdentifiers) {
+		for (const ident of info.industryIdentifiers) {
+			if (ident.type === 'ISBN_10') {
+				items.push({ uri: `urn:isbn:${ident.identifier}`, resource: 'isbn10' });
+			} else if (ident.type === 'ISBN_13') {
+				items.push({ uri: `urn:isbn:${ident.identifier}`, resource: 'isbn13' });
+			} else {
+				items.push({ uri: `https://www.googleapis.com/books/v1/volumes/${ident.identifier}`, resource: 'googleBooks' });
+			}
+		}
 	}
-	return `gbauthors-xn-${(h >>> 0).toString(36)}`;
+	return items;
 }
 
 /**
- * Inverse of {@link authorSlug}. Strips the `gbauthors-` prefix and the
- * optional `xn-` hash-fallback marker, then maps `-` back to spaces.
- *
- * Throws on malformed slugs that aren't `gbauthors-{...}` so callers can
- * fail loudly rather than emit garbage queries.
+ * Mint an author slug from a name. Lowercases, strips diacritics, replaces
+ * non-alphanumerics with `-`. Empty/Unicode-only names fall back to a
+ * deterministic FNV-1a hash prefixed with `c-`. Used only for ephemeral
+ * slug generation in test fixtures.
  */
 export function gbAuthorSlugToName(slug: string): string {
 	const match = slug.match(/^gbauthors-(?:xn-([a-z0-9]+)|(.+))$/);
@@ -43,126 +36,7 @@ export function gbAuthorSlugToName(slug: string): string {
 	return body.replace(/-/g, ' ');
 }
 
-function asUri(value: string): `${string}:${string}` {
-	return value as `${string}:${string}`;
-}
-
-function gbAuthorsToContributors(ctx: ViewContext, authors: string[] | undefined): ContributorView[] {
-	if (!authors?.length) return [];
-	return authors.map((name) => {
-		const slug = authorSlug(name);
-		const uri = `at://${ctx.serviceDid}/${COLLECTION.contributor}/${slug}` as ContributorView['uri'];
-		return { uri, name };
-	});
-}
-
-function gbAuthorsToBookContributors(
-	ctx: ViewContext,
-	bookUri: string,
-	authors: string[] | undefined,
-): BookContributorView[] {
-	if (!authors?.length) return [];
-	const contributors = gbAuthorsToContributors(ctx, authors);
-	return contributors.map((contributor) => {
-		const slug = authorSlug(contributor.name);
-		return {
-			bookUri: bookUri as BookContributorView['bookUri'],
-			contributor,
-			role: `at://${ctx.serviceDid}/${COLLECTION.contributorRole}/author` as BookContributorView['role'],
-		};
-	});
-}
-
-function gbIdentifiersToIdentifiers(volumeId: string, info: GbVolumeInfo): Identifier[] {
-	const items: Identifier[] = [];
-	const url = `https://books.google.com/books?id=${volumeId}`;
-	if (info.industryIdentifiers) {
-		for (const id of info.industryIdentifiers) {
-			const resource = `${id.type.toLowerCase()}:${id.identifier}`;
-			items.push({ resource, url: asUri(url) });
-		}
-	}
-	return items;
-}
-
-/** Parse Google's partial `publishedDate` (YYYY, YYYY-MM, YYYY-MM-DD) to a unix-second timestamp. */
-function parsePublishedDate(value: string | undefined): number | undefined {
-	if (!value) return undefined;
-	const match = value.match(/^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/);
-	if (!match) return undefined;
-	const [, y, m = '01', d = '01'] = match;
-	const ms = Date.UTC(Number(y), Number(m) - 1, Number(d));
-	// Reject silent rollovers: Feb 30, Apr 31, month 13, etc. Date.UTC happily
-	// spills these into the next month/year; round-trip and compare.
-	const back = new Date(ms);
-	if (
-		back.getUTCFullYear() !== Number(y) ||
-		back.getUTCMonth() !== Number(m) - 1 ||
-		back.getUTCDate() !== Number(d)
-	) {
-		return undefined;
-	}
-	return Math.floor(ms / 1000);
-}
-
-function gbCoverUrl(info: GbVolumeInfo): string | undefined {
-	const normalize = (u?: string) =>
-		u?.replace(/^http:\/\//, 'https://').replace(/&edge=curl/g, '');
-	return normalize(info.imageLinks?.thumbnail) ?? normalize(info.imageLinks?.smallThumbnail);
-}
-
-/**
- * Map a Google Books volume to a raw `net.olamaelcu.livtet.biblio.book` record
- * value (the shape persisted in the PDS), as opposed to the AppView's BookView
- * returned by {@link gbVolumeToBookView}. Skips `format` and `genres` because
- * GB's vocabulary doesn't map cleanly to the curated local sets. Returns
- * undefined when the volume has no title (matches gbVolumeToBookView's contract).
- */
-export function gbVolumeToBookRecord(volume: GbVolume): Book | undefined {
-	const info = volume.volumeInfo;
-	if (!info?.title) return undefined;
-	const value: Book = {
-		$type: 'net.olamaelcu.livtet.biblio.book',
-		title: info.title,
-	};
-	const identifiers = gbIdentifiersToIdentifiers(volume.id, info);
-	if (identifiers.length) value.identifiers = identifiers;
-	const published = parsePublishedDate(info.publishedDate);
-	if (published != null) value.publishDate = new Date(published * 1000).toISOString();
-	if (info.description) value.description = info.description;
-	const cover = gbCoverUrl(info);
-	if (cover) value.coverUrl = asUri(cover);
-	value.createdAt = new Date().toISOString();
-	return value;
-}
-
-export async function gbVolumeToBookView(ctx: ViewContext, volume: GbVolume): Promise<BookView | undefined> {
-	const info = volume.volumeInfo;
-	if (!info?.title) return undefined;
-	const slug = `gb-${volume.id}`;
-	const bookUri = `at://${ctx.serviceDid}/${COLLECTION.book}/${slug}`;
-	const view: BookView = {
-		uri: bookUri as BookView['uri'],
-		title: info.title,
-		identifiers: gbIdentifiersToIdentifiers(volume.id, info),
-		contributors: gbAuthorsToBookContributors(ctx, bookUri, info.authors),
-	};
-	const published = parsePublishedDate(info.publishedDate);
-	if (published != null) view.publishDate = new Date(published * 1000).toISOString();
-	if (info.description) view.description = info.description;
-	const cover = gbCoverUrl(info);
-	if (cover) view.coverUrl = asUri(cover);
-	// Attach bsky engagement using the canonical at-uri of this GB-backed book.
-	// People who post about the book would use this URI shape, so constellation
-	// hits resolve naturally.
-	const bsky = await getEngagementForSubject(bookUri);
-	if (bsky && (bsky.likeCount > 0 || bsky.quoteCount > 0)) {
-		view.bsky = { likeCount: bsky.likeCount, quoteCount: bsky.quoteCount };
-	}
-	return view;
-}
-
-/** Opaque cursor encoding `{ q, startIndex }` for `listBooks` / `searchBooks`. */
+/** Opaque cursor encoding `{ q, startIndex }` for `searchEditions`. */
 export interface GbCursor {
 	q: string;
 	startIndex: number;
@@ -188,4 +62,44 @@ export function decodeGbCursor(value: string | undefined): GbCursor | undefined 
 		return undefined;
 	}
 	return undefined;
+}
+
+/**
+ * Map a Google Books volume to a `community.lexicon.book.edition` AppView
+ * record (the shape persisted by GB lazy-load and returned by AppView
+ * queries). Returns undefined when the volume has no title.
+ *
+ * `subject` in `contributors[]` is encoded as just the contributor TID
+ * rkey here; the PDS router rewrites to a full at-uri at serialization
+ * time using the service DID.
+ */
+export function gbVolumeToEditionRecord(
+_ctx: ViewContext,
+volume: GbVolume,
+): Record<string, unknown> | undefined {
+	const info = volume.volumeInfo;
+	if (!info?.title) return undefined;
+	const record: Record<string, unknown> = {
+		$type: COLLECTION.edition,
+		title: info.title,
+		createdAt: new Date().toISOString(),
+	};
+	if (info.subtitle) record.subtitle = info.subtitle;
+	if (info.publishedDate) {
+		const year = parseYear(info.publishedDate);
+		if (year != null) record.publishedYear = year;
+	}
+	if (info.language) record.language = info.language;
+	if (info.description) record.description = info.description;
+	if (info.authors?.length) {
+		record.contributors = info.authors.map((name) => ({ name, role: 'author' }));
+	}
+	const identifiers = gbIdentifiersToIdentifiers(info);
+	if (identifiers.length) record.identifiers = identifiers;
+	return record;
+}
+
+function parseYear(publishedDate: string): number | undefined {
+	const m = publishedDate.match(/^(\d{4})/);
+	return m ? Number(m[1]) : undefined;
 }

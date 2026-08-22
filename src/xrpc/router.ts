@@ -1,4 +1,4 @@
-import { and, eq, isNull, like, or, type SQL } from 'drizzle-orm';
+import { and, eq, ilike, like, or, type SQL } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
 import { XRPCRouter, json, XRPCError, InvalidRequestError } from '@atcute/xrpc-server';
@@ -7,29 +7,33 @@ import { loadLexiconSchema, LexiconNotFound } from '../lexicon-resolve.js';
 import * as Lexicons from '../lexicons/index.js';
 import { registerPdsHandlers } from '../pds/router.js';
 import { GoogleBooksClient, GoogleBooksError, type GbVolume } from '../google-books/client.js';
-import { decodeGbCursor, encodeGbCursor, gbAuthorSlugToName, gbVolumeToBookView } from '../google-books/mapper.js';
+import { decodeGbCursor, encodeGbCursor, gbIdentifiersToIdentifiers } from '../google-books/mapper.js';
 import { getCached, requestHash, setCached, TTL } from '../google-books/cache.js';
 import { logger } from '../logger.js';
 import {
-	hydrateBook,
+	hydrateEdition,
 	toActorView,
 	toBookShelfView,
 	toContributorView,
-	toGenreView,
 	toShelfView,
 	toShelfWithBooksView,
 	withActorBsky,
 	withShelfBsky,
 } from './hydrate.js';
 import { listByCollection, getUserRecord } from '../jetstream/query.js';
-import { contributors, genres } from '../db/schema.js';
+import {
+	bookIdentifiers,
+	contributors,
+	contributorIdentifiers,
+	editions,
+} from '../db/schema.js';
 import { COLLECTION, type PdsRecord, type ViewContext } from '../lex/collections.js';
 import type {
 	BookShelfView,
-	BookView,
-	GenreView,
+	EditionView,
+	ContributorView,
 	ShelfWithBooksView,
-} from '../lexicons/types/net/olamaelcu/livtet/biblio/defs.js';
+} from '../xrpc/views.js';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -74,6 +78,10 @@ function notFound(): never {
 	throw new XRPCError({ status: 404, error: 'NotFound', message: 'record not found' });
 }
 
+function notSupported(nsid: string): never {
+	throw new XRPCError({ status: 501, error: 'NotSupported', message: `${nsid} is not implemented by this AppView` });
+}
+
 function parseVolumeId(uri: string): string {
 	const { rkey } = parseRkey(uri);
 	if (!rkey.startsWith('gb-')) {
@@ -94,33 +102,6 @@ function parseVolumeId(uri: string): string {
 	return volumeId;
 }
 
-function buildGbQuery(opts: { q?: string; genre?: string; contributor?: string }): string {
-	const terms: string[] = [];
-	if (opts.contributor) {
-		const slug = parseRkey(opts.contributor).rkey;
-		let authorName: string;
-		try {
-			authorName = gbAuthorSlugToName(slug);
-		} catch {
-			throw new InvalidRequestError({
-				status: 400,
-				error: 'InvalidRequest',
-				message: `invalid contributor slug: '${slug}'`,
-			});
-		}
-		terms.push(`inauthor:"${authorName.replace(/"/g, '')}"`);
-	}
-	if (opts.genre) {
-		const slug = parseRkey(opts.genre).rkey;
-		terms.push(`subject:${slug.replace(/^gbgenres-/, '')}`);
-	}
-	if (opts.q) terms.push(opts.q);
-	return terms.join(' ');
-}
-
-const DEFAULT_LIMIT = 25;
-const MAX_LIMIT = 40;
-
 class HandlerTimeoutError extends Error {
 	constructor(readonly nsid: string, readonly timeoutMs: number) {
 		super(`${nsid} handler exceeded ${timeoutMs}ms`);
@@ -129,9 +110,9 @@ class HandlerTimeoutError extends Error {
 }
 
 async function withHandlerTimeout<T>(
-	nsid: string,
-	work: (signal: AbortSignal) => Promise<T>,
-	timeoutMs: number,
+nsid: string,
+work: (signal: AbortSignal) => Promise<T>,
+timeoutMs: number,
 ): Promise<T> {
 	const controller = new AbortController();
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -150,9 +131,9 @@ async function withHandlerTimeout<T>(
 }
 
 async function withTimedHandler<T>(
-	nsid: string,
-	opts: { timeoutMs: number; requestId?: string | null; params?: Record<string, unknown> },
-	work: (signal: AbortSignal) => Promise<T>,
+nsid: string,
+opts: { timeoutMs: number; requestId?: string | null; params?: Record<string, unknown> },
+work: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
 	const t0 = Date.now();
 	logger.info(
@@ -178,9 +159,6 @@ async function withTimedHandler<T>(
 				message: `${nsid} exceeded ${opts.timeoutMs}ms`,
 			});
 		}
-		// Surface the stack for unhandled throws (e.g. Google Books 4xx, drizzle
-		// errors, constellation failures). Map well-known upstream errors to
-		// typed XRPCErrors so clients see something better than the generic 500.
 		logger.error(
 			{ nsid, requestId: opts.requestId, durationMs: Date.now() - t0, err },
 			'xrpc handler threw',
@@ -205,10 +183,82 @@ export interface RouterOptions {
 	handlerTimeoutMs?: number;
 }
 
+/** Static list of NSIDs this AppView advertises in its `compatibility` response. */
+function compatibilityQueries(): { nsid: string; type?: string }[] {
+	return [
+		// Required community queries:
+		{ nsid: 'community.lexicon.book.searchEditions', type: 'query' },
+		{ nsid: 'community.lexicon.book.getEdition', type: 'query' },
+		{ nsid: 'community.lexicon.book.getContributor', type: 'query' },
+		{ nsid: 'community.lexicon.book.searchContributors', type: 'query' },
+		{ nsid: 'community.lexicon.book.searchWorks', type: 'query' },
+		{ nsid: 'community.lexicon.book.searchPublishers', type: 'query' },
+		{ nsid: 'community.lexicon.book.compatibility', type: 'query' },
+		// App-private image lookups:
+		{ nsid: 'net.olamaelcu.livtet.biblio.getImageForBook', type: 'query' },
+		{ nsid: 'net.olamaelcu.livtet.biblio.getImageForContributor', type: 'query' },
+		// App-private shelf / actor endpoints:
+		{ nsid: 'net.olamaelcu.livtet.biblio.getActor', type: 'query' },
+		{ nsid: 'net.olamaelcu.livtet.biblio.getShelf', type: 'query' },
+		{ nsid: 'net.olamaelcu.livtet.biblio.listShelves', type: 'query' },
+		{ nsid: 'net.olamaelcu.livtet.biblio.getBookOnShelf', type: 'query' },
+		{ nsid: 'net.olamaelcu.livtet.biblio.listBooksOnShelf', type: 'query' },
+		{ nsid: 'net.olamaelcu.livtet.biblio.getShelvingOfBook', type: 'query' },
+		{ nsid: 'net.olamaelcu.livtet.biblio.listShelvesWithBooks', type: 'query' },
+	];
+}
+
+/**
+ * Materialize a `community.lexicon.book.edition` AppView from an `editions`
+ * DB row. Reads identifiers and contributors (via the JSON column) and joins
+ * contributor rows for display. Single DB query for identifiers; per-contributor
+ * fetches are batched.
+ */
+async function toEditionViewFromRow(db: Db, ctx: ViewContext, row: typeof editions.$inferSelect): Promise<EditionView> {
+	const identifiersRows = await db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, row.pk));
+	const subjects = (row.contributors ?? []) as { subject: string; role: string }[];
+	const contributorRkeys = subjects
+		.map((s) => s.subject.split('/').pop())
+		.filter((s): s is string => !!s);
+	const contributorRows = contributorRkeys.length
+		? await db.select().from(contributors).where(or(...contributorRkeys.map((k) => eq(contributors.pk, k))) as SQL)
+		: [];
+	const contributorRowsByPk = new Map(contributorRows.map((c) => [c.pk, c]));
+	const contributorViews: ContributorView[] = subjects
+		.map((s) => {
+			const rkey = s.subject.split('/').pop()!;
+			const c = contributorRowsByPk.get(rkey);
+			if (!c) return null;
+			return {
+				uri: s.subject as ContributorView['uri'],
+				name: c.name,
+				role: s.role,
+			};
+		})
+		.filter((v): v is ContributorView => v !== null);
+	const view: EditionView = {
+		uri: `at://${ctx.serviceDid}/${COLLECTION.edition}/${row.pk}`,
+		title: row.title,
+		identifiers: identifiersRows.map((i) => ({
+			uri: i.uri as `${string}:${string}`,
+			resource: i.valueScheme,
+		})),
+		contributors: contributorViews,
+	};
+	if (row.subtitle) view.subtitle = row.subtitle;
+	if (row.publishedYear != null) view.publishedYear = row.publishedYear;
+	if (row.language) view.language = row.language;
+	if (row.place) view.place = row.place;
+	if (row.description) view.description = row.description;
+	view.createdAt = new Date(row.createdAt * 1000).toISOString();
+	if (row.updatedAt != null) view.updatedAt = new Date(row.updatedAt * 1000).toISOString();
+	return view;
+}
+
 export function createXrpcRouter(
-	db: Db,
-	ctx: ViewContext,
-	opts: RouterOptions = {},
+db: Db,
+ctx: ViewContext,
+opts: RouterOptions = {},
 ): XRPCRouter {
 	const router = new XRPCRouter();
 	registerPdsHandlers(router, db, ctx, { client: opts.client });
@@ -221,8 +271,8 @@ export function createXrpcRouter(
 	}
 
 	// Map<string, Promise<unknown>> dedupes concurrent identical cache-miss
-	// calls in `searchBooks` and `listBooks` so N parallel requests share a
-	// single Google Books round-trip and a single cache write.
+	// calls in `searchEditions` so N parallel requests share a single Google
+	// Books round-trip and a single cache write.
 	const inflight = new Map<string, Promise<unknown>>();
 
 	let cachedGb: GoogleBooksClient | undefined = opts.client;
@@ -238,9 +288,8 @@ export function createXrpcRouter(
 
 	router.addQuery(Lexicons.ComAtprotoLexiconResolveLexicon.mainSchema, {
 		async handler({ params }) {
-			let schemaNsid: string;
 			try {
-				schemaNsid = params.nsid;
+				const schemaNsid: string = params.nsid;
 				const { json: schemaJson, bytes } = loadLexiconSchema(schemaNsid);
 				const hash = await crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
 				const hashBytes = new Uint8Array(hash);
@@ -261,21 +310,31 @@ export function createXrpcRouter(
 		},
 	});
 
-	// ─── GB-backed handlers ────────────────────────────────────────────────
+	// ─── community.lexicon.book.* (GB-backed) ─────────────────────────────
 
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchBooks.mainSchema, {
+	router.addQuery(Lexicons.CommunityLexiconBookSearchEditions.mainSchema, {
 		async handler({ params, request }) {
-			const nsid = 'net.olamaelcu.livtet.biblio.searchBooks';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasCursor: !!params.cursor } }, async (signal) => {
+			const nsid = 'community.lexicon.book.searchEditions';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasCursor: !!params.cursor, hasQ: !!params.q, hasIds: !!params.id?.length } }, async (signal) => {
 				const requestId = requestIdOf(request) ?? undefined;
-				const q = params.q.trim();
-				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
-				const cursor = decodeGbCursor(params.cursor);
-				const startIndex = cursor?.q === q ? cursor.startIndex : 0;
+				const q = params.q?.trim() ?? '';
+				const ids = params.id ?? [];
+				const limit = Math.min(100, Math.max(1, params.limit ?? 20));
 
-				const cacheKey = { q, startIndex, limit };
-				const hash = requestHash('searchBooks', cacheKey);
-				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'searchBooks', cacheKey, { signal, requestId });
+				if (!q && ids.length === 0) {
+					return json({ items: [], total: 0, cursor: undefined });
+				}
+
+				// Build GB query. If `id[]` is provided, OR each value into q.
+				// GB accepts freeform text; specific ISBN/OL lookups via inauthor/isbn
+				// are not yet supported (limitation; resolve via getEdition round-trip).
+				const combinedQ = q || ids.join(' ');
+				const cursor = decodeGbCursor(params.cursor);
+				const startIndex = cursor?.q === combinedQ ? cursor.startIndex : 0;
+
+				const cacheKey = { q: combinedQ, startIndex, limit };
+				const hash = requestHash('searchEditions', cacheKey);
+				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'searchEditions', cacheKey, { signal, requestId });
 				let totalItems: number;
 				let items: GbVolume[];
 				if (cached) {
@@ -292,7 +351,7 @@ export function createXrpcRouter(
 					} else {
 						logger.info({ nsid, requestId, stage: 'cache', hit: false }, 'cache miss; calling google books');
 						const work = (async () => {
-							const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, { signal, requestId });
+							const res = await gb().searchVolumes(combinedQ, { startIndex, maxResults: limit }, { signal, requestId });
 							return { totalItems: res.totalItems, items: res.items ?? [] };
 						})();
 						inflight.set(hash, work);
@@ -301,143 +360,71 @@ export function createXrpcRouter(
 							totalItems = result.totalItems;
 							items = result.items as GbVolume[];
 							logger.info({ nsid, requestId, stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
-							await setCached(db, 'searchBooks', cacheKey, { totalItems, items }, TTL.search, { signal, requestId });
+							await setCached(db, 'searchEditions', cacheKey, { totalItems, items }, TTL.search, { signal, requestId });
 						} finally {
 							inflight.delete(hash);
 						}
 					}
 				}
 
-				const views = await Promise.all(items.map((v) => gbVolumeToBookView(ctx, v)));
-				const books: BookView[] = [];
+				// Map GB volumes → EditionRecord objects (the community shape).
+				const items_out: unknown[] = [];
 				let dropped = 0;
-				for (const view of views) {
-					if (view) books.push(view);
-					else dropped += 1;
+				for (const v of items) {
+					if (!v.volumeInfo?.title) {
+						dropped++;
+						continue;
+					}
+					items_out.push(gbVolumeToEditionRecord(ctx, v));
 				}
 				if (dropped > 0) {
-					logger.warn({ nsid, requestId, stage: 'map', dropped, kept: books.length }, 'volumes dropped during mapping');
+					logger.warn({ nsid, requestId, stage: 'map', dropped, kept: items_out.length }, 'volumes dropped during mapping');
 				}
-				const hasMore = startIndex + books.length < totalItems;
-				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + books.length }) : undefined;
-				return json({ books, hitsTotal: totalItems, cursor: next });
+				const hasMore = startIndex + items_out.length < totalItems;
+				const next = hasMore ? encodeGbCursor({ q: combinedQ, startIndex: startIndex + items_out.length }) : undefined;
+				return json({ items: items_out, total: totalItems, cursor: next });
 			});
 		},
 	});
 
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetBook.mainSchema, {
+	router.addQuery(Lexicons.CommunityLexiconBookGetEdition.mainSchema, {
 		async handler({ params, request }) {
-			const nsid = 'net.olamaelcu.livtet.biblio.getBook';
+			const nsid = 'community.lexicon.book.getEdition';
 			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { uri: params.uri } }, async (signal) => {
 				const requestId = requestIdOf(request) ?? undefined;
-				const volumeId = parseVolumeId(params.uri);
-				const cached = await getCached<GbVolume>(db, 'getBook', { volumeId }, { signal, requestId });
-				let volume: GbVolume | undefined;
-				if (cached) {
-					logger.info({ nsid, requestId, stage: 'cache', hit: true, volumeId }, 'cache hit');
-					volume = cached;
-				} else {
-					logger.info({ nsid, requestId, stage: 'cache', hit: false, volumeId }, 'cache miss; calling google books');
-					volume = await gb().getVolume(volumeId, { signal, requestId });
-					if (volume) {
-						logger.info({ nsid, requestId, stage: 'google', volumeId, returned: true }, 'google books response');
-						await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, { signal, requestId });
-					} else {
-						logger.info({ nsid, requestId, stage: 'google', volumeId, returned: false }, 'google books returned no volume');
+				const rkey = rkeyFromUri(params.uri, COLLECTION.edition);
+				if (rkey.startsWith('gb-')) {
+					// GB lazy-load: fetch volume, persist as edition, return.
+					const volumeId = rkey.slice(3);
+					if (!VOLUME_ID_RE.test(volumeId)) {
+						throw new InvalidRequestError({
+			status: 400,
+			error: 'InvalidRequest',
+			message: `invalid google books volume id: '${volumeId}'`,
+						});
 					}
+					const cached = await getCached<GbVolume>(db, 'getEdition', { volumeId }, { signal, requestId });
+					let volume: GbVolume | undefined;
+					if (cached) {
+						volume = cached;
+					} else {
+						volume = await gb().getVolume(volumeId, { signal, requestId });
+						if (volume) await setCached(db, 'getEdition', { volumeId }, volume, TTL.getBook, { signal, requestId });
+					}
+					if (!volume) throw new XRPCError({ status: 404, error: 'NotFound', message: 'no such volume' });
+					return json({ edition: gbVolumeToEditionRecord(ctx, volume) });
 				}
-				if (!volume) {
-					throw new XRPCError({ status: 404, error: 'NotFound', message: 'no such volume' });
-				}
-				const book = await gbVolumeToBookView(ctx, volume);
-				if (!book) {
-					throw new XRPCError({ status: 404, error: 'NotFound', message: 'volume missing title' });
-				}
-				return json({ book });
+				const row = (await db.select().from(editions).where(eq(editions.pk, rkey)))[0];
+				if (!row) notFound();
+				return json({ edition: gbVolumeToEditionRecord(ctx, { id: row.pk, volumeInfo: rowToVolumeInfo(row) } as GbVolume) });
 			});
 		},
 	});
 
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListBooks.mainSchema, {
+	router.addQuery(Lexicons.CommunityLexiconBookGetContributor.mainSchema, {
 		async handler({ params, request }) {
-			const nsid = 'net.olamaelcu.livtet.biblio.listBooks';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasGenre: !!params.genre, hasContributor: !!params.contributor, hasFormat: !!params.format } }, async (signal) => {
-				const requestId = requestIdOf(request) ?? undefined;
-				const limit = Math.min(MAX_LIMIT, Math.max(1, params.limit ?? DEFAULT_LIMIT));
-				const q = buildGbQuery({ q: params.q, genre: params.genre, contributor: params.contributor });
-				if (!q) {
-					throw new InvalidRequestError({
-						status: 400,
-						error: 'InvalidRequest',
-						message: 'at least one of q, genre, or contributor is required',
-					});
-				}
-				if (params.format) {
-					throw new InvalidRequestError({
-						status: 400,
-						error: 'InvalidRequest',
-						message: 'format filter is unsupported for google-books-backed listBooks',
-					});
-				}
-				const cursor = decodeGbCursor(params.cursor);
-				const startIndex = cursor?.q === q ? cursor.startIndex : 0;
-				const cacheKey = { q, startIndex, limit };
-				const hash = requestHash('listBooks', cacheKey);
-				const cached = await getCached<{ totalItems: number; items: unknown[] }>(db, 'listBooks', cacheKey, { signal, requestId });
-				let totalItems: number;
-				let items: GbVolume[];
-				if (cached) {
-					logger.info({ nsid, requestId, stage: 'cache', hit: true, cachedItems: cached.items.length }, 'cache hit');
-					totalItems = cached.totalItems;
-					items = cached.items as GbVolume[];
-				} else {
-					const existing = inflight.get(hash);
-					if (existing) {
-						const shared = (await existing) as { totalItems: number; items: unknown[] };
-						logger.info({ nsid, requestId, stage: 'inflight', hit: true }, 'shared in-flight google books response');
-						totalItems = shared.totalItems;
-						items = shared.items as GbVolume[];
-					} else {
-						logger.info({ nsid, requestId, stage: 'cache', hit: false, q }, 'cache miss; calling google books');
-						const work = (async () => {
-							const res = await gb().searchVolumes(q, { startIndex, maxResults: limit }, { signal, requestId });
-							return { totalItems: res.totalItems, items: res.items ?? [] };
-						})();
-						inflight.set(hash, work);
-						try {
-							const result = await work;
-							totalItems = result.totalItems;
-							items = result.items as GbVolume[];
-							logger.info({ nsid, requestId, stage: 'google', totalItems, itemsReturned: items.length }, 'google books response');
-							await setCached(db, 'listBooks', cacheKey, { totalItems, items }, TTL.search, { signal, requestId });
-						} finally {
-							inflight.delete(hash);
-						}
-					}
-				}
-				const viewsOut = await Promise.all(items.map((v) => gbVolumeToBookView(ctx, v)));
-				const booksOut: BookView[] = [];
-				let dropped = 0;
-				for (const view of viewsOut) {
-					if (view) booksOut.push(view);
-					else dropped += 1;
-				}
-				if (dropped > 0) {
-					logger.warn({ nsid, requestId, stage: 'map', dropped, kept: booksOut.length }, 'volumes dropped during mapping');
-				}
-				const hasMore = startIndex + booksOut.length < totalItems;
-				const next = hasMore ? encodeGbCursor({ q, startIndex: startIndex + booksOut.length }) : undefined;
-				return json({ books: booksOut, cursor: next });
-			});
-		},
-	});
-
-	// ─── catalog endpoints (local DB) ──────────────────────────────────────
-
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetContributor.mainSchema, {
-		async handler({ params, request }) {
-			const nsid = 'net.olamaelcu.livtet.biblio.getContributor';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+			const nsid = 'community.lexicon.book.getContributor';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { uri: params.uri } }, async () => {
 				const rkey = rkeyFromUri(params.uri, COLLECTION.contributor);
 				const row = (await db.select().from(contributors).where(eq(contributors.pk, rkey)))[0];
 				if (!row) notFound();
@@ -446,62 +433,90 @@ export function createXrpcRouter(
 		},
 	});
 
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetGenre.mainSchema, {
+	router.addQuery(Lexicons.CommunityLexiconBookSearchContributors.mainSchema, {
 		async handler({ params, request }) {
-			const nsid = 'net.olamaelcu.livtet.biblio.getGenre';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
-				const rkey = rkeyFromUri(params.uri, COLLECTION.genre);
-				const row = (await db.select().from(genres).where(eq(genres.pk, rkey)))[0];
-				if (!row) notFound();
-				return json({ genre: await toGenreView(db, ctx, row) });
-			});
-		},
-	});
-
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioListGenres.mainSchema, {
-		async handler({ params, request }) {
-			const nsid = 'net.olamaelcu.livtet.biblio.listGenres';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
-				const limit = Math.min(100, Math.max(1, params.limit ?? 50));
-				const filters: SQL[] = [];
-				if (params.topLevelOnly) filters.push(isNull(genres.parentPk));
-				const rows = await db
-					.select()
-					.from(genres)
-					.where(filters.length ? and(...filters) : undefined)
-					.orderBy(genres.name)
-					.limit(limit);
-				const genreViews: GenreView[] = rows.map((g) => ({
-					uri: `at://${ctx.serviceDid}/${COLLECTION.genre}/${g.pk}` as GenreView['uri'],
-					name: g.name,
-					description: g.description,
-					emoji: g.emoji,
-					identifiers: [],
-				}));
-				return json({ genres: genreViews });
-			});
-		},
-	});
-
-	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioSearchContributors.mainSchema, {
-		async handler({ params, request }) {
-			const nsid = 'net.olamaelcu.livtet.biblio.searchContributors';
-			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request) }, async () => {
+			const nsid = 'community.lexicon.book.searchContributors';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { hasCursor: !!params.cursor } }, async () => {
 				const q = params.q.trim();
 				const term = `%${q}%`;
-				const limit = Math.min(100, Math.max(1, params.limit ?? 25));
+				const limit = Math.min(100, Math.max(1, params.limit ?? 20));
 				const rows = await db
 					.select()
 					.from(contributors)
-					.where(or(like(contributors.name, term), like(contributors.sortName, term)))
-					.limit(limit);
-				const contributorViews = await Promise.all(rows.map((r) => toContributorView(db, ctx, r)));
-				return json({ contributors: contributorViews });
+					.where(or(ilike(contributors.name, term), ilike(contributors.sortName, term)))
+					.orderBy(contributors.name)
+					.limit(limit + 1);
+				const hasMore = rows.length > limit;
+				const page = rows.slice(0, limit);
+				const items = await Promise.all(page.map((r) => toContributorView(db, ctx, r)));
+				return json({ items, total: hasMore ? undefined : items.length, cursor: undefined });
 			});
 		},
 	});
 
-	// ─── per-user PDS endpoints (Jetstream-indexed) ─────────────────────────
+	router.addQuery(Lexicons.CommunityLexiconBookSearchWorks.mainSchema, {
+		async handler() {
+			notSupported('community.lexicon.book.searchWorks');
+		},
+	});
+
+	router.addQuery(Lexicons.CommunityLexiconBookSearchPublishers.mainSchema, {
+		async handler() {
+			notSupported('community.lexicon.book.searchPublishers');
+		},
+	});
+
+	router.addQuery(Lexicons.CommunityLexiconBookCompatibility.mainSchema, {
+		async handler() {
+			return json({ queries: compatibilityQueries() });
+		},
+	});
+
+	// ─── app-private image lookups ───────────────────────────────────────
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
+		async handler({ params, request }) {
+			const nsid = 'net.olamaelcu.livtet.biblio.getImageForBook';
+			return withTimedHandler(nsid, { timeoutMs: handlerTimeoutMs, requestId: requestIdOf(request), params: { uri: params.uri } }, async (signal) => {
+				const requestId = requestIdOf(request) ?? undefined;
+				const rkey = rkeyFromUri(params.uri, COLLECTION.edition);
+
+				// Resolve a GB volume id: either the rkey is `gb-<id>` directly, or
+				// the persisted edition has a `googleBooks` identifier we can use.
+				let volumeId: string | undefined;
+				if (rkey.startsWith('gb-')) {
+					volumeId = rkey.slice(3);
+				} else {
+					const row = (await db
+						.select()
+						.from(bookIdentifiers)
+						.where(and(eq(bookIdentifiers.bookPk, rkey), eq(bookIdentifiers.valueScheme, 'googleBooks')))
+						.limit(1))[0];
+					if (row) {
+						const m = row.uri.match(/\/volumes\/([^/]+)$/);
+						if (m) volumeId = m[1];
+					}
+				}
+
+				if (!volumeId) return json({ url: undefined });
+
+				const cached = await getCached<GbVolume>(db, 'getVolume', { volumeId }, { signal, requestId });
+				const volume = cached ?? (await gb().getVolume(volumeId, { signal, requestId }));
+				if (volume) await setCached(db, 'getVolume', { volumeId }, volume, TTL.getBook, { signal, requestId });
+				const url = volume?.volumeInfo?.imageLinks?.thumbnail ?? volume?.volumeInfo?.imageLinks?.smallThumbnail;
+				return json({ url });
+			});
+		},
+	});
+
+	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetImageForContributor.mainSchema, {
+		async handler() {
+			// TODO: implement OL cover lookup via openlibrary.org/authors/<id>.json
+			return json({ url: undefined });
+		},
+	});
+
+	// ─── per-user PDS endpoints (Jetstream-indexed, app-private) ─────────
 
 	router.addQuery(Lexicons.NetOlamaelcuLivtetBiblioGetActor.mainSchema, {
 		async handler({ params, request }) {
@@ -543,7 +558,7 @@ export function createXrpcRouter(
 				const rec = await getUserRecord(db, did, COLLECTION.bookShelf, rkey);
 				if (!rec) notFound();
 				const value = rec.value as { shelf: string; book: { ref: string } };
-				const book = await hydrateBook(db, ctx, value.book.ref);
+				const book = await hydrateEdition(db, ctx, value.book.ref);
 				if (!book) notFound();
 				const shelfParsed = parseRkey(String(value.shelf));
 				const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
@@ -573,7 +588,7 @@ export function createXrpcRouter(
 				for (const rec of matching) {
 					const value = rec.value as { shelf: string; book: { ref: string } };
 					const owner = didFromUri(rec.uri);
-					const book = await hydrateBook(db, ctx, value.book.ref);
+					const book = await hydrateEdition(db, ctx, value.book.ref);
 					if (!book) continue;
 					const shelfParsed = parseRkey(String(value.shelf));
 					const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
@@ -596,7 +611,7 @@ export function createXrpcRouter(
 				for (const rec of matching) {
 					const value = rec.value as { shelf: string; book: { ref: string } };
 					const owner = didFromUri(rec.uri);
-					const book = await hydrateBook(db, ctx, value.book.ref);
+					const book = await hydrateEdition(db, ctx, value.book.ref);
 					if (!book) continue;
 					const shelfParsed = parseRkey(String(value.shelf));
 					const shelfRec = await getUserRecord(db, shelfParsed.did, COLLECTION.shelf, shelfParsed.rkey);
@@ -632,7 +647,7 @@ export function createXrpcRouter(
 					for (const rec of shelvingsForShelf) {
 						const value = rec.value as { book: { ref: string } };
 						const owner = didFromUri(rec.uri);
-						const book = await hydrateBook(db, ctx, value.book.ref);
+						const book = await hydrateEdition(db, ctx, value.book.ref);
 						if (!book) continue;
 						booksView.push(toBookShelfView(rec, owner, shelfView, book));
 					}
@@ -644,4 +659,66 @@ export function createXrpcRouter(
 	});
 
 	return router;
+}
+
+// ─── Helpers used by router.ts ──────────────────────────────────────────────
+
+/** Map an `editions` DB row into a fake GB volume so `gbVolumeToEditionRecord` can render it. */
+function rowToVolumeInfo(row: typeof editions.$inferSelect): { title: string; subtitle?: string; publishedDate?: string; description?: string; language?: string; imageLinks?: { thumbnail?: string; smallThumbnail?: string }; authors?: string[] } {
+	const vi: { title: string; subtitle?: string; publishedDate?: string; description?: string; language?: string; imageLinks?: { thumbnail?: string; smallThumbnail?: string }; authors?: string[] } = {
+		title: row.title,
+	};
+	if (row.subtitle) vi.subtitle = row.subtitle;
+	if (row.publishedYear != null) vi.publishedDate = String(row.publishedYear);
+	if (row.description) vi.description = row.description;
+	if (row.language) vi.language = row.language;
+	return vi;
+}
+
+/**
+ * Map a Google Books volume to a `community.lexicon.book.edition` record shape
+ * (the shape that gets persisted in the PDS and returned by AppView queries).
+ */
+export function gbVolumeToEditionRecord(
+ctx: ViewContext,
+volume: GbVolume,
+): Record<string, unknown> {
+	const info = volume.volumeInfo;
+	const rkey = `gb-${volume.id}`;
+	const record: Record<string, unknown> = {
+		$type: 'community.lexicon.book.edition',
+		title: info.title,
+		createdAt: new Date().toISOString(),
+	};
+	if (info.subtitle) record.subtitle = info.subtitle;
+	if (info.publishedDate) {
+		const year = parseYear(info.publishedDate);
+		if (year != null) record.publishedYear = year;
+	}
+	if (info.language) record.language = info.language;
+	if (info.description) record.description = info.description;
+	if (info.authors?.length) {
+		record.contributors = info.authors.map((name) => ({
+			subject: `at://${ctx.serviceDid}/community.lexicon.book.contributor/${encodeURIComponent(name)}`,
+			role: 'author',
+		}));
+	}
+	const identifiers = gbIdentifiersToIdentifiers(info);
+	if (identifiers.length) record.identifiers = identifiers;
+	// Tag the edition with a GB volume id under resource=googleBooks so
+	// getImageForBook can resolve the cover URL.
+	if (!identifiers.find((i) => i.resource === 'googleBooks')) {
+		identifiers.push({
+			uri: `https://www.googleapis.com/books/v1/volumes/${volume.id}`,
+			resource: 'googleBooks',
+		});
+	}
+	record.identifiers = identifiers;
+	void rkey;
+	return record;
+}
+
+function parseYear(publishedDate: string): number | undefined {
+	const m = publishedDate.match(/^(\d{4})/);
+	return m ? Number(m[1]) : undefined;
 }

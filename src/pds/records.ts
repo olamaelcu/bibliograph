@@ -1,35 +1,26 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../db/schema.js';
-import type * as Lexicons from '../lexicons/index.js';
-
-type Book = Lexicons.NetOlamaelcuLivtetBiblioBook.Main;
-type Contributor = Lexicons.NetOlamaelcuLivtetBiblioContributor.Main;
-type ContributorRole = Lexicons.NetOlamaelcuLivtetBiblioContributorRole.Main;
-type Format = Lexicons.NetOlamaelcuLivtetBiblioFormat.Main;
-type Genre = Lexicons.NetOlamaelcuLivtetBiblioGenre.Main;
 import {
-	contributors,
-	contributorIdentifiers,
-	bookContributors,
-	bookGenres,
 	bookIdentifiers,
-	books,
-	contributorRoles,
-	formats,
-	genreIdentifiers,
-	genres,
+	contributorIdentifiers,
+	contributors,
+	editions,
 } from '../db/schema.js';
 import { GoogleBooksClient, GoogleBooksError, type GbVolume } from '../google-books/client.js';
-import { gbVolumeToBookRecord } from '../google-books/mapper.js';
+import { gbVolumeToEditionRecord } from '../google-books/mapper.js';
 import { getCached, setCached, TTL } from '../google-books/cache.js';
+import { COLLECTION } from '../lex/collections.js';
 
+/**
+ * Owned collections for the AppView's PDS. Catalog records (edition,
+ * contributor) live under `community.lexicon.book.*`. App-private shelves /
+ * bookShelving / actor are Jetstream-indexed and served via
+ * `user_records` (not backed by these tables).
+ */
 export const COLLECTIONS = {
-	book: 'net.olamaelcu.livtet.biblio.book',
-	contributor: 'net.olamaelcu.livtet.biblio.contributor',
-	contributorRole: 'net.olamaelcu.livtet.biblio.contributorRole',
-	format: 'net.olamaelcu.livtet.biblio.format',
-	genre: 'net.olamaelcu.livtet.biblio.genre',
+	edition: COLLECTION.edition,
+	contributor: COLLECTION.contributor,
 } as const;
 
 export type OwnedCollection = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];
@@ -55,153 +46,102 @@ function uri(value: string): Uri {
 }
 
 export interface IdentifierRow {
-	resource: string;
-	url: string;
+	valueScheme: string;
+	value: string;
+	uri: string;
 }
 
-// ─── Format ─────────────────────────────────────────────────────────────────
-
-export function serializeFormat(row: {
-	pk: string;
-	description: string;
-	emoji: string;
-	iconImageUrl: string | null;
-	unit: string;
-}): Format {
-	const value: Format = {
-		$type: 'net.olamaelcu.livtet.biblio.format',
-		description: row.description,
-		emoji: row.emoji,
-		unit: row.unit,
-	};
-	if (row.iconImageUrl) value.iconImageUrl = uri(row.iconImageUrl);
-	return value;
+/** Plain object shape for an edition record (mirrors `community.lexicon.book.edition`). */
+export interface EditionRecord {
+	$type: 'community.lexicon.book.edition';
+	title: string;
+	subtitle?: string;
+	work?: string;
+	publisher?: string;
+	place?: string;
+	publishedYear?: number;
+	language?: string;
+	contributors?: { subject: string; role: string }[];
+	identifiers?: { uri: string; resource: string }[];
+	description?: string;
+	createdAt: string;
 }
 
-// ─── Genre ──────────────────────────────────────────────────────────────────
-
-export function serializeGenre(
-	ctx: { serviceDid: string },
-	row: {
-		pk: string;
-		name: string;
-		emoji: string;
-		description: string;
-		iconImageUrl: string | null;
-		parentPk: string | null;
-	},
-	identifiers: IdentifierRow[],
-): Genre {
-	const value: Genre = {
-		$type: 'net.olamaelcu.livtet.biblio.genre',
-		name: row.name,
-		emoji: row.emoji,
-		description: row.description,
-	};
-	if (row.iconImageUrl) value.iconImageUrl = uri(row.iconImageUrl);
-	if (identifiers.length) {
-		value.identifiers = identifiers.map((id) => ({
-			resource: id.resource,
-			url: uri(id.url),
-		}));
-	}
-	if (row.parentPk) {
-		value.parent = `at://${ctx.serviceDid}/${COLLECTIONS.genre}/${row.parentPk}` as Genre['parent'];
-	}
-	return value;
+/** Plain object shape for a contributor record (mirrors `community.lexicon.book.contributor`). */
+export interface ContributorRecord {
+	$type: 'community.lexicon.book.contributor';
+	name: string;
+	aliases?: string[];
+	linkedDid?: string;
+	bio?: string;
+	bornYear?: number;
+	diedYear?: number;
+	identifiers?: { uri: string; resource: string }[];
+	createdAt: string;
 }
 
 // ─── Contributor ────────────────────────────────────────────────────────────
 
 export function serializeContributor(
-	row: {
-		pk: string;
-		name: string;
-		sortName: string | null;
-		bio: string | null;
-		imageUrl: string | null;
-		createdAt: number;
-	},
-	identifiers: IdentifierRow[],
-): Contributor {
-	const value: Contributor = {
-		$type: 'net.olamaelcu.livtet.biblio.contributor',
+row: {
+	pk: string;
+	name: string;
+	sortName: string | null;
+	bio: string | null;
+	createdAt: number;
+	updatedAt: number | null;
+},
+identifiers: IdentifierRow[],
+): ContributorRecord {
+	const value: ContributorRecord = {
+		$type: COLLECTIONS.contributor,
 		name: row.name,
 	};
-	if (row.sortName) value.sortName = row.sortName;
 	if (identifiers.length) {
 		value.identifiers = identifiers.map((id) => ({
-			resource: id.resource,
-			url: uri(id.url),
+			uri: uri(id.uri),
+			resource: id.valueScheme,
 		}));
 	}
 	if (row.bio) value.bio = row.bio;
-	if (row.imageUrl) value.imageUrl = uri(row.imageUrl);
-	if (row.createdAt != null) value.createdAt = toIso(row.createdAt);
+	if (row.createdAt != null) value.createdAt = toIso(row.createdAt)!;
 	return value;
 }
 
-// ─── Contributor Role ───────────────────────────────────────────────────────
+// ─── Edition ────────────────────────────────────────────────────────────────
 
-export function serializeContributorRole(row: {
+export function serializeEdition(
+row: {
 	pk: string;
-	name: string;
-	description: string;
-	iconImageUrl: string | null;
+	title: string;
+	subtitle: string | null;
+	language: string | null;
+	place: string | null;
+	workUri: string | null;
+	publisherUri: string | null;
+	publishedYear: number | null;
+	description: string | null;
+	contributors: unknown;
 	createdAt: number;
-}): ContributorRole {
-	const value: ContributorRole = {
-		$type: 'net.olamaelcu.livtet.biblio.contributorRole',
-		name: row.name,
-		description: row.description,
-	};
-	if (row.iconImageUrl) value.iconImageUrl = uri(row.iconImageUrl);
-	if (row.createdAt != null) value.createdAt = toIso(row.createdAt);
-	return value;
-}
-
-// ─── Book ───────────────────────────────────────────────────────────────────
-
-export interface SerializeBookOptions {
-	serviceDid: string;
-	format?: { pk: string; description: string; emoji: string; iconImageUrl: string | null; unit: string };
-	genres?: Array<{ pk: string; name: string; emoji: string; description: string; iconImageUrl: string | null; parentPk: string | null }>;
-	identifiers?: IdentifierRow[];
-}
-
-export function serializeBook(
-	row: {
-		pk: string;
-		title: string;
-		publishDate: number | null;
-		description: string | null;
-		coverUrl: string | null;
-		createdAt: number;
-	},
-	opts: SerializeBookOptions,
-): Book {
-	const value: Book = {
-		$type: 'net.olamaelcu.livtet.biblio.book',
+	updatedAt: number | null;
+},
+identifiers: IdentifierRow[],
+): EditionRecord {
+	const subjects = (row.contributors ?? []) as { subject: string; role: string }[];
+	const value: EditionRecord = {
+		$type: COLLECTIONS.edition,
 		title: row.title,
+		contributors: subjects,
+		identifiers: identifiers.map((i) => ({ uri: uri(i.uri), resource: i.valueScheme })),
+		createdAt: toIso(row.createdAt)!,
 	};
-	if (opts.format) {
-		value.format = serializeFormat(opts.format);
-	}
-	if (opts.genres?.length) {
-		value.genres = opts.genres.map((g) =>
-			serializeGenre({ serviceDid: opts.serviceDid }, g, []),
-		);
-	}
-	if (opts.identifiers?.length) {
-		value.identifiers = opts.identifiers.map((id) => ({
-			resource: id.resource,
-			url: uri(id.url),
-		}));
-	}
-	if (row.publishDate != null) value.publishDate = toIso(row.publishDate);
+	if (row.subtitle) value.subtitle = row.subtitle;
+	if (row.workUri) value.work = row.workUri;
+	if (row.publisherUri) value.publisher = row.publisherUri;
+	if (row.place) value.place = row.place;
+	if (row.publishedYear != null) value.publishedYear = row.publishedYear;
+	if (row.language) value.language = row.language;
 	if (row.description) value.description = row.description;
-	if (row.coverUrl) value.coverUrl = uri(row.coverUrl);
-	if (row.createdAt != null) value.createdAt = toIso(row.createdAt);
 	return value;
 }
 
@@ -211,86 +151,44 @@ export interface PdsContext {
 	serviceDid: string;
 }
 
-async function loadIdentifiers(db: Db, table: any, pkCol: any, pk: string): Promise<IdentifierRow[]> {
-	const rows = (await db.select().from(table).where(eq(pkCol, pk))) as IdentifierRow[];
-	return rows;
+async function loadContributorIdentifiers(db: Db, pk: string): Promise<IdentifierRow[]> {
+	return db.select().from(contributorIdentifiers).where(eq(contributorIdentifiers.contributorPk, pk));
 }
 
-export async function hydrateFormat(db: Db, pk: string) {
-	const row = (await db.select().from(formats).where(eq(formats.pk, pk)))[0];
-	return row ? serializeFormat(row) : undefined;
-}
-
-export async function hydrateGenre(
-	db: Db,
-	ctx: PdsContext,
-	pk: string,
-): Promise<Genre | undefined> {
-	const row = (await db.select().from(genres).where(eq(genres.pk, pk)))[0];
-	if (!row) return undefined;
-	const identifiers = await loadIdentifiers(db, genreIdentifiers, genreIdentifiers.genrePk, pk);
-	return serializeGenre(ctx, row, identifiers);
+async function loadBookIdentifiers(db: Db, pk: string): Promise<IdentifierRow[]> {
+	return db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, pk));
 }
 
 export async function hydrateContributor(
-	db: Db,
-	pk: string,
-): Promise<Contributor | undefined> {
+db: Db,
+pk: string,
+): Promise<ContributorRecord | undefined> {
 	const row = (await db.select().from(contributors).where(eq(contributors.pk, pk)))[0];
 	if (!row) return undefined;
-	const identifiers = await loadIdentifiers(db, contributorIdentifiers, contributorIdentifiers.contributorPk, pk);
+	const identifiers = await loadContributorIdentifiers(db, pk);
 	return serializeContributor(row, identifiers);
 }
 
-export async function hydrateContributorRole(db: Db, pk: string) {
-	const row = (await db.select().from(contributorRoles).where(eq(contributorRoles.pk, pk)))[0];
-	return row ? serializeContributorRole(row) : undefined;
-}
-
-export async function hydrateBook(db: Db, ctx: PdsContext, pk: string): Promise<Book | undefined> {
-	const row = (await db.select().from(books).where(eq(books.pk, pk)))[0];
+export async function hydrateEdition(db: Db, pk: string): Promise<EditionRecord | undefined> {
+	const row = (await db.select().from(editions).where(eq(editions.pk, pk)))[0];
 	if (!row) return undefined;
-
-	const [genreRows, identifierRows] = await Promise.all([
-		db
-			.select({ genre: genres })
-			.from(bookGenres)
-			.innerJoin(genres, eq(bookGenres.genrePk, genres.pk))
-			.where(eq(bookGenres.bookPk, pk)),
-		loadIdentifiers(db, bookIdentifiers, bookIdentifiers.bookPk, pk),
-	]);
-
-	const format = row.formatPk
-		? (await db.select().from(formats).where(eq(formats.pk, row.formatPk)))[0]
-		: undefined;
-
-	return serializeBook(row, {
-		serviceDid: ctx.serviceDid,
-		format,
-		genres: genreRows.map((j) => j.genre),
-		identifiers: identifierRows,
-	});
+	const identifiers = await loadBookIdentifiers(db, pk);
+	return serializeEdition(row, identifiers);
 }
 
-export type SerializedRecord = Book | Contributor | ContributorRole | Format | Genre;
+export type SerializedRecord = EditionRecord | ContributorRecord;
 
 export async function loadRecord(
-	db: Db,
-	ctx: PdsContext,
-	collection: OwnedCollection,
-	pk: string,
+db: Db,
+_ctx: PdsContext,
+collection: OwnedCollection,
+pk: string,
 ): Promise<SerializedRecord | undefined> {
 	switch (collection) {
-		case COLLECTIONS.book:
-			return hydrateBook(db, ctx, pk);
+		case COLLECTIONS.edition:
+			return hydrateEdition(db, pk);
 		case COLLECTIONS.contributor:
 			return hydrateContributor(db, pk);
-		case COLLECTIONS.contributorRole:
-			return hydrateContributorRole(db, pk);
-		case COLLECTIONS.format:
-			return hydrateFormat(db, pk);
-		case COLLECTIONS.genre:
-			return hydrateGenre(db, ctx, pk);
 	}
 }
 
@@ -302,10 +200,10 @@ export async function loadCid(db: Db, collection: OwnedCollection, pk: string): 
 }
 
 export async function persistCid(
-	db: Db,
-	collection: OwnedCollection,
-	pk: string,
-	cid: string,
+db: Db,
+collection: OwnedCollection,
+pk: string,
+cid: string,
 ): Promise<void> {
 	const table = tableFor(collection);
 	await db.update(table).set({ cid }).where(eq(table.pk, pk));
@@ -313,16 +211,10 @@ export async function persistCid(
 
 function tableFor(collection: OwnedCollection) {
 	switch (collection) {
-		case COLLECTIONS.book:
-			return books;
+		case COLLECTIONS.edition:
+			return editions;
 		case COLLECTIONS.contributor:
 			return contributors;
-		case COLLECTIONS.contributorRole:
-			return contributorRoles;
-		case COLLECTIONS.format:
-			return formats;
-		case COLLECTIONS.genre:
-			return genres;
 	}
 }
 
@@ -345,43 +237,123 @@ export class UpstreamUnavailableError extends Error {
 }
 
 /**
- * Idempotently write a GB-backed book row and its identifier rows. Wrapped in a
- * single transaction so a half-written state can never appear. ON CONFLICT DO
- * NOTHING on both inserts makes concurrent first-time imports safe: the losing
- * insert is a no-op and the caller re-reads from the DB if it needs the
- * canonical row.
- *
- * GB data is canonical and skips the importer review lifecycle.
+ * Mint a fresh TID for use as an atproto record rkey. We use a 13-char
+ * Crockford base32 string of mostly random bytes; collisions are negligible
+ * at our scale (32^13 ≈ 3.7e19 possibilities).
  */
-export async function persistGbBackedBook(db: Db, value: Book, pk: string): Promise<void> {
-	const now = Math.floor(Date.now() / 1000);
-	await db.transaction(async (tx) => {
-		await tx
-			.insert(books)
-			.values({
-				pk,
-				title: value.title,
-				publishDate: value.publishDate ? Math.floor(Date.parse(value.publishDate) / 1000) : null,
-				description: value.description ?? null,
-				coverUrl: value.coverUrl ?? null,
-				createdAt: now,
-				updatedAt: null,
-			})
-			.onConflictDoNothing({ target: books.pk });
+export function mintTid(): string {
+	const alphabet = '234567abcdefghijklmnopqrstuvwxyz';
+	const bytes = new Uint8Array(8);
+	crypto.getRandomValues(bytes);
+	let out = '';
+	for (let i = 0; i < 8; i++) {
+		out += alphabet[bytes[i]! % alphabet.length];
+	}
+	return out + Date.now().toString(36).slice(-5);
+}
 
-		if (value.identifiers?.length) {
-			await tx
-				.insert(bookIdentifiers)
-				.values(
-					value.identifiers.map((id) => ({
-						bookPk: pk,
-						resource: id.resource,
-						url: id.url,
-					})),
-				)
-				.onConflictDoNothing();
+/**
+ * Look up an existing contributor by case-insensitive exact name match. Returns
+ * the contributor pk (TID) if found, or undefined. Used by GB lazy-load to dedupe
+ * contributors imported from multiple GB volumes.
+ */
+async function findContributorByName(
+db: Db,
+name: string,
+): Promise<string | undefined> {
+	const lower = name.toLowerCase();
+	const row = (await db
+		.select({ pk: contributors.pk })
+		.from(contributors)
+		.where(eq(contributors.nameLower, lower))
+		.limit(1))[0];
+	return row?.pk;
+}
+
+/**
+ * Idempotently persist a GB-backed edition. Mints a fresh TID, dedupes
+ * contributors by `name_lower`, and writes identifier rows in flipped
+ * `{value_scheme, value, uri}` form. Wrapped in a single transaction.
+ */
+export async function persistGbBackedEdition(db: Db, volume: GbVolume): Promise<string> {
+	const info = volume.volumeInfo;
+	const editionTid = mintTid();
+	const now = Math.floor(Date.now() / 1000);
+
+	const contributorTids = new Map<string, string>(); // author name → pk
+	const contributorsJson: { subject: string; role: string }[] = [];
+	for (const author of info.authors ?? []) {
+		let tid = contributorTids.get(author);
+		if (!tid) {
+			tid = await findContributorByName(db, author);
+			if (!tid) {
+				tid = mintTid();
+				await db.insert(contributors).values({
+					pk: tid,
+					name: author,
+					createdAt: now,
+				}).onConflictDoNothing();
+			}
+			contributorTids.set(author, tid);
+		}
+		contributorsJson.push({ subject: tid, role: 'author' });
+	}
+
+	// Convert subjects to at-uri strings using a placeholder DID; the PDS router
+	// rewrites to the canonical service DID when serializing the record.
+	const subjectsForJson = contributorsJson.map((c) => ({
+		subject: c.subject,
+		role: c.role,
+	}));
+
+	await db.transaction(async (tx) => {
+		await tx.insert(editions).values({
+			pk: editionTid,
+			title: info.title,
+			subtitle: info.subtitle ?? null,
+			language: info.language ?? null,
+			publishedYear: parseYear(info.publishedDate),
+			description: info.description ?? null,
+			contributors: subjectsForJson as unknown as typeof editions.$inferSelect.contributors,
+			createdAt: now,
+			updatedAt: now,
+		}).onConflictDoNothing({ target: editions.pk });
+
+		const identifiers: { valueScheme: string; value: string; uri: string }[] = [];
+		for (const ident of info.industryIdentifiers ?? []) {
+			if (ident.type === 'ISBN_10') {
+				identifiers.push({ valueScheme: 'isbn10', value: ident.identifier, uri: `urn:isbn:${ident.identifier}` });
+			} else if (ident.type === 'ISBN_13') {
+				identifiers.push({ valueScheme: 'isbn13', value: ident.identifier, uri: `urn:isbn:${ident.identifier}` });
+			} else {
+				identifiers.push({ valueScheme: 'googleBooks', value: ident.identifier, uri: `https://www.googleapis.com/books/v1/volumes/${ident.identifier}` });
+			}
+		}
+		identifiers.push({
+			valueScheme: 'googleBooks',
+			value: volume.id,
+			uri: `https://www.googleapis.com/books/v1/volumes/${volume.id}`,
+		});
+
+		if (identifiers.length) {
+			await tx.insert(bookIdentifiers).values(
+				identifiers.map((id) => ({
+					bookPk: editionTid,
+					valueScheme: id.valueScheme,
+					value: id.value,
+					uri: id.uri,
+				})),
+			).onConflictDoNothing();
 		}
 	});
+
+	return editionTid;
+}
+
+function parseYear(publishedDate: string | undefined): number | null {
+	if (!publishedDate) return null;
+	const m = publishedDate.match(/^(\d{4})/);
+	return m ? Number(m[1]) : null;
 }
 
 export interface LookupGbBookOptions {
@@ -390,18 +362,18 @@ export interface LookupGbBookOptions {
 }
 
 /**
- * Lazy-import a `gb-` prefixed book: cache → GB upstream → map → persist →
- * return. Returns undefined when GB has no such volume or when the volume has
- * no title. Throws {@link InvalidGbRkeyError} for malformed rkeys (caller maps
- * to 400) and {@link UpstreamUnavailableError} for GB failures other than 404
- * (caller maps to 502).
+ * Lazy-import a `gb-` prefixed edition: cache → GB upstream → mint TID →
+ * persist → return record. Returns undefined when GB has no such volume or
+ * when the volume has no title. Throws {@link InvalidGbRkeyError} for
+ * malformed rkeys (caller maps to 400) and {@link UpstreamUnavailableError}
+ * for GB failures other than 404 (caller maps to 502).
  */
 export async function lookupAndImportGbBook(
-	db: Db,
-	client: GoogleBooksClient,
-	rkey: string,
-	opts: LookupGbBookOptions = {},
-): Promise<Book | undefined> {
+db: Db,
+client: GoogleBooksClient,
+rkey: string,
+opts: LookupGbBookOptions = {},
+): Promise<EditionRecord | undefined> {
 	if (!rkey.startsWith('gb-')) {
 		throw new InvalidGbRkeyError(`rkey must start with 'gb-', got '${rkey}'`);
 	}
@@ -410,7 +382,7 @@ export async function lookupAndImportGbBook(
 		throw new InvalidGbRkeyError(`invalid google books volume id: '${volumeId}'`);
 	}
 
-	let volume = await getCached<GbVolume>(db, 'getBook', { volumeId }, opts);
+	let volume = await getCached<GbVolume>(db, 'getVolume', { volumeId }, opts);
 	if (!volume) {
 		try {
 			volume = (await client.getVolume(volumeId, opts)) ?? undefined;
@@ -424,7 +396,7 @@ export async function lookupAndImportGbBook(
 		}
 		if (volume) {
 			try {
-				await setCached(db, 'getBook', { volumeId }, volume, TTL.getBook, opts);
+				await setCached(db, 'getVolume', { volumeId }, volume, TTL.getBook, opts);
 			} catch {
 				// Cache write failures must not block record import.
 			}
@@ -432,9 +404,30 @@ export async function lookupAndImportGbBook(
 	}
 	if (!volume) return undefined;
 
-	const value = gbVolumeToBookRecord(volume);
-	if (!value) return undefined;
+	if (!volume.volumeInfo?.title) return undefined;
+	const tid = await persistGbBackedEdition(db, volume);
 
-	await persistGbBackedBook(db, value, rkey);
-	return value;
+	// Read back and serialize. The mint step above might have failed due to
+	// concurrent insertion; fall back to a re-read.
+	const row = (await db.select().from(editions).where(eq(editions.pk, tid)))[0];
+	if (!row) {
+		// Re-read by GB volume id (which we wrote into book_identifiers).
+		const idents = await db.select().from(bookIdentifiers).where(andBookIdent(volumeId));
+		const editionTid = idents[0]?.bookPk;
+		if (!editionTid) return undefined;
+		const r = (await db.select().from(editions).where(eq(editions.pk, editionTid)))[0];
+		if (!r) return undefined;
+		const ids = await db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, editionTid));
+		return serializeEdition(r, ids);
+	}
+	const ids = await db.select().from(bookIdentifiers).where(eq(bookIdentifiers.bookPk, tid));
+	return serializeEdition(row, ids);
 }
+
+// Helper: book_identifiers where value = (some GB volume id pattern). We use
+// `value` (the GB volume id column) instead of `uri` for the lookup.
+function andBookIdent(volumeId: string) {
+	return eq(bookIdentifiers.value, volumeId);
+}
+
+export { gbVolumeToEditionRecord };

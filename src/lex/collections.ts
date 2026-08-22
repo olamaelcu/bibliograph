@@ -1,11 +1,15 @@
+/**
+ * Canonical collection NSIDs. Catalog records live under the community
+ * `community.lexicon.book.*` namespace; user-owned records (shelves,
+ * book shelvings, actor profiles) stay app-private under
+ * `net.olamaelcu.livtet.biblio.*`.
+ */
 export const COLLECTION = {
-	book: 'net.olamaelcu.livtet.biblio.book',
-	contributor: 'net.olamaelcu.livtet.biblio.contributor',
-	contributorRole: 'net.olamaelcu.livtet.biblio.contributorRole',
-	format: 'net.olamaelcu.livtet.biblio.format',
-	genre: 'net.olamaelcu.livtet.biblio.genre',
+	edition: 'community.lexicon.book.edition',
+	contributor: 'community.lexicon.book.contributor',
+	// App-private user-owned collections (Jetstream-indexed):
 	shelf: 'net.olamaelcu.livtet.biblio.shelf',
-	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelving',
+	bookShelf: 'net.olamaelcu.livtet.biblio.bookShelf',
 	actor: 'net.olamaelcu.livtet.biblio.actor',
 } as const;
 
