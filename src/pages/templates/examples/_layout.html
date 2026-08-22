@@ -1,0 +1,218 @@
+<style>
+  .example-page {
+    max-width: 60rem;
+    margin: 1.5rem auto 0;
+    padding: 0 2rem 2rem;
+  }
+
+  .example-page .example-meta {
+    margin: 0 0 1rem;
+    color: var(--wa-color-on-quiet);
+  }
+
+  .example-page .example-meta code {
+    font-weight: 600;
+  }
+
+  .example-form {
+    display: grid;
+    gap: 0.6rem;
+    margin: 1rem 0 1.25rem;
+    padding: 1rem;
+    border: 1px solid var(--wa-form-control-border-color);
+    border-radius: 8px;
+    background: var(--wa-color-surface-lowered);
+  }
+
+  .example-form .param-row {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .example-form .param-row .param-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .example-form .param-row .param-head code {
+    font-weight: 600;
+  }
+
+  .example-form .param-row .param-desc {
+    font-size: 0.85rem;
+    color: var(--wa-color-on-quiet);
+  }
+
+  .example-form .param-row .param-meta {
+    font-size: 0.8rem;
+    color: var(--wa-color-on-quiet);
+  }
+
+  .example-form .form-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.4rem;
+  }
+
+  .example-output {
+    min-height: 2rem;
+  }
+
+  .example-output .empty {
+    color: var(--wa-color-on-quiet);
+  }
+
+  .example-output .book-card,
+  .example-output .contributor-card,
+  .example-output .shelf-card,
+  .example-output .genre-card,
+  .example-output .actor-card,
+  .example-output .bookShelf-card {
+    width: auto;
+    margin: 0 0 0.75rem;
+  }
+
+  .example-output .book-card-header,
+  .example-output .contributor-card-header,
+  .example-output .shelf-card-header,
+  .example-output .genre-card-header,
+  .example-output .actor-card-header,
+  .example-output .bookShelf-card-header {
+    display: flex;
+    flex-direction: column;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+
+  .example-output .book-title,
+  .example-output .contributor-name,
+  .example-output .shelf-name,
+  .example-output .genre-name,
+  .example-output .actor-name,
+  .example-output .bookShelf-title {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+  }
+
+  .example-output .at-uri {
+    font-family: var(--wa-font-family-code), monospace;
+    font-size: 0.8rem;
+    color: var(--wa-color-on-quiet);
+    word-break: break-all;
+  }
+
+  .example-output .book-cover {
+    width: 4rem;
+    height: 6rem;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--wa-form-control-border-color);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+  }
+
+  .example-output .book-desc,
+  .example-output .contributor-bio,
+  .example-output .shelf-desc,
+  .example-output .genre-desc,
+  .example-output .actor-desc,
+  .example-output .bookShelf-meta {
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .example-output .identifiers {
+    margin: 0.5rem 0 0.75rem;
+    font-size: 0.85rem;
+    list-style: none;
+    padding: 0;
+  }
+
+  .example-output .identifiers li {
+    margin: 0.15rem 0;
+  }
+
+  .example-output .results-meta {
+    margin: 1.25rem 0 0.5rem;
+    color: var(--wa-color-on-quiet);
+  }
+
+  .example-output .load-more {
+    text-align: center;
+    margin: 1rem 0;
+  }
+</style>
+
+<main class="example-page">
+  <div class="page-intro" style="margin:0;padding:0">
+    <h2><%= it.title %></h2>
+    <p class="example-meta">
+      <code><%= it.nsid %></code>
+      <% if (it.endpoint.description) { %>
+        &mdash; <%= it.endpoint.description %>
+      <% } %>
+      &middot; <a href="/<%= it.endpoint.lexiconPath %>" target="_blank" rel="noopener">lexicon</a>
+    </p>
+  </div>
+
+  <form id="example-form" class="example-form" autocomplete="off">
+    <% for (const p of it.endpoint.params) { %>
+      <div class="param-row">
+        <div class="param-head">
+          <code><%= p.name %></code>
+          <% if (p.required) { %><wa-badge variant="danger" appearance="filled">required</wa-badge><% } %>
+          <span class="param-meta"><%= p.type %></span>
+        </div>
+        <% if (p.description) { %>
+          <div class="param-desc"><%= p.description %></div>
+        <% } %>
+        <% if (p.knownValues && p.knownValues.length) { %>
+          <wa-select id="param-<%= p.name %>" name="<%= p.name %>" value="">
+            <wa-option value="">&mdash; select &mdash;</wa-option>
+            <% for (const v of p.knownValues) { %>
+              <wa-option value="<%= v %>"><%= v %></wa-option>
+            <% } %>
+          </wa-select>
+        <% } else if (p.type === 'boolean') { %>
+          <wa-select id="param-<%= p.name %>" name="<%= p.name %>" value="">
+            <wa-option value="">&mdash; select &mdash;</wa-option>
+            <wa-option value="true">true</wa-option>
+            <wa-option value="false">false</wa-option>
+          </wa-select>
+        <% } else if (p.type === 'integer') { %>
+          <wa-input id="param-<%= p.name %>" name="<%= p.name %>" type="number" <%= p.required ? 'required' : '' %>></wa-input>
+          <% if (p.default !== undefined) { %><div class="param-meta">default: <code><%= p.default %></code></div><% } %>
+        <% } else { %>
+          <wa-input id="param-<%= p.name %>" name="<%= p.name %>" type="text" <%= p.required ? 'required' : '' %>></wa-input>
+          <% if (p.default !== undefined) { %><div class="param-meta">default: <code><%= p.default %></code></div><% } %>
+        <% } %>
+      </div>
+    <% } %>
+    <div class="form-actions">
+      <wa-button id="example-submit" variant="brand" type="submit">Run query</wa-button>
+      <span class="muted">fires <code>/xrpc/<%= it.nsid %></code></span>
+    </div>
+  </form>
+
+  <div id="example-output" class="example-output"></div>
+</main>
+
+<script type="application/json" id="example-config">
+<%~ JSON.stringify({ nsid: it.nsid, renderer: it.renderer, paramDefs: it.endpoint.params }) %>
+</script>
+<script type="module">
+  import { initExample } from '/static/examples-client.js';
+  import { <%~ it.renderer %> } from '/static/renderers.js';
+  const config = JSON.parse(document.getElementById('example-config').textContent);
+  initExample({
+    nsid: config.nsid,
+    paramDefs: config.paramDefs,
+    render: <%~ it.renderer %>,
+    outputId: 'example-output',
+    formId: 'example-form',
+  });
+</script>

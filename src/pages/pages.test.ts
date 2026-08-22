@@ -167,4 +167,49 @@ describe('page templates', () => {
 		expect(html).toContain('load-more-btn');
 		expect(html).toContain('End of results');
 	});
+
+	it('renders the examples index with one section per category and every query NSID', async () => {
+		const { groupByCategory, exampleEntries } = await import('./categories.js');
+		const html = renderPage('examples', {
+			title: 'Examples',
+			description: 'd',
+			groups: groupByCategory(exampleEntries(lexiconEndpoints)),
+		});
+		expect(html).toContain('Independent lookups');
+		expect(html).toContain('Composite / cross-entity');
+		expect(html).toContain('Lists &amp; search');
+		for (const e of exampleEntries(lexiconEndpoints)) {
+			expect(html).toContain(e.endpoint.id);
+		}
+	});
+
+	it('renders a per-query example page with form, output container, and renderer import', async () => {
+		const { findExample } = await import('./categories.js');
+		const entry = findExample(lexiconEndpoints, 'getBook');
+		expect(entry).toBeDefined();
+		const html = renderPage('examples/getBook', {
+			title: 'getBook',
+			description: 'd',
+			nsid: entry!.endpoint.id,
+			renderer: entry!.renderer,
+			endpoint: entry!.endpoint,
+		});
+		expect(html).toContain('id="example-form"');
+		expect(html).toContain('id="example-output"');
+		expect(html).toContain('id="param-uri"');
+		expect(html).toContain('net.olamaelcu.livtet.biblio.getBook');
+		expect(html).toContain('/static/examples-client.js');
+		expect(html).toContain('/static/renderers.js');
+		expect(html).toContain('renderBook');
+	});
+
+	it('includes the active nav marker on the Examples page', () => {
+		const html = renderPage('examples', {
+			title: 'Examples',
+			description: 'd',
+			groups: { independent: [], composite: [], list: [] },
+		});
+		expect(html).toContain('href="/examples"');
+		expect(html).toContain('Examples');
+	});
 });

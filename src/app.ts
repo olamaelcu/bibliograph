@@ -1,4 +1,5 @@
 import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
@@ -16,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { loadLexiconSchema, LexiconNotFound } from './lexicon-resolve.js';
 import { dpopNonceMiddleware } from './oauth/nonce.js';
 import { renderPage } from './pages/render.js';
+import { exampleEntries, findExample, groupByCategory } from './pages/categories.js';
 import { catalogRecordNsids, lexiconEndpoints, procedureCount, queryCount, recordLexicons } from './lexicon-catalog.js';
 import type { ViewContext } from './lex/collections.js';
 
@@ -49,6 +51,15 @@ export function createApp(): Hono {
 			root: webAwesomeRoot,
 			// serveStatic joins the full URL path onto root; strip the mount prefix.
 			rewriteRequestPath: (path) => path.replace(/^\/webawesome/, ''),
+		}),
+	);
+
+	const publicDir = fileURLToPath(new URL('./public/', import.meta.url));
+	app.use(
+		'/static/*',
+		serveStatic({
+			root: publicDir,
+			rewriteRequestPath: (path) => path.replace(/^\/static/, ''),
 		}),
 	);
 	app.get('/', (ctx) =>
@@ -97,6 +108,31 @@ export function createApp(): Hono {
 			}),
 		),
 	);
+	app.get('/examples', (ctx) =>
+		ctx.html(
+			renderPage('examples', {
+				title: 'Examples',
+				description: 'Live demos of every read-only Bibliograph query.',
+				groups: groupByCategory(exampleEntries(lexiconEndpoints)),
+			}),
+		),
+	);
+	app.get('/examples/:name', (ctx) => {
+		const name = ctx.req.param('name');
+		const entry = findExample(lexiconEndpoints, name);
+		if (!entry) {
+			return ctx.json({ error: 'NotFound', message: `No demo for query '${name}'.` }, 404);
+		}
+		return ctx.html(
+			renderPage(`examples/${name}`, {
+				title: entry.endpoint.name,
+				description: entry.endpoint.description ?? `Live demo of ${entry.endpoint.id}.`,
+				nsid: entry.endpoint.id,
+				renderer: entry.renderer,
+				endpoint: entry.endpoint,
+			}),
+		);
+	});
 	app.get('/health', healthCheck);
 	app.get('/.well-known/did.json', didDocumentHandler);
 	app.get('/.well-known/atproto-did', serveAtprotoDid);

@@ -8,21 +8,20 @@ import nodeAdapter from '@hono/vite-dev-server/node';
 // assets served by Hono under `/webawesome/*` and 404 them. Re-declare the
 // defaults with those three rules scoped to skip `/webawesome/` paths.
 const exclude = [
-  /^(?!\/webawesome\/).*\.css$/,
+  /^(?!\/(webawesome|static)\/).*\.css$/,
   /.*\.ts$/,
   /.*\.tsx$/,
   /.*\.mdx?$/,
   /^\/@.+$/,
   /\?t\=\d+$/,
   /^\/favicon\.ico$/,
-  /^\/static\/.+/,
   /^\/node_modules\/.*/,
   /^\/\.vite\/.*/,
   /.*\.svelte$/,
   /.*\.vue$/,
-  /^(?!\/webawesome\/).*\.js$/,
+  /^(?!\/(webawesome|static)\/).*\.js$/,
   /.*\.jsx$/,
-  /^(?!\/webawesome\/).*\.mjs$/,
+  /^(?!\/(webawesome|static)\/).*\.mjs$/,
 ];
 
 export default defineConfig(({ mode }) => {

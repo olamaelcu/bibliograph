@@ -1,0 +1,14 @@
+<wa-card class="example-card">
+  <div slot="header" class="example-card-header">
+    <wa-badge variant="brand" appearance="filled">query</wa-badge>
+    <code class="example-nsid"><%= it.endpoint.id %></code>
+  </div>
+  <% if (it.endpoint.description) { %>
+    <p class="endpoint-desc"><%= it.endpoint.description %></p>
+  <% } %>
+  <div class="card-footer">
+    <a href="/examples/<%= it.lastSegment %>">Open demo &rarr;</a>
+    &nbsp;&middot;&nbsp;
+    <a href="/<%= it.endpoint.lexiconPath %>" target="_blank" rel="noopener">Lexicon</a>
+  </div>
+</wa-card>

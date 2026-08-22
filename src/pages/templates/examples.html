@@ -1,0 +1,75 @@
+<style>
+  .examples-section {
+    max-width: 1100px;
+    margin: 1.5rem auto 0;
+    padding: 0 2rem;
+  }
+
+  .examples-section h2 {
+    margin: 0 0 0.25rem;
+  }
+
+  .examples-section .section-blurb {
+    margin: 0 0 0.75rem;
+  }
+
+  .examples-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(25rem, 1fr));
+    gap: 1rem;
+    margin-top: 0.75rem;
+  }
+
+  .example-card {
+    width: auto;
+    margin: 0;
+  }
+
+  .example-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .example-nsid {
+    font-weight: 600;
+    word-break: break-all;
+  }
+</style>
+
+<p class="page-intro muted">
+  Live demos of every read-only query in the <code>net.olamaelcu.livtet.biblio</code> namespace.
+  Each card links to a runnable page where you fill in the parameters and fire the
+  corresponding <code>/xrpc</code> query from your browser.
+</p>
+
+<section class="examples-section">
+  <h2>Independent lookups</h2>
+  <p class="muted section-blurb">Single-identifier lookups &mdash; one in, one hydrated entity out.</p>
+  <div class="examples-grid">
+    <% for (const e of it.groups.independent) { %>
+      <%~ include('partials/example-card.html', { ...e, lastSegment: e.endpoint.name }) %>
+    <% } %>
+  </div>
+</section>
+
+<section class="examples-section">
+  <h2>Composite / cross-entity</h2>
+  <p class="muted section-blurb">Given one record, return the related records across entities.</p>
+  <div class="examples-grid">
+    <% for (const e of it.groups.composite) { %>
+      <%~ include('partials/example-card.html', { ...e, lastSegment: e.endpoint.name }) %>
+    <% } %>
+  </div>
+</section>
+
+<section class="examples-section">
+  <h2>Lists &amp; search</h2>
+  <p class="muted section-blurb">Filtered lists and full-text searches with cursor pagination.</p>
+  <div class="examples-grid">
+    <% for (const e of it.groups.list) { %>
+      <%~ include('partials/example-card.html', { ...e, lastSegment: e.endpoint.name }) %>
+    <% } %>
+  </div>
+</section>
