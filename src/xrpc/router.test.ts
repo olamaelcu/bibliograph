@@ -10,7 +10,6 @@ let dbHolder: Awaited<ReturnType<typeof createTestDb>>;
 const router = () => createXrpcRouter(dbHolder.db, ctx);
 
 beforeAll(async () => {
-	process.env.ATP_SERVICE_DID = SERVICE_DID;
 	process.env.ATP_SERVICE_HOST = SERVICE_HOST;
 	dbHolder = await createTestDb();
 	await dbHolder.seed();
@@ -18,7 +17,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
 	await dbHolder.close();
-	delete process.env.ATP_SERVICE_DID;
 	delete process.env.ATP_SERVICE_HOST;
 });
 

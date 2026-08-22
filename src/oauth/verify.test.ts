@@ -2,13 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { verifyRequest } from './verify.js';
 import { currentNonce } from './nonce.js';
 import { createOauthTestKit } from '../test-utils/fake-auth.js';
-import { SERVICE_DID } from '../test-utils/db.js';
+import { SERVICE_HOST } from '../test-utils/db.js';
 
 beforeAll(() => {
-	process.env.ATP_SERVICE_DID = SERVICE_DID;
+	process.env.ATP_SERVICE_HOST = SERVICE_HOST;
 });
 afterAll(() => {
-	delete process.env.ATP_SERVICE_DID;
+	delete process.env.ATP_SERVICE_HOST;
 });
 
 const DID = 'did:web:alice.example.com';

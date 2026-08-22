@@ -8,7 +8,8 @@ export default defineConfig({
     passWithNoTests: true,
     include: ['src/**/*.{test,spec}.ts'],
     env: {
-      DATABASE_URL: "postgres://bibliograph:bibliograph@localhost:5432/bibliograph_test"
+      DATABASE_URL: "postgres://bibliograph:bibliograph@localhost:5432/bibliograph_test",
+      ALLOW_DEV_DID: '1',
     },
     globalSetup: ['./src/test-utils/global-setup.ts'],
     coverage: {

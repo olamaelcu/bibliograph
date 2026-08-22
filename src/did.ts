@@ -6,7 +6,12 @@ const PLACEHOLDER_KEY_MULTIBASE = 'z6MkplaceholderDidWebOnlyKeyNotFunctional'
 let warnedMissingKey = false
 
 export function getServiceDid(): string {
-  return process.env.ATP_SERVICE_DID || `did:web:${process.env.ATP_SERVICE_HOST || 'localhost'}`
+  const host = process.env.ATP_SERVICE_HOST;
+  if (host) return `did:web:${host}`;
+  if (process.env.ALLOW_DEV_DID === '1') return 'did:web:localhost';
+  throw new Error(
+    'ATP_SERVICE_HOST is not set. Set it to the production host (e.g. biblio.livtet.olamaelcu.net) or set ALLOW_DEV_DID=1 for local development.',
+  );
 }
 
 export function buildDidDocument(host: string, proto: string) {
