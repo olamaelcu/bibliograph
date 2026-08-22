@@ -18,19 +18,19 @@ To make `net.olamaelcu.livtet.biblio.*` NSIDs resolvable via the standard AT Pro
 **Zone:** `biblio.livtet.olamaelcu.net`
 
 ```
-_lexicon.biblio.livtet.olamaelcu.net.  300  IN  TXT  "did=did:web:bibliograph.olamaelcu.net"
+_lexicon.biblio.livtet.olamaelcu.net.  300  IN  TXT  "did=did:web:biblio.livtet.olamaelcu.net"
 ```
 
 - **Host:** `_lexicon.biblio.livtet.olamaelcu.net` (the `_lexicon` prefix + reversed authority from `net.olamaelcu.livtet.biblio.*`)
 - **TTL:** 300 seconds (short TTL recommended per AT Protocol spec since DNS changes need to propagate quickly)
-- **Value:** `did=<service-did>` — the DID of the AppView service. Currently `did:web:bibliograph.olamaelcu.net`.
+- **Value:** `did=<service-did>` — the DID of the AppView service. Same as the public host: `did:web:biblio.livtet.olamaelcu.net`.
 
 ### Verify with dig
 
 ```sh
 dig TXT _lexicon.biblio.livtet.olamaelcu.net
 # Expected:
-# _lexicon.biblio.livtet.olamaelcu.net. 300 IN TXT "did=did:web:bibliograph.olamaelcu.net"
+# _lexicon.biblio.livtet.olamaelcu.net. 300 IN TXT "did=did:web:biblio.livtet.olamaelcu.net"
 ```
 
 ### Verify with the CLI
@@ -63,7 +63,7 @@ Standard XRPC query. Returns:
 
 ```json
 {
-  "uri": "at://did:web:bibliograph.olamaelcu.net/com.atproto.lexicon.schema/net.olamaelcu.livtet.biblio.review",
+  "uri": "at://did:web:biblio.livtet.olamaelcu.net/com.atproto.lexicon.schema/net.olamaelcu.livtet.biblio.review",
   "cid": "bafyrei...",
   "schema": { ... }
 }
@@ -76,7 +76,7 @@ Errors: `400 LexiconNotFound` if the NSID is unknown.
 Path-style endpoint for direct JSON access. No authentication required.
 
 ```sh
-curl https://bibliograph.olamaelcu.net/lexicon/net.olamaelcu.livtet.biblio.review
+curl https://biblio.livtet.olamaelcu.net/lexicon/net.olamaelcu.livtet.biblio.review
 ```
 
 Returns the raw lexicon JSON with `Content-Type: application/json` and `Cache-Control: public, max-age=300`.
@@ -86,7 +86,7 @@ Returns the raw lexicon JSON with `Content-Type: application/json` and `Cache-Co
 If a future lexicon namespace is added (e.g. `net.olamaelcu.livtet.biblio.dev.*`), a separate DNS TXT record is required for each unique authority prefix:
 
 ```
-_lexicon.dev.biblio.livtet.olamaelcu.net.  300  IN  TXT  "did=did:web:bibliograph.olamaelcu.net"
+_lexicon.dev.biblio.livtet.olamaelcu.net.  300  IN  TXT  "did=did:web:biblio.livtet.olamaelcu.net"
 ```
 
 The AppView automatically serves any NSID present in `lexicons/` via both HTTP surfaces.
