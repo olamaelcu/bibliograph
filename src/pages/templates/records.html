@@ -15,16 +15,17 @@
     gap: 1rem;
     margin-top: 0.75rem;
   }
-
 </style>
-<p class="page-intro muted">Record types in the <code>net.olamaelcu.livtet.biblio</code> namespace that land on the Jetstream firehose. Bibliograph writes its catalog to its own PDS and indexes user-owned records written to end-user PDSes.</p>
+<p class="page-intro muted">Record types in the <code>net.olamaelcu.livtet.biblio</code> namespace that land on the
+  Jetstream firehose. Bibliograph writes its catalog to its own PDS and indexes user-owned records written to end-user
+  PDSes.</p>
 <section class="records-section">
   <h2>AppView catalog records</h2>
   <p class="muted">Owned by the AppView's own PDS.</p>
   <div class="inner-grid">
     <% for (const r of it.catalog) { %>
       <%~ include('partials/record-card.html', { ...r }) %>
-    <% } %>
+        <% } %>
   </div>
 </section>
 <section class="records-section">
@@ -33,14 +34,16 @@
   <div class="inner-grid">
     <% for (const r of it.users) { %>
       <%~ include('partials/record-card.html', { ...r }) %>
-    <% } %>
+        <% } %>
   </div>
 </section>
 
-<p>
-  These schemas are resolvable via
-  <code>com.atproto.lexicon.resolveLexicon</code>.
-  See <a href="/docs/lexicon-resolution">the resolution guide</a>
-  for details, or run:
-</p>
-<pre><code>curl https://biblio.livtet.olamaelcu.net/lexicon/net.olamaelcu.livtet.biblio.record</code></pre>
+<div class="wrapped-content">
+  <p>
+    These schemas are resolvable via
+    <code>com.atproto.lexicon.resolveLexicon</code>.
+    See <a href="/docs/lexicon-resolution">the resolution guide</a>
+    for details, or run:
+  </p>
+  <pre><code>curl https://biblio.livtet.olamaelcu.net/lexicon/net.olamaelcu.livtet.biblio.record</code></pre>
+</div>

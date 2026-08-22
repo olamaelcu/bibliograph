@@ -9,6 +9,7 @@ const FIELDS_GET =
 	'id,volumeInfo(title,subtitle,authors,publishedDate,description,industryIdentifiers,imageLinks)';
 
 const USER_AGENT = 'bibliograph/0.1 (atproto; google-books-cache; gzip)';
+const REFERER_HOST = process.env.ATP_SERVICE_HOST ?? 'localhost';
 
 const MAX_RETRY_AFTER_MS = 60_000;
 
@@ -174,6 +175,7 @@ export class GoogleBooksClient {
 					headers: {
 						accept: 'application/json',
 						'user-agent': USER_AGENT,
+						referer: `https://${REFERER_HOST}/`,
 					},
 				});
 				if (res.status === 404) {
