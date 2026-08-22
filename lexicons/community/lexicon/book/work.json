@@ -1,0 +1,76 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.work",
+  "description": "An abstract book work — the conceptual work one or more editions are manifestations of. Opt-in.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "An abstract book work. Opt-in layer above editions.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["title", "createdAt"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "maxGraphemes": 200
+          },
+          "subtitle": {
+            "type": "string",
+            "maxLength": 1024,
+            "maxGraphemes": 100
+          },
+          "originalLanguage": {
+            "type": "string",
+            "format": "language"
+          },
+          "firstPublishedYear": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          },
+          "subjects": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 32,
+            "description": "Subject tags / genres.",
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "maxGraphemes": 32
+            }
+          },
+          "contributors": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 64,
+            "items": {
+              "type": "ref",
+              "ref": "community.lexicon.book.defs#contribution"
+            }
+          },
+          "identifiers": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 32,
+            "items": {
+              "type": "ref",
+              "ref": "community.lexicon.book.defs#main"
+            }
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8192,
+            "maxGraphemes": 1024
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

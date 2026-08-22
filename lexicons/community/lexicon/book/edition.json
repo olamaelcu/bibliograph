@@ -1,0 +1,82 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.edition",
+  "description": "A single edition of a book. The entry-point record.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A single edition of a book. Optionally grouped under a work record.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["title", "createdAt"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "maxGraphemes": 200
+          },
+          "subtitle": {
+            "type": "string",
+            "maxLength": 1024,
+            "maxGraphemes": 100
+          },
+          "work": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the work record this edition belongs to."
+          },
+          "publisher": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the publisher record."
+          },
+          "place": {
+            "type": "string",
+            "maxLength": 256,
+            "maxGraphemes": 64,
+            "description": "Place of publication. Free-form; not normalized."
+          },
+          "publishedYear": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          },
+          "language": {
+            "type": "string",
+            "format": "language"
+          },
+          "contributors": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 64,
+            "items": {
+              "type": "ref",
+              "ref": "community.lexicon.book.defs#contribution"
+            }
+          },
+          "identifiers": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 32,
+            "items": {
+              "type": "ref",
+              "ref": "community.lexicon.book.defs#main"
+            }
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8192,
+            "maxGraphemes": 1024,
+            "description": "Free-form description of this edition."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

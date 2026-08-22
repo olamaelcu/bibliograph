@@ -1,0 +1,68 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.contributor",
+  "description": "A person credited in producing book editions or works.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A person credited in producing book editions or works.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "createdAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "maxGraphemes": 64
+          },
+          "aliases": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 16,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "maxGraphemes": 64
+            }
+          },
+          "linkedDid": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the contributor's own ATProto account."
+          },
+          "bio": {
+            "type": "string",
+            "maxLength": 8192,
+            "maxGraphemes": 1024
+          },
+          "bornYear": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          },
+          "diedYear": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          },
+          "identifiers": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 16,
+            "items": {
+              "type": "ref",
+              "ref": "community.lexicon.book.defs#main"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

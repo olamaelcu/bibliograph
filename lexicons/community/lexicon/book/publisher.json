@@ -1,0 +1,54 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.publisher",
+  "description": "A publishing entity (publisher house, imprint, or self-publishing author-as-publisher).",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A publishing entity.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "createdAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "maxGraphemes": 64
+          },
+          "imprintOf": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of parent publisher."
+          },
+          "foundingDate": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999,
+            "description": "Year founded."
+          },
+          "closingDate": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999,
+            "description": "Year ceased operations."
+          },
+          "identifiers": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 16,
+            "items": {
+              "type": "ref",
+              "ref": "community.lexicon.book.defs#main"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}
