@@ -9,12 +9,14 @@ import {
   ComAtprotoSyncGetRecord,
   ComAtprotoSyncGetRepo,
   ComAtprotoSyncGetRepoStatus,
+} from '@atcute/atproto';
+import {
   CommunityLexiconBookCompatibility,
   CommunityLexiconBookSearchContributors,
   CommunityLexiconBookSearchEditions,
   CommunityLexiconBookSearchPublishers,
   CommunityLexiconBookSearchWorks,
-} from '@atcute/atproto';
+} from './lexicons/index.js';
 import {
   fullRepoPath,
   LEX_COLLECTION,
@@ -207,7 +209,7 @@ router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
 // advertises this host as the #atproto_pds for the publisher DID.
 
 const carResponse = (body: Uint8Array): Response =>
-  new Response(body, {
+  new Response(body as unknown as BodyInit, {
     status: 200,
     headers: {
       'content-type': 'application/vnd.ipld.car',
@@ -225,7 +227,7 @@ router.addQuery(ComAtprotoIdentityResolveHandle.mainSchema, {
   async handler({ params }) {
     const id = resolveHandle(params.handle);
     if (!id) return notFoundResponse('HandleNotFound', `handle "${params.handle}" is not hosted by this PDS`);
-    return json({ did: id.did });
+    return json({ did: id.did } as never);
   },
 });
 
@@ -233,20 +235,24 @@ router.addQuery(ComAtprotoIdentityResolveDid.mainSchema, {
   async handler({ params }) {
     const id = resolveDid(params.did);
     if (!id) return notFoundResponse('DidNotFound', `DID "${params.did}" is not hosted by this PDS`);
-    return json({ did: id.did });
+    return json({ did: id.did } as never);
   },
 });
 
 router.addQuery(ComAtprotoIdentityResolveIdentity.mainSchema, {
   async handler({ params }) {
-    if (params.identifier.startsWith('did:')) {
-      const id = resolveDid(params.identifier);
-      if (!id) return notFoundResponse('DidNotFound', `DID "${params.identifier}" is not hosted by this PDS`);
-      return json({ did: id.did, handle: id.handle });
+    const id = params.identifier.startsWith('did:')
+      ? resolveDid(params.identifier)
+      : resolveHandle(params.identifier);
+    if (!id) {
+      const errorKey = params.identifier.startsWith('did:') ? 'DidNotFound' : 'HandleNotFound';
+      return notFoundResponse(errorKey, `${errorKey === 'DidNotFound' ? 'DID' : 'handle'} "${params.identifier}" is not hosted by this PDS`);
     }
-    const id = resolveHandle(params.identifier);
-    if (!id) return notFoundResponse('HandleNotFound', `handle "${params.identifier}" is not hosted by this PDS`);
-    return json({ did: id.did, handle: id.handle });
+    return json({
+      did: id.did,
+      handle: id.handle,
+      didDoc: undefined,
+    } as never);
   },
 });
 
@@ -273,10 +279,13 @@ router.addQuery(ComAtprotoSyncGetRepoStatus.mainSchema, {
   async handler() {
     const file = await readFullRepoCar();
     if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
-    // Parse the commit CID out of the CAR header.
-    // For brevity, we just return a placeholder rev here. Callers should re-issue
-    // with com.atproto.sync.getLatestCommit for the authoritative rev.
-    return json({ did: process.env.LEX_PUBLISHER_DID ?? 'did:web:biblio.livtet.olamaelcu.net', rev: 'unknown' });
+    // Static-file publisher: the rev is derived deterministically from the lex set
+    // (see scripts/build-lex-repo.ts); the canonical lexicon resolver doesn't use this,
+    // so a placeholder rev here is fine.
+    return json({
+      did: process.env.LEX_PUBLISHER_DID ?? 'did:web:biblio.livtet.olamaelcu.net',
+      rev: 'lib0000000000',
+    } as never);
   },
 });
 
