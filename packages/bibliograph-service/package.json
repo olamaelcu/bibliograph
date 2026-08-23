@@ -25,6 +25,7 @@
     "@atcute/tap": "^1.0.2",
     "@atcute/xrpc-server": "^2.0.2",
     "@atproto/crypto": "^0.5.4",
+    "@atproto/lex-cbor": "^0.1.6",
     "@atproto/repo": "^0.10.11",
     "@awesome.me/webawesome": "^3.12.0",
     "drizzle-orm": "^0.45.2",

@@ -5,6 +5,8 @@ import {
   ComAtprotoIdentityResolveDid,
   ComAtprotoIdentityResolveHandle,
   ComAtprotoIdentityResolveIdentity,
+  ComAtprotoRepoDescribeRepo,
+  ComAtprotoRepoGetRecord,
   ComAtprotoSyncGetBlocks,
   ComAtprotoSyncGetRecord,
   ComAtprotoSyncGetRepo,
@@ -30,6 +32,9 @@ import { db } from './db';
 import { editions } from './db/schema';
 import { createLogger } from './logger';
 import { accessLog } from './access-log';
+import { readCar, MemoryBlockstore, MST, formatDataKey } from '@atproto/repo';
+import { decode as cborDecode } from '@atproto/lex-cbor';
+import { getDidDocument } from './did';
 
 const CURSOR_VERSION = 1;
 
@@ -297,5 +302,70 @@ router.addQuery(ComAtprotoSyncGetBlocks.mainSchema, {
     const file = await readFullRepoCar();
     if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
     return carResponse(file.body);
+  },
+});
+
+// ─── com.atproto.repo.* handlers ─────────────────────────────────────────────
+// JSON views of the records served by this PDS. pdsls.dev (and many legacy
+// clients) call com.atproto.repo.getRecord with the same path as the sync
+// equivalent; this serves the record value as JSON {uri, cid, value} instead
+// of a CAR.
+
+router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
+  async handler({ params }) {
+    if (!resolveDid(params.repo)) {
+      return notFoundResponse('RepoNotFound', `repo "${params.repo}" is not hosted`);
+    }
+    if (params.collection !== LEX_COLLECTION) {
+      return notFoundResponse('RecordNotFound', `collection "${params.collection}" not served`);
+    }
+    const slice = await readPerRecordCar(params.rkey);
+    if (!slice) {
+      return notFoundResponse('RecordNotFound', `no CAR slice for rkey "${params.rkey}"`);
+    }
+    const parsed = await readCar(slice.body);
+    const commitCid = parsed.roots[0];
+    if (!commitCid) return notFoundResponse('RepoNotFound', 'CAR missing root');
+    const commitBytes = parsed.blocks.get(commitCid);
+    if (!commitBytes) return notFoundResponse('RepoNotFound', 'commit block missing');
+    const commit = cborDecode(commitBytes) as { data?: { toString(): string } & Record<string, unknown> };
+    if (!commit.data) return notFoundResponse('RepoNotFound', 'commit missing data pointer');
+    const mstDataCid = commit.data as unknown as { toString(): string } & Record<string, unknown>;
+    const store = new MemoryBlockstore();
+    store.blocks.addMap(parsed.blocks);
+    const mst = MST.load(store, mstDataCid as never);
+    const dataKey = formatDataKey(params.collection, params.rkey);
+    const cids = await mst.cidsForPath(dataKey);
+    if (cids.length === 0) {
+      return notFoundResponse('RecordNotFound', `rkey "${params.rkey}" not in commit`);
+    }
+    const recordCid = cids[0]!;
+    const recordBytes = parsed.blocks.get(recordCid);
+    if (!recordBytes) return notFoundResponse('RepoNotFound', 'record block missing');
+    return json({
+      uri: `at://${params.repo}/${params.collection}/${params.rkey}`,
+      cid: recordCid.toString(),
+      value: cborDecode(recordBytes),
+    } as never);
+  },
+});
+
+router.addQuery(ComAtprotoRepoDescribeRepo.mainSchema, {
+  async handler({ params }) {
+    const id = params.repo.startsWith('did:')
+      ? resolveDid(params.repo)
+      : resolveHandle(params.repo);
+    if (!id) {
+      return notFoundResponse('RepoNotFound', `repo "${params.repo}" is not hosted`);
+    }
+    const didDoc = getDidDocument();
+    const handle = didDoc.alsoKnownAs[0]?.replace(/^at:\/\//, '') ?? '';
+    return json({
+      did: didDoc.id,
+      didDoc,
+      handle,
+      handleIsCorrect: true,
+      collections: [LEX_COLLECTION],
+    } as never);
   },
 });
