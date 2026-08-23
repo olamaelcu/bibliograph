@@ -39,7 +39,7 @@ function isRecordEvent(e: TapEvent): e is Extract<TapEvent, { type: 'record' }> 
 }
 
 export async function runTapConsumer(log: Logger): Promise<void> {
-  log.info({ tap: TAP_URL, upstream: UPSTREAM_APPVIEW }, 'connecting to TAP');
+  log.info({ tap: TAP_URL, upstream: UPSTREAM_APPVIEW }, 'listening to TAP');
 
   for await (const { event, ack } of tap.subscribe()) {
     try {

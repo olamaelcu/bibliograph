@@ -1,5 +1,5 @@
 <script lang="ts">
-  const endpointCounts = { queries: 6, procedures: 0 };
+  let { data }: { data: { endpointCounts: { queries: number; procedures: number; records: number } } } = $props();
 </script>
 
 <main>
@@ -29,12 +29,12 @@
     <div class="hero-meta">
       <a href="/queries">
         <wa-badge variant="brand" appearance="filled"
-          >{endpointCounts.queries} queries</wa-badge
+          >{data.endpointCounts.queries} queries</wa-badge
         >
       </a>
       <a href="/procedures">
         <wa-badge variant="success" appearance="filled"
-          >{endpointCounts.procedures} procedures</wa-badge
+          >{data.endpointCounts.procedures} procedures</wa-badge
         >
       </a>
       <span class="muted">· read-only · records live in your PDS</span>

@@ -32,16 +32,9 @@ export const editions = pgTable(
   (t) => ({
     indexedAtIdx: index('editions_indexed_at_idx').on(t.indexedAt),
     didIdx: index('editions_did_idx').on(t.did),
-    workFk: foreignKey({
-      columns: [t.workUri],
-      foreignColumns: [works.uri],
-      name: 'editions_work_uri_fk',
-    }),
-    publisherFk: foreignKey({
-      columns: [t.publisherUri],
-      foreignColumns: [publishers.uri],
-      name: 'editions_publisher_uri_fk',
-    }),
+    // editions.work_uri / editions.publisher_uri FKs are declared in the
+    // initial migration (kept out of the schema to avoid the self-reference
+    // cycle through publishers.imprint_of_uri).
   }),
 );
 
@@ -97,11 +90,8 @@ export const publishers = pgTable(
   (t) => ({
     didIdx: index('publishers_did_idx').on(t.did),
     indexedAtIdx: index('publishers_indexed_at_idx').on(t.indexedAt),
-    imprintOfFk: foreignKey({
-      columns: [t.imprintOfUri],
-      foreignColumns: [publishers.uri],
-      name: 'publishers_imprint_of_uri_fk',
-    }),
+    // Note: self-FK on imprintOfUri is declared in the migration (drizzle-kit
+    // can't infer types for self-referencing tables).
   }),
 );
 

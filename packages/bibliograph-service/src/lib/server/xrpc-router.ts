@@ -58,6 +58,26 @@ export const router = new XRPCRouter({
   handleHealthCheck: async () => json({ status: 'ok' }),
 });
 
+// Wrapped registrations: every addQuery / addProcedure call below bumps the
+// counter so the landing page can show live endpoint counts. Adding a new
+// endpoint is the single source-of-truth edit.
+export const endpointCounts = { queries: 0, procedures: 0 };
+
+const realAddQuery = router.addQuery.bind(router);
+router.addQuery = ((schema: unknown, opts: unknown) => {
+  const nsid = (schema as { nsid?: string })?.nsid;
+  endpointCounts.queries++;
+  return realAddQuery(schema as never, opts as never);
+}) as typeof router.addQuery;
+
+const realAddProcedure = router.addProcedure?.bind(router);
+if (realAddProcedure) {
+  router.addProcedure = ((schema: unknown, opts: unknown) => {
+    endpointCounts.procedures++;
+    return realAddProcedure(schema as never, opts as never);
+  }) as typeof router.addProcedure;
+}
+
 router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
   async handler({ params }) {
     const limit = Math.min(params.limit ?? 20, 100);
