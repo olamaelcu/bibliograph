@@ -11,11 +11,14 @@
     "worker": "tsx worker.ts",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lex:gen": "lex-cli generate",
+    "verify:lex": "tsx scripts/verify-resolver.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.4",
+    "@atcute/identity-resolver": "^2.0.1",
+    "@atcute/lexicon-resolver": "^1.0.1",
     "@lit-labs/ssr": "^4.1.0",
     "@atcute/client": "^5.1.1",
     "@atcute/lexicons": "^2.1.0",

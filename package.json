@@ -11,6 +11,7 @@
     "worker": "pnpm --filter bibliograph-service worker",
     "check": "pnpm --filter bibliograph-service check",
     "lex:gen": "pnpm --filter bibliograph-service lex:gen",
+    "verify:lex": "pnpm --filter bibliograph-service verify:lex",
     "db:generate": "pnpm --filter bibliograph-service db:generate",
     "db:migrate": "pnpm --filter bibliograph-service db:migrate"
   },

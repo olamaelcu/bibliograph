@@ -57,6 +57,10 @@ function lexRecordValue(nsid: string, lex: { defs?: unknown; description?: strin
 }
 
 async function findLexFiles(): Promise<Array<{ nsid: string; file: string; lex: { defs?: unknown; description?: string } }>> {
+  // NSIDs are derived from the path relative to LEX_ROOT (not relative to LEX_AUTHORITY),
+  // so a file at `lexicons/net/olamaelcu/livtet/biblio/shelf.json` becomes the NSID
+  // `net.olamaelcu.livtet.biblio.shelf`. Walking is restricted to LEX_AUTHORITY so we
+  // don't accidentally publish lexica outside our authority.
   const baseDir = join(LEX_ROOT, LEX_AUTHORITY);
   const out: Array<{ nsid: string; file: string; lex: { defs?: unknown; description?: string } }> = [];
   async function walk(dir: string): Promise<void> {
@@ -72,7 +76,7 @@ async function findLexFiles(): Promise<Array<{ nsid: string; file: string; lex: 
         await walk(full);
       } else if (entry.name.endsWith('.json')) {
         const lex = JSON.parse(await readFile(full, 'utf8')) as { defs?: unknown; description?: string };
-        const nsid = nsidFromPath(relative(baseDir, full));
+        const nsid = nsidFromPath(relative(LEX_ROOT, full));
         out.push({ nsid, file: full, lex });
       }
     }
@@ -137,9 +141,9 @@ async function writePerRecordSlices(
 }
 
 async function deterministicRev(lexFiles: Array<{ nsid: string; lex: { defs?: unknown; description?: string } }>): Promise<string> {
-  // Hash the canonical (sorted, JSON-stringified) lex set to derive a stable rev.
-  // 7 ASCII chars prefix is "lib" (label) — never collides with real TIDs which start
-  // with a base32-encoded millisecond timestamp.
+  // ATProto TID format: [234567abcdefghijklmnopqrstuvwxyz]{13}
+  // (base32-sortable alphabet; excludes 0/1/i/o/l which are confusing).
+  // Hash the canonical lex set, then base32-encode 13 chars from the digest.
   const { createHash } = await import('node:crypto');
   const h = createHash('sha256');
   for (const { nsid, lex } of lexFiles) {
@@ -148,7 +152,17 @@ async function deterministicRev(lexFiles: Array<{ nsid: string; lex: { defs?: un
     h.update(JSON.stringify({ defs: lex.defs ?? {}, description: lex.description }));
     h.update('\n');
   }
-  return `lib${h.digest('hex').slice(0, 10)}`;
+  // Take 13 chars (13 * 5 = 65 bits, so we need ~9 bytes from sha256).
+  // Hex (4 bits each) → map each nibble to 2 chars from base32-sortable alphabet.
+  const ALPHA = '234567abcdefghijklmnopqrstuvwxyz';
+  const hex = h.digest('hex').slice(0, 13);
+  let out = '';
+  for (let i = 0; i < hex.length; i += 2) {
+    const v = parseInt(hex.slice(i, i + 2), 16);
+    out += ALPHA[(v >> 3) & 31];
+    if (out.length < 13) out += ALPHA[v & 31];
+  }
+  return out.slice(0, 13);
 }
 
 async function main(): Promise<void> {
