@@ -8,24 +8,35 @@
   import "@awesome.me/webawesome/dist/components/badge/badge.js";
   import "@awesome.me/webawesome/dist/components/button/button.js";
   import "@awesome.me/webawesome/dist/components/callout/callout.js";
+  import "@awesome.me/webawesome/dist/components/card/card.js";
   import "@awesome.me/webawesome/dist/components/copy-button/copy-button.js";
   import "@awesome.me/webawesome/dist/components/icon/icon.js";
   import "@awesome.me/webawesome/dist/components/input/input.js";
+  import { page } from "$app/state";
   import type { Snippet } from "svelte";
 
   const navLinks = [
     { href: "/", label: "Home" },
-    // { href: "/queries", label: "Queries" },
-    // { href: "/procedures", label: "Procedures" },
+    { href: "/queries", label: "Queries" },
+    { href: "/procedures", label: "Procedures" },
     // { href: "/records", label: "Records" },
     // { href: "/search", label: "Search" },
     // { href: "/examples", label: "Examples" },
   ];
 
-  let {
-    children,
-    activePath = "/",
-  }: { children: Snippet; activePath?: string } = $props();
+  // A nav link is active when the current pathname equals its href OR
+  // (for non-root links) starts with the href + '/'. Special aliases:
+  // /query/... also highlights /queries; /procedure/... highlights
+  // /procedures (singular / plural mismatch).
+  function isActive(href: string, pathname: string): boolean {
+    if (href === "/") return pathname === "/";
+    if (pathname === href || pathname.startsWith(href + "/")) return true;
+    if (href === "/queries" && pathname.startsWith("/query/")) return true;
+    if (href === "/procedures" && pathname.startsWith("/procedure/")) return true;
+    return false;
+  }
+
+  let { children }: { children: Snippet } = $props();
 </script>
 
 <svelte:head>
@@ -72,14 +83,13 @@
     </a>
     <nav class="nav">
       {#each navLinks as link}
-        <a href={link.href} class:active={activePath === link.href}
+        <a
+          href={link.href}
+          class:active={isActive(link.href, page.url.pathname)}
           >{link.label}</a
         >
       {/each}
     </nav>
-    <div class="topbar-actions">
-      <wa-badge variant="brand" appearance="tint">read-only AppView</wa-badge>
-    </div>
   </header>
 
   {@render children()}
@@ -191,10 +201,6 @@
   .topbar .nav a.active {
     color: var(--wa-color-text-normal);
     border-bottom-color: var(--wa-color-brand-50);
-  }
-
-  .topbar-actions {
-    white-space: nowrap;
   }
 
   /* ---- Footer ------------------------------------------------------- */

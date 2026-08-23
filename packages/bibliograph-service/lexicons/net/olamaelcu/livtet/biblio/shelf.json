@@ -1,0 +1,73 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelf",
+  "description": "A user's collection of books.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxGraphemes": 128,
+            "description": "Display name of the shelf."
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 8192,
+            "description": "Description of the shelf."
+          },
+          "iconImageUrl": {
+            "type": "blob",
+            "accept": [
+              "image/png",
+              "image/jpeg",
+              "image/gif",
+              "image/webp",
+              "image/avif",
+              "image/svg+xml",
+              "image/bmp",
+              "image/tiff",
+              "image/heic",
+              "image/x-icon"
+            ],
+            "maxSize": 2000000,
+            "description": "Small icon image for the shelf."
+          },
+          "headerImageUrl": {
+            "type": "blob",
+            "accept": [
+              "image/png",
+              "image/jpeg",
+              "image/gif",
+              "image/webp",
+              "image/avif",
+              "image/svg+xml",
+              "image/bmp",
+              "image/tiff",
+              "image/heic",
+              "image/x-icon"
+            ],
+            "maxSize": 10000000,
+            "description": "Header/banner image for the shelf."
+          },
+          "createdAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp when this record was originally created."
+          },
+          "updatedAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp of the last update to this record."
+          }
+        }
+      }
+    }
+  }
+}

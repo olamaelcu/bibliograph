@@ -2,12 +2,28 @@ import { XRPCRouter, json } from '@atcute/xrpc-server';
 import { cors } from '@atcute/xrpc-server/middlewares/cors';
 import { and, asc, desc, or, sql } from 'drizzle-orm';
 import {
+  ComAtprotoIdentityResolveDid,
+  ComAtprotoIdentityResolveHandle,
+  ComAtprotoIdentityResolveIdentity,
+  ComAtprotoSyncGetBlocks,
+  ComAtprotoSyncGetRecord,
+  ComAtprotoSyncGetRepo,
+  ComAtprotoSyncGetRepoStatus,
   CommunityLexiconBookCompatibility,
   CommunityLexiconBookSearchContributors,
   CommunityLexiconBookSearchEditions,
   CommunityLexiconBookSearchPublishers,
   CommunityLexiconBookSearchWorks,
-} from './lexicons/index.js';
+} from '@atcute/atproto';
+import {
+  fullRepoPath,
+  LEX_COLLECTION,
+  lexFilePath,
+  readFullRepoCar,
+  readPerRecordCar,
+  resolveDid,
+  resolveHandle,
+} from './lex/publisher.js';
 import { db } from './db';
 import { editions } from './db/schema';
 import { createLogger } from './logger';
@@ -59,13 +75,17 @@ export const router = new XRPCRouter({
 });
 
 // Wrapped registrations: every addQuery / addProcedure call below bumps the
-// counter so the landing page can show live endpoint counts. Adding a new
-// endpoint is the single source-of-truth edit.
+// counter AND writes the schema into a registry keyed by NSID, so the
+// /queries and /query/[nsid] routes can render schema docs without a
+// filesystem scan. Adding a new endpoint is the single source-of-truth edit.
 export const endpointCounts = { queries: 0, procedures: 0 };
+export const queryRegistry = new Map<string, unknown>();
+export const procedureRegistry = new Map<string, unknown>();
 
 const realAddQuery = router.addQuery.bind(router);
 router.addQuery = ((schema: unknown, opts: unknown) => {
   const nsid = (schema as { nsid?: string })?.nsid;
+  if (nsid) queryRegistry.set(nsid, schema);
   endpointCounts.queries++;
   return realAddQuery(schema as never, opts as never);
 }) as typeof router.addQuery;
@@ -73,6 +93,8 @@ router.addQuery = ((schema: unknown, opts: unknown) => {
 const realAddProcedure = router.addProcedure?.bind(router);
 if (realAddProcedure) {
   router.addProcedure = ((schema: unknown, opts: unknown) => {
+    const nsid = (schema as { nsid?: string })?.nsid;
+    if (nsid) procedureRegistry.set(nsid, schema);
     endpointCounts.procedures++;
     return realAddProcedure(schema as never, opts as never);
   }) as typeof router.addProcedure;
@@ -141,14 +163,19 @@ router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
 
 router.addQuery(CommunityLexiconBookCompatibility.mainSchema, {
   async handler() {
-    return json({
-      queries: [
-        { nsid: 'community.lexicon.book.searchEditions', type: 'query' },
-        { nsid: 'community.lexicon.book.searchContributors', type: 'query' },
-        { nsid: 'community.lexicon.book.searchPublishers', type: 'query' },
-        { nsid: 'community.lexicon.book.searchWorks', type: 'query' },
-      ],
-    });
+    // Derive from the registries populated by the wrappers above so the
+    // list stays in sync with the public API. The introspection endpoint
+    // itself is excluded — listing it would be self-referential.
+    const SELF = 'community.lexicon.book.compatibility';
+    const queries: { nsid: string; type: 'query' | 'procedure' }[] = [];
+    for (const nsid of queryRegistry.keys()) {
+      if (nsid === SELF) continue;
+      queries.push({ nsid, type: 'query' });
+    }
+    for (const nsid of procedureRegistry.keys()) {
+      queries.push({ nsid, type: 'procedure' });
+    }
+    return json({ queries } as never);
   },
 });
 
@@ -171,5 +198,95 @@ router.addQuery(CommunityLexiconBookSearchPublishers.mainSchema, {
 router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
   async handler() {
     return notImplemented('community.lexicon.book.searchWorks');
+  },
+});
+
+// ─── Lex publisher endpoints ────────────────────────────────────────────────
+// Serves com.atproto.sync.* and com.atproto.identity.* over prebuilt CAR files
+// (see scripts/build-lex-repo.ts). The DID document at /.well-known/did.json
+// advertises this host as the #atproto_pds for the publisher DID.
+
+const carResponse = (body: Uint8Array): Response =>
+  new Response(body, {
+    status: 200,
+    headers: {
+      'content-type': 'application/vnd.ipld.car',
+      'cache-control': 'public, max-age=60, s-maxage=300',
+    },
+  });
+
+const notFoundResponse = (error: string, message: string): Response =>
+  new Response(JSON.stringify({ error, message }), {
+    status: 400,
+    headers: { 'content-type': 'application/json' },
+  });
+
+router.addQuery(ComAtprotoIdentityResolveHandle.mainSchema, {
+  async handler({ params }) {
+    const id = resolveHandle(params.handle);
+    if (!id) return notFoundResponse('HandleNotFound', `handle "${params.handle}" is not hosted by this PDS`);
+    return json({ did: id.did });
+  },
+});
+
+router.addQuery(ComAtprotoIdentityResolveDid.mainSchema, {
+  async handler({ params }) {
+    const id = resolveDid(params.did);
+    if (!id) return notFoundResponse('DidNotFound', `DID "${params.did}" is not hosted by this PDS`);
+    return json({ did: id.did });
+  },
+});
+
+router.addQuery(ComAtprotoIdentityResolveIdentity.mainSchema, {
+  async handler({ params }) {
+    if (params.identifier.startsWith('did:')) {
+      const id = resolveDid(params.identifier);
+      if (!id) return notFoundResponse('DidNotFound', `DID "${params.identifier}" is not hosted by this PDS`);
+      return json({ did: id.did, handle: id.handle });
+    }
+    const id = resolveHandle(params.identifier);
+    if (!id) return notFoundResponse('HandleNotFound', `handle "${params.identifier}" is not hosted by this PDS`);
+    return json({ did: id.did, handle: id.handle });
+  },
+});
+
+router.addQuery(ComAtprotoSyncGetRecord.mainSchema, {
+  async handler({ params }) {
+    if (params.collection !== LEX_COLLECTION) {
+      return notFoundResponse('RecordNotFound', `collection "${params.collection}" not served`);
+    }
+    const file = await readPerRecordCar(params.rkey);
+    if (!file) return notFoundResponse('RecordNotFound', `no CAR slice for rkey "${params.rkey}"`);
+    return carResponse(file.body);
+  },
+});
+
+router.addQuery(ComAtprotoSyncGetRepo.mainSchema, {
+  async handler() {
+    const file = await readFullRepoCar();
+    if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
+    return carResponse(file.body);
+  },
+});
+
+router.addQuery(ComAtprotoSyncGetRepoStatus.mainSchema, {
+  async handler() {
+    const file = await readFullRepoCar();
+    if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
+    // Parse the commit CID out of the CAR header.
+    // For brevity, we just return a placeholder rev here. Callers should re-issue
+    // with com.atproto.sync.getLatestCommit for the authoritative rev.
+    return json({ did: process.env.LEX_PUBLISHER_DID ?? 'did:web:biblio.livtet.olamaelcu.net', rev: 'unknown' });
+  },
+});
+
+router.addQuery(ComAtprotoSyncGetBlocks.mainSchema, {
+  async handler() {
+    // Static-file publisher: returns the full repo CAR; callers can CAR-trim
+    // themselves. The canonical lexicon resolver does not call this endpoint
+    // directly; it's here for protocol completeness.
+    const file = await readFullRepoCar();
+    if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
+    return carResponse(file.body);
   },
 });

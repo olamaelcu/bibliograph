@@ -1,5 +1,11 @@
 <script lang="ts">
-  let { data }: { data: { endpointCounts: { queries: number; procedures: number; records: number } } } = $props();
+  let {
+    data,
+  }: {
+    data: {
+      endpointCounts: { queries: number; procedures: number; records: number };
+    };
+  } = $props();
 </script>
 
 <main>
@@ -10,15 +16,12 @@
       A literary-centric <a href="https://atproto.com/guides/glossary#app-view"
         >AppView</a
       >
-      for
-      <code>net.olamaelcu.livtet.biblio</code> — catalog reads served over
-      <code>/xrpc</code> backed by Google Books, with user-owned records (reviews,
-      shelves, shelvings, profiles) written to your own PDS and indexed from the
-      Jetstream firehose.
+      providing XRPC methods for the NSID
+      <code>net.olamaelcu.livtet.biblio</code>.
     </p>
     <div class="hero-cta">
       <wa-button variant="brand" href="/queries" appearance="accent" size="m">
-        Browse queries →
+        Browse queries
       </wa-button>
     </div>
     <div class="code-block">
@@ -67,10 +70,6 @@
   h1 {
     line-height: 1.12;
     letter-spacing: -0.02em;
-    margin: 0;
-  }
-
-  h2 {
     margin: 0;
   }
 

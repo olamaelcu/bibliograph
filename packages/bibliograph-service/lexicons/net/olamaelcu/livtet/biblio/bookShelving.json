@@ -1,0 +1,48 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookShelving",
+  "description": "A book placed on a user's shelf, with metadata about its relationship to that shelf.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": [
+          "shelf",
+          "book",
+          "metadata"
+        ],
+        "properties": {
+          "shelf": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.shelf",
+            "strong": true,
+            "description": "The shelf this book is on."
+          },
+          "book": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#expandedBook",
+            "strong": true,
+            "description": "The book on the shelf, with embedded metadata (title, contributors, identifiers)."
+          },
+          "metadata": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfMetadata",
+            "description": "Metadata about this book's relationship to the shelf."
+          },
+          "createdAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp when this record was originally created."
+          },
+          "updatedAt": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+            "description": "Client-declared timestamp of the last update to this record."
+          }
+        }
+      }
+    }
+  }
+}

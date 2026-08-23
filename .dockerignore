@@ -9,3 +9,6 @@ logs/
 !.env.example
 .vite
 packages/*/src/lib/server/lexicons
+data/
+*.car
+data/lex/

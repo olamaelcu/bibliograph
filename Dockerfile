@@ -24,12 +24,13 @@ RUN pnpm --filter bibliograph-service build
 FROM node:${NODE_VERSION} AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-RUN corepack enable && \
-    addgroup -g 1001 -S app && adduser -S app -u 1001
-COPY --from=build --chown=app:app /workspace/packages ./packages
-COPY --from=build --chown=app:app /workspace/pnpm-workspace.yaml ./
-COPY --from=build --chown=app:app /workspace/package.json ./
+RUN corepack enable
+COPY --from=build --chown=1000:1000 /workspace/packages ./packages
+COPY --from=build --chown=1000:1000 /workspace/pnpm-workspace.yaml ./
+COPY --from=build --chown=1000:1000 /workspace/package.json ./
 RUN pnpm install --prod --ignore-scripts
-USER app
+# Run as the same UID Dokku's herokuish uses (1000). This matches the host-side
+# `/srv/data/bibliograph/data/lex` files published by the build script.
+USER 1000
 EXPOSE 5000
 CMD ["node", "packages/bibliograph-service/build/index.js"]

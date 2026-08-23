@@ -24,6 +24,14 @@ run = ["mise run worker-dev ::: web-dev"]
 description = "Open a psql shell against the local bibliograph database"
 run = ["psql ${DATABASE_URL}"]
 
+[tasks.lex-keygen]
+description = "Generate an ATProto lex-publisher K-256 keypair (one-time)"
+run = ["pnpm --filter bibliograph-service exec tsx scripts/gen-lex-publisher-key.ts"]
+
+[tasks.lex-build]
+description = "Build the signed lex repo CAR files from lexicons/*.json"
+run = ["pnpm --filter bibliograph-service exec tsx scripts/build-lex-repo.ts"]
+
 [shell_alias]
 sql = "mise sql"
 dev = "mise dev"
