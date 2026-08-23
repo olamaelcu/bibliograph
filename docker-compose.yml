@@ -15,5 +15,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  tap:
+    image: ghcr.io/bluesky-social/indigo/tap:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "2480:2480"
+    environment:
+      TAP_DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/bibliograph?sslmode=disable
+      TAP_BIND: 0.0.0.0:2480
+      TAP_COLLECTION_FILTERS: community.lexicon.book.*,net.olamaelcu.livtet.biblio.*
+      TAP_RELAY_URL: https://relay1.us-east.bsky.network
+    env_file:
+      - .env
+
 volumes:
   pgdata:
