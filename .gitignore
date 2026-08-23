@@ -12,5 +12,11 @@ build
 packages/*/src/lib/server/lexicons/**
 !packages/*/src/lib/server/lexicons/.gitkeep
 
+# lex publisher CAR files (gitignored — published via rsync to host)
+packages/*/data/lex/
+*.car
+data/
+
 # drizzle backups
 drizzle/meta/_journal.json.bak
+.cortexkit/

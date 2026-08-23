@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "lex-cli generate && vite build",
     "preview": "vite preview",
     "start": "node build/index.js",
     "worker": "tsx worker.ts",
