@@ -604,10 +604,10 @@ export function gbVolumeToEditionRecord(
   const info = volume.volumeInfo;
   if (!info?.title) return undefined;
   const rkey = `gb-${volume.id}`;
+  // FIXME: Expand this to include `uri` for this record like in line 621.
   const record: Record<string, unknown> = {
     $type: 'community.lexicon.book.edition',
     title: info.title,
-    createdAt: new Date().toISOString(),
   };
   if (info.subtitle) record.subtitle = info.subtitle;
   if (info.publishedDate) {

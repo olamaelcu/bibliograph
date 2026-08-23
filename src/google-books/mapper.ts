@@ -69,33 +69,40 @@ export function decodeGbCursor(value: string | undefined): GbCursor | undefined 
  * record (the shape persisted by GB lazy-load and returned by AppView
  * queries). Returns undefined when the volume has no title.
  *
+ * The returned record carries a synthetic `uri` of the form
+ * `at://<serviceDid>/community.lexicon.book.edition/gb-<volumeId>` so that
+ * search results can be followed up by `getEdition(uri)` without a
+ * separate indexing step. `getEdition` recognises the `gb-` rkey prefix
+ * and lazily fetches the volume on first call.
+ *
  * `subject` in `contributors[]` is encoded as just the contributor TID
  * rkey here; the PDS router rewrites to a full at-uri at serialization
  * time using the service DID.
  */
 export function gbVolumeToEditionRecord(
-_ctx: ViewContext,
-volume: GbVolume,
+  ctx: ViewContext,
+  volume: GbVolume,
 ): Record<string, unknown> | undefined {
-	const info = volume.volumeInfo;
-	if (!info?.title) return undefined;
-	const record: Record<string, unknown> = {
-		$type: COLLECTION.edition,
-		title: info.title,
-		createdAt: new Date().toISOString(),
-	};
-	if (info.subtitle) record.subtitle = info.subtitle;
-	if (info.publishedDate) {
-		const year = parseYear(info.publishedDate);
-		if (year != null) record.publishedYear = year;
-	}
-	if (info.description) record.description = info.description;
-	if (info.authors?.length) {
-		record.contributors = info.authors.map((name) => ({ name, role: 'author' }));
-	}
-	const identifiers = gbIdentifiersToIdentifiers(info);
-	if (identifiers.length) record.identifiers = identifiers;
-	return record;
+  const info = volume.volumeInfo;
+  if (!info?.title) return undefined;
+  const record: Record<string, unknown> = {
+    $type: COLLECTION.edition,
+    uri: `at://${ctx.serviceDid}/${COLLECTION.edition}/gb-${volume.id}`,
+    title: info.title,
+    createdAt: new Date().toISOString(),
+  };
+  if (info.subtitle) record.subtitle = info.subtitle;
+  if (info.publishedDate) {
+    const year = parseYear(info.publishedDate);
+    if (year != null) record.publishedYear = year;
+  }
+  if (info.description) record.description = info.description;
+  if (info.authors?.length) {
+    record.contributors = info.authors.map((name) => ({ name, role: 'author' }));
+  }
+  const identifiers = gbIdentifiersToIdentifiers(info);
+  if (identifiers.length) record.identifiers = identifiers;
+  return record;
 }
 
 function parseYear(publishedDate: string): number | undefined {
