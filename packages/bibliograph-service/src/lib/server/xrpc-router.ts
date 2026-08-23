@@ -32,7 +32,7 @@ import { db } from './db';
 import { editions } from './db/schema';
 import { createLogger } from './logger';
 import { accessLog } from './access-log';
-import { readCar, MemoryBlockstore, MST, formatDataKey } from '@atproto/repo';
+import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { decode as cborDecode } from '@atproto/lex-cbor';
 import { getDidDocument } from './did';
 
@@ -328,18 +328,17 @@ router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
     if (!commitCid) return notFoundResponse('RepoNotFound', 'CAR missing root');
     const commitBytes = parsed.blocks.get(commitCid);
     if (!commitBytes) return notFoundResponse('RepoNotFound', 'commit block missing');
-    const commit = cborDecode(commitBytes) as { data?: { toString(): string } & Record<string, unknown> };
-    if (!commit.data) return notFoundResponse('RepoNotFound', 'commit missing data pointer');
-    const mstDataCid = commit.data as unknown as { toString(): string } & Record<string, unknown>;
+    const { obj: commit } = parseObjByDef(commitBytes, commitCid, def.commit);
     const store = new MemoryBlockstore();
     store.blocks.addMap(parsed.blocks);
-    const mst = MST.load(store, mstDataCid as never);
+    const mst = MST.load(store, commit.data);
     const dataKey = formatDataKey(params.collection, params.rkey);
     const cids = await mst.cidsForPath(dataKey);
-    if (cids.length === 0) {
+    // cidsForPath returns [mstRootCid, ..., recordCid] — the record CID is the last.
+    if (cids.length < 2) {
       return notFoundResponse('RecordNotFound', `rkey "${params.rkey}" not in commit`);
     }
-    const recordCid = cids[0]!;
+    const recordCid = cids[cids.length - 1]!;
     const recordBytes = parsed.blocks.get(recordCid);
     if (!recordBytes) return notFoundResponse('RepoNotFound', 'record block missing');
     return json({
