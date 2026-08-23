@@ -27,7 +27,7 @@ services:
     environment:
       TAP_DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/bibliograph?sslmode=disable
       TAP_BIND: 0.0.0.0:2480
-      TAP_COLLECTION_FILTERS: community.lexicon.book.*,net.olamaelcu.livtet.biblio.*
+      TAP_COLLECTION_FILTERS: net.olamaelcu.livtet.biblio.*
       TAP_RELAY_URL: https://relay1.us-east.bsky.network
     env_file:
       - .env

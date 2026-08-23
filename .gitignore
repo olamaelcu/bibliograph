@@ -1,2 +1,16 @@
-node_modules/
+node_modules
+.svelte-kit
+build
+.vite
 .env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# generated
+packages/*/src/lib/server/lexicons/**
+!packages/*/src/lib/server/lexicons/.gitkeep
+
+# drizzle backups
+drizzle/meta/_journal.json.bak

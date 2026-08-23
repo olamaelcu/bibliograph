@@ -1,0 +1,11 @@
+node_modules
+.git
+.svelte-kit
+build
+*.log
+logs/
+.env
+.env.*
+!.env.example
+.vite
+packages/*/src/lib/server/lexicons

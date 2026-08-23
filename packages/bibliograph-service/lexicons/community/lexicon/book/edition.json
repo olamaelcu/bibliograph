@@ -1,0 +1,90 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.edition",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["title", "createdAt"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 2048, "maxGraphemes": 200 },
+          "subtitle": { "type": "string", "maxLength": 1024, "maxGraphemes": 100 },
+          "work": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+          "publisher": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+          "place": { "type": "string", "maxLength": 256, "maxGraphemes": 64 },
+          "publishedYear": { "type": "integer", "minimum": 0, "maximum": 9999 },
+          "language": { "type": "string", "format": "language" },
+          "contributors": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 64,
+            "items": { "type": "ref", "ref": "#contribution" }
+          },
+          "identifiers": {
+            "type": "array",
+            "minLength": 0,
+            "maxLength": 32,
+            "items": { "type": "ref", "ref": "#identifier" }
+          },
+          "description": { "type": "string", "maxLength": 8192, "maxGraphemes": 1024 },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    },
+    "contribution": {
+      "type": "object",
+      "required": ["subject", "role"],
+      "properties": {
+        "subject": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+        "role": {
+          "type": "string",
+          "knownValues": [
+            "author",
+            "coAuthor",
+            "editor",
+            "translator",
+            "illustrator",
+            "narrator",
+            "foreword",
+            "contributor"
+          ]
+        }
+      }
+    },
+    "identifier": {
+      "type": "object",
+      "required": ["uri", "resource"],
+      "properties": {
+        "uri": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 2048 },
+        "resource": {
+          "type": "string",
+          "knownValues": [
+            "isbn",
+            "isbn13",
+            "isbn10",
+            "asin",
+            "doi",
+            "oclc",
+            "isbnPrefix",
+            "isni",
+            "viaf",
+            "wikidata",
+            "openlibrary",
+            "googleBooks",
+            "goodreads",
+            "amazon",
+            "barnes",
+            "hardcover",
+            "bookhive",
+            "bibliograph",
+            "imdb",
+            "official",
+            "web"
+          ]
+        }
+      }
+    }
+  }
+}

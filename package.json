@@ -2,42 +2,19 @@
   "name": "bibliograph",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@11.13.1",
+  "scripts": {
+    "dev": "pnpm --filter bibliograph-service dev",
+    "build": "pnpm --filter bibliograph-service build",
+    "start": "pnpm --filter bibliograph-service start",
+    "worker": "pnpm --filter bibliograph-service worker",
+    "check": "pnpm --filter bibliograph-service check",
+    "lex:gen": "pnpm --filter bibliograph-service lex:gen",
+    "db:generate": "pnpm --filter bibliograph-service db:generate",
+    "db:migrate": "pnpm --filter bibliograph-service db:migrate"
+  },
   "engines": {
     "node": "26.3.0"
-  },
-  "type": "module",
-  "scripts": {},
-  "dependencies": {
-    "@atcute/atproto": "^4.0.4",
-    "@atcute/cbor": "^2.3.6",
-    "@atcute/cid": "^2.4.2",
-    "@atcute/client": "^5.1.1",
-    "@atcute/identity": "^2.0.2",
-    "@atcute/identity-resolver": "^2.0.1",
-    "@atcute/lexicons": "^2.0.3",
-    "@atcute/xrpc-server": "^2.0.2",
-    "@awesome.me/webawesome": "^3.11.0",
-    "@hono/node-server": "^2.0.12",
-    "@lit-labs/ssr": "^4.1.0",
-    "eta": "^4.6.0",
-    "hono": "^4.13.0",
-    "pino": "^10.3.1",
-    "pino-roll": "^4.0.0",
-    "tsx": "^4.23.1"
-  },
-  "devDependencies": {
-    "@atcute/lex-cli": "^3.2.1",
-    "@atcute/lexicon-doc": "^3.0.2",
-    "@atproto/crypto": "^0.5.4",
-    "@hono/vite-dev-server": "^0.26.1",
-    "@types/node": "^26.1.2",
-    "@vitest/coverage-v8": "^4.1.10",
-    "@vitest/ui": "^4.1.10",
-    "pino-pretty": "^13.1.3",
-    "typescript": "^7.0.0",
-    "valibot": "^1.4.2",
-    "vite": "^8.2.0",
-    "vitest": "^4.1.10"
   }
 }

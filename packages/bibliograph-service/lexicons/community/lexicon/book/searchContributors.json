@@ -1,0 +1,10 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.searchContributors",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Search contributors. Stub: this AppView returns 501 NotImplemented."
+    }
+  }
+}
