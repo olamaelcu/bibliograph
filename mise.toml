@@ -4,6 +4,20 @@ pnpm = "11.13.1"
 
 [env]
 _.file = ".env"
+TAP_ADMIN_PASSWORD = "19b37984434cbe7908fedcc267d535eee21b15a13971eb4c873a00d371f0b493"
+
+[tasks.containers]
+run = ["docker compose up --detach"]
+
+[tasks.web-dev]
+run = ["pnpm run dev"]
+
+[tasks.worker-dev]
+run = ["pnpm run worker"]
+
+[tasks.dev]
+depends = ["containers"]
+run = ["mise run worker-dev ::: web-dev"]
 
 [shell_alias]
 sql = "mise sql"
