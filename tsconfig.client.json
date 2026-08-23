@@ -3,11 +3,23 @@
   "compilerOptions": {
     "noEmit": true,
     "rootDir": ".",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler"
   },
-  "include": ["src/client/**/*.ts", "vite.config.ts"],
-  "exclude": ["node_modules", "dist", "static"]
+  "include": [
+    "vite.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "static"
+  ]
 }

@@ -14,19 +14,10 @@
       }
     ]
   },
-  "cron": [
-    {
-      "command": "pnpm run gb:evict",
-      "schedule": "0 * * * *"
-    }
-  ],
   "formation": {
     "web": {
       "quantity": 1,
       "max_parallel": 1
-    },
-    "worker": {
-      "quantity": 0
     }
   }
 }

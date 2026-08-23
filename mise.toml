@@ -4,17 +4,6 @@ pnpm = "11.13.1"
 
 [env]
 _.file = ".env"
-ALLOW_DEV_DID = 1
-
-[tasks.dev]
-run = "pnpm run dev"
-
-[tasks.migrate]
-run = "pnpm exec drizzle-kit migrate"
-
-[tasks.sql]
-description = "Open a psql shell against the local Postgres database (DATABASE_URL from .env)"
-run = "psql $DATABASE_URL"
 
 [shell_alias]
 sql = "mise sql"
