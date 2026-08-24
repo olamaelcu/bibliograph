@@ -26,6 +26,7 @@ export const editions = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     description: text('description'),
+    coverImageUrl: text('cover_image_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
   },
