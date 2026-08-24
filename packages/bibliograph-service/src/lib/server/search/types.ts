@@ -11,7 +11,7 @@ export interface ContributionEntry {
 }
 
 export interface EditionItem {
-  uri?: string;
+  uri: string;
   title: string;
   subtitle?: string;
   publishedYear?: number;
@@ -25,7 +25,7 @@ export interface EditionItem {
 }
 
 export interface WorkItem {
-  uri?: string;
+  uri: string;
   title: string;
   subtitle?: string;
   originalLanguage?: string;
@@ -38,7 +38,7 @@ export interface WorkItem {
 }
 
 export interface ContributorItem {
-  uri?: string;
+  uri: string;
   name: string;
   aliases: string[];
   bio?: string;
@@ -50,7 +50,7 @@ export interface ContributorItem {
 }
 
 export interface PublisherItem {
-  uri?: string;
+  uri: string;
   name: string;
   imprintOf?: { uri: string; cid: string };
   foundingDate?: number;
@@ -71,7 +71,7 @@ export interface SearchQuery {
 export interface SearchResult<T> {
   items: T[];
   cursor?: string;
-  total?: number;
+  total: number;
   /**
    * Set when an upstream call failed but partial data is still being returned.
    * Lets the XRPC handler decide between 502 UpstreamUnavailable (total miss)

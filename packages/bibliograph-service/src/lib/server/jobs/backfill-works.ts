@@ -116,8 +116,22 @@ export function workUriForRkey(rkey: string): string {
   return `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
 }
 
+export function rkeyFromUri(uri: string): string {
+  return uri.split('/').pop() ?? '';
+}
+
+export function workRkeyFromEditionUri(editionUri: string): string {
+  const editionRkey = rkeyFromUri(editionUri);
+  if (editionRkey.startsWith('ol.')) {
+    const suffix = editionRkey.slice(3);
+    return `ol.W${suffix}`;
+  }
+  return `ol.W${editionRkey}`;
+}
+
 export function synthesizeWorkFromEdition(edition: EditionRow, now: Date = new Date()): WorkItem {
   return {
+    uri: workUriForRkey(workRkeyFromEditionUri(edition.uri)),
     title: edition.title,
     subtitle: edition.subtitle ?? undefined,
     originalLanguage: edition.language ?? undefined,

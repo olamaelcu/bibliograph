@@ -21,7 +21,7 @@ test('enrichContributorBios writes bio from Wikipedia extract', async () => {
     }), { headers: { 'content-type': 'application/json' } });
   });
   try {
-    const items: ContributorItem[] = [{ name: 'Jane Doe', aliases: [], identifiers: [], createdAt: new Date().toISOString() }];
+    const items: ContributorItem[] = [{ uri: 'ol.OL123A', name: 'Jane Doe', aliases: [], identifiers: [], createdAt: new Date().toISOString() }];
     const [out] = await enrichContributorBios(items, log);
     assert.ok(out);
     assert.equal(out.bio, 'Jane Doe is a writer.');
@@ -33,7 +33,7 @@ test('enrichContributorBios skips when Wikipedia returns no pages', async () => 
     query: { pages: { '-1': { title: 'Ghost', missing: '' } } },
   }), { headers: { 'content-type': 'application/json' } }));
   try {
-    const items: ContributorItem[] = [{ name: 'Ghost', aliases: [], identifiers: [], createdAt: new Date().toISOString() }];
+    const items: ContributorItem[] = [{ uri: 'ol.OL456A', name: 'Ghost', aliases: [], identifiers: [], createdAt: new Date().toISOString() }];
     const [out] = await enrichContributorBios(items, log);
     assert.ok(out);
     assert.equal(out.bio, undefined);
@@ -47,8 +47,8 @@ test('enrichContributorBios dedupes by name within a single call', async () => {
   }), { headers: { 'content-type': 'application/json' } }); });
   try {
     const items: ContributorItem[] = [
-      { name: 'Same', aliases: [], identifiers: [], createdAt: new Date().toISOString() },
-      { name: 'Same', aliases: [], identifiers: [], createdAt: new Date().toISOString() },
+      { uri: 'ol.OL789A', name: 'Same', aliases: [], identifiers: [], createdAt: new Date().toISOString() },
+      { uri: 'ol.OL790A', name: 'Same', aliases: [], identifiers: [], createdAt: new Date().toISOString() },
     ];
     await enrichContributorBios(items, log);
     assert.equal(calls, 1);

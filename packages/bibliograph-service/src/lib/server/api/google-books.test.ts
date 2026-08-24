@@ -13,6 +13,7 @@ function stubFetch(impl: (url: string) => Promise<Response>) {
 }
 
 const baseItem: EditionItem = {
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.Test123',
   title: 'Test',
   identifiers: [{ uri: 'isbn:9780123456789', resource: 'isbn13' }],
   contributors: [],

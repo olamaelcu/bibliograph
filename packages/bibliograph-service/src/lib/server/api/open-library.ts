@@ -2,6 +2,7 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { openLibraryBreaker } from './breakers';
+import { PUBLISHER_DID } from '../did';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
@@ -75,6 +76,21 @@ function makeOlIdentifier(key: string): Identifier {
   return { uri: `https://openlibrary.org${key}`, resource: 'openlibrary' };
 }
 
+function makeEditionUri(key: string): string {
+  const olId = key.replace(/^\/books\//, '');
+  return `at://${PUBLISHER_DID}/community.lexicon.book.edition/ol.${olId}`;
+}
+
+function makeWorkUri(key: string): string {
+  const olId = key.replace(/^\/works\//, '');
+  return `at://${PUBLISHER_DID}/community.lexicon.book.work/ol.${olId}`;
+}
+
+function makeAuthorUri(key: string): string {
+  const olId = key.replace(/^\/authors\//, '');
+  return `at://${PUBLISHER_DID}/community.lexicon.book.contributor/ol.${olId}`;
+}
+
 export async function searchEditions(
   query: SearchQuery,
   log: Logger,
@@ -85,7 +101,7 @@ export async function searchEditions(
   const url = buildUrl(query.q, 'edition', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
-  if (!data) return { items: [] };
+  if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
   const items: EditionItem[] = (data.docs ?? []).map((d) => {
     const identifiers: Identifier[] = [makeOlIdentifier(d.key)];
@@ -96,6 +112,7 @@ export async function searchEditions(
     }
     const year = d.first_publish_year ?? d.publish_year?.[0];
     return {
+      uri: makeEditionUri(d.key),
       title: d.title,
       subtitle: d.subtitle,
       publishedYear: year,
@@ -109,7 +126,7 @@ export async function searchEditions(
     };
   });
   // cursor deferred to orchestrator (cursor-driven pagination is a follow-up)
-  return { items, total: data.numFound };
+  return { items, total: data.numFound ?? 0 };
 }
 
 export async function searchWorks(
@@ -122,9 +139,10 @@ export async function searchWorks(
   const url = buildUrl(query.q, 'work', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlWorkDoc>>(url, log, signal);
-  if (!data) return { items: [] };
+  if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
   const items: WorkItem[] = (data.docs ?? []).map((d) => ({
+    uri: makeWorkUri(d.key),
     title: d.title,
     subtitle: d.subtitle,
     firstPublishedYear: d.first_publish_year,
@@ -136,7 +154,7 @@ export async function searchWorks(
     createdAt,
   }));
   // cursor deferred to orchestrator (cursor-driven pagination is a follow-up)
-  return { items, total: data.numFound };
+  return { items, total: data.numFound ?? 0 };
 }
 
 export async function searchContributors(
@@ -149,11 +167,12 @@ export async function searchContributors(
   const url = buildUrl(query.q, 'author', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlAuthorDoc>>(url, log, signal);
-  if (!data) return { items: [] };
+  if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
   const items: ContributorItem[] = (data.docs ?? []).map((d) => {
     const aliases = d.alternate_names ?? [];
     return {
+      uri: makeAuthorUri(d.key),
       name: d.name,
       aliases,
       bornYear: yearFromDate(d.birth_date),
@@ -163,5 +182,5 @@ export async function searchContributors(
     };
   });
   // cursor deferred to orchestrator (cursor-driven pagination is a follow-up)
-  return { items, total: data.numFound };
+  return { items, total: data.numFound ?? 0 };
 }

@@ -27,6 +27,7 @@ test('Ingestor interface shape', (_t) => {
 
 test('EditionItem fields exist on type', () => {
   const item: EditionItem = {
+    uri: 'ol.OL123M',
     title: 't',
     identifiers: [],
     contributors: [],

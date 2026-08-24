@@ -81,35 +81,45 @@ export class PostgresSource {
     query: SearchQuery,
     kind: 'edition' | 'work' | 'contributor' | 'publisher',
   ): Promise<SearchResult<TItem>> {
-    // ILIKE pattern below is index-accelerated by the pg_trgm GINs added in
-    // migration 0005_search_and_identifiers.sql (editions.title, works.title,
-    // contributors.name). The leading '%' is fine because pg_trgm's
-    // gin_trgm_ops index handles leading-wildcard LIKE/ILIKE directly.
-    const conds: ReturnType<typeof sql>[] = [];
-    if (query.q) conds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
+    const indexedAt = table.indexedAt;
+    const uri = table.uri;
+
+    const filterConds: ReturnType<typeof sql>[] = [];
+    if (query.q) filterConds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
     if (query.id) {
       const identifiers = table.identifiers;
-      for (const id of query.id) conds.push(sql`${identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
+      for (const id of query.id) filterConds.push(sql`${identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
     }
+
+    let cursorCond: ReturnType<typeof sql> | undefined;
     if (query.cursor) {
       const c = decodeCursor(query.cursor);
       if (c) {
-        const indexedAt = table.indexedAt;
-        const uri = table.uri;
-        conds.push(or(sql`${indexedAt} < ${new Date(c.t)}`, and(sql`${indexedAt} = ${new Date(c.t)}`, sql`${uri} > ${c.u}`))!);
+        cursorCond = or(
+          sql`${indexedAt} < ${new Date(c.t)}`,
+          and(sql`${indexedAt} = ${new Date(c.t)}`, sql`${uri} > ${c.u}`))!;
       }
     }
-    const where = conds.length > 0 ? and(...conds) : undefined;
-    const indexedAt = table.indexedAt;
-    const uri = table.uri;
+
+    const where = filterConds.length > 0
+      ? (cursorCond ? and(...filterConds, cursorCond) : and(...filterConds)) : cursorCond;
+
+    let total = 0;
+    if (filterConds.length > 0) {
+      const countResult = await this.db.select({ count: sql<number>`count(*) as count` }).from(table as unknown as PgTable).where(and(...filterConds)).orderBy().limit(1);
+      total = countResult[0]?.count ?? 0;
+    }
+
     const base = this.db.select().from(table as unknown as PgTable);
-    const rawRows = await (where !== undefined ? base.where(where) : base).orderBy(desc(indexedAt), asc(uri)).limit(query.limit);
+    const rawRows = await (where !== undefined ? base.where(where) : base)
+      .orderBy(desc(indexedAt), asc(uri))
+      .limit(query.limit);
     const rows = rawRows as Array<Record<string, unknown>>;
     const items = rows.map(mapRow);
     const last = rows.length === query.limit ? rows[rows.length - 1] as unknown as CursorRow : null;
     const cursor = last ? encodeCursor(last.indexedAt, last.uri) : undefined;
-    this.log.info({ stage: 'postgres-source', kind, items: items.length, did: PUBLISHER_DID }, 'postgres ok');
-    return { items, cursor };
+    this.log.info({ stage: 'postgres-source', kind, items: items.length, total, did: PUBLISHER_DID }, 'postgres ok');
+    return { items, cursor, total };
   }
 
   private mapEditionRow(r: Record<string, unknown>): EditionItem {

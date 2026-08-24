@@ -8,11 +8,13 @@ import {
   enqueueRecordDeleteBatch,
   type TapRecordUpsertItem,
 } from './jobs/enqueue';
+import { getTapQueueDepth } from './jobs/depth';
 
 const TAP_URL = process.env.TAP_URL ?? 'http://localhost:2480';
 const UPSTREAM_APPVIEW = process.env.UPSTREAM_APPVIEW ?? 'https://public.api.bsky.app';
 const TAP_BATCH_SIZE = Number(process.env.TAP_BATCH_SIZE ?? 100);
 const TAP_BATCH_INTERVAL_MS = Number(process.env.TAP_BATCH_INTERVAL_MS ?? 500);
+const TAP_QUEUE_DEPTH_THRESHOLD = Number(process.env.TAP_QUEUE_DEPTH_THRESHOLD ?? 50_000);
 
 export const verifyClient = new Client({
   handler: simpleFetchHandler({ service: UPSTREAM_APPVIEW }),
@@ -87,6 +89,13 @@ export async function runTapConsumer(log: Logger): Promise<void> {
       }
       if (!event.collection.startsWith(NET_PREFIX)) {
         await ack();
+        continue;
+      }
+      // Conditional ack safety net: if the TAP queue is over the threshold, skip
+      // both enqueue and ack so TAP redelivers later when workers drain.
+      const depth = await getTapQueueDepth();
+      if (depth > TAP_QUEUE_DEPTH_THRESHOLD) {
+        log.warn({ stage: 'tap-consumer', depth, threshold: TAP_QUEUE_DEPTH_THRESHOLD }, 'queue depth too high; skipping event (TAP will redeliver)');
         continue;
       }
       const uri = `at://${event.did}/${event.collection}/${event.rkey}`;

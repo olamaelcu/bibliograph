@@ -43,7 +43,6 @@ import { PostgresSource } from './search/postgres-source';
 import { OpenLibrarySource } from './search/open-library-source';
 import { GoogleBooksEnricher } from './search/google-books-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
-import { LocalPostgresIngestor } from './search/local-postgres-ingestor';
 import { SearchService } from './search/service';
 import { eq } from 'drizzle-orm';
 import { db } from './db';
@@ -144,6 +143,7 @@ router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
     });
     const items = result.items.map((r) => ({
       $type: 'community.lexicon.book.edition' as const,
+      uri: r.uri,
       title: r.title,
       subtitle: r.subtitle,
       coverImageUrl: r.coverImageUrl,
@@ -196,6 +196,7 @@ router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
     });
     const items = result.items.map((r) => ({
       $type: 'community.lexicon.book.work' as const,
+      uri: r.uri,
       title: r.title,
       subtitle: r.subtitle,
       originalLanguage: r.originalLanguage,
@@ -219,6 +220,7 @@ router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
     });
     const items = result.items.map((r) => ({
       $type: 'community.lexicon.book.contributor' as const,
+      uri: r.uri,
       name: r.name,
       aliases: r.aliases,
       bio: r.bio,
@@ -241,6 +243,7 @@ router.addQuery(CommunityLexiconBookSearchPublishers.mainSchema, {
     });
     const items = result.items.map((r) => ({
       $type: 'community.lexicon.book.publisher' as const,
+      uri: r.uri,
       name: r.name,
       imprintOf: r.imprintOf,
       foundingDate: r.foundingDate,
@@ -403,6 +406,7 @@ async function serveBookRecordFromDb(
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
     const value = {
       $type: 'community.lexicon.book.edition',
+      uri,
       title: row.title,
       subtitle: row.subtitle ?? undefined,
       place: row.place ?? undefined,
@@ -422,6 +426,7 @@ async function serveBookRecordFromDb(
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
     const value = {
       $type: 'community.lexicon.book.work',
+      uri,
       title: row.title,
       subtitle: row.subtitle ?? undefined,
       originalLanguage: row.originalLanguage ?? undefined,
@@ -441,6 +446,7 @@ async function serveBookRecordFromDb(
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
     const value = {
       $type: 'community.lexicon.book.publisher',
+      uri,
       name: row.name,
       imprintOf:
         row.imprintOfUri && row.imprintOfCid
@@ -457,9 +463,10 @@ async function serveBookRecordFromDb(
   // community.lexicon.book.contributor
   const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
   if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
-  const value = {
-    $type: 'community.lexicon.book.contributor',
-    name: row.name,
+const value = {
+      $type: 'community.lexicon.book.contributor',
+      uri,
+      name: row.name,
     aliases: row.aliases ?? [],
     bio: row.bio ?? undefined,
     bornYear: row.bornYear ?? undefined,

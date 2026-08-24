@@ -7,8 +7,9 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["name", "createdAt"],
+        "required": ["name", "createdAt", "uri"],
         "properties": {
+          "uri": { "type": "string", "format": "uri" },
           "name": { "type": "string", "minLength": 1, "maxLength": 256, "maxGraphemes": 200 },
           "imprintOf": {
             "type": "ref",

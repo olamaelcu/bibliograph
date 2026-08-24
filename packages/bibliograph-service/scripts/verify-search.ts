@@ -22,7 +22,7 @@ import { PostgresSource } from '../src/lib/server/search/postgres-source.js';
 import { OpenLibrarySource } from '../src/lib/server/search/open-library-source.js';
 import { GoogleBooksEnricher } from '../src/lib/server/search/google-books-enricher.js';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from '../src/lib/server/search/wikipedia-enricher.js';
-import { LocalPostgresIngestor } from '../src/lib/server/search/local-postgres-ingestor.js';
+
 import { SearchService } from '../src/lib/server/search/service.js';
 
 const log = pino({ level: 'silent' });

@@ -7,8 +7,9 @@
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["title", "createdAt"],
+        "required": ["title", "createdAt", "uri"],
         "properties": {
+          "uri": { "type": "string", "format": "uri" },
           "title": { "type": "string", "minLength": 1, "maxLength": 2048, "maxGraphemes": 200 },
           "subtitle": { "type": "string", "maxLength": 1024, "maxGraphemes": 100 },
           "originalLanguage": { "type": "string", "format": "language" },

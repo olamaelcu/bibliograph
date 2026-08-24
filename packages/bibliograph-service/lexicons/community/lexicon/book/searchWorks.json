@@ -23,7 +23,7 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["items"],
+          "required": ["items", "total"],
           "properties": {
             "items": {
               "type": "array",

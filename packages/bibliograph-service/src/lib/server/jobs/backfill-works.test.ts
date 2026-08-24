@@ -69,6 +69,7 @@ function makeWorkRow(overrides: Partial<WorkRow> = {}): WorkRow {
 
 function makeWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
   return {
+    uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.WOL1W',
     title: 'Test Edition',
     subjects: [],
     identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Counts } from '$lib/server/stats';
+  import type { Counts } from "$lib/server/stats";
 
   let { data }: { data: { counts: Counts } } = $props();
 
@@ -11,14 +11,18 @@
 
   const POLL_MS = 5_000;
   const TICK_MS = 1_000;
-  const formatter = new Intl.NumberFormat('en-US');
+  const formatter = new Intl.NumberFormat("en-US");
 
-  type Tile = { key: keyof Omit<Counts, 'generatedAt'>; label: string; href?: string };
+  type Tile = {
+    key: keyof Omit<Counts, "generatedAt">;
+    label: string;
+    href?: string;
+  };
   const tiles: Tile[] = [
-    { key: 'works', label: 'Works', href: '/queries' },
-    { key: 'editions', label: 'Editions', href: '/queries' },
-    { key: 'contributors', label: 'Contributors', href: '/queries' },
-    { key: 'publishers', label: 'Publishers' },
+    { key: "works", label: "Works", href: "/queries" },
+    { key: "editions", label: "Editions", href: "/queries" },
+    { key: "contributors", label: "Contributors", href: "/queries" },
+    { key: "publishers", label: "Publishers" },
   ];
 
   function format(n: number): string {
@@ -27,7 +31,7 @@
 
   function ago(timestamp: number, reference: number): string {
     const seconds = Math.max(0, Math.floor((reference - timestamp) / 1000));
-    if (seconds < 5) return 'just now';
+    if (seconds < 5) return "just now";
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
@@ -46,7 +50,9 @@
       if (document.hidden) return;
       inflight = true;
       try {
-        const res = await fetch('/stats/counts', { headers: { accept: 'application/json' } });
+        const res = await fetch("/stats/counts", {
+          headers: { accept: "application/json" },
+        });
         if (!res.ok) {
           isLive = false;
           return;
@@ -64,15 +70,19 @@
     }
 
     pollTimer = setInterval(poll, POLL_MS);
-    tickTimer = setInterval(() => { now = Date.now(); }, TICK_MS);
-    const onVisibility = () => { if (!document.hidden) poll(); };
-    document.addEventListener('visibilitychange', onVisibility);
+    tickTimer = setInterval(() => {
+      now = Date.now();
+    }, TICK_MS);
+    const onVisibility = () => {
+      if (!document.hidden) poll();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
       if (tickTimer) clearInterval(tickTimer);
-      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   });
 </script>
@@ -81,8 +91,8 @@
   <section class="page-intro">
     <h1>Stats</h1>
     <p class="muted">
-      Live row counts from the AppView database. Updates every {POLL_MS / 1000} seconds while this
-      tab is visible.
+      Live row counts from the AppView database. Updates every {POLL_MS / 1000} seconds
+      while this tab is visible.
     </p>
   </section>
 
@@ -91,7 +101,7 @@
       <wa-card class="stat-card">
         <div slot="header" class="card-header">
           <span class="stat-label">{label}</span>
-          <wa-badge variant={isLive ? 'success' : 'neutral'} appearance="tint">
+          <wa-badge variant={isLive ? "success" : "neutral"} appearance="tint">
             {#if isLive}
               <span class="dot dot-live" aria-hidden="true"></span>live
             {:else}
@@ -99,7 +109,9 @@
             {/if}
           </wa-badge>
         </div>
-        <div class="stat-value" data-testid="stat-{key}">{format(counts[key])}</div>
+        <div class="stat-value" data-testid="stat-{key}">
+          {format(counts[key])}
+        </div>
         {#if href}
           <div slot="footer" class="card-footer">
             <a class="muted" {href}>Browse →</a>
@@ -112,7 +124,8 @@
   <section class="page-intro meta">
     <p class="muted">
       Last updated {ago(lastUpdated, now)}.
-      {#if !isLive}<br />Showing last successful fetch; the AppView database may be unreachable.{/if}
+      {#if !isLive}<br />Showing last successful fetch; the AppView database may
+        be unreachable.{/if}
     </p>
   </section>
 </main>
@@ -178,14 +191,21 @@
     border-radius: 50%;
     vertical-align: middle;
     margin-right: 0.35em;
-    background: var(--wa-color-neutral-fill-quiet);
+    background: var(--wa-color-neutral-fill-loud);
+    margin-bottom: 0.15rem;
   }
   .dot-live {
-    background: var(--wa-color-success-fill-loud, #2e7d32);
+    background: var(--wa-color-success-fill-normal);
     animation: pulse 1.6s ease-in-out infinite;
   }
   @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.35; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
   }
 </style>
+

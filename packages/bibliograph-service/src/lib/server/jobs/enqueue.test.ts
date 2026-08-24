@@ -9,6 +9,7 @@ import type { EditionItem, WorkItem, ContributorItem } from '../search/types';
 // scripts/verify-tap-jobs.ts.
 
 const editionItem: EditionItem = {
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL1M',
   title: 'Test Edition',
   identifiers: [{ uri: 'https://openlibrary.org/books/OL1M', resource: 'openlibrary' }],
   contributors: [],
@@ -16,6 +17,7 @@ const editionItem: EditionItem = {
 };
 
 const workItem: WorkItem = {
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.WOL1W',
   title: 'Test Work',
   subjects: [],
   identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],
@@ -24,6 +26,7 @@ const workItem: WorkItem = {
 };
 
 const contributorItem: ContributorItem = {
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.AOL1A',
   name: 'Test Author',
   aliases: [],
   identifiers: [{ uri: 'https://openlibrary.org/authors/OL1A', resource: 'openlibrary' }],
