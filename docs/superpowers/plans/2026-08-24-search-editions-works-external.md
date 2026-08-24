@@ -853,12 +853,12 @@ git commit -m "feat(api): add Wikipedia enrichment wrappers"
 
 ---
 
-## Task 6: Drizzle migration — add `cover_image_url` to `editions`
+## Task 6: Drizzle migration — add `cover_image_url` to `editions` (DONE — commit 48fa670)
 
 **Files:**
 - Create: `packages/bibliograph-service/drizzle/0002_discovery_columns.sql`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 -- drizzle/0002_discovery_columns.sql
@@ -867,7 +867,7 @@ git commit -m "feat(api): add Wikipedia enrichment wrappers"
 ALTER TABLE "editions" ADD COLUMN "cover_image_url" text;
 ```
 
-- [ ] **Step 2: Update the drizzle schema to reflect the new column**
+- [x] **Step 2: Update the drizzle schema to reflect the new column**
 
 Edit `packages/bibliograph-service/src/lib/server/db/schema.ts`. Inside the `editions` table object literal, add one column (alongside the other column declarations):
 
@@ -877,7 +877,7 @@ coverImageUrl: text('cover_image_url'),
 
 Add it right after the `description: text('description'),` line (matches the SQL column order).
 
-- [ ] **Step 3: Apply migration locally**
+- [x] **Step 3: Apply migration locally**
 
 With the Postgres container running (`mise run containers` or `docker compose up -d`), from `packages/bibliograph-service`:
 
@@ -890,7 +890,7 @@ Expected output:
 ALTER TABLE
 ```
 
-- [ ] **Step 4: Verify the column exists**
+- [x] **Step 4: Verify the column exists**
 
 ```bash
 psql "$DATABASE_URL" -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'editions' AND column_name = 'cover_image_url';"
@@ -903,7 +903,7 @@ Expected output:
  cover_image_url  | text
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/drizzle/0002_discovery_columns.sql \
