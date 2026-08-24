@@ -76,6 +76,10 @@ export class PostgresSource {
     query: SearchQuery,
     kind: 'edition' | 'work' | 'contributor',
   ): Promise<SearchResult<TItem>> {
+    // ILIKE pattern below is index-accelerated by the pg_trgm GINs added in
+    // migration 0005_search_and_identifiers.sql (editions.title, works.title,
+    // contributors.name). The leading '%' is fine because pg_trgm's
+    // gin_trgm_ops index handles leading-wildcard LIKE/ILIKE directly.
     const conds: ReturnType<typeof sql>[] = [];
     if (query.q) conds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
     if (query.id) {
