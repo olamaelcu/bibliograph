@@ -6,6 +6,7 @@ export const GET: RequestHandler = async () => {
   return json(getDidDocument(), {
     headers: {
       'cache-control': 'public, max-age=300, must-revalidate',
+      'access-control-allow-origin': '*',
     },
   });
 };

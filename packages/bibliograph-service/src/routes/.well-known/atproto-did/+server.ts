@@ -9,6 +9,7 @@ export const GET: RequestHandler = async () => {
     headers: {
       'content-type': 'text/plain; charset=utf-8',
       'cache-control': 'public, max-age=300, must-revalidate',
+      'access-control-allow-origin': '*',
     },
   });
 };
