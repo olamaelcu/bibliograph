@@ -4,7 +4,7 @@ import { PostgresSource } from './postgres-source';
 import { OpenLibrarySource } from './open-library-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
-import { LocalPostgresIngestor } from './local-postgres-ingestor';
+import { enqueueIngest } from '../jobs/enqueue';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types';
 
 export interface SearchServiceDeps {
@@ -13,7 +13,6 @@ export interface SearchServiceDeps {
   googleBooks: GoogleBooksEnricher;
   authorWikipedia: AuthorWikipediaEnricher;
   contributorWikipedia: ContributorWikipediaEnricher;
-  ingestor: LocalPostgresIngestor;
 }
 
 export class SearchService {
@@ -35,7 +34,9 @@ export class SearchService {
     if (ol.items.length === 0) return ol;
     let items = await this.deps.googleBooks.enrich(ol.items, log);
     items = await this.deps.authorWikipedia.enrich(items, log);
-    void this.deps.ingestor.ingest(items).catch(() => undefined);
+    for (const item of items) {
+      await enqueueIngest('edition', item);
+    }
     log.info({ stage: 'search-editions', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
   }
@@ -47,14 +48,15 @@ export class SearchService {
     const ol = await this.deps.openLibrary.searchWorks(query);
     if (ol.items.length === 0) return ol;
     let items = (await this.deps.authorWikipedia.enrich(ol.items, log)) as WorkItem[];
-    void this.deps.ingestor.ingest(items).catch(() => undefined);
+    for (const item of items) {
+      await enqueueIngest('work', item);
+    }
     log.info({ stage: 'search-works', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
   }
 
   async searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
     const log = this.log();
-    // id-only queries skip OpenLibrary (option B from the design).
     if (!query.q && query.id && query.id.length > 0) {
       return this.deps.postgres.searchContributors(query);
     }
@@ -63,7 +65,9 @@ export class SearchService {
     const ol = await this.deps.openLibrary.searchContributors(query);
     if (ol.items.length === 0) return ol;
     let items = await this.deps.contributorWikipedia.enrich(ol.items, log);
-    void this.deps.ingestor.ingest(items).catch(() => undefined);
+    for (const item of items) {
+      await enqueueIngest('contributor', item);
+    }
     log.info({ stage: 'search-contributors', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
   }

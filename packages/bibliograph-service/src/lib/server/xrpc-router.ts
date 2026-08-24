@@ -56,7 +56,6 @@ const openLibrarySource = new OpenLibrarySource(log);
 const googleBooksEnricher = new GoogleBooksEnricher();
 const authorWikipediaEnricher = new AuthorWikipediaEnricher();
 const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
-const localIngestor = new LocalPostgresIngestor(log);
 const searchService = new SearchService(
   {
     postgres: postgresSource,
@@ -64,7 +63,6 @@ const searchService = new SearchService(
     googleBooks: googleBooksEnricher,
     authorWikipedia: authorWikipediaEnricher,
     contributorWikipedia: contributorWikipediaEnricher,
-    ingestor: localIngestor,
   },
   log,
 );

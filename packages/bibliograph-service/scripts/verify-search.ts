@@ -65,9 +65,8 @@ function buildRouter(): { router: XRPCRouter; restore: () => void } {
   const gb = new GoogleBooksEnricher();
   const aw = new AuthorWikipediaEnricher();
   const cw = new ContributorWikipediaEnricher();
-  const ing = new LocalPostgresIngestor(log);
   const svc = new SearchService(
-    { postgres: pg, openLibrary: ol, googleBooks: gb, authorWikipedia: aw, contributorWikipedia: cw, ingestor: ing },
+    { postgres: pg, openLibrary: ol, googleBooks: gb, authorWikipedia: aw, contributorWikipedia: cw },
     log,
   );
   router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
