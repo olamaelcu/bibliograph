@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, integer, index, foreignKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, timestamp, integer, bigserial, bigint, index, foreignKey } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const editions = pgTable(
@@ -145,3 +145,40 @@ export type WorkRow = typeof works.$inferSelect;
 export type ContributorRow = typeof contributors.$inferSelect;
 export type PublisherRow = typeof publishers.$inferSelect;
 export type RecordRow = typeof records.$inferSelect;
+
+export const ingestDeadLetter = pgTable(
+  'ingest_dead_letter',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    uri: text('uri').notNull().unique(),
+    payload: jsonb('payload').notNull(),
+    errorMessage: text('error_message').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    createdAtIdx: index('ingest_dead_letter_created_at_idx').on(t.createdAt),
+  }),
+);
+
+export const tapDeadLetter = pgTable(
+  'tap_dead_letter',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    eventSeq: bigint('event_seq', { mode: 'number' }),
+    repoDid: text('repo_did').notNull(),
+    collection: text('collection').notNull(),
+    rkey: text('rkey').notNull(),
+    payload: jsonb('payload').notNull(),
+    errorMessage: text('error_message').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    createdAtIdx: index('tap_dead_letter_created_at_idx').on(t.createdAt),
+    didIdx: index('tap_dead_letter_did_idx').on(t.repoDid),
+  }),
+);
+
+export type IngestDeadLetterRow = typeof ingestDeadLetter.$inferSelect;
+export type TapDeadLetterRow = typeof tapDeadLetter.$inferSelect;
