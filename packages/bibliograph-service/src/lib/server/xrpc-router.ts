@@ -1,6 +1,5 @@
 import { XRPCRouter, json } from '@atcute/xrpc-server';
 import { cors } from '@atcute/xrpc-server/middlewares/cors';
-import { and, asc, desc, or, sql } from 'drizzle-orm';
 import {
   ComAtprotoIdentityResolveDid,
   ComAtprotoIdentityResolveHandle,
@@ -32,8 +31,6 @@ import {
   resolveDid,
   resolveHandle,
 } from './lex/publisher.js';
-import { db } from './db';
-import { editions } from './db/schema';
 import { createLogger } from './logger';
 import { accessLog } from './access-log';
 import { pdsClient, resolvePds } from './pds/resolve.js';
@@ -46,43 +43,6 @@ import { GoogleBooksEnricher } from './search/google-books-enricher.ts';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher.ts';
 import { LocalPostgresIngestor } from './search/local-postgres-ingestor.ts';
 import { SearchService } from './search/service.ts';
-
-const CURSOR_VERSION = 1;
-
-function encodeCursor(indexedAt: Date, uri: string): string {
-  return Buffer.from(
-    JSON.stringify({ v: CURSOR_VERSION, t: indexedAt.toISOString(), u: uri }),
-  ).toString('base64url');
-}
-
-function decodeCursor(cursor: string): { indexedAt: Date; uri: string } | null {
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString());
-    if (parsed.v !== CURSOR_VERSION) return null;
-    return { indexedAt: new Date(parsed.t), uri: parsed.u };
-  } catch {
-    return null;
-  }
-}
-
-async function approxRowCount(whereClause: ReturnType<typeof sql> | undefined): Promise<number> {
-  if (!whereClause) {
-    const result = await db.execute<{ estimate: number | string }>(
-      sql`SELECT reltuples::int AS estimate FROM pg_class WHERE relname = 'editions'`,
-    );
-    return Number(result.rows[0]?.estimate ?? 0);
-  }
-  const result = await db.execute<Record<string, unknown>>(
-    sql`EXPLAIN (FORMAT JSON) SELECT * FROM editions WHERE ${whereClause}`,
-  );
-  const row = result.rows[0] as Record<string, unknown> | undefined;
-  const plan = row?.['QUERY PLAN'];
-  if (Array.isArray(plan) && plan[0] && typeof plan[0] === 'object') {
-    const inner = (plan[0] as { Plan?: { 'Plan Rows'?: number } }).Plan;
-    if (inner && typeof inner['Plan Rows'] === 'number') return inner['Plan Rows'];
-  }
-  return 0;
-}
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -194,19 +154,54 @@ const notImplemented = (nsid: string) =>
     { status: 501, headers: { 'content-type': 'application/json' } },
   );
 
+router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
+  async handler({ params }) {
+    const result = await searchService.searchWorks({
+      q: params.q,
+      id: params.id,
+      limit: Math.min(params.limit ?? 20, 100),
+      cursor: params.cursor,
+    });
+    const items = result.items.map((r) => ({
+      $type: 'community.lexicon.book.work' as const,
+      title: r.title,
+      subtitle: r.subtitle,
+      originalLanguage: r.originalLanguage,
+      firstPublishedYear: r.firstPublishedYear,
+      subjects: r.subjects,
+      contributors: r.contributors,
+      identifiers: r.identifiers,
+      description: r.description,
+      createdAt: r.createdAt,
+    }));
+    return json({ items, cursor: result.cursor, total: result.total } as never);
+  },
+});
 router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
-  async handler() {
-    return notImplemented('community.lexicon.book.searchContributors');
+  async handler({ params }) {
+    const result = await searchService.searchContributors({
+      q: params.q,
+      id: params.id,
+      limit: Math.min(params.limit ?? 20, 100),
+      cursor: params.cursor,
+    });
+    const items = result.items.map((r) => ({
+      $type: 'community.lexicon.book.contributor' as const,
+      name: r.name,
+      aliases: r.aliases,
+      bio: r.bio,
+      bornYear: r.bornYear,
+      diedYear: r.diedYear,
+      linkedDid: r.linkedDid,
+      identifiers: r.identifiers,
+      createdAt: r.createdAt,
+    }));
+    return json({ items, cursor: result.cursor, total: result.total } as never);
   },
 });
 router.addQuery(CommunityLexiconBookSearchPublishers.mainSchema, {
   async handler() {
     return notImplemented('community.lexicon.book.searchPublishers');
-  },
-});
-router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
-  async handler() {
-    return notImplemented('community.lexicon.book.searchWorks');
   },
 });
 
