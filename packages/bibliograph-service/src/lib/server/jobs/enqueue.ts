@@ -46,3 +46,22 @@ export async function enqueueRecordDelete(uri: string): Promise<void> {
   const utils = await getUtils();
   await utils.addJob('tap-record-delete', { uri });
 }
+
+export interface TapRecordUpsertItem {
+  uri: string;
+  did: string;
+  rkey: string;
+  value: Record<string, unknown>;
+}
+
+export async function enqueueRecordUpsertBatch(items: TapRecordUpsertItem[]): Promise<void> {
+  if (items.length === 0) return;
+  const utils = await getUtils();
+  await utils.addJob('tap-record-upsert-batch', items);
+}
+
+export async function enqueueRecordDeleteBatch(uris: string[]): Promise<void> {
+  if (uris.length === 0) return;
+  const utils = await getUtils();
+  await utils.addJob('tap-record-delete-batch', uris);
+}
