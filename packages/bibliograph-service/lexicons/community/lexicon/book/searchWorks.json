@@ -4,7 +4,42 @@
   "defs": {
     "main": {
       "type": "query",
-      "description": "Search works. Stub: this AppView returns 501 NotImplemented."
+      "description": "Search works by free-form text (q) and/or identifiers (id, repeatable).",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "q": { "type": "string", "maxLength": 1024, "description": "Free-form text query." },
+          "id": {
+            "type": "array",
+            "items": { "type": "string", "maxLength": 2048 },
+            "maxLength": 32,
+            "description": "Identifiers to match (URI or URN form). Repeatable."
+          },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
+          "cursor": { "type": "string", "maxLength": 256 }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["items"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": { "type": "ref", "ref": "community.lexicon.book.work" }
+            },
+            "cursor": { "type": "string" },
+            "total": { "type": "integer", "minimum": 0 }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidQuery",
+          "description": "The query syntax was invalid for this AppView (e.g. Lucene syntax error)."
+        }
+      ]
     }
   }
 }
