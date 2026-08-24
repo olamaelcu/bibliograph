@@ -41,3 +41,19 @@ export const httpRequestDurationMs = new Histogram({
   buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
   registers: [metricsRegistry],
 });
+
+/**
+ * Collapse high-cardinality path segments (DIDs, rkeys, opaque IDs) to
+ * placeholders so a single label value doesn't generate unbounded time series.
+ * Keep `/xrpc/{nsid}` and `/.well-known/*` paths verbatim — they're bounded by
+ * the lexicon count, not user input.
+ */
+export function normalizePath(pathname: string): string {
+  if (pathname.startsWith('/xrpc/') || pathname.startsWith('/.well-known/')) {
+    return pathname;
+  }
+  return pathname
+    .replace(/\/(did:[a-z0-9:]+)/gi, '/{did}')
+    .replace(/\/[a-z0-9]{16,}/gi, '/{id}')
+    .replace(/\/\d+/g, '/{id}');
+}

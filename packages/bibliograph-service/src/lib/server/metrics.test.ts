@@ -7,6 +7,7 @@ import {
   upstreamRequestsTotal,
   searchLatencyMs,
   upstreamLatencyMs,
+  normalizePath,
 } from './metrics';
 
 test('metricsRegistry registers default process metrics', async () => {
@@ -46,4 +47,20 @@ test('metrics module exports all counter and histogram symbols', () => {
   assert.ok(searchLatencyMs);
   assert.ok(upstreamLatencyMs);
   assert.ok(httpRequestDurationMs);
+});
+
+test('normalizePath keeps /xrpc/{nsid} verbatim', () => {
+  assert.equal(normalizePath('/xrpc/community.lexicon.book.searchEditions'), '/xrpc/community.lexicon.book.searchEditions');
+});
+test('normalizePath keeps /.well-known/* verbatim', () => {
+  assert.equal(normalizePath('/.well-known/atproto-did'), '/.well-known/atproto-did');
+});
+test('normalizePath collapses DIDs', () => {
+  assert.equal(normalizePath('/xrpc/com.atproto.repo.getRecord?uri=at://did:plc:abc123/app.bsky.feed.post/3kb'), '/xrpc/com.atproto.repo.getRecord?uri=at://did:plc:abc123/app.bsky.feed.post/3kb');
+});
+test('normalizePath collapses opaque IDs and numeric segments', () => {
+  assert.equal(normalizePath('/api/records/12345'), '/api/records/{id}');
+});
+test('normalizePath collapses long opaque IDs', () => {
+  assert.equal(normalizePath('/api/objects/abcdef1234567890xyz'), '/api/objects/{id}');
 });
