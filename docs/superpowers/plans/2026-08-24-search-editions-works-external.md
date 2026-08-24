@@ -1137,12 +1137,12 @@ git commit -m "feat(search): add GoogleBooksEnricher"
 
 ---
 
-## Task 10: WikipediaEnricher (two classes)
+## Task 10: WikipediaEnricher (two classes) (DONE — commit 8a862a3)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/wikipedia-enricher.ts`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/wikipedia-enricher.ts
@@ -1152,22 +1152,20 @@ import type { ContributorItem, EditionItem, WorkItem, Enricher } from './types.t
 
 export class ContributorWikipediaEnricher implements Enricher<ContributorItem> {
   readonly name = 'wikipedia-enricher-contributor';
-  constructor(private readonly log: Logger) {}
-  enrich(items: ContributorItem[], signal?: AbortSignal): Promise<ContributorItem[]> {
-    return wikipedia.enrichContributorBios(items, this.log, signal);
+  enrich(items: ContributorItem[], log: Logger, signal?: AbortSignal): Promise<ContributorItem[]> {
+    return wikipedia.enrichContributorBios(items, log, signal);
   }
 }
 
 export class AuthorWikipediaEnricher implements Enricher<EditionItem | WorkItem> {
   readonly name = 'wikipedia-enricher-author';
-  constructor(private readonly log: Logger) {}
-  enrich(items: Array<EditionItem | WorkItem>, signal?: AbortSignal): Promise<Array<EditionItem | WorkItem>> {
-    return wikipedia.enrichAuthorsOnWorksOrEditions(items, this.log, signal);
+  enrich(items: Array<EditionItem | WorkItem>, log: Logger, signal?: AbortSignal): Promise<Array<EditionItem | WorkItem>> {
+    return wikipedia.enrichAuthorsOnWorksOrEditions(items, log, signal);
   }
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1175,7 +1173,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/wikipedia-enricher.ts
