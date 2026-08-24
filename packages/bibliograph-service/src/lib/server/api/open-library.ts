@@ -67,8 +67,8 @@ export async function searchEditions(
   log: Logger,
   externalSignal?: AbortSignal,
 ): Promise<SearchResult<EditionItem>> {
-  const limit = query.limit;
-  const page = 1;
+  const limit = Math.min(query.limit, 100);
+  const page = 1; // cursor-driven pagination deferred to the orchestrator
   const url = buildUrl(query.q, 'edition', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
@@ -104,7 +104,7 @@ export async function searchWorks(
   log: Logger,
   externalSignal?: AbortSignal,
 ): Promise<SearchResult<WorkItem>> {
-  const limit = query.limit;
+  const limit = Math.min(query.limit, 100);
   const page = 1;
   const url = buildUrl(query.q, 'work', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
@@ -131,7 +131,7 @@ export async function searchContributors(
   log: Logger,
   externalSignal?: AbortSignal,
 ): Promise<SearchResult<ContributorItem>> {
-  const limit = query.limit;
+  const limit = Math.min(query.limit, 100);
   const page = 1;
   const url = buildUrl(query.q, 'author', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
