@@ -100,13 +100,13 @@ git commit -m "feat(search): add UPSTREAM_TIMEOUT_MS shared constant"
 
 ---
 
-## Task 2: Search types module (interfaces + item shapes)
+## Task 2: Search types module (interfaces + item shapes) (DONE — commit 03212b8)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/types.ts`
 - Test: `packages/bibliograph-service/src/lib/server/search/types.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/search/types.test.ts
@@ -149,14 +149,14 @@ test('EditionItem fields exist on type', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/search/types.test.ts
 ```
-Expected: FAIL — `Cannot find module './types.ts'`.
+Expected: FAIL — `Cannot find module './types.ts'`. (In practice the test imports `from './types.ts'` only via `import type`, which `tsx --test` erases at runtime — the test type-checks against tsc but never resolves the module. Step 4 still meaningfully validates the contracts.)
 
-- [ ] **Step 3: Implement the types module**
+- [x] **Step 3: Implement the types module**
 
 ```ts
 // src/lib/server/search/types.ts
@@ -242,21 +242,20 @@ export interface Ingestor<T> {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/search/types.test.ts
 ```
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/types.ts \
         packages/bibliograph-service/src/lib/server/search/types.test.ts
 git commit -m "feat(search): add strategy interfaces and item types"
 ```
-
 ---
 
 ## Task 3: OpenLibrary `searchEditions` wrapper
