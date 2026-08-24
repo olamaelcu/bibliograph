@@ -56,7 +56,7 @@ test('normalizePath keeps /.well-known/* verbatim', () => {
   assert.equal(normalizePath('/.well-known/atproto-did'), '/.well-known/atproto-did');
 });
 test('normalizePath collapses DIDs', () => {
-  assert.equal(normalizePath('/xrpc/com.atproto.repo.getRecord?uri=at://did:plc:abc123/app.bsky.feed.post/3kb'), '/xrpc/com.atproto.repo.getRecord?uri=at://did:plc:abc123/app.bsky.feed.post/3kb');
+  assert.equal(normalizePath('/repo/did:plc:abc123/records'), '/repo/{did}/records');
 });
 test('normalizePath collapses opaque IDs and numeric segments', () => {
   assert.equal(normalizePath('/api/records/12345'), '/api/records/{id}');
