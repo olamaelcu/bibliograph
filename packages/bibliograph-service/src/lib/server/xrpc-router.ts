@@ -36,6 +36,7 @@ import { accessLog } from './access-log';
 import { pdsClient, resolvePds } from './pds/resolve.js';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { cidForLex, decode as cborDecode } from '@atproto/lex-cbor';
+import type { LexMap } from '@atproto/lex-data';
 import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
 import { PostgresSource } from './search/postgres-source';
 import { OpenLibrarySource } from './search/open-library-source';
@@ -81,27 +82,31 @@ export const endpointCounts = { queries: 0, procedures: 0 };
 export const queryRegistry = new Map<string, unknown>();
 export const procedureRegistry = new Map<string, unknown>();
 
+type QuerySchema = Parameters<typeof router.addQuery>[0];
+type QueryOpts = Parameters<typeof router.addQuery>[1];
 const realAddQuery = router.addQuery.bind(router);
-router.addQuery = ((schema: unknown, opts: unknown) => {
-  const nsid = (schema as { nsid?: string })?.nsid;
+router.addQuery = ((schema: QuerySchema, opts: QueryOpts) => {
+  const nsid = (schema as { nsid?: string }).nsid;
   // `com.atproto.*` is PDS infrastructure — keep the handler registered, but hide it
   // from the public /queries listing, the compatibility endpoint, and endpoint counts.
   if (nsid && !nsid.startsWith('com.atproto.')) {
     queryRegistry.set(nsid, schema);
     endpointCounts.queries++;
   }
-  return realAddQuery(schema as never, opts as never);
+  return realAddQuery(schema, opts);
 }) as typeof router.addQuery;
 
 const realAddProcedure = router.addProcedure?.bind(router);
 if (realAddProcedure) {
-  router.addProcedure = ((schema: unknown, opts: unknown) => {
-    const nsid = (schema as { nsid?: string })?.nsid;
+  type ProcedureSchema = Parameters<NonNullable<typeof router.addProcedure>>[0];
+  type ProcedureOpts = Parameters<NonNullable<typeof router.addProcedure>>[1];
+  router.addProcedure = ((schema: ProcedureSchema, opts: ProcedureOpts) => {
+    const nsid = (schema as { nsid?: string }).nsid;
     if (nsid && !nsid.startsWith('com.atproto.')) {
       procedureRegistry.set(nsid, schema);
       endpointCounts.procedures++;
     }
-    return realAddProcedure(schema as never, opts as never);
+    return realAddProcedure(schema, opts);
   }) as typeof router.addProcedure;
 }
 
@@ -127,7 +132,7 @@ router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
       description: r.description,
       createdAt: r.createdAt,
     }));
-    return json({ items, cursor: result.cursor, total: result.total } as never);
+    return json({ items, cursor: result.cursor, total: result.total } as unknown as CommunityLexiconBookSearchEditions.$output);
   },
 });
 
@@ -147,7 +152,7 @@ router.addQuery(CommunityLexiconBookCompatibility.mainSchema, {
       if (!nsid.startsWith(AUTHORITY)) continue;
       queries.push({ nsid, type: 'procedure' });
     }
-    return json({ queries } as never);
+    return json({ queries } as unknown as CommunityLexiconBookCompatibility.$output);
   },
 });
 
@@ -177,7 +182,7 @@ router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
       description: r.description,
       createdAt: r.createdAt,
     }));
-    return json({ items, cursor: result.cursor, total: result.total } as never);
+    return json({ items, cursor: result.cursor, total: result.total } as unknown as CommunityLexiconBookSearchWorks.$output);
   },
 });
 router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
@@ -199,7 +204,7 @@ router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
       identifiers: r.identifiers,
       createdAt: r.createdAt,
     }));
-    return json({ items, cursor: result.cursor, total: result.total } as never);
+    return json({ items, cursor: result.cursor, total: result.total } as unknown as CommunityLexiconBookSearchContributors.$output);
   },
 });
 router.addQuery(CommunityLexiconBookSearchPublishers.mainSchema, {
@@ -244,7 +249,7 @@ router.addQuery(ComAtprotoIdentityResolveHandle.mainSchema, {
   async handler({ params }) {
     const id = resolveHandle(params.handle);
     if (!id) return notFoundResponse('HandleNotFound', `handle "${params.handle}" is not hosted by this PDS`);
-    return json({ did: id.did } as never);
+    return json({ did: id.did } as unknown as ComAtprotoIdentityResolveHandle.$output);
   },
 });
 
@@ -252,7 +257,7 @@ router.addQuery(ComAtprotoIdentityResolveDid.mainSchema, {
   async handler({ params }) {
     const id = resolveDid(params.did);
     if (!id) return notFoundResponse('DidNotFound', `DID "${params.did}" is not hosted by this PDS`);
-    return json({ did: id.did } as never);
+    return json({ did: id.did } as unknown as ComAtprotoIdentityResolveDid.$output);
   },
 });
 
@@ -269,7 +274,7 @@ router.addQuery(ComAtprotoIdentityResolveIdentity.mainSchema, {
       did: id.did,
       handle: id.handle,
       didDoc: undefined,
-    } as never);
+    } as unknown as ComAtprotoIdentityResolveIdentity.$output);
   },
 });
 
@@ -299,7 +304,7 @@ router.addQuery(ComAtprotoSyncGetRepoStatus.mainSchema, {
     return json({
       did: process.env.LEX_PUBLISHER_DID ?? PUBLISHER_DID,
       rev: commit.rev,
-    } as never);
+    } as unknown as ComAtprotoSyncGetRepoStatus.$output);
   },
 });
 
@@ -313,7 +318,7 @@ router.addQuery(ComAtprotoServerDescribeServer.mainSchema, {
         privacyPolicy: 'https://livtet.olamaelcu.net/privacy',
         termsOfService: 'https://livtet.olamaelcu.net/terms',
       },
-    } as never);
+    } as unknown as ComAtprotoServerDescribeServer.$output);
   },
 });
 
@@ -324,7 +329,7 @@ router.addQuery(ComAtprotoSyncGetLatestCommit.mainSchema, {
     }
     const commit = await readLatestCommit();
     if (!commit) return notFoundResponse('RepoNotFound', 'no full.car published yet');
-    return json(commit as never);
+    return json(commit as unknown as ComAtprotoSyncGetLatestCommit.$output);
   },
 });
 
@@ -370,8 +375,8 @@ async function serveBookRecordFromDb(
       description: row.description ?? undefined,
       createdAt: row.createdAt.toISOString(),
     };
-    const cid = await cidForLex(value);
-    return json({ uri, cid: cid.toString(), value } as never);
+    const cid = await cidForLex(value as unknown as LexMap);
+    return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
   }
   if (collection === 'community.lexicon.book.work') {
     const [row] = await db.select().from(works).where(eq(works.uri, uri)).limit(1);
@@ -388,8 +393,8 @@ async function serveBookRecordFromDb(
       description: row.description ?? undefined,
       createdAt: row.createdAt.toISOString(),
     };
-    const cid = await cidForLex(value);
-    return json({ uri, cid: cid.toString(), value } as never);
+    const cid = await cidForLex(value as unknown as LexMap);
+    return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
   }
   // community.lexicon.book.contributor
   const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
@@ -405,8 +410,8 @@ async function serveBookRecordFromDb(
     identifiers: row.identifiers ?? [],
     createdAt: row.createdAt.toISOString(),
   };
-  const cid = await cidForLex(value);
-  return json({ uri, cid: cid.toString(), value } as never);
+  const cid = await cidForLex(value as unknown as LexMap);
+  return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
 }
 
 router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
@@ -451,7 +456,7 @@ router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
       uri: `at://${params.repo}/${params.collection}/${params.rkey}`,
       cid: recordCid.toString(),
       value: cborDecode(recordBytes),
-    } as never);
+    } as unknown as ComAtprotoRepoGetRecord.$output);
   },
 });
 
@@ -467,11 +472,11 @@ router.addQuery(ComAtprotoRepoDescribeRepo.mainSchema, {
     const handle = didDoc.alsoKnownAs[0]?.replace(/^at:\/\//, '') ?? '';
     return json({
       did: didDoc.id,
-      didDoc,
+      didDoc: didDoc as unknown as Record<string, unknown>,
       handle,
       handleIsCorrect: true,
       collections: [LEX_COLLECTION],
-    } as never);
+    } as unknown as ComAtprotoRepoDescribeRepo.$output);
   },
 });
 
@@ -513,17 +518,17 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReadingGoal.mainSchema, {
       // RecordNotFound (HTTP 400 with the PDS-specific body) means the user
       // hasn't written a reading goal yet. That's not an error — return null.
       if (/RecordNotFound/i.test(message)) {
-        return json({ goal: null } as never);
+        return Response.json({ goal: null });
       }
       log.warn({ err, did: params.did }, 'getReadingGoal: PDS read failed');
-      return json({ error: 'UpstreamUnavailable', message } as never, { status: 502 });
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
     }
 
     if (!isRecordResponse(raw)) {
       log.warn({ did: params.did, raw }, 'getReadingGoal: unexpected PDS response shape');
-      return json({ goal: null } as never);
+      return Response.json({ goal: null });
     }
-    return json({ goal: raw.value } as never);
+    return json({ goal: raw.value as NetOlamaelcuLivtetBiblioGetReadingGoal.$output['goal'] } as unknown as NetOlamaelcuLivtetBiblioGetReadingGoal.$output);
   },
 });
 
@@ -543,17 +548,17 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetActorProfile.mainSchema, {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (/RecordNotFound/i.test(message)) {
-        return json({ profile: null } as never);
+        return Response.json({ profile: null });
       }
       log.warn({ err, did: params.did }, 'getActorProfile: PDS read failed');
-      return json({ error: 'UpstreamUnavailable', message } as never, { status: 502 });
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
     }
 
     if (!isRecordResponse(raw)) {
       log.warn({ did: params.did, raw }, 'getActorProfile: unexpected PDS response shape');
-      return json({ profile: null } as never);
+      return Response.json({ profile: null });
     }
-    return json({ profile: raw.value } as never);
+    return json({ profile: raw.value as NetOlamaelcuLivtetBiblioGetActorProfile.$output['profile'] } as unknown as NetOlamaelcuLivtetBiblioGetActorProfile.$output);
   },
 });
 

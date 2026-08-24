@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
 import { cidForLex } from '@atproto/lex-cbor';
+import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { editions, works, contributors } from '../db/schema';
 import { PUBLISHER_DID } from '../did';
@@ -62,7 +63,7 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
       description: item.description ?? undefined,
       createdAt: item.createdAt,
     };
-    const cid = await cidForLex(value as never);
+    const cid = await cidForLex(value as unknown as LexMap);
     await this.db.insert(editions).values({
       uri,
       cid: cid.toString(),
@@ -107,7 +108,7 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
       description: item.description ?? undefined,
       createdAt: item.createdAt,
     };
-    const cid = await cidForLex(value as never);
+    const cid = await cidForLex(value as unknown as LexMap);
     await this.db.insert(works).values({
       uri,
       cid: cid.toString(),
@@ -149,7 +150,7 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
       identifiers: item.identifiers,
       createdAt: item.createdAt,
     };
-    const cid = await cidForLex(value as never);
+    const cid = await cidForLex(value as unknown as LexMap);
     await this.db.insert(contributors).values({
       uri,
       cid: cid.toString(),

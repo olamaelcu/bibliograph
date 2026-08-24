@@ -36,6 +36,7 @@ test('enrichEditions writes description + coverImageUrl from Google Books', asyn
   });
   try {
     const [out] = await enrichEditions([baseItem], log);
+    assert.ok(out);
     assert.equal(out.description, 'A great book.');
     assert.equal(out.coverImageUrl, 'http://books.google.com/cover.jpg');
   } finally { restore(); }
@@ -46,6 +47,7 @@ test('enrichEditions leaves item unchanged when Google Books returns no match', 
   const restore = stubFetch(async () => new Response(JSON.stringify({ totalItems: 0 }), { headers: { 'content-type': 'application/json' } }));
   try {
     const [out] = await enrichEditions([baseItem], log);
+    assert.ok(out);
     assert.equal(out.description, undefined);
     assert.equal(out.coverImageUrl, undefined);
   } finally { restore(); }
@@ -57,6 +59,7 @@ test('enrichEditions no-ops when GOOGLE_BOOKS_API_KEY is missing', async () => {
   const restore = stubFetch(async () => { called = true; return new Response('{}'); });
   try {
     const [out] = await enrichEditions([baseItem], log);
+    assert.ok(out);
     assert.equal(out.description, undefined);
     assert.equal(called, false);
   } finally { restore(); }

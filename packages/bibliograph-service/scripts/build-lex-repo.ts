@@ -26,6 +26,8 @@ import {
   blocksToCarFile,
   getRecords,
 } from '@atproto/repo';
+import type { RecordCreateOp } from '@atproto/repo';
+import type { LexMap } from '@atproto/lex-data';
 import { Secp256k1Keypair } from '@atproto/crypto';
 import { TID } from '@atproto/common-web';
 
@@ -46,7 +48,7 @@ function safeNsid(nsid: string): string {
   return nsid.replaceAll('.', '_');
 }
 
-function lexRecordValue(nsid: string, lex: { defs?: unknown; description?: string }): Record<string, unknown> {
+function lexRecordValue(nsid: string, lex: { defs?: unknown; description?: string }): LexMap {
   return {
     $type: COLLECTION,
     lexicon: 1,
@@ -101,11 +103,11 @@ async function loadKey(): Promise<Secp256k1Keypair> {
 
 async function buildRepo(lexFiles: Array<{ nsid: string; lex: { defs?: unknown; description?: string } }>, did: string, kp: Secp256k1Keypair) {
   const store = new MemoryBlockstore();
-  const writes = lexFiles.map(({ nsid, lex }) => ({
+  const writes: RecordCreateOp[] = lexFiles.map(({ nsid, lex }) => ({
     action: WriteOpAction.Create,
     collection: COLLECTION,
     rkey: nsid,
-    record: lexRecordValue(nsid, lex) as never,
+    record: lexRecordValue(nsid, lex),
   }));
   const commit = await Repo.formatInitCommit(store, did, kp, writes);
   const carBytes = await blocksToCarFile(commit.cid, commit.newBlocks);
@@ -184,11 +186,11 @@ async function main(): Promise<void> {
 
   console.log(`[lex-build] Building signed init commit`);
   const store1 = new MemoryBlockstore();
-  const writes1 = lexFiles.map(({ nsid, lex }) => ({
+  const writes1: RecordCreateOp[] = lexFiles.map(({ nsid, lex }) => ({
     action: WriteOpAction.Create,
     collection: COLLECTION,
     rkey: nsid,
-    record: lexRecordValue(nsid, lex) as never,
+    record: lexRecordValue(nsid, lex),
   }));
   const firstData = await Repo.formatInitCommit(store1, DID, kp, writes1, rev);
   const firstCar = await blocksToCarFile(firstData.cid, firstData.newBlocks);
@@ -196,11 +198,11 @@ async function main(): Promise<void> {
 
   console.log(`[lex-build] Verifying determinism (build twice, compare bytes)`);
   const store2 = new MemoryBlockstore();
-  const writes2 = lexFiles.map(({ nsid, lex }) => ({
+  const writes2: RecordCreateOp[] = lexFiles.map(({ nsid, lex }) => ({
     action: WriteOpAction.Create,
     collection: COLLECTION,
     rkey: nsid,
-    record: lexRecordValue(nsid, lex) as never,
+    record: lexRecordValue(nsid, lex),
   }));
   const secondData = await Repo.formatInitCommit(store2, DID, kp, writes2, rev);
   const secondCar = await blocksToCarFile(secondData.cid, secondData.newBlocks);
@@ -224,11 +226,11 @@ async function main(): Promise<void> {
   if (verify) {
     console.log('[lex-build] --verify: re-running build and comparing against on-disk artifacts');
     const store3 = new MemoryBlockstore();
-    const writes3 = lexFiles.map(({ nsid, lex }) => ({
+    const writes3: RecordCreateOp[] = lexFiles.map(({ nsid, lex }) => ({
       action: WriteOpAction.Create,
       collection: COLLECTION,
       rkey: nsid,
-      record: lexRecordValue(nsid, lex) as never,
+      record: lexRecordValue(nsid, lex),
     }));
     const thirdData = await Repo.formatInitCommit(store3, DID, kp, writes3, rev);
     const thirdCar = await blocksToCarFile(thirdData.cid, thirdData.newBlocks);

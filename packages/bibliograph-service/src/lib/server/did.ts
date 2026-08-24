@@ -22,7 +22,6 @@ function getPublicMultibase(): string {
   if (!key || key === PLACEHOLDER_MULTIBASE) {
     if (!warnedMissingKey) {
       warnedMissingKey = true;
-      // eslint-disable-next-line no-console
       console.warn(
         '[did] ATP_SERVICE_KEY_MULTIBASE is not set; serving placeholder publicKeyMultibase. ' +
           'Set ATP_SERVICE_KEY_MULTIBASE to enable verification of lex CAR responses.',

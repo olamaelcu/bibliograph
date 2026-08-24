@@ -23,6 +23,7 @@ test('enrichContributorBios writes bio from Wikipedia extract', async () => {
   try {
     const items: ContributorItem[] = [{ name: 'Jane Doe', aliases: [], identifiers: [], createdAt: new Date().toISOString() }];
     const [out] = await enrichContributorBios(items, log);
+    assert.ok(out);
     assert.equal(out.bio, 'Jane Doe is a writer.');
   } finally { restore(); }
 });
@@ -34,6 +35,7 @@ test('enrichContributorBios skips when Wikipedia returns no pages', async () => 
   try {
     const items: ContributorItem[] = [{ name: 'Ghost', aliases: [], identifiers: [], createdAt: new Date().toISOString() }];
     const [out] = await enrichContributorBios(items, log);
+    assert.ok(out);
     assert.equal(out.bio, undefined);
   } finally { restore(); }
 });

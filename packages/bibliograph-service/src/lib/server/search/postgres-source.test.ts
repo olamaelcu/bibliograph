@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { PostgresSource } from './postgres-source';
+import { PostgresSource, type DbExecutor } from './postgres-source';
 import { editions, works, contributors } from '../db/schema';
 import type { EditionRow, WorkRow, ContributorRow } from '../db/schema';
 
@@ -13,8 +13,17 @@ interface CallCapture {
   whereValue?: unknown;
 }
 
-function createFakeDb(rows: unknown[], capture: CallCapture) {
-  const builder: any = {
+interface FakeSearchBuilder {
+  select(): FakeSearchBuilder;
+  from(table: unknown): FakeSearchBuilder;
+  where(where: unknown): FakeSearchBuilder;
+  orderBy(): FakeSearchBuilder;
+  limit(n: number): FakeSearchBuilder;
+  then(onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown): Promise<unknown>;
+}
+
+function createFakeDb(rows: unknown[], capture: CallCapture): DbExecutor {
+  const builder: FakeSearchBuilder = {
     select() { return builder; },
     from(table: unknown) { capture.table = table; return builder; },
     where(where: unknown) { capture.whereCalled = true; capture.whereValue = where; return builder; },
@@ -24,7 +33,7 @@ function createFakeDb(rows: unknown[], capture: CallCapture) {
       return Promise.resolve(rows).then(onFulfilled, onRejected);
     },
   };
-  return builder;
+  return builder as unknown as DbExecutor;
 }
 
 const silentLog = pino({ level: 'silent' });
@@ -109,7 +118,7 @@ test('searchEditions applies q filter when provided', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const rows = [makeEditionRow()];
   const fakeDb = createFakeDb(rows, cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchEditions({ q: 'foo', limit: 10 });
 
@@ -123,7 +132,7 @@ test('searchEditions omits where when no q/id/cursor', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const rows: EditionRow[] = [];
   const fakeDb = createFakeDb(rows, cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchEditions({ limit: 20 });
 
@@ -134,7 +143,7 @@ test('searchEditions omits where when no q/id/cursor', async () => {
 test('searchEditions applies id filter when provided', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeEditionRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   await src.searchEditions({ id: ['isbn:9780123456789'], limit: 10 });
 
@@ -145,7 +154,7 @@ test('searchEditions decodes v1 cursor (back-compat)', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const rows = [makeEditionRow({ indexedAt: new Date('2024-02-01T00:00:00Z'), uri: 'at://x/edition/r2' })];
   const fakeDb = createFakeDb(rows, cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const v1Cursor = encodeV1Cursor('2024-01-01T00:00:00Z', 'at://x/edition/r1');
   const result = await src.searchEditions({ cursor: v1Cursor, limit: 10 });
@@ -161,7 +170,7 @@ test('searchEditions round-trips v2 cursor when page is full', async () => {
     makeEditionRow({ uri: 'at://x/edition/r2', indexedAt: new Date('2024-02-01T00:00:00Z') }),
   ];
   const fakeDb = createFakeDb(fullPage, cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchEditions({ limit: 2 });
 
@@ -175,7 +184,7 @@ test('searchEditions round-trips v2 cursor when page is full', async () => {
 test('searchEditions omits cursor when page is partial', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeEditionRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchEditions({ limit: 10 });
 
@@ -188,7 +197,7 @@ test('searchEditions maps edition rows to EditionItem', async () => {
     contributors: [{ subject: { uri: 'at://x/c/r1', cid: 'bafyc' }, role: 'author' }],
   });
   const fakeDb = createFakeDb([row], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchEditions({ limit: 10 });
 
@@ -207,7 +216,7 @@ test('searchEditions maps edition rows to EditionItem', async () => {
 test('searchWorks queries works table and maps WorkItem', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeWorkRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchWorks({ limit: 10 });
 
@@ -220,7 +229,7 @@ test('searchWorks queries works table and maps WorkItem', async () => {
 test('searchWorks decodes v1 cursor (back-compat)', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeWorkRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const v1Cursor = encodeV1Cursor('2024-01-01T00:00:00Z', 'at://x/work/r1');
   await src.searchWorks({ cursor: v1Cursor, limit: 10 });
@@ -231,7 +240,7 @@ test('searchWorks decodes v1 cursor (back-compat)', async () => {
 test('searchContributors queries contributors table and maps ContributorItem', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeContributorRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchContributors({ limit: 10 });
 
@@ -245,7 +254,7 @@ test('searchContributors queries contributors table and maps ContributorItem', a
 test('searchContributors decodes v1 cursor (back-compat)', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeContributorRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const v1Cursor = encodeV1Cursor('2024-01-01T00:00:00Z', 'at://x/contributor/r1');
   await src.searchContributors({ cursor: v1Cursor, limit: 10 });
@@ -260,7 +269,7 @@ test('searchContributors emits v2 cursor on full page', async () => {
     makeContributorRow({ uri: 'at://x/c/r2', indexedAt: new Date('2024-02-01T00:00:00Z') }),
   ];
   const fakeDb = createFakeDb(fullPage, cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchContributors({ limit: 2 });
 
@@ -287,7 +296,7 @@ test('all three methods log with did: PUBLISHER_DID', async () => {
   ]) {
     const cap: CallCapture = { whereCalled: false, orderByCalled: false };
     const fakeDb = createFakeDb([setup.row], cap);
-    const src = new PostgresSource(log, fakeDb as never);
+    const src = new PostgresSource(log, fakeDb);
     await src[setup.method]({ limit: 10 });
   }
 
@@ -300,7 +309,7 @@ test('all three methods log with did: PUBLISHER_DID', async () => {
 test('invalid cursor (wrong src) is ignored — no where clause', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeEditionRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   const wrongSrc = Buffer.from(JSON.stringify({ v: 2, src: 'openlibrary', p: 1 })).toString('base64url');
   await src.searchEditions({ cursor: wrongSrc, limit: 10 });
@@ -311,7 +320,7 @@ test('invalid cursor (wrong src) is ignored — no where clause', async () => {
 test('malformed cursor is ignored — no where clause', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeEditionRow()], cap);
-  const src = new PostgresSource(silentLog, fakeDb as never);
+  const src = new PostgresSource(silentLog, fakeDb);
 
   await src.searchEditions({ cursor: 'not-base64-at-all!!!', limit: 10 });
 

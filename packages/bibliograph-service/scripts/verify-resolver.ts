@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { LexiconSchemaResolver } from '@atcute/lexicon-resolver';
 import { AtprotoWebDidDocumentResolver } from '@atcute/identity-resolver';
 
-const DID = 'did:web:biblio.livtet.olamaelcu.net';
+const DID = 'did:web:biblio.livtet.olamaelcu.net' as const;
 const AUTHORITY = 'net/olamaelcu/livtet/biblio';
 const LEX_ROOT = process.env.LEX_ROOT ?? 'lexicons';
 const LEX_DIR = join(LEX_ROOT, AUTHORITY);
@@ -39,10 +39,10 @@ const LEX_DIR = join(LEX_ROOT, AUTHORITY);
   for (const nsid of nsids) {
     try {
       const result = await resolver.resolve(
-        DID as `did:${string}:${string}`,
+        DID,
         nsid as `${string}.${string}.${string}.${string}.${string}`,
       );
-      const defs = Object.keys(result.rawSchema.defs ?? {}).join(', ');
+      const defs = Object.keys((result.rawSchema as { defs?: Record<string, unknown> }).defs ?? {}).join(', ');
       console.log(`✓ ${nsid}`);
       console.log(`    uri: ${result.uri}`);
       console.log(`    cid: ${result.cid.toString()}`);

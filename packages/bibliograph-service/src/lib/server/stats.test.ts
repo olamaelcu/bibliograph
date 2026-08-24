@@ -1,27 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchCounts } from './stats';
+import { fetchCounts, type DbExecutor } from './stats';
 import { works, editions, contributors, publishers } from './db/schema';
 
 interface CallCapture {
   tables: unknown[];
 }
 
-function createFakeDb(counts: Map<object, number>): { db: any; capture: CallCapture } {
+interface FakeCountBuilder {
+  select(): FakeCountBuilder;
+  from(table: unknown): { then(onFulfilled: (v: unknown) => unknown): Promise<unknown> };
+}
+
+function createFakeDb(counts: Map<object, number>): { db: DbExecutor; capture: CallCapture } {
   const capture: CallCapture = { tables: [] };
-  const builder: any = {
+  const builder: FakeCountBuilder = {
     select() { return builder; },
     from(table: unknown) {
       capture.tables.push(table);
       const c = counts.get(table as object) ?? 0;
       return {
-        then(onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) {
-          return Promise.resolve([{ c }]).then(onFulfilled, onRejected);
+        then(onFulfilled: (v: unknown) => unknown) {
+          return Promise.resolve([{ c }]).then(onFulfilled as (v: unknown) => unknown);
         },
       };
     },
   };
-  return { db: builder, capture };
+  return { db: builder as unknown as DbExecutor, capture };
 }
 
 test('fetchCounts queries all four tables and returns numeric counts + ISO timestamp', async () => {
@@ -33,7 +38,7 @@ test('fetchCounts queries all four tables and returns numeric counts + ISO times
   ]);
   const { db, capture } = createFakeDb(counts);
 
-  const result = await fetchCounts(db as never);
+  const result = await fetchCounts(db);
 
   assert.deepEqual(capture.tables, [works, editions, contributors, publishers]);
   assert.equal(result.works, 42);
@@ -46,7 +51,7 @@ test('fetchCounts queries all four tables and returns numeric counts + ISO times
 test('fetchCounts falls back to 0 when the underlying query returns no rows', async () => {
   const { db, capture } = createFakeDb(new Map<object, number>());
 
-  const result = await fetchCounts(db as never);
+  const result = await fetchCounts(db);
 
   assert.equal(capture.tables.length, 4);
   assert.equal(result.works, 0);

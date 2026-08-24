@@ -38,97 +38,113 @@ function identFromJson(i: { uri: string; resource: string }): Identifier {
   return { uri: i.uri, resource: i.resource };
 }
 
+/** Columns runSearch reads off the table to compose WHERE/ORDER BY. */
+interface SearchTable {
+  identifiers: PgColumn;
+  indexedAt: PgColumn;
+  uri: PgColumn;
+}
+
+/** Minimal fields the cursor encoder reads off every row. */
+interface CursorRow {
+  indexedAt: Date;
+  uri: string;
+}
+
 type DbExecutor = typeof defaultDb;
+export type { DbExecutor };
 
 export class PostgresSource {
   constructor(private readonly log: Logger, private readonly db: DbExecutor = defaultDb) {}
 
   searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
-    return this.runSearch(editions, editions.title, this.mapEditionRow, query, 'edition');
+    return this.runSearch<EditionItem>(editions as unknown as SearchTable, editions.title, this.mapEditionRow, query, 'edition');
   }
 
   searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
-    return this.runSearch(works, works.title, this.mapWorkRow, query, 'work');
+    return this.runSearch<WorkItem>(works as unknown as SearchTable, works.title, this.mapWorkRow, query, 'work');
   }
 
   searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
-    return this.runSearch(contributors, contributors.name, this.mapContributorRow, query, 'contributor');
+    return this.runSearch<ContributorItem>(contributors as unknown as SearchTable, contributors.name, this.mapContributorRow, query, 'contributor');
   }
 
-  private async runSearch<TItem extends { identifiers?: Identifier[]; contributors?: ContributionEntry[] }>(
-    table: PgTable,
+  private async runSearch<TItem>(
+    table: SearchTable,
     qColumn: PgColumn,
-    mapRow: (row: any) => TItem,
+    mapRow: (row: Record<string, unknown>) => TItem,
     query: SearchQuery,
     kind: 'edition' | 'work' | 'contributor',
   ): Promise<SearchResult<TItem>> {
     const conds: ReturnType<typeof sql>[] = [];
     if (query.q) conds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
     if (query.id) {
-      const identifiers = (table as any).identifiers as PgColumn;
+      const identifiers = table.identifiers;
       for (const id of query.id) conds.push(sql`${identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
     }
     if (query.cursor) {
       const c = decodeCursor(query.cursor);
       if (c) {
-        const indexedAt = (table as any).indexedAt as PgColumn;
-        const uri = (table as any).uri as PgColumn;
+        const indexedAt = table.indexedAt;
+        const uri = table.uri;
         conds.push(or(sql`${indexedAt} < ${new Date(c.t)}`, and(sql`${indexedAt} = ${new Date(c.t)}`, sql`${uri} > ${c.u}`))!);
       }
     }
     const where = conds.length > 0 ? and(...conds) : undefined;
-    const indexedAt = (table as any).indexedAt as PgColumn;
-    const uri = (table as any).uri as PgColumn;
-    const base = this.db.select().from(table);
-    const rows: any[] = await (where !== undefined ? base.where(where) : base).orderBy(desc(indexedAt), asc(uri)).limit(query.limit);
+    const indexedAt = table.indexedAt;
+    const uri = table.uri;
+    const base = this.db.select().from(table as unknown as PgTable);
+    const rawRows = await (where !== undefined ? base.where(where) : base).orderBy(desc(indexedAt), asc(uri)).limit(query.limit);
+    const rows = rawRows as Array<Record<string, unknown>>;
     const items = rows.map(mapRow);
-    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
+    const last = rows.length === query.limit ? rows[rows.length - 1] as unknown as CursorRow : null;
+    const cursor = last ? encodeCursor(last.indexedAt, last.uri) : undefined;
     this.log.info({ stage: 'postgres-source', kind, items: items.length, did: PUBLISHER_DID }, 'postgres ok');
     return { items, cursor };
   }
 
-  private mapEditionRow(r: any): EditionItem {
+  private mapEditionRow(r: Record<string, unknown>): EditionItem {
     return {
-      uri: r.uri,
-      title: r.title,
-      subtitle: r.subtitle ?? undefined,
-      publishedYear: r.publishedYear ?? undefined,
-      place: r.place ?? undefined,
-      language: r.language ?? undefined,
-      description: r.description ?? undefined,
-      coverImageUrl: r.coverImageUrl ?? undefined,
-      identifiers: (r.identifiers ?? []).map(identFromJson),
-      contributors: (r.contributors ?? []).map(contributionFromJson),
-      createdAt: r.createdAt.toISOString(),
+      uri: r.uri as string,
+      title: r.title as string,
+      subtitle: (r.subtitle as string | null) ?? undefined,
+      publishedYear: (r.publishedYear as number | null) ?? undefined,
+      place: (r.place as string | null) ?? undefined,
+      language: (r.language as string | null) ?? undefined,
+      description: (r.description as string | null) ?? undefined,
+      coverImageUrl: (r.coverImageUrl as string | null) ?? undefined,
+      identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
+      contributors: ((r.contributors as Array<{ subject: { uri: string; cid: string }; role: string }> | null) ?? []).map(contributionFromJson),
+      createdAt: (r.createdAt as Date).toISOString(),
     };
   }
 
-  private mapWorkRow(r: any): WorkItem {
+  private mapWorkRow(r: Record<string, unknown>): WorkItem {
     return {
-      uri: r.uri,
-      title: r.title,
-      subtitle: r.subtitle ?? undefined,
-      originalLanguage: r.originalLanguage ?? undefined,
-      firstPublishedYear: r.firstPublishedYear ?? undefined,
-      subjects: r.subjects ?? [],
-      description: r.description ?? undefined,
-      identifiers: (r.identifiers ?? []).map(identFromJson),
-      contributors: (r.contributors ?? []).map(contributionFromJson),
-      createdAt: r.createdAt.toISOString(),
+      uri: r.uri as string,
+      title: r.title as string,
+      subtitle: (r.subtitle as string | null) ?? undefined,
+      originalLanguage: (r.originalLanguage as string | null) ?? undefined,
+      firstPublishedYear: (r.firstPublishedYear as number | null) ?? undefined,
+      subjects: (r.subjects as string[] | null) ?? [],
+      description: (r.description as string | null) ?? undefined,
+      identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
+      contributors: ((r.contributors as Array<{ subject: { uri: string; cid: string }; role: string }> | null) ?? []).map(contributionFromJson),
+      createdAt: (r.createdAt as Date).toISOString(),
     };
   }
 
-  private mapContributorRow(r: any): ContributorItem {
+  private mapContributorRow(r: Record<string, unknown>): ContributorItem {
     return {
-      uri: r.uri,
-      name: r.name,
-      aliases: r.aliases ?? [],
-      bio: r.bio ?? undefined,
-      bornYear: r.bornYear ?? undefined,
-      diedYear: r.diedYear ?? undefined,
-      linkedDid: r.linkedDid ?? undefined,
-      identifiers: (r.identifiers ?? []).map(identFromJson),
-      createdAt: r.createdAt.toISOString(),
+      uri: r.uri as string,
+      name: r.name as string,
+      aliases: (r.aliases as string[] | null) ?? [],
+      bio: (r.bio as string | null) ?? undefined,
+      bornYear: (r.bornYear as number | null) ?? undefined,
+      diedYear: (r.diedYear as number | null) ?? undefined,
+      linkedDid: (r.linkedDid as string | null) ?? undefined,
+      identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
+      createdAt: (r.createdAt as Date).toISOString(),
     };
   }
 }
