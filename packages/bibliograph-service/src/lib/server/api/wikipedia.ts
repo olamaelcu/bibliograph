@@ -6,34 +6,39 @@ const BASE = 'https://en.wikipedia.org/w/api.php';
 
 interface WikiQueryResponse { query?: { pages?: Record<string, { extract?: string; title?: string; missing?: string }> }; }
 
+const CHUNK_SIZE = 50;
+
 async function fetchExtracts(names: string[], log: Logger, signal?: AbortSignal): Promise<Map<string, string>> {
   if (names.length === 0) return new Map();
-  const url = `${BASE}?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&format=json&titles=${encodeURIComponent(names.join('|'))}`;
-  const start = performance.now();
-  try {
-    const effectiveSignal = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-    const res = await fetch(url, { signal: effectiveSignal });
-    const durationMs = Math.round((performance.now() - start) * 100) / 100;
-    if (!res.ok) {
-      log.warn({ stage: 'wikipedia-enricher', status: res.status, names: names.length }, 'wikipedia non-2xx');
-      return new Map();
-    }
-    const data = (await res.json()) as WikiQueryResponse;
-    const pages = data.query?.pages ?? {};
-    const out = new Map<string, string>();
-    for (const page of Object.values(pages)) {
-      if (page.missing) continue;
-      if (page.extract && page.title) {
-        const clean = page.extract.replace(/\s+/g, ' ').trim().slice(0, 2048);
-        out.set(page.title, clean);
+  const merged = new Map<string, string>();
+  // Chunk to avoid hitting Wikipedia's URL length cap (~8 KB) for long name lists.
+  for (let i = 0; i < names.length; i += CHUNK_SIZE) {
+    const chunk = names.slice(i, i + CHUNK_SIZE);
+    const url = `${BASE}?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1&format=json&titles=${encodeURIComponent(chunk.join('|'))}`;
+    const start = performance.now();
+    try {
+      const effectiveSignal = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+      const res = await fetch(url, { signal: effectiveSignal });
+      const durationMs = Math.round((performance.now() - start) * 100) / 100;
+      if (!res.ok) {
+        log.warn({ stage: 'wikipedia-enricher', status: res.status, names: chunk.length }, 'wikipedia non-2xx');
+        continue;
       }
+      const data = (await res.json()) as WikiQueryResponse;
+      const pages = data.query?.pages ?? {};
+      for (const page of Object.values(pages)) {
+        if (page.missing) continue;
+        if (page.extract && page.title) {
+          const clean = page.extract.replace(/\s+/g, ' ').trim().slice(0, 2048);
+          merged.set(page.title, clean);
+        }
+      }
+      log.info({ stage: 'wikipedia-enricher', requested: chunk.length, matched: merged.size, durationMs }, 'wikipedia ok');
+    } catch (err) {
+      log.error({ stage: 'wikipedia-enricher', err }, 'wikipedia fetch failed');
     }
-    log.info({ stage: 'wikipedia-enricher', requested: names.length, matched: out.size, durationMs }, 'wikipedia ok');
-    return out;
-  } catch (err) {
-    log.error({ stage: 'wikipedia-enricher', err }, 'wikipedia fetch failed');
-    return new Map();
   }
+  return merged;
 }
 
 export async function enrichContributorBios(
