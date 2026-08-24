@@ -2,7 +2,7 @@ import type { Logger } from 'pino';
 import { and, asc, desc, or, sql } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { db as defaultDb } from '../db/index';
-import { editions, works, contributors } from '../db/schema';
+import { editions, works, contributors, publishers } from '../db/schema';
 import { PUBLISHER_DID } from '../did';
 import type {
   SearchQuery,
@@ -10,6 +10,7 @@ import type {
   EditionItem,
   WorkItem,
   ContributorItem,
+  PublisherItem,
   Identifier,
   ContributionEntry,
 } from './types';
@@ -69,12 +70,16 @@ export class PostgresSource {
     return this.runSearch<ContributorItem>(contributors as unknown as SearchTable, contributors.name, this.mapContributorRow, query, 'contributor');
   }
 
+  searchPublishers(query: SearchQuery): Promise<SearchResult<PublisherItem>> {
+    return this.runSearch<PublisherItem>(publishers as unknown as SearchTable, publishers.name, this.mapPublisherRow, query, 'publisher');
+  }
+
   private async runSearch<TItem>(
     table: SearchTable,
     qColumn: PgColumn,
     mapRow: (row: Record<string, unknown>) => TItem,
     query: SearchQuery,
-    kind: 'edition' | 'work' | 'contributor',
+    kind: 'edition' | 'work' | 'contributor' | 'publisher',
   ): Promise<SearchResult<TItem>> {
     // ILIKE pattern below is index-accelerated by the pg_trgm GINs added in
     // migration 0005_search_and_identifiers.sql (editions.title, works.title,
@@ -147,6 +152,20 @@ export class PostgresSource {
       bornYear: (r.bornYear as number | null) ?? undefined,
       diedYear: (r.diedYear as number | null) ?? undefined,
       linkedDid: (r.linkedDid as string | null) ?? undefined,
+      identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
+      createdAt: (r.createdAt as Date).toISOString(),
+    };
+  }
+
+  private mapPublisherRow(r: Record<string, unknown>): PublisherItem {
+    const imprintOfUri = r.imprintOfUri as string | null;
+    const imprintOfCid = r.imprintOfCid as string | null;
+    return {
+      uri: r.uri as string,
+      name: r.name as string,
+      imprintOf: imprintOfUri && imprintOfCid ? { uri: imprintOfUri, cid: imprintOfCid } : undefined,
+      foundingDate: (r.foundingDate as number | null) ?? undefined,
+      closingDate: (r.closingDate as number | null) ?? undefined,
       identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
       createdAt: (r.createdAt as Date).toISOString(),
     };

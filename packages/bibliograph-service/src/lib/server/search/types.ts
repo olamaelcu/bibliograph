@@ -49,7 +49,17 @@ export interface ContributorItem {
   createdAt: string;
 }
 
-export type Item = EditionItem | WorkItem | ContributorItem;
+export interface PublisherItem {
+  uri?: string;
+  name: string;
+  imprintOf?: { uri: string; cid: string };
+  foundingDate?: number;
+  closingDate?: number;
+  identifiers: Identifier[];
+  createdAt: string;
+}
+
+export type Item = EditionItem | WorkItem | ContributorItem | PublisherItem;
 
 export interface SearchQuery {
   q?: string;

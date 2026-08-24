@@ -47,7 +47,7 @@ import { LocalPostgresIngestor } from './search/local-postgres-ingestor';
 import { SearchService } from './search/service';
 import { eq } from 'drizzle-orm';
 import { db } from './db';
-import { editions, works, contributors } from './db/schema';
+import { editions, works, contributors, publishers } from './db/schema';
 import { allowRequest } from './rate-limit';
 
 export const log = createLogger('web');
@@ -68,6 +68,9 @@ const searchService = new SearchService(
   },
   log,
 );
+
+/** Exported for SvelteKit load functions to call the same service the XRPC handlers use. */
+export { searchService };
 
 function rateLimitMiddleware(log: Logger) {
   return async (request: Request, next: (req: Request) => Promise<Response>): Promise<Response> => {
@@ -229,8 +232,23 @@ router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
   },
 });
 router.addQuery(CommunityLexiconBookSearchPublishers.mainSchema, {
-  async handler() {
-    return notImplemented('community.lexicon.book.searchPublishers');
+  async handler({ params }) {
+    const result = await searchService.searchPublishers({
+      q: params.q,
+      id: params.id,
+      limit: Math.min(params.limit ?? 20, 100),
+      cursor: params.cursor,
+    });
+    const items = result.items.map((r) => ({
+      $type: 'community.lexicon.book.publisher' as const,
+      name: r.name,
+      imprintOf: r.imprintOf,
+      foundingDate: r.foundingDate,
+      closingDate: r.closingDate,
+      identifiers: r.identifiers,
+      createdAt: r.createdAt,
+    }));
+    return json({ items, cursor: result.cursor, total: result.total } as unknown as CommunityLexiconBookSearchPublishers.$output);
   },
 });
 
@@ -417,6 +435,25 @@ async function serveBookRecordFromDb(
     const cid = await cidForLex(value as unknown as LexMap);
     return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
   }
+  // community.lexicon.book.publisher
+  if (collection === 'community.lexicon.book.publisher') {
+    const [row] = await db.select().from(publishers).where(eq(publishers.uri, uri)).limit(1);
+    if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
+    const value = {
+      $type: 'community.lexicon.book.publisher',
+      name: row.name,
+      imprintOf:
+        row.imprintOfUri && row.imprintOfCid
+          ? { uri: row.imprintOfUri, cid: row.imprintOfCid }
+          : undefined,
+      foundingDate: row.foundingDate ?? undefined,
+      closingDate: row.closingDate ?? undefined,
+      identifiers: row.identifiers ?? [],
+      createdAt: row.createdAt.toISOString(),
+    };
+    const cid = await cidForLex(value as unknown as LexMap);
+    return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
+  }
   // community.lexicon.book.contributor
   const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
   if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
@@ -435,6 +472,7 @@ async function serveBookRecordFromDb(
   return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
 }
 
+
 router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
   async handler({ params }) {
     if (!resolveDid(params.repo)) {
@@ -444,6 +482,7 @@ router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
       'community.lexicon.book.edition',
       'community.lexicon.book.work',
       'community.lexicon.book.contributor',
+      'community.lexicon.book.publisher',
     ]);
     if (BOOK_COLLECTIONS.has(params.collection)) {
       return await serveBookRecordFromDb(params.repo, params.collection, params.rkey);

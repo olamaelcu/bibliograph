@@ -5,7 +5,7 @@ import { OpenLibrarySource } from './open-library-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import { enqueueIngest } from '../jobs/enqueue';
-import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types';
+import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem } from './types';
 
 export interface SearchServiceDeps {
   postgres: PostgresSource;
@@ -70,5 +70,14 @@ export class SearchService {
     }
     log.info({ stage: 'search-contributors', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
+  }
+
+  // Publishers are Postgres-only by design — no OpenLibrary fallback, no
+  // enrichment. The strategy chain stops at the PostgresSource.
+  async searchPublishers(query: SearchQuery): Promise<SearchResult<PublisherItem>> {
+    const log = this.log();
+    const result = await this.deps.postgres.searchPublishers(query);
+    log.info({ stage: 'search-publishers', items: result.items.length, cursor: !!result.cursor }, 'search done');
+    return result;
   }
 }
