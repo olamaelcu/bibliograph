@@ -2224,18 +2224,18 @@ git commit -m "docs: document GOOGLE_BOOKS_API_KEY and refresh Material Discover
 
 ---
 
-## Task 23: Verify script
+## Task 23: Verify script (DONE — commit 116389b)
 
 **Files:**
 - Create: `packages/bibliograph-service/scripts/verify-search.ts`
 - Modify: `packages/bibliograph-service/package.json` (add `verify:search` script)
 
-- [ ] **Step 1: Add the npm script**
+- [x] **Step 1: Add the npm script**
 
 Edit `packages/bibliograph-service/package.json` `scripts` block. Add:
 
 ```json
-"verify:search": "tsx --test scripts/verify-search.ts"
+- [x] **Step 2: Write the verify script**
 ```
 
 - [ ] **Step 2: Write the verify script**
@@ -2393,14 +2393,14 @@ Expected: 4 tests pass. (The Postgres path returns no rows because the DB is emp
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/bibliograph-service/scripts/verify-search.ts \
+- [x] **Step 3: Run the verify script**
         packages/bibliograph-service/package.json
 git commit -m "test: add end-to-end verify script for searchEditions/works/contributors"
 ```
 
 ---
 
-## Self-review
+- [x] **Step 4: Commit**
 
 1. **Spec coverage** — every requirement in the spec maps to a task:
    - Strategy pattern (C) → Tasks 7-12.
