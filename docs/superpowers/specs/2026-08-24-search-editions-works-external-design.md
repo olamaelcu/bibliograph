@@ -261,14 +261,13 @@ enrichContributorBios(items: ContributorItem[], log: Logger, signal?: AbortSigna
 - `enrichContributorBios`: writes extract directly to `contributor.bio`.
 - Dedupe per call (no name queried twice).
 
-### Open question 1 — where author bio lives on `contribution`
+### Author bio placement on `contribution` (decided: option B)
 
-The existing `community.lexicon.book.defs#contribution` def has `subject` (strongRef to a contributor) and `role` only. Adding `bio` directly makes the def lex-mutating. Two options:
+The existing `community.lexicon.book.defs#contribution` def has `subject` (strongRef to a contributor) and `role` only. Author bios live on the referenced `community.lexicon.book.contributor` record (which already has a `bio` field), NOT on the `contribution` def.
 
-- **(a)** Add `bio: string (maxLength 16384, maxGraphemes 2048)` to the `contribution` def. Simple; lex gets the bio inline.
-- **(b)** Keep `contribution` minimal; store bio on the referenced `community.lexicon.book.contributor` record (which already has a `bio` field); the API response includes the resolved contributor record next to each contribution.
+`enrichAuthorsOnWorksOrEditions` writes the Wikipedia extract into the contributor record (via `LocalPostgresIngestor.ingest` on the `contributors` table); the contributor's `bio` is then served alongside each `contribution` strongRef by the `ComAtprotoRepoGetRecord` extension when callers resolve the reference.
 
-Recommend **(b)**: keeps the `contribution` def a pure relationship shape; the contributor record is the authoritative bio holder; already matches the ATProto pattern.
+This keeps `contribution` a pure relationship shape, matches the ATProto pattern (strongRef to a record; contributor record is authoritative), and avoids mutating the shared def.
 
 ## Persistence
 
@@ -371,6 +370,5 @@ GOOGLE_BOOKS_API_KEY=
 
 ## Open questions for follow-up after spec review
 
-1. **Author bio placement** (item (a) vs (b) in the wikipedia.ts section). Recommend (b).
-2. **OpenLibrary author search `type=author` vs `type=person`** — the OpenLibrary docs accept both. We standardize on `author`. Confirm at impl time.
-3. **Rkey encoding** — `ol-work-OL66554W` keeps the OL prefix; confirm no atproto rkey restriction against uppercase + digits.
+1. **OpenLibrary author search `type=author` vs `type=person`** — the OpenLibrary docs accept both. We standardize on `author`. Confirm at impl time.
+2. **Rkey encoding** — `ol-work-OL66554W` keeps the OL prefix; confirm no atproto rkey restriction against uppercase + digits.
