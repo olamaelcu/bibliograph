@@ -185,12 +185,14 @@ router.addQuery(CommunityLexiconBookCompatibility.mainSchema, {
     // list stays in sync with the public API. The introspection endpoint
     // itself is excluded — listing it would be self-referential.
     const SELF = 'community.lexicon.book.compatibility';
+    const AUTHORITY = 'community.lexicon.book.';
     const queries: { nsid: string; type: 'query' | 'procedure' }[] = [];
     for (const nsid of queryRegistry.keys()) {
-      if (nsid === SELF) continue;
+      if (nsid === SELF || !nsid.startsWith(AUTHORITY)) continue;
       queries.push({ nsid, type: 'query' });
     }
     for (const nsid of procedureRegistry.keys()) {
+      if (!nsid.startsWith(AUTHORITY)) continue;
       queries.push({ nsid, type: 'procedure' });
     }
     return json({ queries } as never);
