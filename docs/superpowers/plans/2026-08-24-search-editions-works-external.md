@@ -1588,7 +1588,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.jso
 
 ---
 
-## Task 15: Lex schema — new `work.json`
+## Task 15: Lex schema — new `work.json` (DONE — commit 4032f76)
 
 **Files:**
 - Create: `packages/bibliograph-service/lexicons/community/lexicon/book/work.json`
@@ -1601,7 +1601,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.jso
   "id": "community.lexicon.book.work",
   "defs": {
     "main": {
-      "type": "record",
+- [x] **Step 1: Write the file**
       "key": "tid",
       "record": {
         "type": "object",
@@ -1634,7 +1634,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.jso
       }
     }
   }
-}
+- [x] **Step 2: Regenerate lex types**
 ```
 
 - [ ] **Step 2: Regenerate lex types**
@@ -1642,7 +1642,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.jso
 ```bash
 pnpm run lex:gen
 ```
-
+- [x] **Step 3: Run typecheck**
 - [ ] **Step 3: Run typecheck**
 
 ```bash
@@ -1650,7 +1650,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
 
 Expected: no errors.
-
+- [x] **Step 4: Commit**
 - [ ] **Step 4: Commit**
 
 ```bash
@@ -1661,7 +1661,7 @@ git commit -m "feat(lex): add community.lexicon.book.work record schema"
 
 ---
 
-## Task 16: Lex schema — new `contributor.json`
+## Task 16: Lex schema — new `contributor.json` (DONE — commit 29ac23b)
 
 **Files:**
 - Create: `packages/bibliograph-service/lexicons/community/lexicon/book/contributor.json`
@@ -1674,7 +1674,7 @@ git commit -m "feat(lex): add community.lexicon.book.work record schema"
   "id": "community.lexicon.book.contributor",
   "defs": {
     "main": {
-      "type": "record",
+- [x] **Step 1: Write the file**
       "key": "tid",
       "record": {
         "type": "object",
@@ -1707,7 +1707,7 @@ git commit -m "feat(lex): add community.lexicon.book.work record schema"
 - [ ] **Step 2: Regenerate lex types**
 
 ```bash
-pnpm run lex:gen
+- [x] **Step 2: Regenerate lex types**
 ```
 
 - [ ] **Step 3: Run typecheck**
@@ -1715,7 +1715,7 @@ pnpm run lex:gen
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
-
+- [x] **Step 3: Run typecheck**
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
@@ -1723,12 +1723,12 @@ Expected: no errors.
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/contributor.json \
         packages/bibliograph-service/src/lib/server/lexicons/
-git commit -m "feat(lex): add community.lexicon.book.contributor record schema"
+- [x] **Step 4: Commit**
 ```
 
 ---
 
-## Task 17: Lex schema — `searchWorks.json` (full body)
+## Task 17: Lex schema — `searchWorks.json` (full body) (DONE — commit cfe4a95)
 
 **Files:**
 - Modify: `packages/bibliograph-service/lexicons/community/lexicon/book/searchWorks.json`
@@ -1741,7 +1741,7 @@ git commit -m "feat(lex): add community.lexicon.book.contributor record schema"
   "id": "community.lexicon.book.searchWorks",
   "defs": {
     "main": {
-      "type": "query",
+- [x] **Step 1: Replace the file contents**
       "description": "Search works by free-form text (q) and/or identifiers (id, repeatable).",
       "parameters": {
         "type": "params",
@@ -1774,7 +1774,7 @@ git commit -m "feat(lex): add community.lexicon.book.contributor record schema"
       },
       "errors": [
         {
-          "name": "InvalidQuery",
+- [x] **Step 2: Regenerate lex types**
           "description": "The query syntax was invalid for this AppView (e.g. Lucene syntax error)."
         }
       ]
@@ -1782,7 +1782,7 @@ git commit -m "feat(lex): add community.lexicon.book.contributor record schema"
   }
 }
 ```
-
+- [x] **Step 3: Run typecheck**
 - [ ] **Step 2: Regenerate lex types**
 
 ```bash
@@ -1790,7 +1790,7 @@ pnpm run lex:gen
 ```
 
 - [ ] **Step 3: Commit**
-
+- [x] **Step 4: Commit**
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/searchWorks.json \
         packages/bibliograph-service/src/lib/server/lexicons/
@@ -1799,7 +1799,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
 
 ---
 
-## Task 18: Lex schema — `searchContributors.json` (full body)
+## Task 18: Lex schema — `searchContributors.json` (full body) (DONE — commit 17c4e9c)
 
 **Files:**
 - Modify: `packages/bibliograph-service/lexicons/community/lexicon/book/searchContributors.json`
@@ -1812,7 +1812,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
   "id": "community.lexicon.book.searchContributors",
   "defs": {
     "main": {
-      "type": "query",
+- [x] **Step 1: Replace the file contents**
       "description": "Search contributors by free-form text (q) and/or identifiers (id, repeatable).",
       "parameters": {
         "type": "params",
@@ -1845,7 +1845,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
       },
       "errors": [
         {
-          "name": "InvalidQuery",
+- [x] **Step 2: Regenerate lex types**
           "description": "The query syntax was invalid for this AppView (e.g. Lucene syntax error)."
         }
       ]
@@ -1853,7 +1853,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
   }
 }
 ```
-
+- [x] **Step 3: Run typecheck**
 - [ ] **Step 2: Regenerate lex types**
 
 ```bash
@@ -1861,7 +1861,7 @@ pnpm run lex:gen
 ```
 
 - [ ] **Step 3: Commit**
-
+- [x] **Step 4: Commit**
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/searchContributors.json \
         packages/bibliograph-service/src/lib/server/lexicons/
