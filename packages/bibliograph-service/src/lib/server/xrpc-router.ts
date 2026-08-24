@@ -33,6 +33,7 @@ import {
 } from './lex/publisher.js';
 import { createLogger } from './logger';
 import { accessLog } from './access-log';
+import type { Logger } from 'pino';
 import { pdsClient, resolvePds } from './pds/resolve.js';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { cidForLex, decode as cborDecode } from '@atproto/lex-cbor';
@@ -47,6 +48,7 @@ import { SearchService } from './search/service';
 import { eq } from 'drizzle-orm';
 import { db } from './db';
 import { editions, works, contributors } from './db/schema';
+import { allowRequest } from './rate-limit';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -67,8 +69,29 @@ const searchService = new SearchService(
   log,
 );
 
+function rateLimitMiddleware(log: Logger) {
+  return async (request: Request, next: (req: Request) => Promise<Response>): Promise<Response> => {
+    const url = new URL(request.url);
+    const m = /^\/xrpc\/([^/?]+)/.exec(url.pathname);
+    const nsid = m?.[1] ?? null;
+    if (!nsid) return next(request);
+    const ip =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+      request.headers.get('x-real-ip') ??
+      '0.0.0.0';
+    if (!allowRequest(ip, nsid)) {
+      log.warn({ ip, nsid }, 'rate limited');
+      return new Response(JSON.stringify({ error: 'RateLimited', message: 'Too many requests' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json', 'retry-after': '60' },
+      });
+    }
+    return next(request);
+  };
+}
+
 export const router = new XRPCRouter({
-  middlewares: [accessLog(log), cors()],
+  middlewares: [accessLog(log), cors(), rateLimitMiddleware(log)],
   handleHealthCheck: async () => json({ status: 'ok' }),
 });
 

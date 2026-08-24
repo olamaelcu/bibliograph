@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { allowRequest, resetRateLimits } from './rate-limit.ts';
+import { allowRequest, resetRateLimits } from './rate-limit';
 
 test('allowRequest allows up to capacity then rejects', () => {
   resetRateLimits();
