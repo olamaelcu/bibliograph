@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { searchEditions } from './open-library.ts';
+import { searchEditions } from './open-library';
 
 const log = pino({ level: 'silent' });
 

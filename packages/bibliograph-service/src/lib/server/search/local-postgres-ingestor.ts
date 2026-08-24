@@ -1,8 +1,9 @@
 import type { Logger } from 'pino';
-import { db as defaultDb } from '../db/index.ts';
-import { editions, works, contributors } from '../db/schema.ts';
-import { PUBLISHER_DID } from '../did.ts';
-import type { EditionItem, WorkItem, ContributorItem, Ingestor, Identifier } from './types.ts';
+import { cidForLex } from '@atproto/lex-cbor';
+import { db as defaultDb } from '../db/index';
+import { editions, works, contributors } from '../db/schema';
+import { PUBLISHER_DID } from '../did';
+import type { EditionItem, WorkItem, ContributorItem, Ingestor, Identifier } from './types';
 
 type Db = typeof defaultDb;
 
@@ -48,9 +49,23 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
   private async ingestEdition(item: EditionItem, olKey: string): Promise<void> {
     const rkey = rkeyForEdition(olKey);
     const uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
+    const value = {
+      $type: 'community.lexicon.book.edition' as const,
+      title: item.title,
+      subtitle: item.subtitle ?? undefined,
+      place: item.place ?? undefined,
+      publishedYear: item.publishedYear ?? undefined,
+      language: item.language ?? undefined,
+      coverImageUrl: item.coverImageUrl ?? undefined,
+      contributors: item.contributors,
+      identifiers: item.identifiers,
+      description: item.description ?? undefined,
+      createdAt: item.createdAt,
+    };
+    const cid = await cidForLex(value as never);
     await this.db.insert(editions).values({
       uri,
-      cid: 'bafyplaceholder',
+      cid: cid.toString(),
       did: PUBLISHER_DID,
       rkey,
       title: item.title,
@@ -80,9 +95,22 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
   private async ingestWork(item: WorkItem, olKey: string): Promise<void> {
     const rkey = rkeyForWork(olKey);
     const uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
+    const value = {
+      $type: 'community.lexicon.book.work' as const,
+      title: item.title,
+      subtitle: item.subtitle ?? undefined,
+      originalLanguage: item.originalLanguage ?? undefined,
+      firstPublishedYear: item.firstPublishedYear ?? undefined,
+      subjects: item.subjects,
+      contributors: item.contributors,
+      identifiers: item.identifiers,
+      description: item.description ?? undefined,
+      createdAt: item.createdAt,
+    };
+    const cid = await cidForLex(value as never);
     await this.db.insert(works).values({
       uri,
-      cid: 'bafyplaceholder',
+      cid: cid.toString(),
       did: PUBLISHER_DID,
       rkey,
       title: item.title,
@@ -110,9 +138,21 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
   private async ingestContributor(item: ContributorItem, olKey: string): Promise<void> {
     const rkey = rkeyForContributor(olKey);
     const uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
+    const value = {
+      $type: 'community.lexicon.book.contributor' as const,
+      name: item.name,
+      aliases: item.aliases,
+      bio: item.bio ?? undefined,
+      bornYear: item.bornYear ?? undefined,
+      diedYear: item.diedYear ?? undefined,
+      linkedDid: item.linkedDid ?? undefined,
+      identifiers: item.identifiers,
+      createdAt: item.createdAt,
+    };
+    const cid = await cidForLex(value as never);
     await this.db.insert(contributors).values({
       uri,
-      cid: 'bafyplaceholder',
+      cid: cid.toString(),
       did: PUBLISHER_DID,
       rkey,
       name: item.name,

@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
-import * as openLibrary from '../api/open-library.ts';
-import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types.ts';
+import * as openLibrary from '../api/open-library';
+import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types';
 
 export class OpenLibrarySource {
   constructor(private readonly log: Logger) {}

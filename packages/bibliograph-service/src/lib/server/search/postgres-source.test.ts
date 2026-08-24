@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { PostgresSource } from './postgres-source.ts';
-import { editions, works, contributors } from '../db/schema.ts';
-import type { EditionRow, WorkRow, ContributorRow } from '../db/schema.ts';
+import { PostgresSource } from './postgres-source';
+import { editions, works, contributors } from '../db/schema';
+import type { EditionRow, WorkRow, ContributorRow } from '../db/schema';
 
 interface CallCapture {
   whereCalled: boolean;

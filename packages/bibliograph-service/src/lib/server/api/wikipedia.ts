@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
-import { UPSTREAM_TIMEOUT_MS } from './timeout.ts';
-import type { ContributorItem, EditionItem, WorkItem } from '../search/types.ts';
+import { UPSTREAM_TIMEOUT_MS } from './timeout';
+import type { ContributorItem, EditionItem, WorkItem } from '../search/types';
 
 const BASE = 'https://en.wikipedia.org/w/api.php';
 

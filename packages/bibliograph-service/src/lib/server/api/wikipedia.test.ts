@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { enrichContributorBios } from './wikipedia.ts';
-import type { ContributorItem } from '../search/types.ts';
+import { enrichContributorBios } from './wikipedia';
+import type { ContributorItem } from '../search/types';
 
 const log = pino({ level: 'silent' });
 

@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
-import * as wikipedia from '../api/wikipedia.ts';
-import type { ContributorItem, EditionItem, WorkItem, Enricher } from './types.ts';
+import * as wikipedia from '../api/wikipedia';
+import type { ContributorItem, EditionItem, WorkItem, Enricher } from './types';
 
 export class ContributorWikipediaEnricher implements Enricher<ContributorItem> {
   readonly name = 'wikipedia-enricher-contributor';

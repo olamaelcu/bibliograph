@@ -1,11 +1,11 @@
 import type { Logger } from 'pino';
-import { getCorrelationLog } from '../correlation.ts';
-import { PostgresSource } from './postgres-source.ts';
-import { OpenLibrarySource } from './open-library-source.ts';
-import { GoogleBooksEnricher } from './google-books-enricher.ts';
-import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher.ts';
-import { LocalPostgresIngestor } from './local-postgres-ingestor.ts';
-import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types.ts';
+import { getCorrelationLog } from '../correlation';
+import { PostgresSource } from './postgres-source';
+import { OpenLibrarySource } from './open-library-source';
+import { GoogleBooksEnricher } from './google-books-enricher';
+import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
+import { LocalPostgresIngestor } from './local-postgres-ingestor';
+import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types';
 
 export interface SearchServiceDeps {
   postgres: PostgresSource;

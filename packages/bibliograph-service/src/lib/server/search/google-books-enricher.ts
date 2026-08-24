@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
-import * as googleBooks from '../api/google-books.ts';
-import type { EditionItem, Enricher } from './types.ts';
+import * as googleBooks from '../api/google-books';
+import type { EditionItem, Enricher } from './types';
 
 export class GoogleBooksEnricher implements Enricher<EditionItem> {
   readonly name = 'google-books-enricher';

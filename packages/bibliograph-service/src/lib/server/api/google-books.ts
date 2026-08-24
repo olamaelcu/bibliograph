@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
-import { UPSTREAM_TIMEOUT_MS } from './timeout.ts';
-import type { EditionItem } from '../search/types.ts';
+import { UPSTREAM_TIMEOUT_MS } from './timeout';
+import type { EditionItem } from '../search/types';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
 

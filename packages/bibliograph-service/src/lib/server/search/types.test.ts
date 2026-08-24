@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Logger } from 'pino';
-import type { SearchSource, Enricher, Ingestor, SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types.ts';
+import type { SearchSource, Enricher, Ingestor, SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem } from './types';
 
 test('SearchSource interface shape', (_t) => {
   const fn = (_q: SearchQuery, _l: Logger, _s?: AbortSignal): Promise<SearchResult<EditionItem>> => {

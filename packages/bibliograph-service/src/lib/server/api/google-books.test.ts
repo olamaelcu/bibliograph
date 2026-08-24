@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { enrichEditions } from './google-books.ts';
-import type { EditionItem } from '../search/types.ts';
+import { enrichEditions } from './google-books';
+import type { EditionItem } from '../search/types';
 
 const log = pino({ level: 'silent' });
 

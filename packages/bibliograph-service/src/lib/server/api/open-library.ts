@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
-import { UPSTREAM_TIMEOUT_MS } from './timeout.ts';
-import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types.ts';
+import { UPSTREAM_TIMEOUT_MS } from './timeout';
+import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 

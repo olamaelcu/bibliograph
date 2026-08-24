@@ -1,9 +1,9 @@
 import type { Logger } from 'pino';
 import { and, asc, desc, or, sql } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
-import { db as defaultDb } from '../db/index.ts';
-import { editions, works, contributors } from '../db/schema.ts';
-import { PUBLISHER_DID } from '../did.ts';
+import { db as defaultDb } from '../db/index';
+import { editions, works, contributors } from '../db/schema';
+import { PUBLISHER_DID } from '../did';
 import type {
   SearchQuery,
   SearchResult,
@@ -12,7 +12,7 @@ import type {
   ContributorItem,
   Identifier,
   ContributionEntry,
-} from './types.ts';
+} from './types';
 
 const CURSOR_VERSION = 2;
 
