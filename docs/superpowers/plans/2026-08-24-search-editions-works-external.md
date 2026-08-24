@@ -45,13 +45,13 @@
 
 ---
 
-## Task 1: Shared upstream timeout constant
+## Task 1: Shared upstream timeout constant (DONE — commit 8040fb2)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/timeout.ts`
 - Test: `packages/bibliograph-service/src/lib/server/api/timeout.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/timeout.test.ts
@@ -64,7 +64,7 @@ test('UPSTREAM_TIMEOUT_MS is 10_000', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run from `packages/bibliograph-service`:
 ```bash
@@ -72,7 +72,7 @@ pnpm exec tsx --test src/lib/server/api/timeout.test.ts
 ```
 Expected: FAIL — `Cannot find module './timeout.ts'`.
 
-- [ ] **Step 3: Implement the constant**
+- [x] **Step 3: Implement the constant**
 
 ```ts
 // src/lib/server/api/timeout.ts
@@ -83,14 +83,14 @@ Expected: FAIL — `Cannot find module './timeout.ts'`.
 export const UPSTREAM_TIMEOUT_MS = 10_000;
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/timeout.test.ts
 ```
 Expected: PASS, 1 test.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/timeout.ts \
