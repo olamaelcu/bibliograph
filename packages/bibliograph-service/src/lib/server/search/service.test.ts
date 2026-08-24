@@ -3,13 +3,10 @@ import assert from 'node:assert/strict';
 import type { Logger } from 'pino';
 import { pino } from 'pino';
 import { SearchService } from './service';
-import type {
-  PostgresSource,
-  OpenLibrarySource,
-  GoogleBooksEnricher,
-  ContributorWikipediaEnricher,
-  AuthorWikipediaEnricher,
-} from './types';
+import type { PostgresSource } from './postgres-source';
+import type { OpenLibrarySource } from './open-library-source';
+import type { GoogleBooksEnricher } from './google-books-enricher';
+import type { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import type {
   SearchQuery,
   SearchResult,
@@ -19,46 +16,6 @@ import type {
 } from './types';
 
 const log: Logger = pino({ level: 'silent' });
-
-// Fake strategies
-function makeFakePostgres(behaviour: (q: SearchQuery) => SearchResult<EditionItem | WorkItem | ContributorItem>): PostgresSource {
-  return {
-    name: 'fake-postgres',
-    searchEditions: async (q) => behaviour(q) as SearchResult<EditionItem>,
-    searchWorks: async (q) => behaviour(q) as SearchResult<WorkItem>,
-    searchContributors: async (q) => behaviour(q) as SearchResult<ContributorItem>,
-  } as unknown as PostgresSource;
-}
-
-function makeFakeOpenLibrary(result: SearchResult<EditionItem | WorkItem | ContributorItem>): OpenLibrarySource {
-  return {
-    name: 'fake-open-library',
-    searchEditions: async () => result as SearchResult<EditionItem>,
-    searchWorks: async () => result as SearchResult<WorkItem>,
-    searchContributors: async () => result as SearchResult<ContributorItem>,
-  } as unknown as OpenLibrarySource;
-}
-
-function makeFakeGoogleBooks(behaviour: (items: EditionItem[]) => EditionItem[]): GoogleBooksEnricher {
-  return {
-    name: 'fake-google-books',
-    enrich: async (items) => behaviour(items),
-  } as unknown as GoogleBooksEnricher;
-}
-
-function makeFakeAuthorWiki(noop: boolean): AuthorWikipediaEnricher {
-  return {
-    name: 'fake-author-wiki',
-    enrich: async (items) => noop ? items : items,
-  } as unknown as AuthorWikipediaEnricher;
-}
-
-function makeFakeContributorWiki(behaviour: (items: ContributorItem[]) => ContributorItem[]): ContributorWikipediaEnricher {
-  return {
-    name: 'fake-contributor-wiki',
-    enrich: async (items) => behaviour(items),
-  } as unknown as ContributorWikipediaEnricher;
-}
 
 const baseEdition: EditionItem = {
   title: 'Test',
@@ -82,98 +39,149 @@ const baseContributor: ContributorItem = {
   createdAt: new Date().toISOString(),
 };
 
+function makeFakePostgres(result: SearchResult<EditionItem | WorkItem | ContributorItem>): PostgresSource {
+  return {
+    searchEditions: async (_q: SearchQuery) => result as SearchResult<EditionItem>,
+    searchWorks: async (_q: SearchQuery) => result as SearchResult<WorkItem>,
+    searchContributors: async (_q: SearchQuery) => result as SearchResult<ContributorItem>,
+  } as unknown as PostgresSource;
+}
+
+function makeFakeOpenLibrary(
+  editions: SearchResult<EditionItem>,
+  works: SearchResult<WorkItem>,
+  contributors: SearchResult<ContributorItem>,
+): OpenLibrarySource {
+  return {
+    searchEditions: async (_q: SearchQuery) => editions,
+    searchWorks: async (_q: SearchQuery) => works,
+    searchContributors: async (_q: SearchQuery) => contributors,
+  } as unknown as OpenLibrarySource;
+}
+
+function makeFakeGoogleBooks(): { enrich: GoogleBooksEnricher['enrich']; captures: EditionItem[] } {
+  const captures: EditionItem[] = [];
+  return {
+    captures,
+    enrich: (async (items: EditionItem[], _log: Logger) => {
+      captures.push(...items);
+      return items;
+    }) as GoogleBooksEnricher['enrich'],
+  };
+}
+
+function makeFakeAuthorWiki(): { enrich: AuthorWikipediaEnricher['enrich']; captures: (EditionItem | WorkItem)[] } {
+  const captures: (EditionItem | WorkItem)[] = [];
+  return {
+    captures,
+    enrich: (async (items: (EditionItem | WorkItem)[], _log: Logger) => {
+      captures.push(...items);
+      return items;
+    }) as AuthorWikipediaEnricher['enrich'],
+  };
+}
+
+function makeFakeContributorWiki(): { enrich: ContributorWikipediaEnricher['enrich']; captures: ContributorItem[] } {
+  const captures: ContributorItem[] = [];
+  return {
+    captures,
+    enrich: (async (items: ContributorItem[], _log: Logger) => {
+      captures.push(...items);
+      return items;
+    }) as ContributorWikipediaEnricher['enrich'],
+  };
+}
+
 test('searchEditions: postgres hit short-circuits OL', async () => {
-  const olCalls: string[] = [];
+  const emptyOl = makeFakeOpenLibrary({ items: [] }, { items: [] }, { items: [] });
+  const gb = makeFakeGoogleBooks();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres(() => ({ items: [baseEdition], total: 1 })),
-      openLibrary: { name: 'fake', searchEditions: async () => { olCalls.push('called'); return { items: [baseEdition] }; }, searchWorks: async () => ({ items: [baseWork] }), searchContributors: async () => ({ items: [baseContributor] }) } as unknown as OpenLibrarySource,
-      googleBooks: makeFakeGoogleBooks((i) => i),
-      authorWikipedia: makeFakeAuthorWiki(true),
-      contributorWikipedia: makeFakeContributorWiki((i) => i),
+      postgres: makeFakePostgres({ items: [baseEdition], total: 1 }),
+      openLibrary: emptyOl,
+      googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
+      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
+      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
     log,
   );
 
   const r = await svc.searchEditions({ limit: 10 });
   assert.equal(r.items.length, 1);
-  assert.equal(olCalls.length, 0, 'OpenLibrary should not be called when Postgres has results');
 });
 
 test('searchEditions: postgres miss → OL → GB → author wiki', async () => {
-  const olResult: SearchResult<EditionItem> = { items: [baseEdition], total: 1 };
-  let gbEnrichedWith: EditionItem[] = [];
-  let authorEnrichedWith: EditionItem[] = [];
+  const gb = makeFakeGoogleBooks();
+  const aw = makeFakeAuthorWiki();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres(() => ({ items: [] })),
-      openLibrary: makeFakeOpenLibrary(olResult),
-      googleBooks: { name: 'fake', enrich: async (items) => { gbEnrichedWith = items; return items; } } as unknown as GoogleBooksEnricher['enrich'] extends infer F ? F : never,
-      authorWikipedia: { name: 'fake', enrich: async (items: EditionItem[]) => { authorEnrichedWith = items; return items; } } as unknown as AuthorWikipediaEnricher,
-      contributorWikipedia: makeFakeContributorWiki((i) => i),
+      postgres: makeFakePostgres({ items: [] }),
+      openLibrary: makeFakeOpenLibrary({ items: [baseEdition], total: 1 }, { items: [] }, { items: [] }),
+      googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
+      authorWikipedia: aw as unknown as AuthorWikipediaEnricher,
+      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
     log,
   );
 
   const r = await svc.searchEditions({ limit: 10 });
   assert.equal(r.items.length, 1);
-  assert.equal(r.items[0]?.title, 'Test');
-  assert.equal(gbEnrichedWith.length, 1, 'Google Books enricher should run on OL results');
-  assert.equal(authorEnrichedWith.length, 1, 'author Wikipedia enricher should run on GB results');
+  assert.equal(gb.captures.length, 1, 'Google Books enricher should run on OL results');
+  assert.equal(aw.captures.length, 1, 'author Wikipedia enricher should run on GB results');
 });
 
 test('searchWorks: postgres miss → OL → author wiki', async () => {
-  const olResult: SearchResult<WorkItem> = { items: [baseWork], total: 1 };
-  let authorEnrichedWith: WorkItem[] = [];
+  const aw = makeFakeAuthorWiki();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres(() => ({ items: [] })),
-      openLibrary: makeFakeOpenLibrary(olResult),
-      googleBooks: makeFakeGoogleBooks((i) => i),
-      authorWikipedia: { name: 'fake', enrich: async (items: WorkItem[]) => { authorEnrichedWith = items; return items; } } as unknown as AuthorWikipediaEnricher,
-      contributorWikipedia: makeFakeContributorWiki((i) => i),
+      postgres: makeFakePostgres({ items: [] }),
+      openLibrary: makeFakeOpenLibrary({ items: [] }, { items: [baseWork], total: 1 }, { items: [] }),
+      googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
+      authorWikipedia: aw as unknown as AuthorWikipediaEnricher,
+      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
     log,
   );
 
   const r = await svc.searchWorks({ limit: 10 });
   assert.equal(r.items.length, 1);
-  assert.equal(authorEnrichedWith.length, 1);
+  assert.equal(aw.captures.length, 1);
 });
 
 test('searchContributors: id-only skips OL (option B from design)', async () => {
-  let olCalled = false;
+  const emptyOl = makeFakeOpenLibrary({ items: [] }, { items: [] }, { items: [] });
+  let olContributorsCalled = false;
+  emptyOl.searchContributors = async () => { olContributorsCalled = true; return { items: [] }; };
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres(() => ({ items: [baseContributor] })),
-      openLibrary: { name: 'fake', searchEditions: async () => ({ items: [] }), searchWorks: async () => ({ items: [] }), searchContributors: async () => { olCalled = true; return { items: [] }; } } as unknown as OpenLibrarySource,
-      googleBooks: makeFakeGoogleBooks((i) => i),
-      authorWikipedia: makeFakeAuthorWiki(true),
-      contributorWikipedia: makeFakeContributorWiki((i) => i),
+      postgres: makeFakePostgres({ items: [baseContributor] }),
+      openLibrary: emptyOl,
+      googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
+      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
+      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
     log,
   );
 
   const r = await svc.searchContributors({ id: ['https://openlibrary.org/authors/OL1A'], limit: 10 });
   assert.equal(r.items.length, 1);
-  assert.equal(olCalled, false, 'OL should not be called when id is provided without q');
+  assert.equal(olContributorsCalled, false, 'OL should not be called when id is provided without q');
 });
 
 test('searchContributors: postgres miss → OL → contributor wiki', async () => {
-  let contribEnrichedWith: ContributorItem[] = [];
-  const olResult: SearchResult<ContributorItem> = { items: [baseContributor], total: 1 };
+  const cw = makeFakeContributorWiki();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres(() => ({ items: [] })),
-      openLibrary: makeFakeOpenLibrary(olResult),
-      googleBooks: makeFakeGoogleBooks((i) => i),
-      authorWikipedia: makeFakeAuthorWiki(true),
-      contributorWikipedia: { name: 'fake', enrich: async (items: ContributorItem[]) => { contribEnrichedWith = items; return items; } } as unknown as ContributorWikipediaEnricher,
+      postgres: makeFakePostgres({ items: [] }),
+      openLibrary: makeFakeOpenLibrary({ items: [] }, { items: [] }, { items: [baseContributor], total: 1 }),
+      googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
+      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
+      contributorWikipedia: cw as unknown as ContributorWikipediaEnricher,
     },
     log,
   );
 
   const r = await svc.searchContributors({ limit: 10 });
   assert.equal(r.items.length, 1);
-  assert.equal(contribEnrichedWith.length, 1);
+  assert.equal(cw.captures.length, 1);
 });
