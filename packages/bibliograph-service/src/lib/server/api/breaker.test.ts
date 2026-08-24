@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CircuitBreaker } from './breaker.ts';
+import { CircuitBreaker } from './breaker';
 
 test('breaker starts closed and allows calls', () => {
   const b = new CircuitBreaker('test', 3, 1000);

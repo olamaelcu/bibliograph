@@ -1,5 +1,7 @@
 import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
+import { withRetry } from './retry';
+import { openLibraryBreaker } from './breakers';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
@@ -14,17 +16,28 @@ function buildUrl(q: string | undefined, type: 'edition' | 'work' | 'author', li
 }
 
 async function fetchJson<T>(url: string, log: Logger, signal: AbortSignal): Promise<T | null> {
+  if (!openLibraryBreaker.canCall()) {
+    log.warn({ stage: 'open-library-source', breaker: openLibraryBreaker.getState() }, 'breaker open; skipping fetch');
+    return null;
+  }
   const start = performance.now();
   try {
-    const res = await fetch(url, { headers: { 'user-agent': UA }, signal });
-    const durationMs = Math.round((performance.now() - start) * 100) / 100;
-    if (!res.ok) {
-      log.warn({ stage: 'open-library-source', status: res.status, body: await res.text() }, 'openlibrary non-2xx');
-      return null;
-    }
-    log.info({ stage: 'open-library-source', url, durationMs }, 'openlibrary ok');
-    return (await res.json()) as T;
+    const body = await withRetry(async () => {
+      const res = await fetch(url, { headers: { 'user-agent': UA }, signal });
+      const durationMs = Math.round((performance.now() - start) * 100) / 100;
+      if (!res.ok) {
+        const text = await res.text();
+        const err = new Error(`openlibrary ${res.status}: ${text.slice(0, 200)}`) as Error & { status: number };
+        (err as Error & { status: number }).status = res.status;
+        throw err;
+      }
+      log.info({ stage: 'open-library-source', url, durationMs }, 'openlibrary ok');
+      return res.json() as Promise<T>;
+    }, log);
+    openLibraryBreaker.recordSuccess();
+    return body;
   } catch (err) {
+    openLibraryBreaker.recordFailure();
     log.error({ stage: 'open-library-source', err, url }, 'openlibrary fetch failed');
     return null;
   }

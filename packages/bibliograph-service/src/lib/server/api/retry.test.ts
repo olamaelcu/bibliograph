@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { withRetry } from './retry.ts';
+import { withRetry } from './retry';
 
 const log = pino({ level: 'silent' });
 
