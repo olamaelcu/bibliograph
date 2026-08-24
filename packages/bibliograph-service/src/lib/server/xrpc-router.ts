@@ -476,7 +476,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetActorProfile.mainSchema, {
       raw = await client.get('com.atproto.repo.getRecord', {
         params: {
           repo: params.did,
-          collection: 'net.olamaelcu.livtet.actor.profile',
+          collection: 'net.olamaelcu.livtet.biblio.actorProfile',
           rkey: 'self',
         },
         signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),

@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "net.olamaelcu.livtet.bookReview",
+  "id": "net.olamaelcu.livtet.biblio.bookReview",
   "description": "A user's review of a book. StrongRefs the catalog book and optionally the originating bookShelving. rkey: tid. Written by the OAuth client (livtet-service) via com.atproto.repo.putRecord.",
   "defs": {
     "main": {

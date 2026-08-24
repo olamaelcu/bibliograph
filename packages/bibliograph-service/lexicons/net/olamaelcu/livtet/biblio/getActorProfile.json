@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.getActorProfile",
-  "description": "Fetch a user's profile record (net.olamaelcu.livtet.actor.profile at rkey 'self') from the user's PDS, plus optional handle resolution.",
+  "description": "Fetch a user's profile record (net.olamaelcu.livtet.biblio.actorProfile at rkey 'self') from the user's PDS, plus optional handle resolution.",
   "defs": {
     "main": {
       "type": "query",
@@ -24,7 +24,7 @@
           "properties": {
           "profile": {
             "type": "ref",
-            "ref": "net.olamaelcu.livtet.actor.profile#main"
+            "ref": "net.olamaelcu.livtet.biblio.actorProfile#main"
           },
             "handle": {
               "type": "string",

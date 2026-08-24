@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "net.olamaelcu.livtet.actor.profile",
+  "id": "net.olamaelcu.livtet.biblio.actorProfile",
   "description": "User profile record stored on the user's PDS at rkey 'self'. Written by the OAuth client (livtet-service) via com.atproto.repo.putRecord.",
   "defs": {
     "main": {
