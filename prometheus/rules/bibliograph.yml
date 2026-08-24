@@ -1,0 +1,49 @@
+groups:
+  - name: bibliograph.http
+    interval: 30s
+    rules:
+      - record: job:http_requests:rate5m
+        expr: sum by (service, path, status) (rate(http_request_duration_ms_count[5m]))
+
+      - record: job:http_latency:p50_5m
+        expr: histogram_quantile(0.50, sum by (le, service, path) (rate(http_request_duration_ms_bucket[5m])))
+      - record: job:http_latency:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, service, path) (rate(http_request_duration_ms_bucket[5m])))
+      - record: job:http_latency:p99_5m
+        expr: histogram_quantile(0.99, sum by (le, service, path) (rate(http_request_duration_ms_bucket[5m])))
+
+      - record: job:http_errors:ratio5m
+        expr: |
+          sum by (service, path) (rate(http_request_duration_ms_count{status=~"5.."}[5m]))
+          /
+          clamp_min(sum by (service, path) (rate(http_request_duration_ms_count[5m])), 1)
+
+  - name: bibliograph.runtime
+    interval: 30s
+    rules:
+      - record: job:nodejs_eventloop_lag:p95_1m
+        expr: histogram_quantile(0.95, sum by (le, service) (rate(nodejs_eventloop_lag_seconds_bucket[1m])))
+
+      - record: job:process_memory_rss:bytes
+        expr: process_resident_memory_bytes{service="bibliograph"}
+
+  - name: bibliograph.tap
+    interval: 30s
+    rules:
+      - record: job:tap_firehose:received_rate1m
+        expr: sum(rate(tap_firehose_events_received_total[1m]))
+
+      - record: job:tap_firehose:processed_rate1m
+        expr: sum(rate(tap_firehose_events_processed_total[1m]))
+
+      - record: job:tap_outbox:delivered_rate1m
+        expr: sum(rate(tap_events_delivered_total[1m]))
+
+      - record: job:tap_resync:p95_5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(tap_resync_duration_seconds_bucket[5m])))
+
+      - record: job:tap_event_cache:size
+        expr: tap_event_cache_size
+
+      - record: job:tap_firehose:last_seq
+        expr: tap_firehose_last_seq
