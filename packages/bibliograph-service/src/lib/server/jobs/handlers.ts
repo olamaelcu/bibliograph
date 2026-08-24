@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
 import type { Task, TaskList } from 'graphile-worker';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
@@ -311,6 +311,69 @@ export const tapRecordDeleteTask: Task = async (payload, helpers) => {
   }
 };
 
+export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
+  const items = payload as Array<{ uri: string; did: string; rkey: string; value: Record<string, unknown> }>;
+  const log = helpers.logger as unknown as Logger;
+  try {
+    if (items.length === 0) return;
+    const rows = items.map((it) => ({
+      uri: it.uri,
+      cid: 'bafyplaceholder',
+      did: it.did,
+      rkey: it.rkey,
+      collection: it.uri.split('/').slice(-2, -1)[0] ?? '',
+      value: it.value as never,
+      createdAt: new Date(),
+    }));
+    await db.insert(records).values(rows as never).onConflictDoUpdate({
+      target: records.uri,
+      set: { value: records.value, indexedAt: new Date() },
+    });
+    log.info({ stage: 'tap-record-upsert-batch', count: items.length }, 'batch upsert ok');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ stage: 'tap-record-upsert-batch', err, count: items.length }, 'batch upsert failed; writing to DLQ');
+    for (const it of items) {
+      const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
+      const rkey = it.uri.split('/').pop() ?? '';
+      await db.insert(tapDeadLetter).values({
+        repoDid: it.did,
+        collection,
+        rkey: rkey || 'unknown',
+        payload: it as never,
+        errorMessage: message,
+        attempts: helpers.job.attempts,
+      });
+    }
+  }
+};
+
+export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
+  const uris = payload as string[];
+  const log = helpers.logger as unknown as Logger;
+  try {
+    if (uris.length === 0) return;
+    await db.delete(records).where(inArray(records.uri, uris));
+    log.info({ stage: 'tap-record-delete-batch', count: uris.length }, 'batch delete ok');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ stage: 'tap-record-delete-batch', err, count: uris.length }, 'batch delete failed; writing to DLQ');
+    for (const uri of uris) {
+      const collection = uri.split('/').slice(-2, -1)[0] ?? '';
+      const did = uri.split('/').slice(-3, -2)[0] ?? '';
+      const rkey = uri.split('/').pop() ?? '';
+      await db.insert(tapDeadLetter).values({
+        repoDid: did,
+        collection,
+        rkey: rkey || 'unknown',
+        payload: { uri } as never,
+        errorMessage: message,
+        attempts: helpers.job.attempts,
+      });
+    }
+  }
+};
+
 export const searchTaskList: TaskList = {
   'ingest-edition': ingestEditionTask,
   'ingest-work': ingestWorkTask,
@@ -323,6 +386,8 @@ export const searchTaskList: TaskList = {
 export const tapTaskList: TaskList = {
   'tap-record-upsert': tapRecordUpsertTask,
   'tap-record-delete': tapRecordDeleteTask,
+  'tap-record-upsert-batch': tapRecordUpsertBatchTask,
+  'tap-record-delete-batch': tapRecordDeleteBatchTask,
 };
 
 export const allTaskList: TaskList = {
