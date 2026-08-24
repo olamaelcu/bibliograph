@@ -1182,12 +1182,12 @@ git commit -m "feat(search): add ContributorWikipediaEnricher and AuthorWikipedi
 
 ---
 
-## Task 11: LocalPostgresIngestor (fire-and-forget)
+## Task 11: LocalPostgresIngestor (fire-and-forget) (DONE — commit 19fd864)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/local-postgres-ingestor.ts`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/local-postgres-ingestor.ts
@@ -1328,7 +1328,7 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1336,7 +1336,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/local-postgres-ingestor.ts
