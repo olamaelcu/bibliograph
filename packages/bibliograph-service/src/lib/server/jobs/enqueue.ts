@@ -23,6 +23,15 @@ export async function enqueueIngest(
   await utils.addJob(`ingest-${kind}`, item);
 }
 
+export async function enqueueIngestBatch(
+  kind: 'edition' | 'work' | 'contributor',
+  items: IngestItem[],
+): Promise<void> {
+  if (items.length === 0) return;
+  const utils = await getUtils();
+  await utils.addJob(`ingest-${kind}-batch`, items);
+}
+
 export async function enqueueRecordUpsert(
   uri: string,
   did: string,

@@ -46,180 +46,231 @@ async function writeTapDLQ(
   await db.insert(tapDeadLetter).values({
     repoDid,
     collection,
-    rkey,
+    rkey: rkey || 'unknown',
     payload: payload as never,
     errorMessage,
     attempts,
   });
 }
 
+// -- per-item tasks (kept for backward compat; new code prefers batch tasks) --
+
 export const ingestEditionTask: Task = async (payload, helpers) => {
-  const item = payload as EditionItem;
-  const log = helpers.logger as unknown as Logger;
-  try {
-    const olKey = olKeyFromIdentifiers(item.identifiers);
-    if (!olKey) {
-      log.warn({ stage: 'ingest-edition' }, 'skipping item without openlibrary identifier');
-      return;
-    }
-    const rkey = rkeyForEdition(olKey);
-    const uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
-    const value = {
-      $type: 'community.lexicon.book.edition' as const,
-      title: item.title,
-      subtitle: item.subtitle ?? undefined,
-      place: item.place ?? undefined,
-      publishedYear: item.publishedYear ?? undefined,
-      language: item.language ?? undefined,
-      coverImageUrl: item.coverImageUrl ?? undefined,
-      contributors: item.contributors,
-      identifiers: item.identifiers,
-      description: item.description ?? undefined,
-      createdAt: item.createdAt,
-    };
-    const cid = await cidForLex(value as unknown as LexMap);
-    await db.insert(editions).values({
-      uri,
-      cid: cid.toString(),
-      did: PUBLISHER_DID,
-      rkey,
-      title: item.title,
-      subtitle: item.subtitle ?? null,
-      place: item.place ?? null,
-      publishedYear: item.publishedYear ?? null,
-      language: item.language ?? null,
-      description: item.description ?? null,
-      coverImageUrl: item.coverImageUrl ?? null,
-      contributors: item.contributors,
-      identifiers: item.identifiers,
-      createdAt: new Date(item.createdAt),
-    }).onConflictDoUpdate({
-      target: editions.uri,
-      set: {
-        title: item.title,
-        subtitle: item.subtitle ?? null,
-        description: item.description ?? null,
-        coverImageUrl: item.coverImageUrl ?? null,
-        identifiers: item.identifiers,
-        contributors: item.contributors,
-        indexedAt: new Date(),
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ stage: 'ingest-edition', err }, 'ingest failed; writing to DLQ');
-    await writeIngestDLQ(`at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkeyForEdition(olKeyFromIdentifiers(item.identifiers) ?? 'unknown')}`, item, message, helpers.job.attempts);
-  }
+  await ingestEditionBatch([payload as EditionItem], helpers.logger as unknown as Logger, helpers.job.attempts);
 };
 
 export const ingestWorkTask: Task = async (payload, helpers) => {
-  const item = payload as WorkItem;
-  const log = helpers.logger as unknown as Logger;
-  try {
-    const olKey = olKeyFromIdentifiers(item.identifiers);
-    if (!olKey) {
-      log.warn({ stage: 'ingest-work' }, 'skipping item without openlibrary identifier');
-      return;
-    }
-    const rkey = rkeyForWork(olKey);
-    const uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
-    const value = {
-      $type: 'community.lexicon.book.work' as const,
-      title: item.title,
-      subtitle: item.subtitle ?? undefined,
-      originalLanguage: item.originalLanguage ?? undefined,
-      firstPublishedYear: item.firstPublishedYear ?? undefined,
-      subjects: item.subjects,
-      contributors: item.contributors,
-      identifiers: item.identifiers,
-      description: item.description ?? undefined,
-      createdAt: item.createdAt,
-    };
-    const cid = await cidForLex(value as unknown as LexMap);
-    await db.insert(works).values({
-      uri,
-      cid: cid.toString(),
-      did: PUBLISHER_DID,
-      rkey,
-      title: item.title,
-      subtitle: item.subtitle ?? null,
-      originalLanguage: item.originalLanguage ?? null,
-      firstPublishedYear: item.firstPublishedYear ?? null,
-      subjects: item.subjects,
-      contributors: item.contributors,
-      identifiers: item.identifiers,
-      description: item.description ?? null,
-      createdAt: new Date(item.createdAt),
-    }).onConflictDoUpdate({
-      target: works.uri,
-      set: {
-        title: item.title,
-        subtitle: item.subtitle ?? null,
-        description: item.description ?? null,
-        identifiers: item.identifiers,
-        contributors: item.contributors,
-        indexedAt: new Date(),
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ stage: 'ingest-work', err }, 'ingest failed; writing to DLQ');
-    await writeIngestDLQ(`at://${PUBLISHER_DID}/community.lexicon.book.work/${rkeyForWork(olKeyFromIdentifiers(item.identifiers) ?? 'unknown')}`, item, message, helpers.job.attempts);
-  }
+  await ingestWorkBatch([payload as WorkItem], helpers.logger as unknown as Logger, helpers.job.attempts);
 };
 
 export const ingestContributorTask: Task = async (payload, helpers) => {
-  const item = payload as ContributorItem;
-  const log = helpers.logger as unknown as Logger;
+  await ingestContributorBatch([payload as ContributorItem], helpers.logger as unknown as Logger, helpers.job.attempts);
+};
+
+// -- batched handlers (single multi-row INSERT per call) --
+
+export const ingestEditionBatchTask: Task = async (payload, helpers) => {
+  const items = payload as EditionItem[];
+  await ingestEditionBatch(items, helpers.logger as unknown as Logger, helpers.job.attempts);
+};
+
+export const ingestWorkBatchTask: Task = async (payload, helpers) => {
+  const items = payload as WorkItem[];
+  await ingestWorkBatch(items, helpers.logger as unknown as Logger, helpers.job.attempts);
+};
+
+export const ingestContributorBatchTask: Task = async (payload, helpers) => {
+  const items = payload as ContributorItem[];
+  await ingestContributorBatch(items, helpers.logger as unknown as Logger, helpers.job.attempts);
+};
+
+async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: number): Promise<void> {
   try {
-    const olKey = olKeyFromIdentifiers(item.identifiers);
-    if (!olKey) {
-      log.warn({ stage: 'ingest-contributor' }, 'skipping item without openlibrary identifier');
-      return;
-    }
-    const rkey = rkeyForContributor(olKey);
-    const uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
-    const value = {
-      $type: 'community.lexicon.book.contributor' as const,
-      name: item.name,
-      aliases: item.aliases,
-      bio: item.bio ?? undefined,
-      bornYear: item.bornYear ?? undefined,
-      diedYear: item.diedYear ?? undefined,
-      linkedDid: item.linkedDid ?? undefined,
-      identifiers: item.identifiers,
-      createdAt: item.createdAt,
-    };
-    const cid = await cidForLex(value as unknown as LexMap);
-    await db.insert(contributors).values({
-      uri,
-      cid: cid.toString(),
-      did: PUBLISHER_DID,
-      rkey,
-      name: item.name,
-      aliases: item.aliases,
-      linkedDid: item.linkedDid ?? null,
-      bio: item.bio ?? null,
-      bornYear: item.bornYear ?? null,
-      diedYear: item.diedYear ?? null,
-      identifiers: item.identifiers,
-      createdAt: new Date(item.createdAt),
-    }).onConflictDoUpdate({
-      target: contributors.uri,
-      set: {
-        name: item.name,
-        aliases: item.aliases,
-        bio: item.bio ?? null,
+    const allRows: unknown[] = [];
+    for (const item of items) {
+      const olKey = olKeyFromIdentifiers(item.identifiers);
+      if (!olKey) continue;
+      const rkey = rkeyForEdition(olKey);
+      const uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
+      const value = {
+        $type: 'community.lexicon.book.edition' as const,
+        title: item.title,
+        subtitle: item.subtitle ?? undefined,
+        place: item.place ?? undefined,
+        publishedYear: item.publishedYear ?? undefined,
+        language: item.language ?? undefined,
+        coverImageUrl: item.coverImageUrl ?? undefined,
+        contributors: item.contributors,
         identifiers: item.identifiers,
+        description: item.description ?? undefined,
+        createdAt: item.createdAt,
+      };
+      const cid = await cidForLex(value as unknown as LexMap);
+      allRows.push({
+        uri,
+        cid: cid.toString(),
+        did: PUBLISHER_DID,
+        rkey,
+        title: item.title,
+        subtitle: item.subtitle ?? null,
+        place: item.place ?? null,
+        publishedYear: item.publishedYear ?? null,
+        language: item.language ?? null,
+        description: item.description ?? null,
+        coverImageUrl: item.coverImageUrl ?? null,
+        contributors: item.contributors,
+        identifiers: item.identifiers,
+        createdAt: new Date(item.createdAt),
+      });
+    }
+    if (allRows.length === 0) return;
+    await db.insert(editions).values(allRows as never).onConflictDoUpdate({
+      target: editions.uri,
+      set: {
+        title: editions.title,
+        subtitle: editions.subtitle,
+        description: editions.description,
+        coverImageUrl: editions.coverImageUrl,
+        identifiers: editions.identifiers,
+        contributors: editions.contributors,
         indexedAt: new Date(),
       },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.error({ stage: 'ingest-contributor', err }, 'ingest failed; writing to DLQ');
-    await writeIngestDLQ(`at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkeyForContributor(olKeyFromIdentifiers(item.identifiers) ?? 'unknown')}`, item, message, helpers.job.attempts);
+    log.error({ stage: 'ingest-edition-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
+    for (const item of items) {
+      const olKey = olKeyFromIdentifiers(item.identifiers);
+      const uri = olKey
+        ? `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkeyForEdition(olKey)}`
+        : 'at://unknown/community.lexicon.book.edition/unknown';
+      await writeIngestDLQ(uri, item, message, attempts);
+    }
   }
-};
+}
+
+async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number): Promise<void> {
+  try {
+    const allRows: unknown[] = [];
+    for (const item of items) {
+      const olKey = olKeyFromIdentifiers(item.identifiers);
+      if (!olKey) continue;
+      const rkey = rkeyForWork(olKey);
+      const uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
+      const value = {
+        $type: 'community.lexicon.book.work' as const,
+        title: item.title,
+        subtitle: item.subtitle ?? undefined,
+        originalLanguage: item.originalLanguage ?? undefined,
+        firstPublishedYear: item.firstPublishedYear ?? undefined,
+        subjects: item.subjects,
+        contributors: item.contributors,
+        identifiers: item.identifiers,
+        description: item.description ?? undefined,
+        createdAt: item.createdAt,
+      };
+      const cid = await cidForLex(value as unknown as LexMap);
+      allRows.push({
+        uri,
+        cid: cid.toString(),
+        did: PUBLISHER_DID,
+        rkey,
+        title: item.title,
+        subtitle: item.subtitle ?? null,
+        originalLanguage: item.originalLanguage ?? null,
+        firstPublishedYear: item.firstPublishedYear ?? null,
+        subjects: item.subjects,
+        contributors: item.contributors,
+        identifiers: item.identifiers,
+        description: item.description ?? null,
+        createdAt: new Date(item.createdAt),
+      });
+    }
+    if (allRows.length === 0) return;
+    await db.insert(works).values(allRows as never).onConflictDoUpdate({
+      target: works.uri,
+      set: {
+        title: works.title,
+        subtitle: works.subtitle,
+        description: works.description,
+        identifiers: works.identifiers,
+        contributors: works.contributors,
+        indexedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ stage: 'ingest-work-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
+    for (const item of items) {
+      const olKey = olKeyFromIdentifiers(item.identifiers);
+      const uri = olKey
+        ? `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkeyForWork(olKey)}`
+        : 'at://unknown/community.lexicon.book.work/unknown';
+      await writeIngestDLQ(uri, item, message, attempts);
+    }
+  }
+}
+
+async function ingestContributorBatch(items: ContributorItem[], log: Logger, attempts: number): Promise<void> {
+  try {
+    const allRows: unknown[] = [];
+    for (const item of items) {
+      const olKey = olKeyFromIdentifiers(item.identifiers);
+      if (!olKey) continue;
+      const rkey = rkeyForContributor(olKey);
+      const uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
+      const value = {
+        $type: 'community.lexicon.book.contributor' as const,
+        name: item.name,
+        aliases: item.aliases,
+        bio: item.bio ?? undefined,
+        bornYear: item.bornYear ?? undefined,
+        diedYear: item.diedYear ?? undefined,
+        linkedDid: item.linkedDid ?? undefined,
+        identifiers: item.identifiers,
+        createdAt: item.createdAt,
+      };
+      const cid = await cidForLex(value as unknown as LexMap);
+      allRows.push({
+        uri,
+        cid: cid.toString(),
+        did: PUBLISHER_DID,
+        rkey,
+        name: item.name,
+        aliases: item.aliases,
+        linkedDid: item.linkedDid ?? null,
+        bio: item.bio ?? null,
+        bornYear: item.bornYear ?? null,
+        diedYear: item.diedYear ?? null,
+        identifiers: item.identifiers,
+        createdAt: new Date(item.createdAt),
+      });
+    }
+    if (allRows.length === 0) return;
+    await db.insert(contributors).values(allRows as never).onConflictDoUpdate({
+      target: contributors.uri,
+      set: {
+        name: contributors.name,
+        aliases: contributors.aliases,
+        bio: contributors.bio,
+        identifiers: contributors.identifiers,
+        indexedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ stage: 'ingest-contributor-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
+    for (const item of items) {
+      const olKey = olKeyFromIdentifiers(item.identifiers);
+      const uri = olKey
+        ? `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkeyForContributor(olKey)}`
+        : 'at://unknown/community.lexicon.book.contributor/unknown';
+      await writeIngestDLQ(uri, item, message, attempts);
+    }
+  }
+}
+
+// -- TAP record handlers (unchanged) --
 
 export const tapRecordUpsertTask: Task = async (payload, helpers) => {
   const { uri, did, rkey, value } = payload as { uri: string; did: string; rkey: string; value: Record<string, unknown> };
@@ -264,6 +315,9 @@ export const searchTaskList: TaskList = {
   'ingest-edition': ingestEditionTask,
   'ingest-work': ingestWorkTask,
   'ingest-contributor': ingestContributorTask,
+  'ingest-edition-batch': ingestEditionBatchTask,
+  'ingest-work-batch': ingestWorkBatchTask,
+  'ingest-contributor-batch': ingestContributorBatchTask,
 };
 
 export const tapTaskList: TaskList = {
