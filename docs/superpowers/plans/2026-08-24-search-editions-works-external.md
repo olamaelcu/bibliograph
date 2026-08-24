@@ -689,13 +689,12 @@ git commit -m "feat(api): add Google Books enrichment for editions"
 
 ---
 
-## Task 5: Wikipedia wrapper (two exports)
-
+## Task 5: Wikipedia wrapper (two exports) (DONE — commit 58cf9b2)
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/wikipedia.ts`
 - Create: `packages/bibliograph-service/src/lib/server/api/wikipedia.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/wikipedia.test.ts
@@ -703,7 +702,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
 import { enrichContributorBios } from './wikipedia.ts';
-import type { ContributorItem, EditionItem } from '../search/types.ts';
+import type { ContributorItem } from '../search/types.ts';
 
 const log = pino({ level: 'silent' });
 
@@ -755,20 +754,20 @@ test('enrichContributorBios dedupes by name within a single call', async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/wikipedia.test.ts
 ```
 Expected: FAIL — `Cannot find module './wikipedia.ts'`.
 
-- [ ] **Step 3: Implement the wrapper**
+- [x] **Step 3: Implement the wrapper**
 
 ```ts
 // src/lib/server/api/wikipedia.ts
 import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout.ts';
-import type { ContributorItem, EditionItem, WorkItem, ContributionEntry } from '../search/types.ts';
+import type { ContributorItem, EditionItem, WorkItem } from '../search/types.ts';
 
 const BASE = 'https://en.wikipedia.org/w/api.php';
 
@@ -804,8 +803,6 @@ async function fetchExtracts(names: string[], log: Logger, signal?: AbortSignal)
   }
 }
 
-function uniq<T>(arr: T[]): T[] { return Array.from(new Set(arr)); }
-
 export async function enrichContributorBios(
   items: readonly ContributorItem[],
   log: Logger,
@@ -839,14 +836,14 @@ export async function enrichAuthorsOnWorksOrEditions(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/wikipedia.test.ts
 ```
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/wikipedia.ts \
