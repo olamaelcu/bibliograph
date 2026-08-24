@@ -20,3 +20,6 @@ data/
 # drizzle backups
 drizzle/meta/_journal.json.bak
 .cortexkit/
+
+# git worktrees
+.worktrees/
