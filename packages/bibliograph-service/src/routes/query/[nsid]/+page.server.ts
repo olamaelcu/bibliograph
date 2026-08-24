@@ -5,6 +5,7 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params }) => {
   const nsid = decodeURIComponent(params.nsid);
+  if (nsid.startsWith('com.atproto.')) error(404, `Unknown query: ${nsid}`);
   const schema = queryRegistry.get(nsid);
   if (!schema) error(404, `Unknown query: ${nsid}`);
 

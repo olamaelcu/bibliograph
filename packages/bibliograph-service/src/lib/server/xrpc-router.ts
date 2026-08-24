@@ -97,8 +97,12 @@ export const procedureRegistry = new Map<string, unknown>();
 const realAddQuery = router.addQuery.bind(router);
 router.addQuery = ((schema: unknown, opts: unknown) => {
   const nsid = (schema as { nsid?: string })?.nsid;
-  if (nsid) queryRegistry.set(nsid, schema);
-  endpointCounts.queries++;
+  // `com.atproto.*` is PDS infrastructure — keep the handler registered, but hide it
+  // from the public /queries listing, the compatibility endpoint, and endpoint counts.
+  if (nsid && !nsid.startsWith('com.atproto.')) {
+    queryRegistry.set(nsid, schema);
+    endpointCounts.queries++;
+  }
   return realAddQuery(schema as never, opts as never);
 }) as typeof router.addQuery;
 
@@ -106,8 +110,10 @@ const realAddProcedure = router.addProcedure?.bind(router);
 if (realAddProcedure) {
   router.addProcedure = ((schema: unknown, opts: unknown) => {
     const nsid = (schema as { nsid?: string })?.nsid;
-    if (nsid) procedureRegistry.set(nsid, schema);
-    endpointCounts.procedures++;
+    if (nsid && !nsid.startsWith('com.atproto.')) {
+      procedureRegistry.set(nsid, schema);
+      endpointCounts.procedures++;
+    }
     return realAddProcedure(schema as never, opts as never);
   }) as typeof router.addProcedure;
 }

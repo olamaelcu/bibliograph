@@ -5,6 +5,7 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params }) => {
   const nsid = decodeURIComponent(params.nsid);
+  if (nsid.startsWith('com.atproto.')) error(404, `Unknown procedure: ${nsid}`);
   const schema = procedureRegistry.get(nsid);
   if (!schema) error(404, `Unknown procedure: ${nsid}`);
 

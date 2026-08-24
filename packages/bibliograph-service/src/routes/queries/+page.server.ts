@@ -12,6 +12,7 @@ export const load: PageServerLoad = async () => {
         params: s.params ? summarizeSchema(s.params) : undefined,
       };
     })
+    .filter(({ nsid }) => !nsid.startsWith('com.atproto.'))
     .sort((a, b) => a.nsid.localeCompare(b.nsid));
   return { endpoints };
 };
