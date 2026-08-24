@@ -102,14 +102,16 @@ export function olKeyFromWorkIdentifiers(idents: ReadonlyArray<Identifier>): str
 }
 
 export function rkeyForWorkFromOlKey(olKey: string): string {
-  return `ol-work-${olKey.replace(OL_WORK_PREFIX, '')}`;
+  const olId = olKey.replace(OL_WORK_PREFIX, '');
+  return `ol.W${olId.slice(2)}`;
 }
 
 export function rkeyForSyntheticWork(editionUri: string): string {
-  // `synth-work-<editionRkey>` — distinct namespace from `ol-work-*`, so a
-  // later OL discovery never overwrites a synthetic record.
   const tail = editionUri.split('/').pop() ?? 'unknown';
-  return `synth-work-${tail}`;
+  if (tail.startsWith('ol.')) {
+    return `${tail}S`;
+  }
+  return `ol.${tail}S`;
 }
 
 export function workUriForRkey(rkey: string): string {
@@ -123,10 +125,11 @@ export function rkeyFromUri(uri: string): string {
 export function workRkeyFromEditionUri(editionUri: string): string {
   const editionRkey = rkeyFromUri(editionUri);
   if (editionRkey.startsWith('ol.')) {
-    const suffix = editionRkey.slice(3);
-    return `ol.W${suffix}`;
+    const olId = editionRkey.slice(3);
+    return `ol.W${olId.slice(2)}`;
   }
-  return `ol.W${editionRkey}`;
+  const olId = editionRkey.replace(/^OL/, '');
+  return `ol.W${olId}`;
 }
 
 export function synthesizeWorkFromEdition(edition: EditionRow, now: Date = new Date()): WorkItem {

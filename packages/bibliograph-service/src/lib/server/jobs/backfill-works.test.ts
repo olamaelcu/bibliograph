@@ -165,20 +165,20 @@ test('olKeyFromWorkIdentifiers ignores non-OL identifiers', () => {
   );
 });
 
-test('rkeyForWorkFromOlKey strips /works/ prefix', () => {
-  assert.equal(rkeyForWorkFromOlKey('/works/OL66554W'), 'ol-work-OL66554W');
+test('rkeyForWorkFromOlKey transforms OL key to rkey', () => {
+  assert.equal(rkeyForWorkFromOlKey('/works/OL66554W'), 'ol.W66554W');
 });
 
 test('rkeyForSyntheticWork is deterministic from edition URI', () => {
-  const uri = 'at://did:plc:user/community.lexicon.book.edition/rec-abc';
-  assert.equal(rkeyForSyntheticWork(uri), 'synth-work-rec-abc');
+  const uri = 'at://did:plc:user/community.lexicon.book.edition/ol.OL123M';
+  assert.equal(rkeyForSyntheticWork(uri), 'ol.OL123MS');
   assert.notEqual(rkeyForSyntheticWork(uri), rkeyForWorkFromOlKey('/works/OL1W'));
 });
 
 test('workUriForRkey uses PUBLISHER_DID', () => {
   assert.equal(
-    workUriForRkey('ol-work-OL1W'),
-    `at://${PUBLISHER_DID}/community.lexicon.book.work/ol-work-OL1W`,
+    workUriForRkey('ol.W66554W'),
+    `at://${PUBLISHER_DID}/community.lexicon.book.work/ol.W66554W`,
   );
 });
 

@@ -13,13 +13,16 @@ type Db = typeof defaultDb;
 const db: Db = defaultDb;
 
 function rkeyForEdition(olKey: string): string {
-  return `ol-edition-${olKey.replace(/^\/books\//, '')}`;
+  const olId = olKey.replace(/^\/books\//, '');
+  return `ol.${olId}`;
 }
 function rkeyForWork(olKey: string): string {
-  return `ol-work-${olKey.replace(/^\/works\//, '')}`;
+  const olId = olKey.replace(/^\/works\//, '');
+  return `ol.W${olId.slice(2)}`;
 }
 function rkeyForContributor(olKey: string): string {
-  return `ol-author-${olKey.replace(/^\/authors\//, '')}`;
+  const olId = olKey.replace(/^\/authors\//, '');
+  return `ol.A${olId.slice(2)}`;
 }
 
 function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {

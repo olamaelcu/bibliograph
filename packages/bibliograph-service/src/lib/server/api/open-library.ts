@@ -83,12 +83,14 @@ function makeEditionUri(key: string): string {
 
 function makeWorkUri(key: string): string {
   const olId = key.replace(/^\/works\//, '');
-  return `at://${PUBLISHER_DID}/community.lexicon.book.work/ol.${olId}`;
+  const rkey = `ol.W${olId.slice(2)}`;
+  return `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
 }
 
 function makeAuthorUri(key: string): string {
   const olId = key.replace(/^\/authors\//, '');
-  return `at://${PUBLISHER_DID}/community.lexicon.book.contributor/ol.${olId}`;
+  const rkey = `ol.A${olId.slice(2)}`;
+  return `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
 }
 
 export async function searchEditions(
