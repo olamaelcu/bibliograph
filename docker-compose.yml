@@ -24,11 +24,13 @@ services:
         condition: service_healthy
     ports:
       - "2480:2480"
+      - "2481:2481"
     environment:
       TAP_DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/bibliograph?sslmode=disable
       TAP_BIND: 0.0.0.0:2480
       TAP_COLLECTION_FILTERS: net.olamaelcu.livtet.biblio.*
       TAP_RELAY_URL: https://relay1.us-east.bsky.network
+      TAP_METRICS_LISTEN: 0.0.0.0:2481
     env_file:
       - .env
 
