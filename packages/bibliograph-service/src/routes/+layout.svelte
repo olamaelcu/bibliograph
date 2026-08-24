@@ -7,6 +7,7 @@
   import "@awesome.me/webawesome/dist/components/page/page.js";
   import "@awesome.me/webawesome/dist/components/badge/badge.js";
   import "@awesome.me/webawesome/dist/components/button/button.js";
+  import "@awesome.me/webawesome/dist/components/button-group/button-group.js";
   import "@awesome.me/webawesome/dist/components/callout/callout.js";
   import "@awesome.me/webawesome/dist/components/card/card.js";
   import "@awesome.me/webawesome/dist/components/copy-button/copy-button.js";
@@ -20,20 +21,25 @@
     { href: "/queries", label: "Queries" },
     { href: "/procedures", label: "Procedures" },
     { href: "/stats", label: "Stats" },
+    { href: "/search", label: "Search" },
     // { href: "/records", label: "Records" },
-    // { href: "/search", label: "Search" },
     // { href: "/examples", label: "Examples" },
   ];
 
   // A nav link is active when the current pathname equals its href OR
   // (for non-root links) starts with the href + '/'. Special aliases:
   // /query/... also highlights /queries; /procedure/... highlights
-  // /procedures (singular / plural mismatch).
+  // /procedures (singular / plural mismatch); the four detail-page kinds
+  // (/editions/, /works/, /contributors/, /publishers/) all highlight Search.
   function isActive(href: string, pathname: string): boolean {
     if (href === "/") return pathname === "/";
     if (pathname === href || pathname.startsWith(href + "/")) return true;
     if (href === "/queries" && pathname.startsWith("/query/")) return true;
     if (href === "/procedures" && pathname.startsWith("/procedure/")) return true;
+    if (href === "/search" && (
+      pathname.startsWith("/editions/") || pathname.startsWith("/works/") ||
+      pathname.startsWith("/contributors/") || pathname.startsWith("/publishers/")
+    )) return true;
     return false;
   }
 
