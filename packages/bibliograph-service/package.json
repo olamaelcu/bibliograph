@@ -12,6 +12,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "lex:gen": "lex-cli generate",
     "verify:lex": "tsx scripts/verify-resolver.ts",
+    "verify:server": "tsx --test scripts/verify-server.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },

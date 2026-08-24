@@ -7,7 +7,9 @@ import {
   ComAtprotoIdentityResolveIdentity,
   ComAtprotoRepoDescribeRepo,
   ComAtprotoRepoGetRecord,
+  ComAtprotoServerDescribeServer,
   ComAtprotoSyncGetBlocks,
+  ComAtprotoSyncGetLatestCommit,
   ComAtprotoSyncGetRecord,
   ComAtprotoSyncGetRepo,
   ComAtprotoSyncGetRepoStatus,
@@ -34,7 +36,7 @@ import { createLogger } from './logger';
 import { accessLog } from './access-log';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { decode as cborDecode } from '@atproto/lex-cbor';
-import { getDidDocument } from './did';
+import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
 
 const CURSOR_VERSION = 1;
 
@@ -228,6 +230,18 @@ const notFoundResponse = (error: string, message: string): Response =>
     headers: { 'content-type': 'application/json' },
   });
 
+async function readLatestCommit(): Promise<{ cid: string; rev: string } | null> {
+  const file = await readFullRepoCar();
+  if (!file) return null;
+  const parsed = await readCar(file.body);
+  const commitCid = parsed.roots[0];
+  if (!commitCid) return null;
+  const commitBytes = parsed.blocks.get(commitCid);
+  if (!commitBytes) return null;
+  const { obj: commit } = parseObjByDef(commitBytes, commitCid, def.commit);
+  return { cid: commitCid.toString(), rev: commit.rev };
+}
+
 router.addQuery(ComAtprotoIdentityResolveHandle.mainSchema, {
   async handler({ params }) {
     const id = resolveHandle(params.handle);
@@ -282,15 +296,37 @@ router.addQuery(ComAtprotoSyncGetRepo.mainSchema, {
 
 router.addQuery(ComAtprotoSyncGetRepoStatus.mainSchema, {
   async handler() {
-    const file = await readFullRepoCar();
-    if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
-    // Static-file publisher: the rev is derived deterministically from the lex set
-    // (see scripts/build-lex-repo.ts); the canonical lexicon resolver doesn't use this,
-    // so a placeholder rev here is fine.
+    const commit = await readLatestCommit();
+    if (!commit) return notFoundResponse('RepoNotFound', 'no full.car published yet');
     return json({
-      did: process.env.LEX_PUBLISHER_DID ?? 'did:web:biblio.livtet.olamaelcu.net',
-      rev: 'lib0000000000',
+      did: process.env.LEX_PUBLISHER_DID ?? PUBLISHER_DID,
+      rev: commit.rev,
     } as never);
+  },
+});
+
+router.addQuery(ComAtprotoServerDescribeServer.mainSchema, {
+  async handler() {
+    return json({
+      availableUserDomains: [PUBLISHER_HOSTNAME],
+      inviteCodeRequired: true,
+      did: PUBLISHER_DID,
+      links: {
+        privacyPolicy: 'https://livtet.olamaelcu.net/privacy',
+        termsOfService: 'https://livtet.olamaelcu.net/terms',
+      },
+    } as never);
+  },
+});
+
+router.addQuery(ComAtprotoSyncGetLatestCommit.mainSchema, {
+  async handler({ params }) {
+    if (!resolveDid(params.did)) {
+      return notFoundResponse('RepoNotFound', `repo "${params.did}" is not hosted`);
+    }
+    const commit = await readLatestCommit();
+    if (!commit) return notFoundResponse('RepoNotFound', 'no full.car published yet');
+    return json(commit as never);
   },
 });
 
