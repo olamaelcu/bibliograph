@@ -62,6 +62,12 @@ export interface SearchResult<T> {
   items: T[];
   cursor?: string;
   total?: number;
+  /**
+   * Set when an upstream call failed but partial data is still being returned.
+   * Lets the XRPC handler decide between 502 UpstreamUnavailable (total miss)
+   * and including the field in the body (degraded partial response).
+   */
+  degraded?: { upstream: 'openlibrary' | 'googlebooks' | 'wikipedia'; reason: string };
 }
 
 export interface SearchSource<T> {
