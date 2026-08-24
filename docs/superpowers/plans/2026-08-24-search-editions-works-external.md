@@ -1443,12 +1443,12 @@ git commit -m "feat(search): add SearchService orchestrator"
 
 ---
 
-## Task 13: Lex schema — shared `defs.json`
+## Task 13: Lex schema — shared `defs.json` (DONE — commit 2c69e43)
 
 **Files:**
 - Create: `packages/bibliograph-service/lexicons/community/lexicon/book/defs.json`
 
-- [ ] **Step 1: Write the file**
+- [x] **Step 1: Write the file**
 
 ```json
 {
@@ -1486,7 +1486,7 @@ git commit -m "feat(search): add SearchService orchestrator"
 }
 ```
 
-- [ ] **Step 2: Regenerate lex types**
+- [x] **Step 2: Regenerate lex types**
 
 From `packages/bibliograph-service`:
 
@@ -1502,7 +1502,7 @@ ls src/lib/server/lexicons/types/community/lexicon/book/
 
 Should now include `defs.ts`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/defs.json \
