@@ -30,7 +30,7 @@ Bibliograph reviews so they can appear to Bibliograph-powered applications.
 
 Information is sourced from a few places:
 
-- Book information is sourced from Google Books
+- Book information is sourced from OpenLibrary (works + editions APIs) with optional Google Books enrichment for descriptions and covers (requires `GOOGLE_BOOKS_API_KEY`)
 - Author information is _gleamed_ from Wikipedia and OpenLibrary
 
 [1]: https://atproto.com/guides/glossary#app-view
