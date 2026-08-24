@@ -40,6 +40,12 @@ import { pdsClient, resolvePds } from './pds/resolve.js';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { decode as cborDecode } from '@atproto/lex-cbor';
 import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
+import { PostgresSource } from './search/postgres-source.ts';
+import { OpenLibrarySource } from './search/open-library-source.ts';
+import { GoogleBooksEnricher } from './search/google-books-enricher.ts';
+import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher.ts';
+import { LocalPostgresIngestor } from './search/local-postgres-ingestor.ts';
+import { SearchService } from './search/service.ts';
 
 const CURSOR_VERSION = 1;
 
@@ -81,6 +87,24 @@ async function approxRowCount(whereClause: ReturnType<typeof sql> | undefined): 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
 
+const postgresSource = new PostgresSource(log);
+const openLibrarySource = new OpenLibrarySource(log);
+const googleBooksEnricher = new GoogleBooksEnricher();
+const authorWikipediaEnricher = new AuthorWikipediaEnricher();
+const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
+const localIngestor = new LocalPostgresIngestor(log);
+const searchService = new SearchService(
+  {
+    postgres: postgresSource,
+    openLibrary: openLibrarySource,
+    googleBooks: googleBooksEnricher,
+    authorWikipedia: authorWikipediaEnricher,
+    contributorWikipedia: contributorWikipediaEnricher,
+    ingestor: localIngestor,
+  },
+  log,
+);
+
 export const router = new XRPCRouter({
   middlewares: [accessLog(log), cors()],
   handleHealthCheck: async () => json({ status: 'ok' }),
@@ -120,62 +144,27 @@ if (realAddProcedure) {
 
 router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
   async handler({ params }) {
-    const limit = Math.min(params.limit ?? 20, 100);
-
-    const conds: ReturnType<typeof sql>[] = [];
-    if (params.q) {
-      // search_vector is added via custom migration (drizzle-kit ignores functional indexes)
-      conds.push(sql`${sql.raw('editions.search_vector')} @@ websearch_to_tsquery('english', ${params.q})`);
-    }
-    if (params.id) {
-      for (const id of params.id) {
-        conds.push(sql`${editions.identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
-      }
-    }
-
-    if (params.cursor) {
-      const c = decodeCursor(params.cursor);
-      if (c) {
-        const cursorClause = or(
-          sql`${editions.indexedAt} < ${c.indexedAt}`,
-          and(sql`${editions.indexedAt} = ${c.indexedAt}`, sql`${editions.uri} > ${c.uri}`),
-        );
-        if (cursorClause) conds.push(cursorClause);
-      }
-    }
-
-    const where = conds.length > 0 ? and(...conds) : undefined;
-
-    const [rows, total] = await Promise.all([
-      db
-        .select()
-        .from(editions)
-        .where(where)
-        .orderBy(desc(editions.indexedAt), asc(editions.uri))
-        .limit(limit),
-      approxRowCount(where),
-    ]);
-
-    const cursor =
-      rows.length === limit
-        ? encodeCursor(rows[rows.length - 1].indexedAt, rows[rows.length - 1].uri)
-        : undefined;
-
-    const items = rows.map((r) => ({
+    const result = await searchService.searchEditions({
+      q: params.q,
+      id: params.id,
+      limit: Math.min(params.limit ?? 20, 100),
+      cursor: params.cursor,
+    });
+    const items = result.items.map((r) => ({
       $type: 'community.lexicon.book.edition' as const,
       title: r.title,
-      subtitle: r.subtitle ?? undefined,
-      publisher: r.publisherUri && r.publisherCid ? { uri: r.publisherUri, cid: r.publisherCid } : undefined,
-      place: r.place ?? undefined,
-      publishedYear: r.publishedYear ?? undefined,
-      language: r.language ?? undefined,
+      subtitle: r.subtitle,
+      coverImageUrl: r.coverImageUrl,
+      publisher: undefined,
+      place: r.place,
+      publishedYear: r.publishedYear,
+      language: r.language,
       contributors: r.contributors,
       identifiers: r.identifiers,
-      description: r.description ?? undefined,
-      createdAt: r.createdAt.toISOString(),
+      description: r.description,
+      createdAt: r.createdAt,
     }));
-
-    return json({ items, cursor, total } as never);
+    return json({ items, cursor: result.cursor, total: result.total } as never);
   },
 });
 
