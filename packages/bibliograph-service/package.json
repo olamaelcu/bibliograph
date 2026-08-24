@@ -16,6 +16,7 @@
     "verify:server": "tsx --test scripts/verify-server.ts",
     "verify:tap-jobs": "tsx --test scripts/verify-tap-jobs.ts",
     "worker:search": "tsx worker-search-jobs.ts",
+    "backfill:works": "tsx scripts/backfill-works.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "lint": "eslint .",
