@@ -2183,7 +2183,7 @@ git commit -m "feat(xrpc): serve community.lexicon.book.* records from Postgres 
 
 ---
 
-## Task 22: Env config and README
+## Task 22: Env config and README (DONE — commit 42eee02)
 
 **Files:**
 - Modify: `packages/bibliograph-service/.env.example`
@@ -2200,12 +2200,12 @@ GOOGLE_BOOKS_API_KEY=
 ```
 
 - [ ] **Step 2: Update README's Material Discovery bullet**
-
+- [x] **Step 1: Add the env var to `.env.example`**
 Edit the Material Discovery section in `README.md`:
 
 Replace:
 ```
-- Book information is sourced from Google Books
+- [x] **Step 2: Update README's Material Discovery bullet**
 - Author information is _gleamed_ from Wikipedia and OpenLibrary
 ```
 
@@ -2214,7 +2214,7 @@ With:
 - Book information is sourced from OpenLibrary (works + editions APIs) with optional Google Books enrichment for descriptions and covers (requires `GOOGLE_BOOKS_API_KEY`)
 - Author information is _gleamed_ from Wikipedia and OpenLibrary
 ```
-
+- [x] **Step 3: Commit**
 - [ ] **Step 3: Commit**
 
 ```bash
