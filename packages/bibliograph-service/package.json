@@ -14,6 +14,8 @@
     "verify:lex": "tsx scripts/verify-resolver.ts",
     "verify:search": "tsx --test scripts/verify-search.ts",
     "verify:server": "tsx --test scripts/verify-server.ts",
+    "verify:tap-jobs": "tsx --test scripts/verify-tap-jobs.ts",
+    "worker:search": "tsx worker-search-jobs.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "lint": "eslint .",
