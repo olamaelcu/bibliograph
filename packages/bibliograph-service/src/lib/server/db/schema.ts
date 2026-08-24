@@ -69,6 +69,32 @@ export const works = pgTable(
   }),
 );
 
+export const contributors = pgTable(
+  'contributors',
+  {
+    uri: text('uri').primaryKey(),
+    cid: text('cid').notNull(),
+    did: text('did').notNull(),
+    rkey: text('rkey').notNull(),
+    name: text('name').notNull(),
+    aliases: jsonb('aliases').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    linkedDid: text('linked_did'),
+    bio: text('bio'),
+    bornYear: integer('born_year'),
+    diedYear: integer('died_year'),
+    identifiers: jsonb('identifiers')
+      .$type<Array<{ uri: string; resource: string }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    didIdx: index('contributors_did_idx').on(t.did),
+    indexedAtIdx: index('contributors_indexed_at_idx').on(t.indexedAt),
+  }),
+);
+
 export const publishers = pgTable(
   'publishers',
   {
@@ -116,5 +142,6 @@ export const records = pgTable(
 
 export type EditionRow = typeof editions.$inferSelect;
 export type WorkRow = typeof works.$inferSelect;
+export type ContributorRow = typeof contributors.$inferSelect;
 export type PublisherRow = typeof publishers.$inferSelect;
 export type RecordRow = typeof records.$inferSelect;
