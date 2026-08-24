@@ -35,7 +35,7 @@ import { createLogger } from './logger';
 import { accessLog } from './access-log';
 import { pdsClient, resolvePds } from './pds/resolve.js';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
-import { decode as cborDecode } from '@atproto/lex-cbor';
+import { cidForLex, decode as cborDecode } from '@atproto/lex-cbor';
 import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
 import { PostgresSource } from './search/postgres-source.ts';
 import { OpenLibrarySource } from './search/open-library-source.ts';
@@ -43,6 +43,9 @@ import { GoogleBooksEnricher } from './search/google-books-enricher.ts';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher.ts';
 import { LocalPostgresIngestor } from './search/local-postgres-ingestor.ts';
 import { SearchService } from './search/service.ts';
+import { eq } from 'drizzle-orm';
+import { db } from './db';
+import { editions, works, contributors } from './db/schema.ts';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -342,10 +345,82 @@ router.addQuery(ComAtprotoSyncGetBlocks.mainSchema, {
 // equivalent; this serves the record value as JSON {uri, cid, value} instead
 // of a CAR.
 
+async function serveBookRecordFromDb(
+  repo: string,
+  collection: string,
+  rkey: string,
+): Promise<Response> {
+  if (repo !== PUBLISHER_DID) {
+    return notFoundResponse('RecordNotFound', `repo "${repo}" not hosted`);
+  }
+  const uri = `at://${repo}/${collection}/${rkey}`;
+  if (collection === 'community.lexicon.book.edition') {
+    const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
+    if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
+    const value = {
+      $type: 'community.lexicon.book.edition',
+      title: row.title,
+      subtitle: row.subtitle ?? undefined,
+      place: row.place ?? undefined,
+      publishedYear: row.publishedYear ?? undefined,
+      language: row.language ?? undefined,
+      coverImageUrl: row.coverImageUrl ?? undefined,
+      contributors: row.contributors ?? [],
+      identifiers: row.identifiers ?? [],
+      description: row.description ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+    };
+    const cid = await cidForLex(value);
+    return json({ uri, cid: cid.toString(), value } as never);
+  }
+  if (collection === 'community.lexicon.book.work') {
+    const [row] = await db.select().from(works).where(eq(works.uri, uri)).limit(1);
+    if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
+    const value = {
+      $type: 'community.lexicon.book.work',
+      title: row.title,
+      subtitle: row.subtitle ?? undefined,
+      originalLanguage: row.originalLanguage ?? undefined,
+      firstPublishedYear: row.firstPublishedYear ?? undefined,
+      subjects: row.subjects ?? [],
+      contributors: row.contributors ?? [],
+      identifiers: row.identifiers ?? [],
+      description: row.description ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+    };
+    const cid = await cidForLex(value);
+    return json({ uri, cid: cid.toString(), value } as never);
+  }
+  // community.lexicon.book.contributor
+  const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
+  if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
+  const value = {
+    $type: 'community.lexicon.book.contributor',
+    name: row.name,
+    aliases: row.aliases ?? [],
+    bio: row.bio ?? undefined,
+    bornYear: row.bornYear ?? undefined,
+    diedYear: row.diedYear ?? undefined,
+    linkedDid: row.linkedDid ?? undefined,
+    identifiers: row.identifiers ?? [],
+    createdAt: row.createdAt.toISOString(),
+  };
+  const cid = await cidForLex(value);
+  return json({ uri, cid: cid.toString(), value } as never);
+}
+
 router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
   async handler({ params }) {
     if (!resolveDid(params.repo)) {
       return notFoundResponse('RepoNotFound', `repo "${params.repo}" is not hosted`);
+    }
+    const BOOK_COLLECTIONS = new Set([
+      'community.lexicon.book.edition',
+      'community.lexicon.book.work',
+      'community.lexicon.book.contributor',
+    ]);
+    if (BOOK_COLLECTIONS.has(params.collection)) {
+      return await serveBookRecordFromDb(params.repo, params.collection, params.rkey);
     }
     if (params.collection !== LEX_COLLECTION) {
       return notFoundResponse('RecordNotFound', `collection "${params.collection}" not served`);
