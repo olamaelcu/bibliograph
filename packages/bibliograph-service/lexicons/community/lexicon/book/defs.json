@@ -1,0 +1,33 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.book.defs",
+  "defs": {
+    "contribution": {
+      "type": "object",
+      "required": ["subject", "role"],
+      "properties": {
+        "subject": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+        "role": {
+          "type": "string",
+          "knownValues": ["author", "coAuthor", "editor", "translator", "illustrator", "narrator", "foreword", "contributor"]
+        }
+      }
+    },
+    "identifier": {
+      "type": "object",
+      "required": ["uri", "resource"],
+      "properties": {
+        "uri": { "type": "string", "format": "uri", "minLength": 1, "maxLength": 2048 },
+        "resource": {
+          "type": "string",
+          "knownValues": [
+            "isbn", "isbn13", "isbn10", "asin", "doi", "oclc", "isbnPrefix",
+            "isni", "viaf", "wikidata", "openlibrary", "googleBooks",
+            "goodreads", "amazon", "barnes", "hardcover", "bookhive",
+            "bibliograph", "imdb", "official", "web"
+          ]
+        }
+      }
+    }
+  }
+}
