@@ -19,6 +19,7 @@
     { href: "/", label: "Home" },
     { href: "/queries", label: "Queries" },
     { href: "/procedures", label: "Procedures" },
+    { href: "/stats", label: "Stats" },
     // { href: "/records", label: "Records" },
     // { href: "/search", label: "Search" },
     // { href: "/examples", label: "Examples" },
