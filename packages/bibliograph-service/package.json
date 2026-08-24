@@ -36,10 +36,12 @@
     "@lit-labs/ssr": "^4.1.0",
     "@lit-labs/ssr-client": "^1.1.8",
     "drizzle-orm": "^0.45.2",
+    "graphile-worker": "^0.17.3",
     "happy-dom": "^20.11.6",
     "pg": "^8.23.0",
     "pino": "^9.5.0",
     "pino-pretty": "^11.3.0",
+    "prom-client": "^15.1.3",
     "tsx": "^4.23.12",
     "valibot": "^1.4.2"
   },
