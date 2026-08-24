@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: bibliograph-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:5000"]
+        labels:
+          service: bibliograph
+
+  - job_name: tap
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["tap:2481"]
+        labels:
+          service: tap
