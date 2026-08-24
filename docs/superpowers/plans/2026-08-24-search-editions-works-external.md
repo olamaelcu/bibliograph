@@ -45,13 +45,13 @@
 
 ---
 
-## Task 1: Shared upstream timeout constant (DONE — commit 8040fb2)
+## Task 1: Shared upstream timeout constant
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/timeout.ts`
 - Test: `packages/bibliograph-service/src/lib/server/api/timeout.test.ts`
 
-- [x] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/timeout.test.ts
@@ -64,7 +64,7 @@ test('UPSTREAM_TIMEOUT_MS is 10_000', () => {
 });
 ```
 
-- [x] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 Run from `packages/bibliograph-service`:
 ```bash
@@ -72,7 +72,7 @@ pnpm exec tsx --test src/lib/server/api/timeout.test.ts
 ```
 Expected: FAIL — `Cannot find module './timeout.ts'`.
 
-- [x] **Step 3: Implement the constant**
+- [ ] **Step 3: Implement the constant**
 
 ```ts
 // src/lib/server/api/timeout.ts
@@ -83,14 +83,14 @@ Expected: FAIL — `Cannot find module './timeout.ts'`.
 export const UPSTREAM_TIMEOUT_MS = 10_000;
 ```
 
-- [x] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/timeout.test.ts
 ```
 Expected: PASS, 1 test.
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/timeout.ts \
@@ -100,13 +100,13 @@ git commit -m "feat(search): add UPSTREAM_TIMEOUT_MS shared constant"
 
 ---
 
-## Task 2: Search types module (interfaces + item shapes) (DONE — commit 03212b8)
+## Task 2: Search types module (interfaces + item shapes)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/types.ts`
 - Test: `packages/bibliograph-service/src/lib/server/search/types.test.ts`
 
-- [x] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/search/types.test.ts
@@ -149,14 +149,14 @@ test('EditionItem fields exist on type', () => {
 });
 ```
 
-- [x] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/search/types.test.ts
 ```
-Expected: FAIL — `Cannot find module './types.ts'`. (In practice the test imports `from './types.ts'` only via `import type`, which `tsx --test` erases at runtime — the test type-checks against tsc but never resolves the module. Step 4 still meaningfully validates the contracts.)
+Expected: FAIL — `Cannot find module './types.ts'`.
 
-- [x] **Step 3: Implement the types module**
+- [ ] **Step 3: Implement the types module**
 
 ```ts
 // src/lib/server/search/types.ts
@@ -242,29 +242,30 @@ export interface Ingestor<T> {
 }
 ```
 
-- [x] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/search/types.test.ts
 ```
 Expected: PASS, 4 tests.
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/types.ts \
         packages/bibliograph-service/src/lib/server/search/types.test.ts
 git commit -m "feat(search): add strategy interfaces and item types"
 ```
+
 ---
 
-## Task 3: OpenLibrary `searchEditions` wrapper (DONE — commit a1782c0)
+## Task 3: OpenLibrary `searchEditions` wrapper
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/open-library.ts`
 - Create: `packages/bibliograph-service/src/lib/server/api/open-library.test.ts`
 
-- [x] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/open-library.test.ts
@@ -320,14 +321,14 @@ test('searchEditions propagates 4xx as error log + empty result', async () => {
 });
 ```
 
-- [x] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/open-library.test.ts
 ```
 Expected: FAIL — `Cannot find module './open-library.ts'`.
 
-- [x] **Step 3: Implement the wrapper**
+- [ ] **Step 3: Implement the wrapper**
 
 ```ts
 // src/lib/server/api/open-library.ts
@@ -335,10 +336,11 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout.ts';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types.ts';
 
+const BASE = 'https://openlibrary.org/search.json';
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
 function buildUrl(q: string | undefined, type: 'edition' | 'work' | 'author', limit: number, page: number): string {
-  const u = new URL('https://openlibrary.org/search.json');
+  const u = new URL(BASE);
   if (q) u.searchParams.set('q', q);
   u.searchParams.set('type', type);
   u.searchParams.set('limit', String(limit));
@@ -370,11 +372,11 @@ interface OlSearchResponse<T> {
   docs?: T[];
 }
 
-interface OlEditionDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; publish_year?: number[]; place?: string[]; language?: string[]; isbn?: string[]; cover_i?: number; description?: string | { value: string }; }
+interface OlEditionDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; publish_year?: number[]; place?: string[]; language?: string[]; isbn?: string[]; cover_i?: number; description?: string | { value: string }; number_of_pages_median?: number; }
 interface OlWorkDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; original_languages?: string[]; subject?: string[]; description?: string | { value: string }; cover_i?: number; }
 interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
 
-function coverUrl(coverId: number | undefined): string | undefined {
+function coverUrl(coverId: number | undefined, kind: 'books' | 'works' | 'authors'): string | undefined {
   if (coverId === undefined) return undefined;
   return `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
 }
@@ -391,13 +393,6 @@ function yearFromDate(d: string | undefined): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
-function isbnResource(isbn: string): 'isbn13' | 'isbn10' | 'isbn' {
-  const cleaned = isbn.replace(/-/g, '');
-  if (cleaned.length === 13) return 'isbn13';
-  if (cleaned.length === 10) return 'isbn10';
-  return 'isbn';
-}
-
 function makeOlIdentifier(key: string): Identifier {
   return { uri: `https://openlibrary.org${key}`, resource: 'openlibrary' };
 }
@@ -408,15 +403,14 @@ export async function searchEditions(
   externalSignal?: AbortSignal,
 ): Promise<SearchResult<EditionItem>> {
   const limit = query.limit;
-  const page = 1;
+  const page = 1; // cursor-driven pagination comes via searchService in a follow-up
   const url = buildUrl(query.q, 'edition', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
   if (!data) return { items: [] };
-  const createdAt = new Date().toISOString();
-  const items: EditionItem[] = (data.docs ?? []).map((d) => {
+  const items: EditionItem[] = (data.docs ?? ?? []).map((d) => {
     const identifiers: Identifier[] = [makeOlIdentifier(d.key)];
-    if (d.isbn) for (const i of d.isbn.slice(0, 5)) identifiers.push({ uri: `isbn:${i}`, resource: isbnResource(i) });
+    if (d.isbn) for (const i of d.isbn.slice(0, 5)) identifiers.push({ uri: `isbn:${i}`, resource: 'isbn13' });
     const year = d.first_publish_year ?? d.publish_year?.[0];
     return {
       title: d.title,
@@ -425,13 +419,14 @@ export async function searchEditions(
       place: d.place?.[0],
       language: d.language?.[0],
       description: extractDescription(d.description),
-      coverImageUrl: coverUrl(d.cover_i),
+      coverImageUrl: coverUrl(d.cover_i, 'books'),
       identifiers,
       contributors: [],
-      createdAt,
+      createdAt: new Date().toISOString(),
     };
   });
-  return { items, total: data.numFound }; // cursor deferred to orchestrator
+  const total = data.numFound;
+  return { items, total };
 }
 
 export async function searchWorks(
@@ -445,8 +440,7 @@ export async function searchWorks(
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlWorkDoc>>(url, log, signal);
   if (!data) return { items: [] };
-  const createdAt = new Date().toISOString();
-  const items: WorkItem[] = (data.docs ?? []).map((d) => ({
+  const items: WorkItem[] = (data.docs ?? ?? []).map((d) => ({
     title: d.title,
     subtitle: d.subtitle,
     firstPublishedYear: d.first_publish_year,
@@ -455,9 +449,9 @@ export async function searchWorks(
     description: extractDescription(d.description),
     contributors: [],
     identifiers: [makeOlIdentifier(d.key)],
-    createdAt,
+    createdAt: new Date().toISOString(),
   }));
-  return { items, total: data.numFound }; // cursor deferred to orchestrator
+  return { items, total: data.numFound };
 }
 
 export async function searchContributors(
@@ -471,8 +465,7 @@ export async function searchContributors(
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlAuthorDoc>>(url, log, signal);
   if (!data) return { items: [] };
-  const createdAt = new Date().toISOString();
-  const items: ContributorItem[] = (data.docs ?? []).map((d) => {
+  const items: ContributorItem[] = (data.docs ?? ?? []).map((d) => {
     const aliases = d.alternate_names ?? [];
     return {
       name: d.name,
@@ -480,43 +473,37 @@ export async function searchContributors(
       bornYear: yearFromDate(d.birth_date),
       diedYear: yearFromDate(d.death_date),
       identifiers: [makeOlIdentifier(d.key)],
-      createdAt,
+      createdAt: new Date().toISOString(),
     };
   });
-  return { items, total: data.numFound }; // cursor deferred to orchestrator
+  return { items, total: data.numFound };
 }
 ```
 
-- [x] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/open-library.test.ts
 ```
 Expected: PASS, 3 tests.
 
-NOTE: The plan as written had `assert.ok(result.cursor)` in test 2, but the implementation now returns `cursor: undefined` (deferred to orchestrator). Update the test to:
-```ts
-assert.equal(result.cursor, undefined, 'cursor is deferred to the orchestrator');
-```
-
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/open-library.ts \
         packages/bibliograph-service/src/lib/server/api/open-library.test.ts
 git commit -m "feat(api): add OpenLibrary search wrappers for editions/works/contributors"
 ```
-(Plus fixup commit `a1782c0`: `fix(api): strip placeholder cursor and dead coverUrl kind param`)
 
 ---
 
-## Task 4: Google Books enrichment wrapper (DONE — commit 0c85e1d)
+## Task 4: Google Books enrichment wrapper
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/google-books.ts`
 - Create: `packages/bibliograph-service/src/lib/server/api/google-books.test.ts`
 
-- [x] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/google-books.test.ts
@@ -585,14 +572,14 @@ test('enrichEditions no-ops when GOOGLE_BOOKS_API_KEY is missing', async () => {
 });
 ```
 
-- [x] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/google-books.test.ts
 ```
 Expected: FAIL — `Cannot find module './google-books.ts'`.
 
-- [x] **Step 3: Implement the wrapper**
+- [ ] **Step 3: Implement the wrapper**
 
 ```ts
 // src/lib/server/api/google-books.ts
@@ -672,14 +659,14 @@ export async function enrichEditions(
 }
 ```
 
-- [x] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/google-books.test.ts
 ```
 Expected: PASS, 3 tests.
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/google-books.ts \
@@ -689,12 +676,13 @@ git commit -m "feat(api): add Google Books enrichment for editions"
 
 ---
 
-## Task 5: Wikipedia wrapper (two exports) (DONE — commit 58cf9b2)
+## Task 5: Wikipedia wrapper (two exports)
+
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/wikipedia.ts`
 - Create: `packages/bibliograph-service/src/lib/server/api/wikipedia.test.ts`
 
-- [x] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/wikipedia.test.ts
@@ -702,7 +690,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
 import { enrichContributorBios } from './wikipedia.ts';
-import type { ContributorItem } from '../search/types.ts';
+import type { ContributorItem, EditionItem } from '../search/types.ts';
 
 const log = pino({ level: 'silent' });
 
@@ -754,20 +742,20 @@ test('enrichContributorBios dedupes by name within a single call', async () => {
 });
 ```
 
-- [x] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/wikipedia.test.ts
 ```
 Expected: FAIL — `Cannot find module './wikipedia.ts'`.
 
-- [x] **Step 3: Implement the wrapper**
+- [ ] **Step 3: Implement the wrapper**
 
 ```ts
 // src/lib/server/api/wikipedia.ts
 import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout.ts';
-import type { ContributorItem, EditionItem, WorkItem } from '../search/types.ts';
+import type { ContributorItem, EditionItem, WorkItem, ContributionEntry } from '../search/types.ts';
 
 const BASE = 'https://en.wikipedia.org/w/api.php';
 
@@ -803,6 +791,8 @@ async function fetchExtracts(names: string[], log: Logger, signal?: AbortSignal)
   }
 }
 
+function uniq<T>(arr: T[]): T[] { return Array.from(new Set(arr)); }
+
 export async function enrichContributorBios(
   items: readonly ContributorItem[],
   log: Logger,
@@ -836,14 +826,14 @@ export async function enrichAuthorsOnWorksOrEditions(
 }
 ```
 
-- [x] **Step 4: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/wikipedia.test.ts
 ```
 Expected: PASS, 3 tests.
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/wikipedia.ts \
@@ -853,12 +843,12 @@ git commit -m "feat(api): add Wikipedia enrichment wrappers"
 
 ---
 
-## Task 6: Drizzle migration — add `cover_image_url` to `editions` (DONE — commit 48fa670)
+## Task 6: Drizzle migration — add `cover_image_url` to `editions`
 
 **Files:**
 - Create: `packages/bibliograph-service/drizzle/0002_discovery_columns.sql`
 
-- [x] **Step 1: Write the migration**
+- [ ] **Step 1: Write the migration**
 
 ```sql
 -- drizzle/0002_discovery_columns.sql
@@ -867,7 +857,7 @@ git commit -m "feat(api): add Wikipedia enrichment wrappers"
 ALTER TABLE "editions" ADD COLUMN "cover_image_url" text;
 ```
 
-- [x] **Step 2: Update the drizzle schema to reflect the new column**
+- [ ] **Step 2: Update the drizzle schema to reflect the new column**
 
 Edit `packages/bibliograph-service/src/lib/server/db/schema.ts`. Inside the `editions` table object literal, add one column (alongside the other column declarations):
 
@@ -877,7 +867,7 @@ coverImageUrl: text('cover_image_url'),
 
 Add it right after the `description: text('description'),` line (matches the SQL column order).
 
-- [x] **Step 3: Apply migration locally**
+- [ ] **Step 3: Apply migration locally**
 
 With the Postgres container running (`mise run containers` or `docker compose up -d`), from `packages/bibliograph-service`:
 
@@ -890,7 +880,7 @@ Expected output:
 ALTER TABLE
 ```
 
-- [x] **Step 4: Verify the column exists**
+- [ ] **Step 4: Verify the column exists**
 
 ```bash
 psql "$DATABASE_URL" -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'editions' AND column_name = 'cover_image_url';"
@@ -903,7 +893,7 @@ Expected output:
  cover_image_url  | text
 ```
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/drizzle/0002_discovery_columns.sql \
@@ -913,28 +903,18 @@ git commit -m "feat(db): add cover_image_url column to editions"
 
 ---
 
-## Task 7: PostgresSource<T> (DONE — commits ba90cea + 3006b92 + aa66597)
+## Task 7: PostgresSource<T>
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/postgres-source.ts`
-- Modify: `packages/bibliograph-service/src/lib/server/db/schema.ts` (added missing `contributors` pgTable — gap in original plan)
-- Create: `packages/bibliograph-service/src/lib/server/search/postgres-source.test.ts`
 
-The implementation as committed differs from the original plan in two respects:
-
-1. **v1 cursor back-compat (commit `aa66597`)**: `PostgresCursor.v` is `1 | 2` (not just `2`), and `decodeCursor` accepts both. This matches the spec design doc's back-compat contract for in-flight v1 cursors from the old `xrpc-router.ts` cursor path.
-2. **Shared `runSearch` helper (commit `aa66597`)**: The three public methods are now one-line delegations to a private `runSearch<TItem>(table, qColumn, mapRow, query, kind)` that handles conds-building, where-clause assembly, row fetching, cursor encode, and the unified `log.info({ stage: 'postgres-source', kind, items: N, did: PUBLISHER_DID })` line. Per-table row mappers (`mapEditionRow`/`mapWorkRow`/`mapContributorRow`) are private methods.
-
-The constructor signature also accepts an optional `db` arg (default `defaultDb`) so the unit test can inject a fake.
-
-- [x] **Step 1: Write the implementation**
+- [ ] **Step 1: Write the implementation**
 
 ```ts
 // src/lib/server/search/postgres-source.ts
 import type { Logger } from 'pino';
-import { and, asc, desc, or, sql } from 'drizzle-orm';
-import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
-import { db as defaultDb, type Db } from '../db/index.ts';
+import { and, asc, desc, or, sql, ilike } from 'drizzle-orm';
+import { db } from '../db/index.ts';
 import { editions, works, contributors } from '../db/schema.ts';
 import { PUBLISHER_DID } from '../did.ts';
 import type {
@@ -949,7 +929,7 @@ import type {
 
 const CURSOR_VERSION = 2;
 
-type PostgresCursor = { v: 1 | 2; src: 'postgres'; t: string; u: string };
+type PostgresCursor = { v: 2; src: 'postgres'; t: string; u: string };
 
 function encodeCursor(indexedAt: Date, uri: string): string {
   return Buffer.from(JSON.stringify({ v: CURSOR_VERSION, src: 'postgres', t: indexedAt.toISOString(), u: uri } satisfies PostgresCursor)).toString('base64url');
@@ -958,7 +938,7 @@ function encodeCursor(indexedAt: Date, uri: string): string {
 function decodeCursor(cursor: string): PostgresCursor | null {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString());
-    if ((parsed.v !== 1 && parsed.v !== 2) || parsed.src !== 'postgres') return null;
+    if (parsed.v !== CURSOR_VERSION || parsed.src !== 'postgres') return null;
     return parsed as PostgresCursor;
   } catch { return null; }
 }
@@ -972,54 +952,21 @@ function identFromJson(i: { uri: string; resource: string }): Identifier {
 }
 
 export class PostgresSource {
-  constructor(private readonly log: Logger, private readonly db: Db = defaultDb) {}
+  constructor(private readonly log: Logger) {}
 
-  searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
-    return this.runSearch(editions, editions.title, this.mapEditionRow, query, 'edition');
-  }
-
-  searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
-    return this.runSearch(works, works.title, this.mapWorkRow, query, 'work');
-  }
-
-  searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
-    return this.runSearch(contributors, contributors.name, this.mapContributorRow, query, 'contributor');
-  }
-
-  private async runSearch<TItem extends { identifiers?: Identifier[]; contributors?: ContributionEntry[] }>(
-    table: PgTable,
-    qColumn: PgColumn,
-    mapRow: (row: any) => TItem,
-    query: SearchQuery,
-    kind: 'edition' | 'work' | 'contributor',
-  ): Promise<SearchResult<TItem>> {
+  async searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
     const conds: ReturnType<typeof sql>[] = [];
-    if (query.q) conds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
-    if (query.id) {
-      const identifiers = (table as any).identifiers as PgColumn;
-      for (const id of query.id) conds.push(sql`${identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
-    }
+    if (query.q) conds.push(sql`${editions.title} ILIKE ${'%' + query.q + '%'}`);
+    if (query.id) for (const id of query.id) conds.push(sql`${editions.identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
     if (query.cursor) {
       const c = decodeCursor(query.cursor);
       if (c) {
-        const indexedAt = (table as any).indexedAt as PgColumn;
-        const uri = (table as any).uri as PgColumn;
-        conds.push(or(sql`${indexedAt} < ${new Date(c.t)}`, and(sql`${indexedAt} = ${new Date(c.t)}`, sql`${uri} > ${c.u}`))!);
+        conds.push(or(sql`${editions.indexedAt} < ${new Date(c.t)}`, and(sql`${editions.indexedAt} = ${new Date(c.t)}`, sql`${editions.uri} > ${c.u}`))!);
       }
     }
     const where = conds.length > 0 ? and(...conds) : undefined;
-    const indexedAt = (table as any).indexedAt as PgColumn;
-    const uri = (table as any).uri as PgColumn;
-    const base = this.db.select().from(table);
-    const rows: any[] = await (where !== undefined ? base.where(where) : base).orderBy(desc(indexedAt), asc(uri)).limit(query.limit);
-    const items = rows.map(mapRow);
-    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
-    this.log.info({ stage: 'postgres-source', kind, items: items.length, did: PUBLISHER_DID }, 'postgres ok');
-    return { items, cursor };
-  }
-
-  private mapEditionRow(r: any): EditionItem {
-    return {
+    const rows = await db.select().from(editions).where(where).orderBy(desc(editions.indexedAt), asc(editions.uri)).limit(query.limit);
+    const items: EditionItem[] = rows.map((r) => ({
       uri: r.uri,
       title: r.title,
       subtitle: r.subtitle ?? undefined,
@@ -1031,35 +978,94 @@ export class PostgresSource {
       identifiers: (r.identifiers ?? []).map(identFromJson),
       contributors: (r.contributors ?? []).map(contributionFromJson),
       createdAt: r.createdAt.toISOString(),
-    };
+    }));
+    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
+    this.log.info({ stage: 'postgres-source', kind: 'edition', items: items.length, did: PUBLISHER_DID }, 'postgres ok');
+    return { items, cursor };
   }
 
-  private mapWorkRow(r: any): WorkItem { /* … */ }
-  private mapContributorRow(r: any): ContributorItem { /* … */ }
+  async searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
+    const conds: ReturnType<typeof sql>[] = [];
+    if (query.q) conds.push(sql`${works.title} ILIKE ${'%' + query.q + '%'}`);
+    if (query.id) for (const id of query.id) conds.push(sql`${works.identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
+    if (query.cursor) {
+      const c = decodeCursor(query.cursor);
+      if (c) {
+        conds.push(or(sql`${works.indexedAt} < ${new Date(c.t)}`, and(sql`${works.indexedAt} = ${new Date(c.t)}`, sql`${works.uri} > ${c.u}`))!);
+      }
+    }
+    const where = conds.length > 0 ? and(...conds) : undefined;
+    const rows = await db.select().from(works).where(where).orderBy(desc(works.indexedAt), asc(works.uri)).limit(query.limit);
+    const items: WorkItem[] = rows.map((r) => ({
+      uri: r.uri,
+      title: r.title,
+      subtitle: r.subtitle ?? undefined,
+      originalLanguage: r.originalLanguage ?? undefined,
+      firstPublishedYear: r.firstPublishedYear ?? undefined,
+      subjects: r.subjects ?? [],
+      description: r.description ?? undefined,
+      identifiers: (r.identifiers ?? []).map(identFromJson),
+      contributors: (r.contributors ?? []).map(contributionFromJson),
+      createdAt: r.createdAt.toISOString(),
+    }));
+    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
+    this.log.info({ stage: 'postgres-source', kind: 'work', items: items.length }, 'postgres ok');
+    return { items, cursor };
+  }
+
+  async searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
+    const conds: ReturnType<typeof sql>[] = [];
+    if (query.q) conds.push(sql`${contributors.name} ILIKE ${'%' + query.q + '%'}`);
+    if (query.id) for (const id of query.id) conds.push(sql`${contributors.identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
+    if (query.cursor) {
+      const c = decodeCursor(query.cursor);
+      if (c) {
+        conds.push(or(sql`${contributors.indexedAt} < ${new Date(c.t)}`, and(sql`${contributors.indexedAt} = ${new Date(c.t)}`, sql`${contributors.uri} > ${c.u}`))!);
+      }
+    }
+    const where = conds.length > 0 ? and(...conds) : undefined;
+    const rows = await db.select().from(contributors).where(where).orderBy(desc(contributors.indexedAt), asc(contributors.uri)).limit(query.limit);
+    const items: ContributorItem[] = rows.map((r) => ({
+      uri: r.uri,
+      name: r.name,
+      aliases: r.aliases ?? [],
+      bio: r.bio ?? undefined,
+      bornYear: r.bornYear ?? undefined,
+      diedYear: r.diedYear ?? undefined,
+      linkedDid: r.linkedDid ?? undefined,
+      identifiers: (r.identifiers ?? []).map(identFromJson),
+      createdAt: r.createdAt.toISOString(),
+    }));
+    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
+    this.log.info({ stage: 'postgres-source', kind: 'contributor', items: items.length }, 'postgres ok');
+    return { items, cursor };
+  }
 }
 ```
 
-- [x] **Step 2: Run typecheck**
+- [ ] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
-Expected: no new semantic errors (the `.ts` import-extension count grows; same pattern as sibling files).
 
-- [x] **Step 3: Commit**
+Expected: no errors introduced by this file.
 
-Three commits in order:
-- `ba90cea` — `feat(db): add contributors table to schema.ts` (gap fix)
-- `3006b92` — `feat(search): add PostgresSource for editions/works/contributors`
-- `aa66597` — `refactor(search): collapse PostgresSource methods, fix v1 cursor back-compat, add unit test`
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/bibliograph-service/src/lib/server/search/postgres-source.ts
+git commit -m "feat(search): add PostgresSource for editions/works/contributors"
+```
+
 ---
 
 ## Task 8: OpenLibrarySource (wraps the API wrapper)
 
-## Task 8: OpenLibrarySource (wraps the API wrapper) (DONE — commit 85556d5)
+**Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/open-library-source.ts`
 
-- [x] **Step 1: Implement**
+- [ ] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/open-library-source.ts
@@ -1082,7 +1088,7 @@ export class OpenLibrarySource {
 }
 ```
 
-- [x] **Step 2: Run typecheck**
+- [ ] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1090,7 +1096,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [x] **Step 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/open-library-source.ts
@@ -1099,12 +1105,12 @@ git commit -m "feat(search): add OpenLibrarySource wrapping the api wrapper"
 
 ---
 
-## Task 9: GoogleBooksEnricher (DONE — commit fcdb580)
+## Task 9: GoogleBooksEnricher
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/google-books-enricher.ts`
 
-- [x] **Step 1: Implement**
+- [ ] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/google-books-enricher.ts
@@ -1114,13 +1120,14 @@ import type { EditionItem, Enricher } from './types.ts';
 
 export class GoogleBooksEnricher implements Enricher<EditionItem> {
   readonly name = 'google-books-enricher';
-  enrich(items: EditionItem[], log: Logger, signal?: AbortSignal): Promise<EditionItem[]> {
-    return googleBooks.enrichEditions(items, log, signal);
+  constructor(private readonly log: Logger) {}
+  enrich(items: EditionItem[], signal?: AbortSignal): Promise<EditionItem[]> {
+    return googleBooks.enrichEditions(items, this.log, signal);
   }
 }
 ```
 
-- [x] **Step 2: Run typecheck**
+- [ ] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1128,7 +1135,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [x] **Step 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/google-books-enricher.ts
@@ -1137,12 +1144,12 @@ git commit -m "feat(search): add GoogleBooksEnricher"
 
 ---
 
-## Task 10: WikipediaEnricher (two classes) (DONE — commit 8a862a3)
+## Task 10: WikipediaEnricher (two classes)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/wikipedia-enricher.ts`
 
-- [x] **Step 1: Implement**
+- [ ] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/wikipedia-enricher.ts
@@ -1152,20 +1159,22 @@ import type { ContributorItem, EditionItem, WorkItem, Enricher } from './types.t
 
 export class ContributorWikipediaEnricher implements Enricher<ContributorItem> {
   readonly name = 'wikipedia-enricher-contributor';
-  enrich(items: ContributorItem[], log: Logger, signal?: AbortSignal): Promise<ContributorItem[]> {
-    return wikipedia.enrichContributorBios(items, log, signal);
+  constructor(private readonly log: Logger) {}
+  enrich(items: ContributorItem[], signal?: AbortSignal): Promise<ContributorItem[]> {
+    return wikipedia.enrichContributorBios(items, this.log, signal);
   }
 }
 
 export class AuthorWikipediaEnricher implements Enricher<EditionItem | WorkItem> {
   readonly name = 'wikipedia-enricher-author';
-  enrich(items: Array<EditionItem | WorkItem>, log: Logger, signal?: AbortSignal): Promise<Array<EditionItem | WorkItem>> {
-    return wikipedia.enrichAuthorsOnWorksOrEditions(items, log, signal);
+  constructor(private readonly log: Logger) {}
+  enrich(items: Array<EditionItem | WorkItem>, signal?: AbortSignal): Promise<Array<EditionItem | WorkItem>> {
+    return wikipedia.enrichAuthorsOnWorksOrEditions(items, this.log, signal);
   }
 }
 ```
 
-- [x] **Step 2: Run typecheck**
+- [ ] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1173,7 +1182,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [x] **Step 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/wikipedia-enricher.ts
@@ -1182,12 +1191,12 @@ git commit -m "feat(search): add ContributorWikipediaEnricher and AuthorWikipedi
 
 ---
 
-## Task 11: LocalPostgresIngestor (fire-and-forget) (DONE — commit 19fd864)
+## Task 11: LocalPostgresIngestor (fire-and-forget)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/local-postgres-ingestor.ts`
 
-- [x] **Step 1: Implement**
+- [ ] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/local-postgres-ingestor.ts
@@ -1328,7 +1337,7 @@ export class LocalPostgresIngestor implements Ingestor<EditionItem | WorkItem | 
 }
 ```
 
-- [x] **Step 2: Run typecheck**
+- [ ] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1336,7 +1345,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [x] **Step 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/local-postgres-ingestor.ts
@@ -1345,12 +1354,12 @@ git commit -m "feat(search): add LocalPostgresIngestor with fire-and-forget upse
 
 ---
 
-## Task 12: SearchService orchestrator (DONE — commit 8e1c638)
+## Task 12: SearchService orchestrator
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/service.ts`
 
-- [x] **Step 1: Implement**
+- [ ] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/service.ts
@@ -1389,8 +1398,8 @@ export class SearchService {
     if (pg.items.length > 0) return pg;
     const ol = await this.deps.openLibrary.searchEditions(query);
     if (ol.items.length === 0) return ol;
-    let items = await this.deps.googleBooks.enrich(ol.items, log);
-    items = await this.deps.authorWikipedia.enrich(items, log);
+    let items = await this.deps.googleBooks.enrich(ol.items);
+    items = await this.deps.authorWikipedia.enrich(items);
     void this.deps.ingestor.ingest(items).catch(() => undefined);
     log.info({ stage: 'search-editions', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
@@ -1402,7 +1411,7 @@ export class SearchService {
     if (pg.items.length > 0) return pg;
     const ol = await this.deps.openLibrary.searchWorks(query);
     if (ol.items.length === 0) return ol;
-    let items = (await this.deps.authorWikipedia.enrich(ol.items, log)) as WorkItem[];
+    let items = await this.deps.authorWikipedia.enrich(ol.items);
     void this.deps.ingestor.ingest(items).catch(() => undefined);
     log.info({ stage: 'search-works', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
@@ -1418,7 +1427,7 @@ export class SearchService {
     if (pg.items.length > 0) return pg;
     const ol = await this.deps.openLibrary.searchContributors(query);
     if (ol.items.length === 0) return ol;
-    let items = await this.deps.contributorWikipedia.enrich(ol.items, log);
+    let items = await this.deps.contributorWikipedia.enrich(ol.items);
     void this.deps.ingestor.ingest(items).catch(() => undefined);
     log.info({ stage: 'search-contributors', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
@@ -1426,7 +1435,7 @@ export class SearchService {
 }
 ```
 
-- [x] **Step 2: Run typecheck**
+- [ ] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1434,7 +1443,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [x] **Step 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/service.ts
@@ -1443,12 +1452,12 @@ git commit -m "feat(search): add SearchService orchestrator"
 
 ---
 
-## Task 13: Lex schema — shared `defs.json` (DONE — commit 2c69e43)
+## Task 13: Lex schema — shared `defs.json`
 
 **Files:**
 - Create: `packages/bibliograph-service/lexicons/community/lexicon/book/defs.json`
 
-- [x] **Step 1: Write the file**
+- [ ] **Step 1: Write the file**
 
 ```json
 {
@@ -1486,7 +1495,7 @@ git commit -m "feat(search): add SearchService orchestrator"
 }
 ```
 
-- [x] **Step 2: Regenerate lex types**
+- [ ] **Step 2: Regenerate lex types**
 
 From `packages/bibliograph-service`:
 
@@ -1502,7 +1511,7 @@ ls src/lib/server/lexicons/types/community/lexicon/book/
 
 Should now include `defs.ts`.
 
-- [x] **Step 3: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/defs.json \
@@ -1512,12 +1521,12 @@ git commit -m "feat(lex): add community.lexicon.book.defs with shared contributi
 
 ---
 
-## Task 14: Lex schema — update `edition.json` (add `coverImageUrl`, swap to NSID refs) (DONE — commit 1952af3)
+## Task 14: Lex schema — update `edition.json` (add `coverImageUrl`, swap to NSID refs)
 
 **Files:**
 - Modify: `packages/bibliograph-service/lexicons/community/lexicon/book/edition.json`
 
-- [x] **Step 1: Replace the file contents**
+- [ ] **Step 1: Replace the file contents**
 
 ```json
 {
@@ -1568,14 +1577,14 @@ Note: removed the inline `contribution` and `identifier` defs (now in `defs.json
 pnpm run lex:gen
 ```
 
-- [x] **Step 2: Regenerate lex types**
+Expected: regenerates types. The generated `edition.ts` should now reference `community.lexicon.book.defs#contribution` etc.
 
 - [ ] **Step 3: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
-- [x] **Step 3: Run typecheck**
+
 Expected: no errors. (The Postgres-side mapping still emits `identifiers: r.identifiers` as the same shape — no changes required to handlers yet.)
 
 - [ ] **Step 4: Commit**
@@ -1583,12 +1592,12 @@ Expected: no errors. (The Postgres-side mapping still emits `identifiers: r.iden
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.json \
         packages/bibliograph-service/src/lib/server/lexicons/
-- [x] **Step 4: Commit**
+git commit -m "feat(lex): add coverImageUrl to edition; switch to NSID refs"
 ```
 
 ---
 
-## Task 15: Lex schema — new `work.json` (DONE — commit 4032f76)
+## Task 15: Lex schema — new `work.json`
 
 **Files:**
 - Create: `packages/bibliograph-service/lexicons/community/lexicon/book/work.json`
@@ -1601,7 +1610,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.jso
   "id": "community.lexicon.book.work",
   "defs": {
     "main": {
-- [x] **Step 1: Write the file**
+      "type": "record",
       "key": "tid",
       "record": {
         "type": "object",
@@ -1634,7 +1643,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.jso
       }
     }
   }
-- [x] **Step 2: Regenerate lex types**
+}
 ```
 
 - [ ] **Step 2: Regenerate lex types**
@@ -1642,7 +1651,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.jso
 ```bash
 pnpm run lex:gen
 ```
-- [x] **Step 3: Run typecheck**
+
 - [ ] **Step 3: Run typecheck**
 
 ```bash
@@ -1650,7 +1659,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
 
 Expected: no errors.
-- [x] **Step 4: Commit**
+
 - [ ] **Step 4: Commit**
 
 ```bash
@@ -1661,7 +1670,7 @@ git commit -m "feat(lex): add community.lexicon.book.work record schema"
 
 ---
 
-## Task 16: Lex schema — new `contributor.json` (DONE — commit 29ac23b)
+## Task 16: Lex schema — new `contributor.json`
 
 **Files:**
 - Create: `packages/bibliograph-service/lexicons/community/lexicon/book/contributor.json`
@@ -1674,7 +1683,7 @@ git commit -m "feat(lex): add community.lexicon.book.work record schema"
   "id": "community.lexicon.book.contributor",
   "defs": {
     "main": {
-- [x] **Step 1: Write the file**
+      "type": "record",
       "key": "tid",
       "record": {
         "type": "object",
@@ -1707,7 +1716,7 @@ git commit -m "feat(lex): add community.lexicon.book.work record schema"
 - [ ] **Step 2: Regenerate lex types**
 
 ```bash
-- [x] **Step 2: Regenerate lex types**
+pnpm run lex:gen
 ```
 
 - [ ] **Step 3: Run typecheck**
@@ -1715,7 +1724,7 @@ git commit -m "feat(lex): add community.lexicon.book.work record schema"
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
-- [x] **Step 3: Run typecheck**
+
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
@@ -1723,12 +1732,12 @@ Expected: no errors.
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/contributor.json \
         packages/bibliograph-service/src/lib/server/lexicons/
-- [x] **Step 4: Commit**
+git commit -m "feat(lex): add community.lexicon.book.contributor record schema"
 ```
 
 ---
 
-## Task 17: Lex schema — `searchWorks.json` (full body) (DONE — commit cfe4a95)
+## Task 17: Lex schema — `searchWorks.json` (full body)
 
 **Files:**
 - Modify: `packages/bibliograph-service/lexicons/community/lexicon/book/searchWorks.json`
@@ -1741,7 +1750,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/contributor
   "id": "community.lexicon.book.searchWorks",
   "defs": {
     "main": {
-- [x] **Step 1: Replace the file contents**
+      "type": "query",
       "description": "Search works by free-form text (q) and/or identifiers (id, repeatable).",
       "parameters": {
         "type": "params",
@@ -1774,7 +1783,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/contributor
       },
       "errors": [
         {
-- [x] **Step 2: Regenerate lex types**
+          "name": "InvalidQuery",
           "description": "The query syntax was invalid for this AppView (e.g. Lucene syntax error)."
         }
       ]
@@ -1782,7 +1791,7 @@ git add packages/bibliograph-service/lexicons/community/lexicon/book/contributor
   }
 }
 ```
-- [x] **Step 3: Run typecheck**
+
 - [ ] **Step 2: Regenerate lex types**
 
 ```bash
@@ -1790,7 +1799,7 @@ pnpm run lex:gen
 ```
 
 - [ ] **Step 3: Commit**
-- [x] **Step 4: Commit**
+
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/searchWorks.json \
         packages/bibliograph-service/src/lib/server/lexicons/
@@ -1799,7 +1808,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
 
 ---
 
-## Task 18: Lex schema — `searchContributors.json` (full body) (DONE — commit 17c4e9c)
+## Task 18: Lex schema — `searchContributors.json` (full body)
 
 **Files:**
 - Modify: `packages/bibliograph-service/lexicons/community/lexicon/book/searchContributors.json`
@@ -1812,7 +1821,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
   "id": "community.lexicon.book.searchContributors",
   "defs": {
     "main": {
-- [x] **Step 1: Replace the file contents**
+      "type": "query",
       "description": "Search contributors by free-form text (q) and/or identifiers (id, repeatable).",
       "parameters": {
         "type": "params",
@@ -1845,7 +1854,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
       },
       "errors": [
         {
-- [x] **Step 2: Regenerate lex types**
+          "name": "InvalidQuery",
           "description": "The query syntax was invalid for this AppView (e.g. Lucene syntax error)."
         }
       ]
@@ -1853,7 +1862,7 @@ git commit -m "feat(lex): replace searchWorks stub with full schema"
   }
 }
 ```
-- [x] **Step 3: Run typecheck**
+
 - [ ] **Step 2: Regenerate lex types**
 
 ```bash
@@ -1861,7 +1870,7 @@ pnpm run lex:gen
 ```
 
 - [ ] **Step 3: Commit**
-- [x] **Step 4: Commit**
+
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/searchContributors.json \
         packages/bibliograph-service/src/lib/server/lexicons/
@@ -1879,29 +1888,31 @@ git commit -m "feat(lex): replace searchContributors stub with full schema"
 
 Add the new imports at the top of `xrpc-router.ts` (next to the existing lexicon imports):
 
-```ts
+- [x] **Step 1: Construct the service at module load**
 import { PostgresSource } from './search/postgres-source.ts';
 import { OpenLibrarySource } from './search/open-library-source.ts';
 import { GoogleBooksEnricher } from './search/google-books-enricher.ts';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher.ts';
-import { LocalPostgresIngestor } from './search/local-postgres-ingestor.ts';
+const googleBooksEnricher = new GoogleBooksEnricher();
+const authorWikipediaEnricher = new AuthorWikipediaEnricher();
+const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
 import { SearchService } from './search/service.ts';
 ```
 
-- [x] **Step 1: Construct the service at module load**
+After the `log` declaration (around line 81), construct the service:
 
 ```ts
 const postgresSource = new PostgresSource(log);
 const openLibrarySource = new OpenLibrarySource(log);
-const googleBooksEnricher = new GoogleBooksEnricher();
-const authorWikipediaEnricher = new AuthorWikipediaEnricher();
-const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
+const googleBooksEnricher = new GoogleBooksEnricher(log);
+const authorWikipediaEnricher = new AuthorWikipediaEnricher(log);
+const contributorWikipediaEnricher = new ContributorWikipediaEnricher(log);
 const localIngestor = new LocalPostgresIngestor(log);
 const searchService = new SearchService(
   {
     postgres: postgresSource,
     openLibrary: openLibrarySource,
-    googleBooks: googleBooksEnricher,
+- [x] **Step 2: Replace the `searchEditions` handler body**
     authorWikipedia: authorWikipediaEnricher,
     contributorWikipedia: contributorWikipediaEnricher,
     ingestor: localIngestor,
@@ -1910,7 +1921,7 @@ const searchService = new SearchService(
 );
 ```
 
-- [x] **Step 2: Replace the `searchEditions` handler body**
+- [ ] **Step 2: Replace the `searchEditions` handler body**
 
 Replace the handler inside `router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, { async handler({ params }) { ... } })` with:
 
@@ -1935,16 +1946,16 @@ async handler({ params }) {
     identifiers: r.identifiers,
     description: r.description,
     createdAt: r.createdAt,
-  }));
+- [x] **Step 4: Run typecheck**
   return json({ items, cursor: result.cursor, total: result.total } as never);
 }
 ```
 
-- [x] **Step 3: Remove the unused helpers**
+- [ ] **Step 3: Remove the unused helpers**
 
 The inline `encodeCursor`, `decodeCursor`, `approxRowCount` functions (lines 44-79) become unused. Leave them for now (not strictly broken); a follow-up Task deletes them after `searchWorks` is also migrated in Task 20.
-
-- [x] **Step 4: Run typecheck**
+- [x] **Step 5: Commit**
+- [ ] **Step 4: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1952,21 +1963,21 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [x] **Step 5: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/xrpc-router.ts
 git commit -m "refactor(xrpc): wire searchEditions handler to SearchService"
 ```
 
----
-
 ## Task 20: Wire `searchWorks` and `searchContributors` handlers (DONE — commit 669562c)
 
-**Files:**
-- Modify: `packages/bibliograph-service/src/lib/server/xrpc-router.ts`
+## Task 20: Wire `searchWorks` and `searchContributors` handlers
 
+**Files:**
 - [x] **Step 1: Replace `searchWorks` handler**
+
+- [ ] **Step 1: Replace `searchWorks` handler**
 
 Replace the `searchWorks` block (line 218-222):
 
@@ -2021,9 +2032,9 @@ router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
       createdAt: r.createdAt,
     }));
     return json({ items, cursor: result.cursor, total: result.total } as never);
-  },
-});
 - [x] **Step 2: Replace `searchContributors` handler**
+});
+```
 
 - [ ] **Step 3: Add the missing imports for the new schema types**
 
@@ -2057,30 +2068,30 @@ Expected: no errors.
 ```bash
 git add packages/bibliograph-service/src/lib/server/xrpc-router.ts
 git commit -m "feat(xrpc): wire searchWorks + searchContributors to SearchService"
-```
+- [x] **Step 5: Run typecheck**
 
----
+## Task 21: Extend `ComAtprotoRepoGetRecord` for the three book collections (DONE — commit cf008f3)
 
-- [x] **Step 3: Add the missing imports for the new schema types**
+## Task 21: Extend `ComAtprotoRepoGetRecord` for the three book collections
 
 **Files:**
-- Modify: `packages/bibliograph-service/src/lib/server/xrpc-router.ts` (the handler at line 361-397)
-- [x] **Step 4: Remove the now-unused helpers**
+- [x] **Step 1: Add a Postgres branch for the three book collections**
+- [x] **Step 6: Commit**
 - [ ] **Step 1: Add a Postgres branch for the three book collections**
 
 Right after the `if (!resolveDid(params.repo))` guard at the top of the `ComAtprotoRepoGetRecord` handler, add:
-- [x] **Step 5: Run typecheck**
+
 ```ts
 const BOOK_COLLECTIONS = new Set([
   'community.lexicon.book.edition',
   'community.lexicon.book.work',
-- [x] **Step 6: Commit**
+  'community.lexicon.book.contributor',
 ]);
 if (BOOK_COLLECTIONS.has(params.collection)) {
   return await serveBookRecordFromDb(params.repo, params.collection, params.rkey);
 }
 ```
-
+- [x] **Step 2: Implement `serveBookRecordFromDb` and the supporting helpers**
 - [ ] **Step 2: Implement `serveBookRecordFromDb`**
 
 Just above the `ComAtprotoRepoGetRecord` registration (or at the end of the file), add:
@@ -2140,7 +2151,7 @@ async function serveBookRecordFromDb(
   const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
   if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
   const value = {
-    $type: 'community.lexicon.book.contributor',
+- [x] **Step 3: Run typecheck**
     name: row.name,
     aliases: row.aliases ?? [],
     bio: row.bio ?? undefined,
@@ -2148,7 +2159,7 @@ async function serveBookRecordFromDb(
     diedYear: row.diedYear ?? undefined,
     linkedDid: row.linkedDid ?? undefined,
     identifiers: row.identifiers ?? [],
-    createdAt: row.createdAt.toISOString(),
+- [x] **Step 4: Commit**
   };
   const cid = await cidForLex(value);
   return json({ uri, cid: cid.toString(), value } as never);
