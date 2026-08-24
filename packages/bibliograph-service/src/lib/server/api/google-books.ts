@@ -32,15 +32,29 @@ export async function enrichEditions(
     return [...items];
   }
 
-  const out: EditionItem[] = [];
+  const CONCURRENCY = 8;
+  const out: EditionItem[] = new Array(items.length);
   let matched = 0;
   let missing = 0;
-  for (const item of items) {
-    let enriched = item;
-    const isbn = isbnFromIdentifiers(item);
-    if (isbn) {
-      const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-      const url = `${BASE}?q=isbn:${encodeURIComponent(isbn)}&key=${encodeURIComponent(key)}`;
+
+  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+
+  // Bounded concurrency: at most CONCURRENCY in-flight fetches at any time.
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      const item = items[i];
+      if (!item) return;
+      const isbn = isbnFromIdentifiers(item);
+      if (!isbn) {
+        out[i] = item;
+        missing++;
+        continue;
+      }
+      const url = `${BASE}?q=isbn:${encodeURIComponent(isbn)}&key=${encodeURIComponent(key ?? '')}`;
+      let enriched = item;
       try {
         const start = performance.now();
         const res = await fetch(url, { signal });
@@ -65,10 +79,9 @@ export async function enrichEditions(
         log.error({ stage: 'google-books-enricher', err, isbn }, 'googlebooks fetch failed');
         missing++;
       }
-    } else {
-      missing++;
+      out[i] = enriched;
     }
-    out.push(enriched);
   }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker()));
   return out;
 }
