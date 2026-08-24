@@ -1961,12 +1961,12 @@ git commit -m "refactor(xrpc): wire searchEditions handler to SearchService"
 
 ---
 
-## Task 20: Wire `searchWorks` and `searchContributors` handlers
+## Task 20: Wire `searchWorks` and `searchContributors` handlers (DONE — commit 669562c)
 
 **Files:**
 - Modify: `packages/bibliograph-service/src/lib/server/xrpc-router.ts`
 
-- [ ] **Step 1: Replace `searchWorks` handler**
+- [x] **Step 1: Replace `searchWorks` handler**
 
 Replace the `searchWorks` block (line 218-222):
 
@@ -2023,7 +2023,7 @@ router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
     return json({ items, cursor: result.cursor, total: result.total } as never);
   },
 });
-```
+- [x] **Step 2: Replace `searchContributors` handler**
 
 - [ ] **Step 3: Add the missing imports for the new schema types**
 
@@ -2061,20 +2061,20 @@ git commit -m "feat(xrpc): wire searchWorks + searchContributors to SearchServic
 
 ---
 
-## Task 21: Extend `ComAtprotoRepoGetRecord` for the three book collections
+- [x] **Step 3: Add the missing imports for the new schema types**
 
 **Files:**
 - Modify: `packages/bibliograph-service/src/lib/server/xrpc-router.ts` (the handler at line 361-397)
-
+- [x] **Step 4: Remove the now-unused helpers**
 - [ ] **Step 1: Add a Postgres branch for the three book collections**
 
 Right after the `if (!resolveDid(params.repo))` guard at the top of the `ComAtprotoRepoGetRecord` handler, add:
-
+- [x] **Step 5: Run typecheck**
 ```ts
 const BOOK_COLLECTIONS = new Set([
   'community.lexicon.book.edition',
   'community.lexicon.book.work',
-  'community.lexicon.book.contributor',
+- [x] **Step 6: Commit**
 ]);
 if (BOOK_COLLECTIONS.has(params.collection)) {
   return await serveBookRecordFromDb(params.repo, params.collection, params.rkey);
