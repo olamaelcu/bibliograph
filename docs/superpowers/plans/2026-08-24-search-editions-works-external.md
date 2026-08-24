@@ -1056,10 +1056,10 @@ Three commits in order:
 
 ## Task 8: OpenLibrarySource (wraps the API wrapper)
 
-**Files:**
+## Task 8: OpenLibrarySource (wraps the API wrapper) (DONE — commit 85556d5)
 - Create: `packages/bibliograph-service/src/lib/server/search/open-library-source.ts`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/open-library-source.ts
@@ -1082,7 +1082,7 @@ export class OpenLibrarySource {
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1090,7 +1090,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/open-library-source.ts
