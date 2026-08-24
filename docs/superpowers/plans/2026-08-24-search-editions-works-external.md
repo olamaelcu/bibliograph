@@ -913,18 +913,28 @@ git commit -m "feat(db): add cover_image_url column to editions"
 
 ---
 
-## Task 7: PostgresSource<T>
+## Task 7: PostgresSource<T> (DONE — commits ba90cea + 3006b92 + aa66597)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/postgres-source.ts`
+- Modify: `packages/bibliograph-service/src/lib/server/db/schema.ts` (added missing `contributors` pgTable — gap in original plan)
+- Create: `packages/bibliograph-service/src/lib/server/search/postgres-source.test.ts`
 
-- [ ] **Step 1: Write the implementation**
+The implementation as committed differs from the original plan in two respects:
+
+1. **v1 cursor back-compat (commit `aa66597`)**: `PostgresCursor.v` is `1 | 2` (not just `2`), and `decodeCursor` accepts both. This matches the spec design doc's back-compat contract for in-flight v1 cursors from the old `xrpc-router.ts` cursor path.
+2. **Shared `runSearch` helper (commit `aa66597`)**: The three public methods are now one-line delegations to a private `runSearch<TItem>(table, qColumn, mapRow, query, kind)` that handles conds-building, where-clause assembly, row fetching, cursor encode, and the unified `log.info({ stage: 'postgres-source', kind, items: N, did: PUBLISHER_DID })` line. Per-table row mappers (`mapEditionRow`/`mapWorkRow`/`mapContributorRow`) are private methods.
+
+The constructor signature also accepts an optional `db` arg (default `defaultDb`) so the unit test can inject a fake.
+
+- [x] **Step 1: Write the implementation**
 
 ```ts
 // src/lib/server/search/postgres-source.ts
 import type { Logger } from 'pino';
-import { and, asc, desc, or, sql, ilike } from 'drizzle-orm';
-import { db } from '../db/index.ts';
+import { and, asc, desc, or, sql } from 'drizzle-orm';
+import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
+import { db as defaultDb, type Db } from '../db/index.ts';
 import { editions, works, contributors } from '../db/schema.ts';
 import { PUBLISHER_DID } from '../did.ts';
 import type {
@@ -939,7 +949,7 @@ import type {
 
 const CURSOR_VERSION = 2;
 
-type PostgresCursor = { v: 2; src: 'postgres'; t: string; u: string };
+type PostgresCursor = { v: 1 | 2; src: 'postgres'; t: string; u: string };
 
 function encodeCursor(indexedAt: Date, uri: string): string {
   return Buffer.from(JSON.stringify({ v: CURSOR_VERSION, src: 'postgres', t: indexedAt.toISOString(), u: uri } satisfies PostgresCursor)).toString('base64url');
@@ -948,7 +958,7 @@ function encodeCursor(indexedAt: Date, uri: string): string {
 function decodeCursor(cursor: string): PostgresCursor | null {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString());
-    if (parsed.v !== CURSOR_VERSION || parsed.src !== 'postgres') return null;
+    if ((parsed.v !== 1 && parsed.v !== 2) || parsed.src !== 'postgres') return null;
     return parsed as PostgresCursor;
   } catch { return null; }
 }
@@ -962,21 +972,54 @@ function identFromJson(i: { uri: string; resource: string }): Identifier {
 }
 
 export class PostgresSource {
-  constructor(private readonly log: Logger) {}
+  constructor(private readonly log: Logger, private readonly db: Db = defaultDb) {}
 
-  async searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
+  searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
+    return this.runSearch(editions, editions.title, this.mapEditionRow, query, 'edition');
+  }
+
+  searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
+    return this.runSearch(works, works.title, this.mapWorkRow, query, 'work');
+  }
+
+  searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
+    return this.runSearch(contributors, contributors.name, this.mapContributorRow, query, 'contributor');
+  }
+
+  private async runSearch<TItem extends { identifiers?: Identifier[]; contributors?: ContributionEntry[] }>(
+    table: PgTable,
+    qColumn: PgColumn,
+    mapRow: (row: any) => TItem,
+    query: SearchQuery,
+    kind: 'edition' | 'work' | 'contributor',
+  ): Promise<SearchResult<TItem>> {
     const conds: ReturnType<typeof sql>[] = [];
-    if (query.q) conds.push(sql`${editions.title} ILIKE ${'%' + query.q + '%'}`);
-    if (query.id) for (const id of query.id) conds.push(sql`${editions.identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
+    if (query.q) conds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
+    if (query.id) {
+      const identifiers = (table as any).identifiers as PgColumn;
+      for (const id of query.id) conds.push(sql`${identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
+    }
     if (query.cursor) {
       const c = decodeCursor(query.cursor);
       if (c) {
-        conds.push(or(sql`${editions.indexedAt} < ${new Date(c.t)}`, and(sql`${editions.indexedAt} = ${new Date(c.t)}`, sql`${editions.uri} > ${c.u}`))!);
+        const indexedAt = (table as any).indexedAt as PgColumn;
+        const uri = (table as any).uri as PgColumn;
+        conds.push(or(sql`${indexedAt} < ${new Date(c.t)}`, and(sql`${indexedAt} = ${new Date(c.t)}`, sql`${uri} > ${c.u}`))!);
       }
     }
     const where = conds.length > 0 ? and(...conds) : undefined;
-    const rows = await db.select().from(editions).where(where).orderBy(desc(editions.indexedAt), asc(editions.uri)).limit(query.limit);
-    const items: EditionItem[] = rows.map((r) => ({
+    const indexedAt = (table as any).indexedAt as PgColumn;
+    const uri = (table as any).uri as PgColumn;
+    const base = this.db.select().from(table);
+    const rows: any[] = await (where !== undefined ? base.where(where) : base).orderBy(desc(indexedAt), asc(uri)).limit(query.limit);
+    const items = rows.map(mapRow);
+    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
+    this.log.info({ stage: 'postgres-source', kind, items: items.length, did: PUBLISHER_DID }, 'postgres ok');
+    return { items, cursor };
+  }
+
+  private mapEditionRow(r: any): EditionItem {
+    return {
       uri: r.uri,
       title: r.title,
       subtitle: r.subtitle ?? undefined,
@@ -988,86 +1031,27 @@ export class PostgresSource {
       identifiers: (r.identifiers ?? []).map(identFromJson),
       contributors: (r.contributors ?? []).map(contributionFromJson),
       createdAt: r.createdAt.toISOString(),
-    }));
-    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
-    this.log.info({ stage: 'postgres-source', kind: 'edition', items: items.length, did: PUBLISHER_DID }, 'postgres ok');
-    return { items, cursor };
+    };
   }
 
-  async searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
-    const conds: ReturnType<typeof sql>[] = [];
-    if (query.q) conds.push(sql`${works.title} ILIKE ${'%' + query.q + '%'}`);
-    if (query.id) for (const id of query.id) conds.push(sql`${works.identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
-    if (query.cursor) {
-      const c = decodeCursor(query.cursor);
-      if (c) {
-        conds.push(or(sql`${works.indexedAt} < ${new Date(c.t)}`, and(sql`${works.indexedAt} = ${new Date(c.t)}`, sql`${works.uri} > ${c.u}`))!);
-      }
-    }
-    const where = conds.length > 0 ? and(...conds) : undefined;
-    const rows = await db.select().from(works).where(where).orderBy(desc(works.indexedAt), asc(works.uri)).limit(query.limit);
-    const items: WorkItem[] = rows.map((r) => ({
-      uri: r.uri,
-      title: r.title,
-      subtitle: r.subtitle ?? undefined,
-      originalLanguage: r.originalLanguage ?? undefined,
-      firstPublishedYear: r.firstPublishedYear ?? undefined,
-      subjects: r.subjects ?? [],
-      description: r.description ?? undefined,
-      identifiers: (r.identifiers ?? []).map(identFromJson),
-      contributors: (r.contributors ?? []).map(contributionFromJson),
-      createdAt: r.createdAt.toISOString(),
-    }));
-    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
-    this.log.info({ stage: 'postgres-source', kind: 'work', items: items.length }, 'postgres ok');
-    return { items, cursor };
-  }
-
-  async searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
-    const conds: ReturnType<typeof sql>[] = [];
-    if (query.q) conds.push(sql`${contributors.name} ILIKE ${'%' + query.q + '%'}`);
-    if (query.id) for (const id of query.id) conds.push(sql`${contributors.identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
-    if (query.cursor) {
-      const c = decodeCursor(query.cursor);
-      if (c) {
-        conds.push(or(sql`${contributors.indexedAt} < ${new Date(c.t)}`, and(sql`${contributors.indexedAt} = ${new Date(c.t)}`, sql`${contributors.uri} > ${c.u}`))!);
-      }
-    }
-    const where = conds.length > 0 ? and(...conds) : undefined;
-    const rows = await db.select().from(contributors).where(where).orderBy(desc(contributors.indexedAt), asc(contributors.uri)).limit(query.limit);
-    const items: ContributorItem[] = rows.map((r) => ({
-      uri: r.uri,
-      name: r.name,
-      aliases: r.aliases ?? [],
-      bio: r.bio ?? undefined,
-      bornYear: r.bornYear ?? undefined,
-      diedYear: r.diedYear ?? undefined,
-      linkedDid: r.linkedDid ?? undefined,
-      identifiers: (r.identifiers ?? []).map(identFromJson),
-      createdAt: r.createdAt.toISOString(),
-    }));
-    const cursor = rows.length === query.limit ? encodeCursor(rows[rows.length - 1]!.indexedAt, rows[rows.length - 1]!.uri) : undefined;
-    this.log.info({ stage: 'postgres-source', kind: 'contributor', items: items.length }, 'postgres ok');
-    return { items, cursor };
-  }
+  private mapWorkRow(r: any): WorkItem { /* … */ }
+  private mapContributorRow(r: any): ContributorItem { /* … */ }
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
+Expected: no new semantic errors (the `.ts` import-extension count grows; same pattern as sibling files).
 
-Expected: no errors introduced by this file.
+- [x] **Step 3: Commit**
 
-- [ ] **Step 3: Commit**
-
-```bash
-git add packages/bibliograph-service/src/lib/server/search/postgres-source.ts
-git commit -m "feat(search): add PostgresSource for editions/works/contributors"
-```
-
+Three commits in order:
+- `ba90cea` — `feat(db): add contributors table to schema.ts` (gap fix)
+- `3006b92` — `feat(search): add PostgresSource for editions/works/contributors`
+- `aa66597` — `refactor(search): collapse PostgresSource methods, fix v1 cursor back-compat, add unit test`
 ---
 
 ## Task 8: OpenLibrarySource (wraps the API wrapper)
