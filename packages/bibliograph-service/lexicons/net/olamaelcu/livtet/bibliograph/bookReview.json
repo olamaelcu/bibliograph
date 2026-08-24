@@ -1,0 +1,41 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.bookReview",
+  "description": "A user's review of a book. StrongRefs the catalog book and optionally the originating bookShelving. rkey: tid. Written by the OAuth client (livtet-service) via com.atproto.repo.putRecord.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["text", "book", "createdAt"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Free-form review body."
+          },
+          "book": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the catalog book record being reviewed."
+          },
+          "shelf": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the originating bookShelving record, if any."
+          },
+          "rating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Optional 1-10 rating. Half-stars are not yet supported at the lexicon level; round to the nearest integer. Tracked separately as a writer-side concern (see BookReviewRating type in livtet-service)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

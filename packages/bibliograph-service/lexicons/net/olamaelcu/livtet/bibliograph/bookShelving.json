@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookShelving",
+  "description": "A book placed on a user's shelf, with inline book metadata and a status. The rkey is derived from the catalog book URI (last segment after the final '/'). Written by the OAuth client (livtet-service).",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "properties": {
+          "shelf": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the parent shelf record (e.g. at://did/biblio.shelf/reading)."
+          },
+          "book": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The book on the shelf (catalog record URI)."
+          },
+          "metadata": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfMetadata",
+            "description": "Status and optional position/notes/emoji for this book's relationship to the shelf."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

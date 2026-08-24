@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.actor.profile",
+  "description": "User profile record stored on the user's PDS at rkey 'self'. Written by the OAuth client (livtet-service) via com.atproto.repo.putRecord.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxLength": 640,
+            "maxGraphemes": 640
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 256,
+            "maxGraphemes": 256
+          },
+          "avatarCid": {
+            "type": "string",
+            "description": "CID of the avatar blob uploaded via com.atproto.repo.uploadBlob."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        },
+        "required": ["createdAt", "updatedAt"]
+      }
+    }
+  }
+}

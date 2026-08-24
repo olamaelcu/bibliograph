@@ -1,0 +1,31 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelf",
+  "description": "A user's reading-status shelf. The rkey is one of 'reading', 'read', 'to-read', 'dnf'. Each user has at most one of each (deterministic rkey). Written by the OAuth client (livtet-service).",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 128,
+            "maxGraphemes": 128,
+            "description": "Human-readable shelf name (e.g. 'Currently Reading')."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        },
+        "required": ["name", "createdAt", "updatedAt"]
+      }
+    }
+  }
+}

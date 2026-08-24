@@ -1,0 +1,40 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.readingGoal",
+  "description": "Reading goal record stored on the user's PDS at rkey 'current'. Written by the OAuth client (livtet-service).",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "literal:current",
+      "record": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "knownValues": ["weekly", "monthly", "annual"],
+            "description": "weekly = Mon-Sun, monthly = calendar month, annual = calendar year."
+          },
+          "year": {
+            "type": "integer",
+            "minimum": 1900,
+            "maximum": 9999
+          },
+          "booksGoal": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of books the user aims to finish in the period."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        },
+        "required": ["period", "year", "booksGoal", "createdAt", "updatedAt"]
+      }
+    }
+  }
+}
