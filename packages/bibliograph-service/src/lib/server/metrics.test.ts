@@ -19,9 +19,25 @@ test('metricsRegistry exposes http_request_duration_ms histogram', async () => {
   assert.match(body, /http_request_duration_ms/);
 });
 
-test('httpRequestDurationMs observes a sample with method/status/path labels', () => {
-  httpRequestDurationMs.observe({ method: 'GET', status: '200', path: '/x' }, 12);
-  assert.ok(httpRequestDurationMs);
+test('httpRequestDurationMs observes a sample with method/status/path labels', async () => {
+  const labels = { method: 'GET', status: '200', path: '/x' };
+  const countFor = (data: { values: Array<{ value: number; labels: Record<string, string | number>; metricName?: string }> }) =>
+    data.values.find(
+      (v) =>
+        v.metricName === 'http_request_duration_ms_count' &&
+        v.labels.path === labels.path &&
+        v.labels.method === labels.method &&
+        v.labels.status === labels.status,
+    )?.value ?? 0;
+
+  const before = countFor(await httpRequestDurationMs.get());
+  httpRequestDurationMs.observe(labels, 12);
+  const after = countFor(await httpRequestDurationMs.get());
+
+  assert.ok(
+    after > before,
+    `expected http_request_duration_ms_count for ${JSON.stringify(labels)} to increase (before=${before}, after=${after})`,
+  );
 });
 
 test('metrics module exports all counter and histogram symbols', () => {
@@ -29,4 +45,5 @@ test('metrics module exports all counter and histogram symbols', () => {
   assert.ok(upstreamRequestsTotal);
   assert.ok(searchLatencyMs);
   assert.ok(upstreamLatencyMs);
+  assert.ok(httpRequestDurationMs);
 });
