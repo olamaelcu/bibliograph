@@ -1512,12 +1512,12 @@ git commit -m "feat(lex): add community.lexicon.book.defs with shared contributi
 
 ---
 
-## Task 14: Lex schema — update `edition.json` (add `coverImageUrl`, swap to NSID refs)
+## Task 14: Lex schema — update `edition.json` (add `coverImageUrl`, swap to NSID refs) (DONE — commit 1952af3)
 
 **Files:**
 - Modify: `packages/bibliograph-service/lexicons/community/lexicon/book/edition.json`
 
-- [ ] **Step 1: Replace the file contents**
+- [x] **Step 1: Replace the file contents**
 
 ```json
 {
@@ -1568,14 +1568,14 @@ Note: removed the inline `contribution` and `identifier` defs (now in `defs.json
 pnpm run lex:gen
 ```
 
-Expected: regenerates types. The generated `edition.ts` should now reference `community.lexicon.book.defs#contribution` etc.
+- [x] **Step 2: Regenerate lex types**
 
 - [ ] **Step 3: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
 ```
-
+- [x] **Step 3: Run typecheck**
 Expected: no errors. (The Postgres-side mapping still emits `identifiers: r.identifiers` as the same shape — no changes required to handlers yet.)
 
 - [ ] **Step 4: Commit**
@@ -1583,7 +1583,7 @@ Expected: no errors. (The Postgres-side mapping still emits `identifiers: r.iden
 ```bash
 git add packages/bibliograph-service/lexicons/community/lexicon/book/edition.json \
         packages/bibliograph-service/src/lib/server/lexicons/
-git commit -m "feat(lex): add coverImageUrl to edition; switch to NSID refs"
+- [x] **Step 4: Commit**
 ```
 
 ---
