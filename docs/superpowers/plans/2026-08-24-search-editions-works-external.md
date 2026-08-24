@@ -1870,7 +1870,7 @@ git commit -m "feat(lex): replace searchContributors stub with full schema"
 
 ---
 
-## Task 19: Wire `searchEditions` XRPC handler to `SearchService`
+## Task 19: Wire `searchEditions` XRPC handler to `SearchService` (DONE — commit edecfd9)
 
 **Files:**
 - Modify: `packages/bibliograph-service/src/lib/server/xrpc-router.ts` (the `searchEditions` handler at line 121-180)
@@ -1888,14 +1888,14 @@ import { LocalPostgresIngestor } from './search/local-postgres-ingestor.ts';
 import { SearchService } from './search/service.ts';
 ```
 
-After the `log` declaration (around line 81), construct the service:
+- [x] **Step 1: Construct the service at module load**
 
 ```ts
 const postgresSource = new PostgresSource(log);
 const openLibrarySource = new OpenLibrarySource(log);
-const googleBooksEnricher = new GoogleBooksEnricher(log);
-const authorWikipediaEnricher = new AuthorWikipediaEnricher(log);
-const contributorWikipediaEnricher = new ContributorWikipediaEnricher(log);
+const googleBooksEnricher = new GoogleBooksEnricher();
+const authorWikipediaEnricher = new AuthorWikipediaEnricher();
+const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
 const localIngestor = new LocalPostgresIngestor(log);
 const searchService = new SearchService(
   {
@@ -1910,7 +1910,7 @@ const searchService = new SearchService(
 );
 ```
 
-- [ ] **Step 2: Replace the `searchEditions` handler body**
+- [x] **Step 2: Replace the `searchEditions` handler body**
 
 Replace the handler inside `router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, { async handler({ params }) { ... } })` with:
 
@@ -1940,11 +1940,11 @@ async handler({ params }) {
 }
 ```
 
-- [ ] **Step 3: Remove the unused helpers**
+- [x] **Step 3: Remove the unused helpers**
 
 The inline `encodeCursor`, `decodeCursor`, `approxRowCount` functions (lines 44-79) become unused. Leave them for now (not strictly broken); a follow-up Task deletes them after `searchWorks` is also migrated in Task 20.
 
-- [ ] **Step 4: Run typecheck**
+- [x] **Step 4: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1952,7 +1952,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/xrpc-router.ts
