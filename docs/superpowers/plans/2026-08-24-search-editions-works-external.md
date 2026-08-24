@@ -258,13 +258,13 @@ git commit -m "feat(search): add strategy interfaces and item types"
 ```
 ---
 
-## Task 3: OpenLibrary `searchEditions` wrapper
+## Task 3: OpenLibrary `searchEditions` wrapper (DONE — commit a1782c0)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/open-library.ts`
 - Create: `packages/bibliograph-service/src/lib/server/api/open-library.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/open-library.test.ts
@@ -320,14 +320,14 @@ test('searchEditions propagates 4xx as error log + empty result', async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/open-library.test.ts
 ```
 Expected: FAIL — `Cannot find module './open-library.ts'`.
 
-- [ ] **Step 3: Implement the wrapper**
+- [x] **Step 3: Implement the wrapper**
 
 ```ts
 // src/lib/server/api/open-library.ts
@@ -335,11 +335,10 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout.ts';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types.ts';
 
-const BASE = 'https://openlibrary.org/search.json';
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
 function buildUrl(q: string | undefined, type: 'edition' | 'work' | 'author', limit: number, page: number): string {
-  const u = new URL(BASE);
+  const u = new URL('https://openlibrary.org/search.json');
   if (q) u.searchParams.set('q', q);
   u.searchParams.set('type', type);
   u.searchParams.set('limit', String(limit));
@@ -371,11 +370,11 @@ interface OlSearchResponse<T> {
   docs?: T[];
 }
 
-interface OlEditionDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; publish_year?: number[]; place?: string[]; language?: string[]; isbn?: string[]; cover_i?: number; description?: string | { value: string }; number_of_pages_median?: number; }
+interface OlEditionDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; publish_year?: number[]; place?: string[]; language?: string[]; isbn?: string[]; cover_i?: number; description?: string | { value: string }; }
 interface OlWorkDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; original_languages?: string[]; subject?: string[]; description?: string | { value: string }; cover_i?: number; }
 interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
 
-function coverUrl(coverId: number | undefined, kind: 'books' | 'works' | 'authors'): string | undefined {
+function coverUrl(coverId: number | undefined): string | undefined {
   if (coverId === undefined) return undefined;
   return `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
 }
@@ -392,6 +391,13 @@ function yearFromDate(d: string | undefined): number | undefined {
   return m ? Number(m[1]) : undefined;
 }
 
+function isbnResource(isbn: string): 'isbn13' | 'isbn10' | 'isbn' {
+  const cleaned = isbn.replace(/-/g, '');
+  if (cleaned.length === 13) return 'isbn13';
+  if (cleaned.length === 10) return 'isbn10';
+  return 'isbn';
+}
+
 function makeOlIdentifier(key: string): Identifier {
   return { uri: `https://openlibrary.org${key}`, resource: 'openlibrary' };
 }
@@ -402,14 +408,15 @@ export async function searchEditions(
   externalSignal?: AbortSignal,
 ): Promise<SearchResult<EditionItem>> {
   const limit = query.limit;
-  const page = 1; // cursor-driven pagination comes via searchService in a follow-up
+  const page = 1;
   const url = buildUrl(query.q, 'edition', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
   if (!data) return { items: [] };
-  const items: EditionItem[] = (data.docs ?? ?? []).map((d) => {
+  const createdAt = new Date().toISOString();
+  const items: EditionItem[] = (data.docs ?? []).map((d) => {
     const identifiers: Identifier[] = [makeOlIdentifier(d.key)];
-    if (d.isbn) for (const i of d.isbn.slice(0, 5)) identifiers.push({ uri: `isbn:${i}`, resource: 'isbn13' });
+    if (d.isbn) for (const i of d.isbn.slice(0, 5)) identifiers.push({ uri: `isbn:${i}`, resource: isbnResource(i) });
     const year = d.first_publish_year ?? d.publish_year?.[0];
     return {
       title: d.title,
@@ -418,14 +425,13 @@ export async function searchEditions(
       place: d.place?.[0],
       language: d.language?.[0],
       description: extractDescription(d.description),
-      coverImageUrl: coverUrl(d.cover_i, 'books'),
+      coverImageUrl: coverUrl(d.cover_i),
       identifiers,
       contributors: [],
-      createdAt: new Date().toISOString(),
+      createdAt,
     };
   });
-  const total = data.numFound;
-  return { items, total };
+  return { items, total: data.numFound }; // cursor deferred to orchestrator
 }
 
 export async function searchWorks(
@@ -439,7 +445,8 @@ export async function searchWorks(
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlWorkDoc>>(url, log, signal);
   if (!data) return { items: [] };
-  const items: WorkItem[] = (data.docs ?? ?? []).map((d) => ({
+  const createdAt = new Date().toISOString();
+  const items: WorkItem[] = (data.docs ?? []).map((d) => ({
     title: d.title,
     subtitle: d.subtitle,
     firstPublishedYear: d.first_publish_year,
@@ -448,9 +455,9 @@ export async function searchWorks(
     description: extractDescription(d.description),
     contributors: [],
     identifiers: [makeOlIdentifier(d.key)],
-    createdAt: new Date().toISOString(),
+    createdAt,
   }));
-  return { items, total: data.numFound };
+  return { items, total: data.numFound }; // cursor deferred to orchestrator
 }
 
 export async function searchContributors(
@@ -464,7 +471,8 @@ export async function searchContributors(
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlAuthorDoc>>(url, log, signal);
   if (!data) return { items: [] };
-  const items: ContributorItem[] = (data.docs ?? ?? []).map((d) => {
+  const createdAt = new Date().toISOString();
+  const items: ContributorItem[] = (data.docs ?? []).map((d) => {
     const aliases = d.alternate_names ?? [];
     return {
       name: d.name,
@@ -472,27 +480,33 @@ export async function searchContributors(
       bornYear: yearFromDate(d.birth_date),
       diedYear: yearFromDate(d.death_date),
       identifiers: [makeOlIdentifier(d.key)],
-      createdAt: new Date().toISOString(),
+      createdAt,
     };
   });
-  return { items, total: data.numFound };
+  return { items, total: data.numFound }; // cursor deferred to orchestrator
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/open-library.test.ts
 ```
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Commit**
+NOTE: The plan as written had `assert.ok(result.cursor)` in test 2, but the implementation now returns `cursor: undefined` (deferred to orchestrator). Update the test to:
+```ts
+assert.equal(result.cursor, undefined, 'cursor is deferred to the orchestrator');
+```
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/open-library.ts \
         packages/bibliograph-service/src/lib/server/api/open-library.test.ts
 git commit -m "feat(api): add OpenLibrary search wrappers for editions/works/contributors"
 ```
+(Plus fixup commit `a1782c0`: `fix(api): strip placeholder cursor and dead coverUrl kind param`)
 
 ---
 
