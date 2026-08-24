@@ -510,13 +510,13 @@ git commit -m "feat(api): add OpenLibrary search wrappers for editions/works/con
 
 ---
 
-## Task 4: Google Books enrichment wrapper
+## Task 4: Google Books enrichment wrapper (DONE — commit 0c85e1d)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/api/google-books.ts`
 - Create: `packages/bibliograph-service/src/lib/server/api/google-books.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 // src/lib/server/api/google-books.test.ts
@@ -585,14 +585,14 @@ test('enrichEditions no-ops when GOOGLE_BOOKS_API_KEY is missing', async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/google-books.test.ts
 ```
 Expected: FAIL — `Cannot find module './google-books.ts'`.
 
-- [ ] **Step 3: Implement the wrapper**
+- [x] **Step 3: Implement the wrapper**
 
 ```ts
 // src/lib/server/api/google-books.ts
@@ -672,14 +672,14 @@ export async function enrichEditions(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pnpm exec tsx --test src/lib/server/api/google-books.test.ts
 ```
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/api/google-books.ts \
