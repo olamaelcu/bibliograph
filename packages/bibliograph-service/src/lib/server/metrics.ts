@@ -33,3 +33,11 @@ export const upstreamLatencyMs = new Histogram({
   buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
   registers: [metricsRegistry],
 });
+
+export const httpRequestDurationMs = new Histogram({
+  name: 'http_request_duration_ms',
+  help: 'HTTP request duration in ms',
+  labelNames: ['method', 'status', 'path'] as const,
+  buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+  registers: [metricsRegistry],
+});
