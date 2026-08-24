@@ -64,3 +64,6 @@ test('normalizePath collapses opaque IDs and numeric segments', () => {
 test('normalizePath collapses long opaque IDs', () => {
   assert.equal(normalizePath('/api/objects/abcdef1234567890xyz'), '/api/objects/{id}');
 });
+test('normalizePath collapses did:web DIDs (with dots)', () => {
+  assert.equal(normalizePath('/repo/did:web:example.com/records'), '/repo/{did}/records');
+});

@@ -53,7 +53,7 @@ export function normalizePath(pathname: string): string {
     return pathname;
   }
   return pathname
-    .replace(/\/(did:[a-z0-9:]+)/gi, '/{did}')
+    .replace(/\/(did:[a-z0-9:.-]+)/gi, '/{did}')
     .replace(/\/[a-z0-9]{16,}/gi, '/{id}')
     .replace(/\/\d+/g, '/{id}');
 }
