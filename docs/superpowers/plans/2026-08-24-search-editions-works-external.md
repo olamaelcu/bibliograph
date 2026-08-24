@@ -1345,12 +1345,12 @@ git commit -m "feat(search): add LocalPostgresIngestor with fire-and-forget upse
 
 ---
 
-## Task 12: SearchService orchestrator
+## Task 12: SearchService orchestrator (DONE — commit 8e1c638)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/service.ts`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/service.ts
@@ -1389,8 +1389,8 @@ export class SearchService {
     if (pg.items.length > 0) return pg;
     const ol = await this.deps.openLibrary.searchEditions(query);
     if (ol.items.length === 0) return ol;
-    let items = await this.deps.googleBooks.enrich(ol.items);
-    items = await this.deps.authorWikipedia.enrich(items);
+    let items = await this.deps.googleBooks.enrich(ol.items, log);
+    items = await this.deps.authorWikipedia.enrich(items, log);
     void this.deps.ingestor.ingest(items).catch(() => undefined);
     log.info({ stage: 'search-editions', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
@@ -1402,7 +1402,7 @@ export class SearchService {
     if (pg.items.length > 0) return pg;
     const ol = await this.deps.openLibrary.searchWorks(query);
     if (ol.items.length === 0) return ol;
-    let items = await this.deps.authorWikipedia.enrich(ol.items);
+    let items = (await this.deps.authorWikipedia.enrich(ol.items, log)) as WorkItem[];
     void this.deps.ingestor.ingest(items).catch(() => undefined);
     log.info({ stage: 'search-works', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
@@ -1418,7 +1418,7 @@ export class SearchService {
     if (pg.items.length > 0) return pg;
     const ol = await this.deps.openLibrary.searchContributors(query);
     if (ol.items.length === 0) return ol;
-    let items = await this.deps.contributorWikipedia.enrich(ol.items);
+    let items = await this.deps.contributorWikipedia.enrich(ol.items, log);
     void this.deps.ingestor.ingest(items).catch(() => undefined);
     log.info({ stage: 'search-contributors', items: items.length, total: ol.total }, 'search done');
     return { items, cursor: ol.cursor, total: ol.total };
@@ -1426,7 +1426,7 @@ export class SearchService {
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1434,7 +1434,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/service.ts
