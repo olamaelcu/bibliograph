@@ -1,0 +1,41 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getActorProfile",
+  "description": "Fetch a user's profile record (net.olamaelcu.livtet.actor.profile at rkey 'self') from the user's PDS, plus optional handle resolution.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the user whose profile to fetch."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["profile"],
+          "properties": {
+          "profile": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.actor.profile#main"
+          },
+            "handle": {
+              "type": "string",
+              "description": "Resolved handle for the DID, if available."
+            }
+          }
+        }
+      },
+      "errors": [
+        { "name": "UpstreamUnavailable", "description": "Could not reach the user's PDS." }
+      ]
+    }
+  }
+}

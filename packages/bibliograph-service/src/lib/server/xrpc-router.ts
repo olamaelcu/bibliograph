@@ -20,6 +20,8 @@ import {
   CommunityLexiconBookSearchEditions,
   CommunityLexiconBookSearchPublishers,
   CommunityLexiconBookSearchWorks,
+  NetOlamaelcuLivtetBiblioGetActorProfile,
+  NetOlamaelcuLivtetBiblioGetReadingGoal,
 } from './lexicons/index.js';
 import {
   fullRepoPath,
@@ -34,6 +36,7 @@ import { db } from './db';
 import { editions } from './db/schema';
 import { createLogger } from './logger';
 import { accessLog } from './access-log';
+import { pdsClient, resolvePds } from './pds/resolve.js';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { decode as cborDecode } from '@atproto/lex-cbor';
 import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
@@ -404,3 +407,89 @@ router.addQuery(ComAtprotoRepoDescribeRepo.mainSchema, {
     } as never);
   },
 });
+
+// ─── User-owned record reads (Livtet AppView client refactor) ───────────────
+// These procedures read records the user wrote to their OWN PDS. Bibliograph
+// resolves the user's PDS via the DID document and reads anonymously. Caching
+// (Postgres tables + tap-consumer ingestion) for the list/aggregate queries
+// is a follow-up — these first two are simple on-read hydrations.
+
+const PDS_READ_TIMEOUT_MS = 10_000;
+
+interface PdsRecordResponse {
+  uri: string;
+  cid?: string;
+  value: Record<string, unknown>;
+}
+
+function isRecordResponse(value: unknown): value is PdsRecordResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.uri === 'string' && typeof v.value === 'object' && v.value !== null;
+}
+
+router.addQuery(NetOlamaelcuLivtetBiblioGetReadingGoal.mainSchema, {
+  async handler({ params }) {
+    let raw: unknown;
+    try {
+      const { client } = await pdsClient(params.did);
+      raw = await client.get('com.atproto.repo.getRecord', {
+        params: {
+          repo: params.did,
+          collection: 'net.olamaelcu.livtet.biblio.readingGoal',
+          rkey: 'current',
+        },
+        signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // RecordNotFound (HTTP 400 with the PDS-specific body) means the user
+      // hasn't written a reading goal yet. That's not an error — return null.
+      if (/RecordNotFound/i.test(message)) {
+        return json({ goal: null } as never);
+      }
+      log.warn({ err, did: params.did }, 'getReadingGoal: PDS read failed');
+      return json({ error: 'UpstreamUnavailable', message } as never, { status: 502 });
+    }
+
+    if (!isRecordResponse(raw)) {
+      log.warn({ did: params.did, raw }, 'getReadingGoal: unexpected PDS response shape');
+      return json({ goal: null } as never);
+    }
+    return json({ goal: raw.value } as never);
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioGetActorProfile.mainSchema, {
+  async handler({ params }) {
+    let raw: unknown;
+    try {
+      const { client } = await pdsClient(params.did);
+      raw = await client.get('com.atproto.repo.getRecord', {
+        params: {
+          repo: params.did,
+          collection: 'net.olamaelcu.livtet.actor.profile',
+          rkey: 'self',
+        },
+        signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/RecordNotFound/i.test(message)) {
+        return json({ profile: null } as never);
+      }
+      log.warn({ err, did: params.did }, 'getActorProfile: PDS read failed');
+      return json({ error: 'UpstreamUnavailable', message } as never, { status: 502 });
+    }
+
+    if (!isRecordResponse(raw)) {
+      log.warn({ did: params.did, raw }, 'getActorProfile: unexpected PDS response shape');
+      return json({ profile: null } as never);
+    }
+    return json({ profile: raw.value } as never);
+  },
+});
+
+// Remaining procedures (getActorStats, listShelvesForDid, listShelvingForDid,
+// listReviewsForDid, getReview, getImageForActor) follow once Postgres cache
+// tables + tap-consumer ingestion are wired.

@@ -1,0 +1,37 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getReadingGoal",
+  "description": "Fetch a user's reading goal record (net.olamaelcu.livtet.biblio.readingGoal at rkey 'current') from the user's PDS.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["did"],
+        "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the user whose reading goal to fetch."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["goal"],
+          "properties": {
+            "goal": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.readingGoal#main"
+            }
+          }
+        }
+      },
+      "errors": [
+        { "name": "UpstreamUnavailable", "description": "Could not reach the user's PDS." }
+      ]
+    }
+  }
+}
