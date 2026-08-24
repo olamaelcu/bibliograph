@@ -1099,12 +1099,12 @@ git commit -m "feat(search): add OpenLibrarySource wrapping the api wrapper"
 
 ---
 
-## Task 9: GoogleBooksEnricher
+## Task 9: GoogleBooksEnricher (DONE — commit fcdb580)
 
 **Files:**
 - Create: `packages/bibliograph-service/src/lib/server/search/google-books-enricher.ts`
 
-- [ ] **Step 1: Implement**
+- [x] **Step 1: Implement**
 
 ```ts
 // src/lib/server/search/google-books-enricher.ts
@@ -1114,14 +1114,13 @@ import type { EditionItem, Enricher } from './types.ts';
 
 export class GoogleBooksEnricher implements Enricher<EditionItem> {
   readonly name = 'google-books-enricher';
-  constructor(private readonly log: Logger) {}
-  enrich(items: EditionItem[], signal?: AbortSignal): Promise<EditionItem[]> {
-    return googleBooks.enrichEditions(items, this.log, signal);
+  enrich(items: EditionItem[], log: Logger, signal?: AbortSignal): Promise<EditionItem[]> {
+    return googleBooks.enrichEditions(items, log, signal);
   }
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 ```bash
 pnpm exec svelte-check --tsconfig ./tsconfig.json
@@ -1129,7 +1128,7 @@ pnpm exec svelte-check --tsconfig ./tsconfig.json
 
 Expected: no errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/bibliograph-service/src/lib/server/search/google-books-enricher.ts
