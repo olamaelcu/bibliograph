@@ -53,6 +53,8 @@ import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
 import { PostgresSource } from './search/postgres-source';
 import { OpenLibrarySource } from './search/open-library-source';
 import { GoogleBooksEnricher } from './search/google-books-enricher';
+import { OpenLibraryEnricher } from './search/open-library-enricher';
+import { GoogleBooksSource } from './search/google-books-source';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
 import { SearchService } from './search/service';
 import { eq, inArray, and, sql } from 'drizzle-orm';
@@ -74,14 +76,18 @@ log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
 
 const postgresSource = new PostgresSource(log);
 const openLibrarySource = new OpenLibrarySource(log);
+const googleBooksSource = new GoogleBooksSource(log);
 const googleBooksEnricher = new GoogleBooksEnricher();
+const openLibraryEnricher = new OpenLibraryEnricher();
 const authorWikipediaEnricher = new AuthorWikipediaEnricher();
 const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
 const searchService = new SearchService(
   {
     postgres: postgresSource,
     openLibrary: openLibrarySource,
+    googleBooksSource,
     googleBooks: googleBooksEnricher,
+    openLibraryEnricher,
     authorWikipedia: authorWikipediaEnricher,
     contributorWikipedia: contributorWikipediaEnricher,
   },

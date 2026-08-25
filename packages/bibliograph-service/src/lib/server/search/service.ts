@@ -2,7 +2,9 @@ import type { Logger } from 'pino';
 import { getCorrelationLog } from '../correlation';
 import { PostgresSource } from './postgres-source';
 import { OpenLibrarySource } from './open-library-source';
+import { GoogleBooksSource } from './google-books-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
+import { OpenLibraryEnricher } from './open-library-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import { enqueueIngest } from '../jobs/enqueue';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem } from './types';
@@ -10,7 +12,9 @@ import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem,
 export interface SearchServiceDeps {
   postgres: PostgresSource;
   openLibrary: OpenLibrarySource;
+  googleBooksSource: GoogleBooksSource;
   googleBooks: GoogleBooksEnricher;
+  openLibraryEnricher: OpenLibraryEnricher;
   authorWikipedia: AuthorWikipediaEnricher;
   contributorWikipedia: ContributorWikipediaEnricher;
 }
@@ -30,29 +34,54 @@ export class SearchService {
     const log = this.log();
     const pg = await this.deps.postgres.searchEditions(query);
     if (pg.items.length > 0) return pg;
-    const ol = await this.deps.openLibrary.searchEditions(query);
-    if (ol.items.length === 0) return ol;
-    let items = await this.deps.googleBooks.enrich(ol.items, log);
-    items = await this.deps.authorWikipedia.enrich(items, log);
-    for (const item of items) {
-      await enqueueIngest('edition', item);
+
+    const gb = await this.deps.googleBooksSource.searchEditions(query, AbortSignal.timeout(15_000));
+    if (gb.items.length > 0) {
+      let items = (await this.deps.openLibraryEnricher.enrich(gb.items, log)) as EditionItem[];
+      items = (await this.deps.authorWikipedia.enrich(items, log)) as EditionItem[];
+      for (const item of items) await enqueueIngest('edition', item);
+      log.info({ stage: 'search-editions', source: 'googlebooks', items: items.length, total: gb.total }, 'search done');
+      return { items, cursor: gb.cursor, total: gb.total, degraded: gb.degraded };
     }
-    log.info({ stage: 'search-editions', items: items.length, total: ol.total }, 'search done');
-    return { items, cursor: ol.cursor, total: ol.total };
+
+    const ol = await this.deps.openLibrary.searchEditions(query);
+    if (ol.items.length === 0) {
+      return {
+        items: [],
+        total: ol.total,
+        cursor: ol.cursor,
+        degraded: gb.degraded ?? ol.degraded,
+      };
+    }
+    let items = await this.deps.googleBooks.enrich(ol.items, log);
+    items = (await this.deps.authorWikipedia.enrich(items, log)) as EditionItem[];
+    for (const item of items) await enqueueIngest('edition', item);
+    log.info({ stage: 'search-editions', source: 'openlibrary', items: items.length, total: ol.total }, 'search done');
+    return { items, cursor: ol.cursor, total: ol.total, degraded: ol.degraded };
   }
 
   async searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
     const log = this.log();
     const pg = await this.deps.postgres.searchWorks(query);
     if (pg.items.length > 0) return pg;
-    const ol = await this.deps.openLibrary.searchWorks(query);
-    if (ol.items.length === 0) return ol;
-    let items = (await this.deps.authorWikipedia.enrich(ol.items, log)) as WorkItem[];
-    for (const item of items) {
-      await enqueueIngest('work', item);
+
+    const gb = await this.deps.googleBooksSource.searchWorks(query, AbortSignal.timeout(15_000));
+    if (gb.items.length > 0) {
+      let items = (await this.deps.openLibraryEnricher.enrich(gb.items, log)) as WorkItem[];
+      items = (await this.deps.authorWikipedia.enrich(items, log)) as WorkItem[];
+      for (const item of items) await enqueueIngest('work', item);
+      log.info({ stage: 'search-works', source: 'googlebooks', items: items.length, total: gb.total }, 'search done');
+      return { items, cursor: gb.cursor, total: gb.total, degraded: gb.degraded };
     }
-    log.info({ stage: 'search-works', items: items.length, total: ol.total }, 'search done');
-    return { items, cursor: ol.cursor, total: ol.total };
+
+    const ol = await this.deps.openLibrary.searchWorks(query);
+    if (ol.items.length === 0) {
+      return { items: [], total: ol.total, cursor: ol.cursor, degraded: gb.degraded ?? ol.degraded };
+    }
+    let items = (await this.deps.authorWikipedia.enrich(ol.items, log)) as WorkItem[];
+    for (const item of items) await enqueueIngest('work', item);
+    log.info({ stage: 'search-works', source: 'openlibrary', items: items.length, total: ol.total }, 'search done');
+    return { items, cursor: ol.cursor, total: ol.total, degraded: ol.degraded };
   }
 
   async searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
@@ -72,8 +101,6 @@ export class SearchService {
     return { items, cursor: ol.cursor, total: ol.total };
   }
 
-  // Publishers are Postgres-only by design — no OpenLibrary fallback, no
-  // enrichment. The strategy chain stops at the PostgresSource.
   async searchPublishers(query: SearchQuery): Promise<SearchResult<PublisherItem>> {
     const log = this.log();
     const result = await this.deps.postgres.searchPublishers(query);
