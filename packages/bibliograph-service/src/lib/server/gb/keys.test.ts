@@ -8,7 +8,7 @@ import {
   volumeIdFromGbRkey,
   isGbRkey,
   gbIdentifierFromUri,
-} from './keys.ts';
+} from './keys';
 
 test('gbEditionRkey: gb.{volumeId}', () => {
   assert.equal(gbEditionRkey('GhPSEAAAQBAJ'), 'gb.GhPSEAAAQBAJ');

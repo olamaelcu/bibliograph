@@ -7,9 +7,12 @@ import { db as defaultDb } from '../db/index';
 import { editions, works, contributors, records, ingestDeadLetter, tapDeadLetter } from '../db/schema';
 import type { EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 import { PUBLISHER_DID } from '../did';
-import { parseEditionKey, parseWorkKey, parseAuthorKey, editionRkey, workRkey, contributorRkey } from '../ol/keys.js';
+import { parseEditionKey, parseWorkKey, parseAuthorKey, editionRkey, workRkey, contributorRkey } from '../ol/keys';
+import { gbEditionRkey, gbWorkRkey, volumeIdFromGbRkey, gbIdentifierFromUri } from '../gb/keys';
 
 const db: typeof defaultDb = defaultDb;
+
+type SourceKind = 'ol' | 'gb';
 
 function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   const i = idents.find((i) => i.resource === 'openlibrary');
@@ -19,6 +22,23 @@ function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function gbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
+  const i = idents.find((x) => x.resource === 'googlebooks');
+  if (!i) return undefined;
+  return gbIdentifierFromUri(i.uri) ?? undefined;
+}
+
+/** Determine which synthesis path applies for an item, returning OL key, GB volume id, or nothing. */
+function identifySource(
+  idents: Identifier[],
+): { kind: SourceKind; olKey: string; gbId: string } | null {
+  const olKey = olKeyFromIdentifiers(idents);
+  if (olKey) return { kind: 'ol', olKey, gbId: '' };
+  const gbId = gbKeyFromIdentifiers(idents);
+  if (gbId) return { kind: 'gb', olKey: '', gbId };
+  return null;
 }
 
 async function writeIngestDLQ(uri: string, payload: unknown, errorMessage: string, attempts: number): Promise<void> {
@@ -83,13 +103,20 @@ async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: n
   try {
     const allRows: unknown[] = [];
     for (const item of items) {
-      const olKey = olKeyFromIdentifiers(item.identifiers);
+      const source = identifySource(item.identifiers);
       let uri: string | undefined;
       let rkey: string | undefined;
-      if (olKey) {
+      if (source?.kind === 'ol') {
         try {
-          const olid = parseEditionKey(olKey);
+          const olid = parseEditionKey(source.olKey);
           rkey = editionRkey(olid);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
+        } catch {
+          continue;
+        }
+      } else if (source?.kind === 'gb') {
+        try {
+          rkey = gbEditionRkey(source.gbId);
           uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
         } catch {
           continue;
@@ -163,13 +190,20 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
   try {
     const allRows: unknown[] = [];
     for (const item of items) {
-      const olKey = olKeyFromIdentifiers(item.identifiers);
+      const source = identifySource(item.identifiers);
       let uri: string | undefined;
       let rkey: string | undefined;
-      if (olKey) {
+      if (source?.kind === 'ol') {
         try {
-          const olid = parseWorkKey(olKey);
+          const olid = parseWorkKey(source.olKey);
           rkey = workRkey(olid);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
+        } catch {
+          continue;
+        }
+      } else if (source?.kind === 'gb') {
+        try {
+          rkey = gbWorkRkey(source.gbId);
           uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
         } catch {
           continue;
