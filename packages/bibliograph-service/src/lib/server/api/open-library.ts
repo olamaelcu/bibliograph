@@ -2,7 +2,7 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { openLibraryBreaker } from './breakers';
-import { editionRkey, parseEditionKey, parseWorkKey, parseAuthorKey, editionUri, workUri, contributorUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey, PUBLISHER_DID } from '../ol/keys.js';
+import { parseEditionKey, parseWorkKey, parseAuthorKey, editionUri, workUri, contributorUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey } from '../ol/keys.js';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
