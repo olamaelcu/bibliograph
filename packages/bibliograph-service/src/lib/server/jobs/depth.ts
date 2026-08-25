@@ -26,7 +26,7 @@ export async function getTapQueueDepth(): Promise<number> {
   const pool = new Pool({ connectionString, max: 1 });
   try {
     const { rows } = await pool.query<{ count: string }>(
-      "SELECT COUNT(*)::text FROM graphile_worker.jobs WHERE task_identifier LIKE 'tap-record-%' AND is_available",
+      "SELECT COUNT(*)::text FROM graphile_worker.jobs WHERE task_identifier LIKE 'tap-record-%' AND locked_at IS NULL",
     );
     const value = Number(rows[0]?.count ?? '0');
     cached = { value, fetchedAt: now };

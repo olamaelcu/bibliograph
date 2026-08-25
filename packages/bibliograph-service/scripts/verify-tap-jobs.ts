@@ -5,10 +5,16 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '../src/lib/server/db';
 import { records, tapDeadLetter } from '../src/lib/server/db/schema';
-import { tapRecordUpsertTask, tapRecordDeleteTask } from '../src/lib/server/jobs/handlers';
+import {
+  tapRecordUpsertTask,
+  tapRecordDeleteTask,
+  tapRecordUpsertBatchTask,
+  tapRecordDeleteBatchTask,
+} from '../src/lib/server/jobs/handlers';
+import { getTapQueueDepth } from '../src/lib/server/jobs/depth';
 
 if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL required');
@@ -16,6 +22,11 @@ if (!process.env.DATABASE_URL) {
 }
 
 const TEST_URI = 'at://did:plc:test/TapTestCollection/rec1';
+const BATCH_URIS = [
+  'at://did:plc:batch/TapTestCollection/rec-b1',
+  'at://did:plc:batch/TapTestCollection/rec-b2',
+  'at://did:plc:batch/TapTestCollection/rec-b3',
+];
 
 function fakeHelpers() {
   return {
@@ -55,4 +66,32 @@ test('DLQ table exists and accepts inserts', async () => {
   const [dlq] = await db.select().from(tapDeadLetter).where(eq(tapDeadLetter.rkey, 'rec-dlq-smoke')).limit(1);
   assert.ok(dlq, 'DLQ row should exist');
   assert.equal(dlq.errorMessage, 'synthetic smoke test');
+});
+
+test('tap-record-upsert-batch writes multiple rows', async () => {
+  for (const uri of BATCH_URIS) {
+    await db.delete(records).where(eq(records.uri, uri));
+  }
+  await tapRecordUpsertBatchTask(
+    [
+      { uri: BATCH_URIS[0]!, did: 'did:plc:batch', rkey: 'rec-b1', value: { displayName: 'B1' } },
+      { uri: BATCH_URIS[1]!, did: 'did:plc:batch', rkey: 'rec-b2', value: { displayName: 'B2' } },
+      { uri: BATCH_URIS[2]!, did: 'did:plc:batch', rkey: 'rec-b3', value: { displayName: 'B3' } },
+    ],
+    fakeHelpers(),
+  );
+  const rows = await db.select().from(records).where(inArray(records.uri, BATCH_URIS));
+  assert.equal(rows.length, 3, 'all 3 batch rows should exist');
+});
+
+test('tap-record-delete-batch removes multiple rows', async () => {
+  await tapRecordDeleteBatchTask(BATCH_URIS, fakeHelpers());
+  const rows = await db.select().from(records).where(inArray(records.uri, BATCH_URIS));
+  assert.equal(rows.length, 0, 'all 3 batch rows should be removed');
+});
+
+test('getTapQueueDepth returns a non-negative number', async () => {
+  const depth = await getTapQueueDepth();
+  assert.ok(typeof depth === 'number');
+  assert.ok(depth >= 0);
 });
