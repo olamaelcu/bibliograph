@@ -2,6 +2,10 @@ import { eq } from 'drizzle-orm';
 import { db } from './db';
 import { editions, works, contributors, publishers } from './db/schema';
 import { PUBLISHER_DID } from './did';
+import { getEditionByRkey, getWorkByRkey, getContributorByRkey } from './api/open-library.js';
+import { enqueueIngest } from './jobs/enqueue.js';
+import pino from 'pino';
+import type { Logger } from 'pino';
 import type {
   DetailKind,
   DetailValue,
@@ -23,6 +27,8 @@ const COLLECTION: Record<DetailKind, string> = {
   publishers: 'community.lexicon.book.publisher',
 };
 
+const log: Logger = pino({ level: 'info', redact: ['password'] });
+
 export function collectionFor(kind: DetailKind): string {
   return COLLECTION[kind];
 }
@@ -36,7 +42,27 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
 
   if (kind === 'editions') {
     const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
-    if (!row) return { kind, rkey, notFound: true };
+    if (!row) {
+      const item = await getEditionByRkey(rkey, log).catch(() => null);
+      if (item) {
+        enqueueIngest('edition', item).catch(() => {});
+        const value: EditionValue = {
+          $type: 'community.lexicon.book.edition',
+          title: item.title,
+          subtitle: item.subtitle,
+          place: item.place,
+          publishedYear: item.publishedYear,
+          language: item.language,
+          coverImageUrl: item.coverImageUrl,
+          description: item.description,
+          contributors: item.contributors as unknown as Contribution[],
+          identifiers: item.identifiers,
+          createdAt: item.createdAt,
+        };
+        return { kind, rkey, notFound: false, value };
+      }
+      return { kind, rkey, notFound: true };
+    }
     const value: EditionValue = {
       $type: 'community.lexicon.book.edition',
       title: row.title,
@@ -54,7 +80,25 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
   }
   if (kind === 'works') {
     const [row] = await db.select().from(works).where(eq(works.uri, uri)).limit(1);
-    if (!row) return { kind, rkey, notFound: true };
+    if (!row) {
+      const item = await getWorkByRkey(rkey, log).catch(() => null);
+      if (item) {
+        enqueueIngest('work', item).catch(() => {});
+        return { kind, rkey, notFound: false, value: {
+          $type: 'community.lexicon.book.work',
+          title: item.title,
+          subtitle: item.subtitle,
+          originalLanguage: item.originalLanguage,
+          firstPublishedYear: item.firstPublishedYear,
+          subjects: item.subjects,
+          description: item.description,
+          contributors: item.contributors as unknown as Contribution[],
+          identifiers: item.identifiers,
+          createdAt: item.createdAt,
+        }};
+      }
+      return { kind, rkey, notFound: true };
+    }
     const value: WorkValue = {
       $type: 'community.lexicon.book.work',
       title: row.title,
@@ -71,7 +115,24 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
   }
   if (kind === 'contributors') {
     const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
-    if (!row) return { kind, rkey, notFound: true };
+    if (!row) {
+      const item = await getContributorByRkey(rkey, log).catch(() => null);
+      if (item) {
+        enqueueIngest('contributor', item).catch(() => {});
+        return { kind, rkey, notFound: false, value: {
+          $type: 'community.lexicon.book.contributor',
+          name: item.name,
+          aliases: item.aliases,
+          bio: item.bio ?? undefined,
+          bornYear: item.bornYear ?? undefined,
+          diedYear: item.diedYear ?? undefined,
+          linkedDid: item.linkedDid ?? undefined,
+          identifiers: item.identifiers,
+          createdAt: item.createdAt,
+        }};
+      }
+      return { kind, rkey, notFound: true };
+    }
     const value: ContributorValue = {
       $type: 'community.lexicon.book.contributor',
       name: row.name,
