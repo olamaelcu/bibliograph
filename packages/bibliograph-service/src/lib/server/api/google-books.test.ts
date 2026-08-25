@@ -39,7 +39,7 @@ test('enrichEditions writes description + coverImageUrl from Google Books', asyn
     const [out] = await enrichEditions([baseItem], log);
     assert.ok(out);
     assert.equal(out.description, 'A great book.');
-    assert.equal(out.coverImageUrl, 'http://books.google.com/cover.jpg');
+    assert.equal(out.coverImageUrl, 'https://books.google.com/cover.jpg');
   } finally { restore(); }
 });
 
