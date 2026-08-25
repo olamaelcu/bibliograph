@@ -23,11 +23,8 @@ export function parseWorkKey(key: string): string {
 }
 
 export function parseAuthorKey(key: string): string {
-  // Accept '/authors/OL123A', 'OL123A' (bare OLID), etc.
-  let id = key;
-  if (key.startsWith('/authors/')) {
-    id = key.slice(9);
-  }
+  if (!key.startsWith('/authors/')) throw new Error(`author key must start with /authors/: ${key}`);
+  const id = key.slice(9);
   assertOlId(id, OL_AUTHOR_RE, 'author');
   return id;
 }
@@ -57,4 +54,25 @@ export function workUri(olid: string): string {
 
 export function contributorUri(olid: string): string {
   return `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${contributorRkey(olid)}`;
+}
+
+export function olidFromEditionRkey(rkey: string): string {
+  if (!rkey.startsWith('ol.')) throw new Error(`invalid edition rkey: ${rkey}`);
+  const olid = rkey.slice(3);
+  if (!OL_EDITION_RE.test(olid)) throw new Error(`invalid edition rkey: ${rkey}`);
+  return olid;
+}
+
+export function olidFromWorkRkey(rkey: string): string {
+  if (!rkey.startsWith('ol.W')) throw new Error(`invalid work rkey: ${rkey}`);
+  const olid = `OL${rkey.slice(4)}`;
+  if (!OL_WORK_RE.test(olid)) throw new Error(`invalid work rkey: ${rkey}`);
+  return olid;
+}
+
+export function olidFromContributorRkey(rkey: string): string {
+  if (!rkey.startsWith('ol.A')) throw new Error(`invalid contributor rkey: ${rkey}`);
+  const olid = `OL${rkey.slice(4)}`;
+  if (!OL_AUTHOR_RE.test(olid)) throw new Error(`invalid contributor rkey: ${rkey}`);
+  return olid;
 }

@@ -77,7 +77,7 @@ interface OlWorkDoc {
   cover_i?: number;
 }
 
-interface OlAuthorDoc { key: string; author_name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
+interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
 
 function coverUrl(coverId: number | undefined): string | undefined {
   if (coverId === undefined) return undefined;
@@ -97,7 +97,23 @@ function yearFromDate(d: string | undefined): number | undefined {
 }
 
 function makeOlIdentifier(key: string): Identifier {
-  return { uri: `https://openlibrary.org${key}`, resource: 'openlibrary' };
+  // key formats: /books/OL123M, /works/OL123W, OL123A (bare author OLID)
+  let uri: string;
+  if (key.startsWith('/books/') || key.startsWith('/works/') || key.startsWith('/authors/')) {
+    uri = `https://openlibrary.org${key}`;
+  } else if (key.startsWith('OL') && key.endsWith('A')) {
+    // Bare author OLID like OL26459A
+    uri = `https://openlibrary.org/authors/${key}`;
+  } else if (key.startsWith('OL') && key.endsWith('M')) {
+    // Bare edition OLID like OL123M
+    uri = `https://openlibrary.org/books/${key}`;
+  } else if (key.startsWith('OL') && key.endsWith('W')) {
+    // Bare work OLID like OL123W
+    uri = `https://openlibrary.org/works/${key}`;
+  } else {
+    uri = `https://openlibrary.org${key}`;
+  }
+  return { uri, resource: 'openlibrary' };
 }
 
 function isbnIdentifier(isbn: string): Identifier {
@@ -204,7 +220,7 @@ export async function searchContributors(
         const aliases = d.alternate_names ?? [];
         items.push({
           uri: contributorUri(olid),
-          name: d.author_name,
+          name: d.name,
           aliases,
           bornYear: yearFromDate(d.birth_date),
           diedYear: yearFromDate(d.death_date),

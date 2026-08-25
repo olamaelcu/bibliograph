@@ -10,6 +10,9 @@ import {
   editionUri,
   workUri,
   contributorUri,
+  olidFromEditionRkey,
+  olidFromWorkRkey,
+  olidFromContributorRkey,
 } from './keys.js';
 
 test('parseEditionKey accepts /books/OL123M', () => {
@@ -82,4 +85,20 @@ test('workUri transforms correctly', () => {
 test('contributorUri is formatted correctly', () => {
   const uri = contributorUri('OL12345A');
   assert.ok(uri.includes('community.lexicon.book.contributor/ol.A12345A'));
+});
+
+test('olidFromEditionRkey round-trips ol.OL7281956M', () => {
+  assert.equal(olidFromEditionRkey('ol.OL7281956M'), 'OL7281956M');
+});
+
+test('olidFromEditionRkey rejects bad prefix', () => {
+  assert.throws(() => olidFromEditionRkey('ol.W123W'), /invalid edition rkey/);
+});
+
+test('olidFromWorkRkey converts ol.W66554W -> OL66554W', () => {
+  assert.equal(olidFromWorkRkey('ol.W66554W'), 'OL66554W');
+});
+
+test('olidFromContributorRkey converts ol.A12345A -> OL12345A', () => {
+  assert.equal(olidFromContributorRkey('ol.A12345A'), 'OL12345A');
 });
