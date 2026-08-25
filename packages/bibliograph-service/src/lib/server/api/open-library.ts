@@ -2,7 +2,7 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { openLibraryBreaker } from './breakers';
-import { editionRkey, parseEditionKey, parseWorkKey, parseAuthorKey, editionUri, workUri, contributorUri } from '../ol/keys.js';
+import { editionRkey, parseEditionKey, parseWorkKey, parseAuthorKey, editionUri, workUri, contributorUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey, PUBLISHER_DID } from '../ol/keys.js';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
@@ -97,18 +97,14 @@ function yearFromDate(d: string | undefined): number | undefined {
 }
 
 function makeOlIdentifier(key: string): Identifier {
-  // key formats: /books/OL123M, /works/OL123W, OL123A (bare author OLID)
   let uri: string;
   if (key.startsWith('/books/') || key.startsWith('/works/') || key.startsWith('/authors/')) {
     uri = `https://openlibrary.org${key}`;
   } else if (key.startsWith('OL') && key.endsWith('A')) {
-    // Bare author OLID like OL26459A
     uri = `https://openlibrary.org/authors/${key}`;
   } else if (key.startsWith('OL') && key.endsWith('M')) {
-    // Bare edition OLID like OL123M
     uri = `https://openlibrary.org/books/${key}`;
   } else if (key.startsWith('OL') && key.endsWith('W')) {
-    // Bare work OLID like OL123W
     uri = `https://openlibrary.org/works/${key}`;
   } else {
     uri = `https://openlibrary.org${key}`;
@@ -214,22 +210,91 @@ export async function searchContributors(
   if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
   const items: ContributorItem[] = [];
-      for (const d of data.docs ?? []) {
-      try {
-        const olid = parseAuthorKey(d.key);
-        const aliases = d.alternate_names ?? [];
-        items.push({
-          uri: contributorUri(olid),
-          name: d.name,
-          aliases,
-          bornYear: yearFromDate(d.birth_date),
-          diedYear: yearFromDate(d.death_date),
-          identifiers: [makeOlIdentifier(d.key)],
-          createdAt,
-        });
+  for (const d of data.docs ?? []) {
+    try {
+      const olid = parseAuthorKey(d.key);
+      const aliases = d.alternate_names ?? [];
+      items.push({
+        uri: contributorUri(olid),
+        name: d.name,
+        aliases,
+        bornYear: yearFromDate(d.birth_date),
+        diedYear: yearFromDate(d.death_date),
+        identifiers: [makeOlIdentifier(d.key)],
+        createdAt,
+      });
     } catch (err) {
       log.warn({ stage: 'open-library-source', key: d.key, err: String(err) }, 'skip malformed contributor doc');
     }
   }
   return { items, total: data.numFound ?? 0 };
+}
+
+export async function getEditionByRkey(rkey: string, log: Logger, signal?: AbortSignal): Promise<EditionItem | null> {
+  let olid: string;
+  try { olid = olidFromEditionRkey(rkey); } catch { return null; }
+  return getEditionByOlid(olid, log, signal);
+}
+
+async function getEditionByOlid(olid: string, log: Logger, signal?: AbortSignal): Promise<EditionItem | null> {
+  const url = `https://openlibrary.org/books/${olid}.json`;
+  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const raw = await fetchJson<OlEditionDoc & { key: string; title: string }>(url, log, s);
+  if (!raw) return null;
+  const parsedOlid = parseEditionKey(raw.key);
+  const identifiers: Identifier[] = [makeOlIdentifier(raw.key)];
+  return {
+    uri: editionUri(parsedOlid),
+    title: raw.title,
+    subtitle: raw.subtitle,
+    publishedYear: raw.first_publish_year ?? raw.publish_year?.[0],
+    place: raw.place?.[0] as string | undefined,
+    language: raw.language?.[0] as string | undefined,
+    description: extractDescription(raw.description),
+    coverImageUrl: coverUrl(raw.cover_i),
+    identifiers,
+    contributors: [],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function getWorkByRkey(rkey: string, log: Logger, signal?: AbortSignal): Promise<WorkItem | null> {
+  let olid: string;
+  try { olid = olidFromWorkRkey(rkey); } catch { return null; }
+  const url = `https://openlibrary.org/works/${olid}.json`;
+  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const raw = await fetchJson<OlWorkDoc>(url, log, s);
+  if (!raw) return null;
+  const parsed = parseWorkKey(raw.key);
+  return {
+    uri: workUri(parsed),
+    title: raw.title,
+    subtitle: raw.subtitle,
+    firstPublishedYear: raw.first_publish_year,
+    originalLanguage: raw.original_languages?.[0] as string | undefined,
+    subjects: raw.subject ?? [],
+    description: extractDescription(raw.description),
+    contributors: [],
+    identifiers: [makeOlIdentifier(raw.key)],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export async function getContributorByRkey(rkey: string, log: Logger, signal?: AbortSignal): Promise<ContributorItem | null> {
+  let olid: string;
+  try { olid = olidFromContributorRkey(rkey); } catch { return null; }
+  const url = `https://openlibrary.org/authors/${olid}.json`;
+  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const raw = await fetchJson<OlAuthorDoc & { key: string }>(url, log, s);
+  if (!raw) return null;
+  const parsed = parseAuthorKey(raw.key);
+  return {
+    uri: contributorUri(parsed),
+    name: raw.name,
+    aliases: raw.alternate_names ?? [],
+    bornYear: yearFromDate(raw.birth_date),
+    diedYear: yearFromDate(raw.death_date),
+    identifiers: [makeOlIdentifier(raw.key)],
+    createdAt: new Date().toISOString(),
+  };
 }
