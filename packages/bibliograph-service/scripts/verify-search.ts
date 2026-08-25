@@ -140,3 +140,76 @@ test('searchEditions degrades when GOOGLE_BOOKS_API_KEY is missing', async () =>
     assert.equal(body.items[0]?.coverImageUrl, undefined);
   } finally { restore(); }
 });
+
+test('searchContributors parses bare OpenLibrary author OLIDs (no /authors/ prefix)', async () => {
+  const restore = stubFetch(async (url: string) => {
+    if (url.includes('/search/authors.json')) {
+      return new Response(JSON.stringify({
+        numFound: 1,
+        docs: [{ key: 'OL28885A', name: 'Maya Angelou', birth_date: 'April 4, 1928' }],
+      }), { headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('wikipedia.org')) {
+      return new Response(JSON.stringify({ query: { pages: { '1': { extract: 'Bio.', title: 'Maya Angelou' } } } }),
+        { headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('not found', { status: 404 });
+  });
+  const router = new XRPCRouter();
+  const svc = new SearchService(
+    { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), googleBooks: new GoogleBooksEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+    log,
+  );
+  router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
+    async handler({ params }: { params: { q?: string } }) {
+      const r = await svc.searchContributors({ q: params.q, id: undefined, limit: 20, cursor: undefined });
+      return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
+    },
+  });
+  try {
+    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchContributors?q=Maya+Angelou'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { items: Array<{ name: string; uri: string }> };
+    assert.ok(body.items.length >= 1, 'bare OLID must parse, not be skipped');
+    assert.equal(body.items[0]?.name, 'Maya Angelou');
+    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.contributor\/ol\.A28885A$/);
+  } finally { restore(); }
+});
+
+test('searchEditions skips work-only docs with no cover edition (no /books/ key)', async () => {
+  const restore = stubFetch(async (url: string) => {
+    if (url.includes('openlibrary.org/search') && url.includes('type=edition')) {
+      return new Response(JSON.stringify({
+        numFound: 2,
+        docs: [
+          { key: '/works/OL80021W', title: 'No Cover Edition' },
+          { key: '/books/OL3321378M', title: 'With Edition', isbn: ['9780123456789'] },
+        ],
+      }), { headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('googleapis.com/books')) {
+      return new Response(JSON.stringify({ items: [] }), { headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('not found', { status: 404 });
+  });
+  const router = new XRPCRouter();
+  const pg = new PostgresSource(log);
+  const svc = new SearchService(
+    { postgres: pg, openLibrary: new OpenLibrarySource(log), googleBooks: new GoogleBooksEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+    log,
+  );
+  router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
+    async handler({ params }: { params: { q?: string } }) {
+      const r = await svc.searchEditions({ q: params.q, id: undefined, limit: 20, cursor: undefined });
+      return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
+    },
+  });
+  try {
+    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchEditions?q=work-unique-xyz'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { items: Array<{ title: string }>; total: number };
+    assert.equal(body.items.length, 1, 'work-only doc must be skipped, not synthesized');
+    assert.equal(body.items[0]?.title, 'With Edition');
+    assert.equal(body.total, 2, 'total reflects OpenLibrary numFound, not the filtered set');
+  } finally { restore(); }
+});

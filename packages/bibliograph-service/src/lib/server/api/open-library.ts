@@ -118,6 +118,109 @@ function isbnIdentifier(isbn: string): Identifier {
   return { uri: `isbn:${clean}`, resource };
 }
 
+function isbnFromIdentifiers(item: EditionItem): string | undefined {
+  for (const id of item.identifiers) {
+    if (id.resource === 'isbn13' || id.resource === 'isbn10' || id.resource === 'isbn') {
+      return id.uri.replace(/^isbn:/, '');
+    }
+  }
+  return undefined;
+}
+
+async function enrichOneEdition(item: EditionItem, log: Logger, signal: AbortSignal): Promise<EditionItem> {
+  const isbn = isbnFromIdentifiers(item);
+  if (!isbn) return item;
+  const url = buildUrl(`isbn:${isbn}`, 'edition', 1, 1);
+  const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
+  const doc = data?.docs?.[0];
+  if (!doc) return item;
+  let enriched = item;
+  if (!enriched.description) {
+    const desc = extractDescription(doc.description);
+    if (desc) enriched = { ...enriched, description: desc };
+  }
+  if (!enriched.coverImageUrl && doc.cover_i !== undefined) {
+    enriched = { ...enriched, coverImageUrl: `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg` };
+  }
+  if (!enriched.place && doc.place?.[0]) {
+    enriched = { ...enriched, place: doc.place[0] };
+  }
+  if (!enriched.publishedYear && doc.first_publish_year) {
+    enriched = { ...enriched, publishedYear: doc.first_publish_year };
+  }
+  if (!enriched.language && doc.language?.[0]) {
+    enriched = { ...enriched, language: doc.language[0] };
+  }
+  log.info({ stage: 'open-library-enricher', isbn, uri: enriched.uri }, 'ol enrich ok');
+  return enriched;
+}
+
+export async function enrichEditions(
+  items: readonly EditionItem[],
+  log: Logger,
+  externalSignal?: AbortSignal,
+): Promise<EditionItem[]> {
+  const CONCURRENCY = 8;
+  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const out: EditionItem[] = new Array(items.length);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      const item = items[i];
+      if (!item) return;
+      out[i] = await enrichOneEdition(item, log, signal);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker()));
+  return out;
+}
+
+async function enrichOneWork(item: WorkItem, log: Logger, signal: AbortSignal): Promise<WorkItem> {
+  const title = item.title;
+  if (!title) return item;
+  const url = buildUrl(title, 'work', 1, 1);
+  const data = await fetchJson<OlSearchResponse<OlWorkDoc>>(url, log, signal);
+  const doc = data?.docs?.[0];
+  if (!doc) return item;
+  let enriched = item;
+  if (!enriched.description) {
+    const desc = extractDescription(doc.description);
+    if (desc) enriched = { ...enriched, description: desc };
+  }
+  if (enriched.subjects.length === 0 && doc.subject) {
+    enriched = { ...enriched, subjects: doc.subject };
+  }
+  if (!enriched.firstPublishedYear && doc.first_publish_year) {
+    enriched = { ...enriched, firstPublishedYear: doc.first_publish_year };
+  }
+  log.info({ stage: 'open-library-enricher', title, uri: enriched.uri }, 'ol enrich ok');
+  return enriched;
+}
+
+export async function enrichWorks(
+  items: readonly WorkItem[],
+  log: Logger,
+  externalSignal?: AbortSignal,
+): Promise<WorkItem[]> {
+  const CONCURRENCY = 8;
+  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const out: WorkItem[] = new Array(items.length);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      const item = items[i];
+      if (!item) return;
+      out[i] = await enrichOneWork(item, log, signal);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker()));
+  return out;
+}
+
 export async function searchEditions(
   query: SearchQuery,
   log: Logger,
@@ -132,8 +235,14 @@ export async function searchEditions(
   const createdAt = new Date().toISOString();
   const items: EditionItem[] = [];
   for (const d of data.docs ?? []) {
+    const editionKey = d.cover_edition_key
+      ? (d.cover_edition_key.startsWith('/') ? d.cover_edition_key : `/books/${d.cover_edition_key}`)
+      : d.key;
+    if (!editionKey.startsWith('/books/')) {
+      log.warn({ stage: 'open-library-source', key: d.key, cover_edition_key: d.cover_edition_key }, 'skip work-only doc with no cover edition');
+      continue;
+    }
     try {
-      const editionKey = d.cover_edition_key ? `/books/${d.cover_edition_key}` : d.key;
       const olid = parseEditionKey(editionKey);
       const identifiers: Identifier[] = [makeOlIdentifier(editionKey)];
       if (d.isbn) {

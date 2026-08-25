@@ -58,6 +58,7 @@ import { SearchService } from './search/service';
 import { eq, inArray, and, sql } from 'drizzle-orm';
 import { db } from './db';
 import { editions, works, contributors, publishers, records } from './db/schema';
+import * as v from 'valibot';
 import { allowRequest } from './rate-limit';
 import { getBacklinks } from './constellation/client';
 import {
@@ -482,10 +483,10 @@ async function serveBookRecordFromDb(
   // community.lexicon.book.contributor
   const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
   if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
-const value = {
-      $type: 'community.lexicon.book.contributor',
-      uri,
-      name: row.name,
+  const value = {
+    $type: 'community.lexicon.book.contributor',
+    uri,
+    name: row.name,
     aliases: row.aliases ?? [],
     bio: row.bio ?? undefined,
     bornYear: row.bornYear ?? undefined,
@@ -592,6 +593,36 @@ function isRecordResponse(value: unknown): value is PdsRecordResponse {
   return typeof v.uri === 'string' && typeof v.value === 'object' && v.value !== null;
 }
 
+interface PdsListRecordsResponse {
+  records: Array<{ uri: string; cid?: string; value: Record<string, unknown> }>;
+  cursor?: string;
+}
+
+const PdsListRecordSchema = v.object({
+  uri: v.string(),
+  cid: v.optional(v.string()),
+  value: v.record(v.string(), v.unknown()),
+});
+const PdsListRecordsSchema = v.object({
+  records: v.array(PdsListRecordSchema),
+  cursor: v.optional(v.string()),
+});
+
+function safeParseListRecords(raw: unknown): { ok: true; data: PdsListRecordsResponse } | { ok: false; issues: ReadonlyArray<{ message: string; path?: unknown }> } {
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, issues: [{ message: 'raw is not an object' }] };
+  }
+  const wrapper = raw as { ok?: unknown; data?: unknown };
+  const inner = wrapper.ok === true && wrapper.data && typeof wrapper.data === 'object'
+    ? wrapper.data
+    : raw;
+  const result = v.safeParse(PdsListRecordsSchema, inner);
+  if (result.success) {
+    return { ok: true, data: { records: result.output.records, cursor: result.output.cursor } };
+  }
+  return { ok: false, issues: result.issues.map((i) => ({ message: i.message, path: i.path })) };
+}
+
 router.addQuery(NetOlamaelcuLivtetBiblioGetReadingGoal.mainSchema, {
   async handler({ params }) {
     let raw: unknown;
@@ -690,19 +721,61 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
   async handler({ params }) {
     const { did, limit = 50, cursor } = params;
     try {
-      const { client } = await pdsClient(did);
-      const raw = await client.get('com.atproto.repo.listRecords', {
-        params: { repo: did, collection: 'net.olamaelcu.livtet.biblio.shelf', limit, cursor },
-        signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
-      });
-      if (!isRecordResponse(raw)) {
-        return json({ shelves: [], cursor: undefined } as NetOlamaelcuLivtetBiblioListShelves.$output);
+      const cacheRows = await db
+        .select()
+        .from(records)
+        .where(
+          and(
+            eq(records.did, did as string),
+            eq(records.collection, 'net.olamaelcu.livtet.biblio.shelf'),
+          ),
+        )
+        .limit(limit + 1);
+      const hasMore = cacheRows.length > limit;
+      let merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
+      let tier = 'tap' as 'tap' | 'pds';
+
+      if (merged.length < limit && !cursor) {
+        tier = 'pds';
+        try {
+          const { client } = await pdsClient(did);
+          const raw = await client.get('com.atproto.repo.listRecords', {
+            params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.shelf', limit, cursor },
+            signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+          });
+          const parsed = safeParseListRecords(raw);
+          if (!parsed.ok) {
+            log.warn({ stage: 'listShelves.parse', did, issues: parsed.issues }, 'listRecords response did not match schema');
+          }
+          if (parsed.ok) {
+            const { records: pdsRecords, cursor: pdsCursor } = parsed.data;
+            const fetched = pdsRecords.map((r) => ({
+              uri: r.uri,
+              cid: 'bafyplaceholder',
+              did: did as string,
+              rkey: r.uri.split('/').pop() ?? '',
+              collection: 'net.olamaelcu.livtet.biblio.shelf',
+              value: r.value as never,
+              createdAt: new Date(),
+              indexedAt: new Date(),
+            }));
+            const seen = new Set(merged.map((r) => r.uri));
+            for (const row of fetched) if (!seen.has(row.uri)) merged.push(row);
+          }
+        } catch (err: unknown) {
+          log.warn({ err, did }, 'listShelves: PDS scan failed (cache-only result returned)');
+        }
       }
-      const { records, cursor: resultCursor } = raw.value as { records: Array<{ uri: string; value: Record<string, unknown> }>; cursor?: string };
-      const shelves = records.map((r) => ({ uri: r.uri as `${string}:${string}`, name: (r.value.name as string) ?? '' }));
-      return json({ shelves, cursor: resultCursor } as NetOlamaelcuLivtetBiblioListShelves.$output);
+
+      const shelves = merged.map((r) => ({
+        uri: r.uri as `${string}:${string}`,
+        name: ((r.value as { name?: string }).name) ?? '',
+        $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
+      }));
+      const outCursor = tier === 'tap' && hasMore ? String(merged.length) : undefined;
+      return json({ shelves, cursor: outCursor } as NetOlamaelcuLivtetBiblioListShelves.$output);
     } catch (err: unknown) {
-      log.warn({ err, did }, 'listShelves: PDS read failed');
+      log.warn({ err, did }, 'listShelves: failed');
       return json({ shelves: [], cursor: undefined } as NetOlamaelcuLivtetBiblioListShelves.$output);
     }
   },
@@ -778,9 +851,13 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
               params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.bookShelving', limit, cursor: cur },
               signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
             });
-            if (!isRecordResponse(page)) break;
-            const recs = (page.value as { records: Array<{ uri: string; value: Record<string, unknown> }>; cursor?: string }).records;
-            cur = (page.value as { cursor?: string }).cursor;
+            const parsed = safeParseListRecords(page);
+            if (!parsed.ok) {
+              log.warn({ stage: 'getShelvingOfBook.parse', did, bookUri, issues: parsed.issues }, 'listRecords response did not match schema');
+              break;
+            }
+            const recs = parsed.data.records;
+            cur = parsed.data.cursor;
             for (const r of recs) {
               const bookRef = (r.value.book as { uri?: string } | undefined)?.uri;
               if (bookRef === bookUri) {
@@ -879,9 +956,13 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
               params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.bookShelving', limit, cursor: cur },
               signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
             });
-            if (!isRecordResponse(page)) break;
-            const recs = (page.value as { records: Array<{ uri: string; value: Record<string, unknown> }>; cursor?: string }).records;
-            cur = (page.value as { cursor?: string }).cursor;
+            const parsed = safeParseListRecords(page);
+            if (!parsed.ok) {
+              log.warn({ stage: 'listBooksOnShelf.parse', did, shelfUri, issues: parsed.issues }, 'listRecords response did not match schema');
+              break;
+            }
+            const recs = parsed.data.records;
+            cur = parsed.data.cursor;
             for (const r of recs) {
               const shelfRef = (r.value.shelf as string | undefined);
               if (shelfRef === shelfUri) {

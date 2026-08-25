@@ -56,7 +56,7 @@ type DbExecutor = typeof defaultDb;
 export type { DbExecutor };
 
 export class PostgresSource {
-  constructor(private readonly log: Logger, private readonly db: DbExecutor = defaultDb) {}
+  constructor(private readonly log: Logger, private readonly db: DbExecutor = defaultDb) { }
 
   searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
     return this.runSearch<EditionItem>(editions as unknown as SearchTable, editions.title, this.mapEditionRow, query, 'edition');
@@ -107,7 +107,7 @@ export class PostgresSource {
     let total = 0;
     if (filterConds.length > 0) {
       const countResult = await this.db.select({ count: sql<number>`count(*) as count` }).from(table as unknown as PgTable).where(and(...filterConds)).orderBy().limit(1);
-      total = countResult[0]?.count ?? 0;
+      total = Number(countResult[0]?.count ?? 0);
     }
 
     const base = this.db.select().from(table as unknown as PgTable);

@@ -8,23 +8,24 @@ function assertOlId(id: string, re: RegExp, label: string): void {
   if (!re.test(id)) throw new Error(`invalid ${label} OLID: ${id}`);
 }
 
+function stripPrefix(key: string, prefix: string): string {
+  return key.startsWith(prefix) ? key.slice(prefix.length) : key;
+}
+
 export function parseEditionKey(key: string): string {
-  if (!key.startsWith('/books/')) throw new Error(`edition key must start with /books/: ${key}`);
-  const id = key.slice(7);
+  const id = stripPrefix(key, '/books/');
   assertOlId(id, OL_EDITION_RE, 'edition');
   return id;
 }
 
 export function parseWorkKey(key: string): string {
-  if (!key.startsWith('/works/')) throw new Error(`work key must start with /works/: ${key}`);
-  const id = key.slice(7);
+  const id = stripPrefix(key, '/works/');
   assertOlId(id, OL_WORK_RE, 'work');
   return id;
 }
 
 export function parseAuthorKey(key: string): string {
-  if (!key.startsWith('/authors/')) throw new Error(`author key must start with /authors/: ${key}`);
-  const id = key.slice(9);
+  const id = stripPrefix(key, '/authors/');
   assertOlId(id, OL_AUTHOR_RE, 'author');
   return id;
 }
