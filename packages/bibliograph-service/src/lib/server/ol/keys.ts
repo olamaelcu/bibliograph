@@ -23,8 +23,11 @@ export function parseWorkKey(key: string): string {
 }
 
 export function parseAuthorKey(key: string): string {
-  if (!key.startsWith('/authors/')) throw new Error(`author key must start with /authors/: ${key}`);
-  const id = key.slice(9);
+  // Accept '/authors/OL123A', 'OL123A' (bare OLID), etc.
+  let id = key;
+  if (key.startsWith('/authors/')) {
+    id = key.slice(9);
+  }
   assertOlId(id, OL_AUTHOR_RE, 'author');
   return id;
 }

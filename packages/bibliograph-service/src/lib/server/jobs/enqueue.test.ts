@@ -17,7 +17,7 @@ const editionItem: EditionItem = {
 };
 
 const workItem: WorkItem = {
-  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.WOL1W',
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.W1W',
   title: 'Test Work',
   subjects: [],
   identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],
@@ -26,7 +26,7 @@ const workItem: WorkItem = {
 };
 
 const contributorItem: ContributorItem = {
-  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.AOL1A',
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.A1A',
   name: 'Test Author',
   aliases: [],
   identifiers: [{ uri: 'https://openlibrary.org/authors/OL1A', resource: 'openlibrary' }],

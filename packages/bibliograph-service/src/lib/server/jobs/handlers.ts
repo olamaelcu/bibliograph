@@ -5,28 +5,20 @@ import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { editions, works, contributors, records, ingestDeadLetter, tapDeadLetter } from '../db/schema';
-import { PUBLISHER_DID } from '../did';
 import type { EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
+import { PUBLISHER_DID } from '../did';
+import { parseEditionKey, parseWorkKey, parseAuthorKey, editionRkey, workRkey, contributorRkey } from '../ol/keys.js';
 
-type Db = typeof defaultDb;
-
-const db: Db = defaultDb;
-
-function rkeyForEdition(olKey: string): string {
-  const olId = olKey.replace(/^\/books\//, '');
-  return `ol.${olId}`;
-}
-function rkeyForWork(olKey: string): string {
-  const olId = olKey.replace(/^\/works\//, '');
-  return `ol.W${olId.slice(2)}`;
-}
-function rkeyForContributor(olKey: string): string {
-  const olId = olKey.replace(/^\/authors\//, '');
-  return `ol.A${olId.slice(2)}`;
-}
+const db: typeof defaultDb = defaultDb;
 
 function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
-  return idents.find((i) => i.resource === 'openlibrary')?.uri.replace(/^https:\/\/openlibrary\.org/, '');
+  const i = idents.find((i) => i.resource === 'openlibrary');
+  if (!i) return undefined;
+  try {
+    return new URL(i.uri).pathname;
+  } catch {
+    return undefined;
+  }
 }
 
 async function writeIngestDLQ(uri: string, payload: unknown, errorMessage: string, attempts: number): Promise<void> {
@@ -92,9 +84,18 @@ async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: n
     const allRows: unknown[] = [];
     for (const item of items) {
       const olKey = olKeyFromIdentifiers(item.identifiers);
-      if (!olKey) continue;
-      const rkey = rkeyForEdition(olKey);
-      const uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
+      let uri: string | undefined;
+      let rkey: string | undefined;
+      if (olKey) {
+        try {
+          const olid = parseEditionKey(olKey);
+          rkey = editionRkey(olid);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
+        } catch {
+          continue;
+        }
+      }
+      if (!uri || !rkey) continue;
       const value = {
         $type: 'community.lexicon.book.edition' as const,
         title: item.title,
@@ -144,9 +145,15 @@ async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: n
     log.error({ stage: 'ingest-edition-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
     for (const item of items) {
       const olKey = olKeyFromIdentifiers(item.identifiers);
-      const uri = olKey
-        ? `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkeyForEdition(olKey)}`
-        : 'at://unknown/community.lexicon.book.edition/unknown';
+      let uri = 'at://unknown/community.lexicon.book.edition/unknown';
+      if (olKey) {
+        try {
+          const olid = parseEditionKey(olKey);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${editionRkey(olid)}`;
+        } catch {
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/unknown`; // malformed
+        }
+      }
       await writeIngestDLQ(uri, item, message, attempts);
     }
   }
@@ -157,9 +164,18 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
     const allRows: unknown[] = [];
     for (const item of items) {
       const olKey = olKeyFromIdentifiers(item.identifiers);
-      if (!olKey) continue;
-      const rkey = rkeyForWork(olKey);
-      const uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
+      let uri: string | undefined;
+      let rkey: string | undefined;
+      if (olKey) {
+        try {
+          const olid = parseWorkKey(olKey);
+          rkey = workRkey(olid);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
+        } catch {
+          continue;
+        }
+      }
+      if (!uri || !rkey) continue;
       const value = {
         $type: 'community.lexicon.book.work' as const,
         title: item.title,
@@ -206,9 +222,15 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
     log.error({ stage: 'ingest-work-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
     for (const item of items) {
       const olKey = olKeyFromIdentifiers(item.identifiers);
-      const uri = olKey
-        ? `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkeyForWork(olKey)}`
-        : 'at://unknown/community.lexicon.book.work/unknown';
+      let uri = 'at://unknown/community.lexicon.book.work/unknown';
+      if (olKey) {
+        try {
+          const olid = parseWorkKey(olKey);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${workRkey(olid)}`;
+        } catch {
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/unknown`;
+        }
+      }
       await writeIngestDLQ(uri, item, message, attempts);
     }
   }
@@ -219,9 +241,18 @@ async function ingestContributorBatch(items: ContributorItem[], log: Logger, att
     const allRows: unknown[] = [];
     for (const item of items) {
       const olKey = olKeyFromIdentifiers(item.identifiers);
-      if (!olKey) continue;
-      const rkey = rkeyForContributor(olKey);
-      const uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
+      let uri: string | undefined;
+      let rkey: string | undefined;
+      if (olKey) {
+        try {
+          const olid = parseAuthorKey(olKey);
+          rkey = contributorRkey(olid);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
+        } catch {
+          continue;
+        }
+      }
+      if (!uri || !rkey) continue;
       const value = {
         $type: 'community.lexicon.book.contributor' as const,
         name: item.name,
@@ -265,9 +296,15 @@ async function ingestContributorBatch(items: ContributorItem[], log: Logger, att
     log.error({ stage: 'ingest-contributor-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
     for (const item of items) {
       const olKey = olKeyFromIdentifiers(item.identifiers);
-      const uri = olKey
-        ? `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkeyForContributor(olKey)}`
-        : 'at://unknown/community.lexicon.book.contributor/unknown';
+      let uri = 'at://unknown/community.lexicon.book.contributor/unknown';
+      if (olKey) {
+        try {
+          const olid = parseAuthorKey(olKey);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${contributorRkey(olid)}`;
+        } catch {
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/unknown`;
+        }
+      }
       await writeIngestDLQ(uri, item, message, attempts);
     }
   }

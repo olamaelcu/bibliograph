@@ -35,7 +35,7 @@ const baseWork: WorkItem = {
 };
 
 const baseContributor: ContributorItem = {
-  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.AOL1A',
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.A1A',
   name: 'Jane Doe',
   aliases: [],
   identifiers: [{ uri: 'https://openlibrary.org/authors/OL1A', resource: 'openlibrary' }],
