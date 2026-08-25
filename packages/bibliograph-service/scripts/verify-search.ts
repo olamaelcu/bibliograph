@@ -98,16 +98,51 @@ function buildRouter(): { router: XRPCRouter; restore: () => void } {
   return { router, restore };
 }
 
-test('searchEditions returns OpenLibrary results on Postgres miss', async () => {
+test('searchEditions returns Google Books primary results on Postgres miss', async () => {
   process.env.GOOGLE_BOOKS_API_KEY = 'k';
   const { router, restore } = buildRouter();
   try {
     const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchEditions?q=anything'));
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ title: string; coverImageUrl?: string }>; total?: number };
-    assert.ok(body.items.length >= 1, 'expected OpenLibrary fallback to return at least one edition');
+    const body = (await res.json()) as { items: Array<{ title: string; uri: string; coverImageUrl?: string }>; total?: number };
+    assert.ok(body.items.length >= 1, 'expected Google Books primary to return at least one edition');
     assert.equal(body.items[0]?.title, 'OL Edition');
-    assert.equal(body.items[0]?.coverImageUrl, 'http://x/cover.jpg');
+    assert.equal(body.items[0]?.coverImageUrl, 'https://x/cover.jpg');
+    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.edition\/ol\./);
+  } finally { restore(); }
+});
+
+test('searchEditions falls back to OpenLibrary when Google Books is empty', async () => {
+  process.env.GOOGLE_BOOKS_API_KEY = 'k';
+  const restore = stubFetch(async (url: string) => {
+    if (url.includes('googleapis.com/books')) {
+      return new Response(JSON.stringify({ totalItems: 0, items: [] }), { headers: { 'content-type': 'application/json' } });
+    }
+    if (url.includes('openlibrary.org/search') && (url.endsWith('.json') || url.includes('?'))) {
+      return new Response(JSON.stringify({
+        numFound: 1,
+        docs: [{ key: '/books/OL999M', title: 'OL Fallback Edition', isbn: ['9780123456789'] }],
+      }), { headers: { 'content-type': 'application/json' } });
+    }
+    return new Response('not found', { status: 404 });
+  });
+  try {
+    const router = new XRPCRouter();
+    const svc = new SearchService(
+      { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+      log,
+    );
+    router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
+      async handler({ params }: { params: { q?: string } }) {
+        const r = await svc.searchEditions({ q: params.q, id: undefined, limit: 20, cursor: undefined });
+        return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
+      },
+    });
+    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchEditions?q=fallback'));
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { items: Array<{ title: string; uri: string }> };
+    assert.equal(body.items[0]?.title, 'OL Fallback Edition');
+    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.edition\/ol\./);
   } finally { restore(); }
 });
 
