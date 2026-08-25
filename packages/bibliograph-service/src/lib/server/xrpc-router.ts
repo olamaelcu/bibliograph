@@ -21,6 +21,17 @@ import {
   CommunityLexiconBookSearchWorks,
   NetOlamaelcuLivtetBiblioGetActorProfile,
   NetOlamaelcuLivtetBiblioGetReadingGoal,
+  NetOlamaelcuLivtetBiblioGetShelf,
+  NetOlamaelcuLivtetBiblioGetBookOnShelf,
+  NetOlamaelcuLivtetBiblioListShelves,
+  NetOlamaelcuLivtetBiblioListBooksOnShelf,
+  NetOlamaelcuLivtetBiblioGetShelvingOfBook,
+  NetOlamaelcuLivtetBiblioListShelvesWithBooks,
+  NetOlamaelcuLivtetBiblioGetImageForBook,
+  NetOlamaelcuLivtetBiblioGetImageForContributor,
+  NetOlamaelcuLivtetBiblioShelf,
+  NetOlamaelcuLivtetBiblioBookShelving,
+  NetOlamaelcuLivtetBiblioDefs,
 } from './lexicons/index.js';
 import {
   fullRepoPath,
@@ -44,10 +55,18 @@ import { OpenLibrarySource } from './search/open-library-source';
 import { GoogleBooksEnricher } from './search/google-books-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
 import { SearchService } from './search/service';
-import { eq } from 'drizzle-orm';
+import { eq, inArray, and, sql } from 'drizzle-orm';
 import { db } from './db';
-import { editions, works, contributors, publishers } from './db/schema';
+import { editions, works, contributors, publishers, records } from './db/schema';
 import { allowRequest } from './rate-limit';
+import { getBacklinks } from './constellation/client';
+import {
+  hydrateShelvesByUri,
+  hydrateBookByUri,
+  hydrateBooksByUri,
+  buildBookShelfView,
+  fetchBookShelvingRecord,
+} from './shelving/hydrate';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -563,7 +582,13 @@ interface PdsRecordResponse {
 
 function isRecordResponse(value: unknown): value is PdsRecordResponse {
   if (!value || typeof value !== 'object') return false;
-  const v = value as Record<string, unknown>;
+  const v = value as { ok?: unknown; data?: unknown; uri?: unknown; value?: unknown };
+  if (v.ok === true) {
+    const d = v.data;
+    if (!d || typeof d !== 'object') return false;
+    const r = d as Record<string, unknown>;
+    return typeof r.uri === 'string' && typeof r.value === 'object' && r.value !== null;
+  }
   return typeof v.uri === 'string' && typeof v.value === 'object' && v.value !== null;
 }
 
@@ -628,7 +653,313 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetActorProfile.mainSchema, {
     return json({ profile: raw.value as NetOlamaelcuLivtetBiblioGetActorProfile.$output['profile'] } as unknown as NetOlamaelcuLivtetBiblioGetActorProfile.$output);
   },
 });
+// Shelving and image queries
+function parseDidFromUri(uri: string): string {
+  const m = /^at:\/\/(did:[^/]+)/.exec(uri);
+  if (!m) throw new Error(`Invalid AT-URI: ${uri}`);
+  return m[1]!;
+}
 
-// Remaining procedures (getActorStats, listShelvesForDid, listShelvingForDid,
-// listReviewsForDid, getReview, getImageForActor) follow once Postgres cache
-// tables + tap-consumer ingestion are wired.
+router.addQuery(NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
+  async handler({ params }) {
+    const uri = params.uri as string;
+    const did = parseDidFromUri(uri);
+    try {
+      const { client } = await pdsClient(did);
+      const raw = await client.get('com.atproto.repo.getRecord', {
+        params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.shelf', rkey: uri.split('/').pop()! },
+        signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+      });
+      if (!isRecordResponse(raw)) {
+        return Response.json({ error: 'RecordNotResolved', message: 'PDS record missing' }, { status: 404 });
+      }
+      const shelf = raw.value as unknown as NetOlamaelcuLivtetBiblioDefs.ShelfView;
+      return json({ shelf } as NetOlamaelcuLivtetBiblioGetShelf.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/RecordNotFound/i.test(message)) {
+        return Response.json({ error: 'RecordNotFound', message }, { status: 404 });
+      }
+      log.warn({ err, did, uri }, 'getShelf: PDS read failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
+  async handler({ params }) {
+    const { did, limit = 50, cursor } = params;
+    try {
+      const { client } = await pdsClient(did);
+      const raw = await client.get('com.atproto.repo.listRecords', {
+        params: { repo: did, collection: 'net.olamaelcu.livtet.biblio.shelf', limit, cursor },
+        signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+      });
+      if (!isRecordResponse(raw)) {
+        return json({ shelves: [], cursor: undefined } as NetOlamaelcuLivtetBiblioListShelves.$output);
+      }
+      const { records, cursor: resultCursor } = raw.value as { records: Array<{ uri: string; value: Record<string, unknown> }>; cursor?: string };
+      const shelves = records.map((r) => ({ uri: r.uri as `${string}:${string}`, name: (r.value.name as string) ?? '' }));
+      return json({ shelves, cursor: resultCursor } as NetOlamaelcuLivtetBiblioListShelves.$output);
+    } catch (err: unknown) {
+      log.warn({ err, did }, 'listShelves: PDS read failed');
+      return json({ shelves: [], cursor: undefined } as NetOlamaelcuLivtetBiblioListShelves.$output);
+    }
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
+  async handler({ params }) {
+    const uri = params.uri as string;
+    const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
+    return json({ url: row?.coverImageUrl ?? undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioGetImageForContributor.mainSchema, {
+  async handler({ params }) {
+    return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForContributor.$output);
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
+  async handler({ params }) {
+    const bookUri = params.book as string;
+    const { did, limit = 50, cursor } = params;
+    try {
+      const cacheRows = await db
+        .select()
+        .from(records)
+        .where(
+          and(
+            eq(records.did, did as string),
+            eq(records.collection, 'net.olamaelcu.livtet.biblio.bookShelving'),
+            sql`${records.value}->'book'->>'uri' = ${bookUri}`,
+          ),
+        )
+        .limit(limit + 1);
+      const hasMore = cacheRows.length > limit;
+      let merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
+      let tier = 'tap' as 'tap' | 'constellation' | 'pds';
+
+      if (merged.length < limit && !cursor) {
+        const backlinks = await getBacklinks({
+          subject: bookUri,
+          source: 'net.olamaelcu.livtet.biblio.bookShelving:book.ref',
+          did: did as string,
+          limit,
+        });
+        if (backlinks.records.length > 0) {
+          tier = 'constellation';
+          const seen = new Set(merged.map((r) => r.uri));
+          for (const bl of backlinks.records) {
+            if (seen.has(bl.uri)) continue;
+            const row = await fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+            if (row) merged.push(row);
+            if (merged.length >= limit) break;
+          }
+          if (backlinks.cursor && merged.length >= limit) {
+            return json({
+              bookShelves: await hydrateBookShelves(merged, bookUri),
+              cursor: backlinks.cursor,
+            } as NetOlamaelcuLivtetBiblioGetShelvingOfBook.$output);
+          }
+        }
+      }
+
+      if (merged.length < limit && !cursor) {
+        tier = 'pds';
+        try {
+          const { client } = await pdsClient(did);
+          let cur: string | undefined;
+          const fetched: typeof merged = [];
+          while (fetched.length < limit) {
+            const page = await client.get('com.atproto.repo.listRecords', {
+              params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.bookShelving', limit, cursor: cur },
+              signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+            });
+            if (!isRecordResponse(page)) break;
+            const recs = (page.value as { records: Array<{ uri: string; value: Record<string, unknown> }>; cursor?: string }).records;
+            cur = (page.value as { cursor?: string }).cursor;
+            for (const r of recs) {
+              const bookRef = (r.value.book as { uri?: string } | undefined)?.uri;
+              if (bookRef === bookUri) {
+                fetched.push({
+                  uri: r.uri,
+                  cid: 'bafyplaceholder',
+                  did: did as string,
+                  rkey: r.uri.split('/').pop() ?? '',
+                  collection: 'net.olamaelcu.livtet.biblio.bookShelving',
+                  value: r.value as never,
+                  createdAt: new Date(),
+                  indexedAt: new Date(),
+                });
+              }
+              if (fetched.length >= limit) break;
+            }
+            if (!cur) break;
+          }
+          const seen = new Set(merged.map((r) => r.uri));
+          for (const row of fetched) if (!seen.has(row.uri)) merged.push(row);
+        } catch (err: unknown) {
+          log.warn({ err, did, bookUri }, 'getShelvingOfBook: PDS scan failed (cache+constellation only)');
+        }
+      }
+
+      const bookShelves = await hydrateBookShelves(merged, bookUri);
+      const outCursor = tier === 'tap' && hasMore ? String(merged.length) : undefined;
+      return json({ bookShelves, cursor: outCursor } as NetOlamaelcuLivtetBiblioGetShelvingOfBook.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, did, bookUri }, 'getShelvingOfBook: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
+  async handler({ params }) {
+    const shelfUri = params.shelf as string;
+    const { limit = 50, cursor } = params;
+    let did: string;
+    try {
+      did = parseDidFromUri(shelfUri);
+    } catch {
+      return Response.json({ error: 'InvalidRequest', message: 'shelf must be an AT-URI' }, { status: 400 });
+    }
+    try {
+      const cacheRows = await db
+        .select()
+        .from(records)
+        .where(
+          and(
+            eq(records.did, did),
+            eq(records.collection, 'net.olamaelcu.livtet.biblio.bookShelving'),
+            sql`${records.value}->>'shelf' = ${shelfUri}`,
+          ),
+        )
+        .limit(limit + 1);
+      const hasMore = cacheRows.length > limit;
+      let merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
+      let tier = 'tap' as 'tap' | 'constellation' | 'pds';
+
+      if (merged.length < limit && !cursor) {
+        const backlinks = await getBacklinks({
+          subject: shelfUri,
+          source: 'net.olamaelcu.livtet.biblio.bookShelving:shelf',
+          did,
+          limit,
+        });
+        if (backlinks.records.length > 0) {
+          tier = 'constellation';
+          const seen = new Set(merged.map((r) => r.uri));
+          for (const bl of backlinks.records) {
+            if (seen.has(bl.uri)) continue;
+            const row = await fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+            if (row) merged.push(row);
+            if (merged.length >= limit) break;
+          }
+          if (backlinks.cursor && merged.length >= limit) {
+            return json({
+              bookShelves: await hydrateBookShelves(merged),
+              cursor: backlinks.cursor,
+            } as NetOlamaelcuLivtetBiblioListBooksOnShelf.$output);
+          }
+        }
+      }
+
+      if (merged.length < limit && !cursor) {
+        tier = 'pds';
+        try {
+          const { client } = await pdsClient(did);
+          let cur: string | undefined;
+          const fetched: typeof merged = [];
+          while (fetched.length < limit) {
+            const page = await client.get('com.atproto.repo.listRecords', {
+              params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.bookShelving', limit, cursor: cur },
+              signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+            });
+            if (!isRecordResponse(page)) break;
+            const recs = (page.value as { records: Array<{ uri: string; value: Record<string, unknown> }>; cursor?: string }).records;
+            cur = (page.value as { cursor?: string }).cursor;
+            for (const r of recs) {
+              const shelfRef = (r.value.shelf as string | undefined);
+              if (shelfRef === shelfUri) {
+                fetched.push({
+                  uri: r.uri,
+                  cid: 'bafyplaceholder',
+                  did,
+                  rkey: r.uri.split('/').pop() ?? '',
+                  collection: 'net.olamaelcu.livtet.biblio.bookShelving',
+                  value: r.value as never,
+                  createdAt: new Date(),
+                  indexedAt: new Date(),
+                });
+              }
+              if (fetched.length >= limit) break;
+            }
+            if (!cur) break;
+          }
+          const seen = new Set(merged.map((r) => r.uri));
+          for (const row of fetched) if (!seen.has(row.uri)) merged.push(row);
+        } catch (err: unknown) {
+          log.warn({ err, did, shelfUri }, 'listBooksOnShelf: PDS scan failed (cache+constellation only)');
+        }
+      }
+
+      const bookShelves = await hydrateBookShelves(merged);
+      const outCursor = tier === 'tap' && hasMore ? String(merged.length) : undefined;
+      return json({ bookShelves, cursor: outCursor } as NetOlamaelcuLivtetBiblioListBooksOnShelf.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, did, shelfUri }, 'listBooksOnShelf: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
+  async handler({ params }) {
+    const uri = params.uri as string;
+    let did: string;
+    try {
+      did = parseDidFromUri(uri);
+    } catch {
+      return Response.json({ error: 'InvalidRequest', message: 'uri must be an AT-URI' }, { status: 400 });
+    }
+    try {
+      let row = await fetchBookShelvingRecord(uri, did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+      if (!row) {
+        return Response.json({ error: 'RecordNotFound', message: `no bookShelving record at ${uri}` }, { status: 404 });
+      }
+      const [view] = await hydrateBookShelves([row]);
+      return json({ bookShelf: view } as NetOlamaelcuLivtetBiblioGetBookOnShelf.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, did, uri }, 'getBookOnShelf: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, bookUriHint?: string): Promise<NetOlamaelcuLivtetBiblioDefs.BookShelfView[]> {
+  if (rows.length === 0) return [];
+  const shelfUris = Array.from(new Set(rows.map((r) => (r.value as { shelf?: string }).shelf).filter((u): u is string => !!u)));
+  const bookUris = Array.from(new Set([
+    bookUriHint,
+    ...rows.map((r) => (r.value as { book?: { uri?: string } }).book?.uri),
+  ].filter((u): u is string => !!u)));
+  const [shelfMap, bookMap] = await Promise.all([hydrateShelvesByUri(shelfUris), hydrateBooksByUri(bookUris)]);
+  return rows.map((r) => {
+    const v = r.value as { shelf?: string; book?: { uri?: string } };
+    const shelfUri = v.shelf;
+    const bookRefUri = v.book?.uri;
+    const shelfView: NetOlamaelcuLivtetBiblioDefs.ShelfView = shelfUri && shelfMap.has(shelfUri)
+      ? shelfMap.get(shelfUri)!
+      : { uri: (shelfUri ?? '') as never, name: '', $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const };
+    const bookView: NetOlamaelcuLivtetBiblioDefs.BookView = bookRefUri && bookMap.has(bookRefUri)
+      ? bookMap.get(bookRefUri)!
+      : { uri: (bookRefUri ?? '') as never, title: '', $type: 'net.olamaelcu.livtet.biblio.defs#bookView' as const };
+    return buildBookShelfView(r, shelfView, bookView);
+  });
+}

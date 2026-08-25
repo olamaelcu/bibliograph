@@ -7,12 +7,17 @@
       "type": "query",
       "parameters": {
         "type": "params",
-        "required": ["book"],
+        "required": ["book", "did"],
         "properties": {
           "book": {
             "type": "string",
             "format": "at-uri",
             "description": "AT-URI of the book to find on shelves."
+          },
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the account whose shelves to search."
           },
           "limit": {
             "type": "integer",

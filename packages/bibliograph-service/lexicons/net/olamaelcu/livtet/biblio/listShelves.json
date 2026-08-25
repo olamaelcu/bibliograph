@@ -7,7 +7,13 @@
       "type": "query",
       "parameters": {
         "type": "params",
+        "required": ["did"],
         "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "DID of the shelf owner."
+          },
           "limit": {
             "type": "integer",
             "minimum": 1,
