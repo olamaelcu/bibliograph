@@ -2,15 +2,16 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { openLibraryBreaker } from './breakers';
-import { PUBLISHER_DID } from '../did';
+import { editionRkey, parseEditionKey, parseWorkKey, parseAuthorKey, editionUri, workUri, contributorUri } from '../ol/keys.js';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
 function buildUrl(q: string | undefined, type: 'edition' | 'work' | 'author', limit: number, page: number): string {
-  const u = new URL('https://openlibrary.org/search.json');
+  const base = type === 'author' ? 'https://openlibrary.org/search/authors.json' : 'https://openlibrary.org/search.json';
+  const u = new URL(base);
   if (q) u.searchParams.set('q', q);
-  u.searchParams.set('type', type);
+  if (type !== 'author') u.searchParams.set('type', type);
   u.searchParams.set('limit', String(limit));
   u.searchParams.set('page', String(page));
   return u.toString();
@@ -51,9 +52,32 @@ interface OlSearchResponse<T> {
   docs?: T[];
 }
 
-interface OlEditionDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; publish_year?: number[]; place?: string[]; language?: string[]; isbn?: string[]; cover_i?: number; description?: string | { value: string }; }
-interface OlWorkDoc { key: string; title: string; subtitle?: string; first_publish_year?: number; original_languages?: string[]; subject?: string[]; description?: string | { value: string }; cover_i?: number; }
-interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
+interface OlEditionDoc {
+  key: string;
+  cover_edition_key?: string;
+  title: string;
+  subtitle?: string;
+  first_publish_year?: number;
+  publish_year?: number[];
+  place?: string[];
+  language?: string[];
+  isbn?: string[];
+  cover_i?: number;
+  description?: string | { value: string };
+}
+
+interface OlWorkDoc {
+  key: string;
+  title: string;
+  subtitle?: string;
+  first_publish_year?: number;
+  original_languages?: string[];
+  subject?: string[];
+  description?: string | { value: string };
+  cover_i?: number;
+}
+
+interface OlAuthorDoc { key: string; author_name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
 
 function coverUrl(coverId: number | undefined): string | undefined {
   if (coverId === undefined) return undefined;
@@ -76,21 +100,10 @@ function makeOlIdentifier(key: string): Identifier {
   return { uri: `https://openlibrary.org${key}`, resource: 'openlibrary' };
 }
 
-function makeEditionUri(key: string): string {
-  const olId = key.replace(/^\/books\//, '');
-  return `at://${PUBLISHER_DID}/community.lexicon.book.edition/ol.${olId}`;
-}
-
-function makeWorkUri(key: string): string {
-  const olId = key.replace(/^\/works\//, '');
-  const rkey = `ol.W${olId.slice(2)}`;
-  return `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
-}
-
-function makeAuthorUri(key: string): string {
-  const olId = key.replace(/^\/authors\//, '');
-  const rkey = `ol.A${olId.slice(2)}`;
-  return `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
+function isbnIdentifier(isbn: string): Identifier {
+  const clean = isbn.replace(/-/g, '');
+  const resource = clean.length === 13 ? 'isbn13' : clean.length === 10 ? 'isbn10' : 'isbn';
+  return { uri: `isbn:${clean}`, resource };
 }
 
 export async function searchEditions(
@@ -99,35 +112,41 @@ export async function searchEditions(
   externalSignal?: AbortSignal,
 ): Promise<SearchResult<EditionItem>> {
   const limit = Math.min(query.limit, 100);
-  const page = 1; // cursor-driven pagination deferred to the orchestrator
+  const page = 1;
   const url = buildUrl(query.q, 'edition', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
   if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
-  const items: EditionItem[] = (data.docs ?? []).map((d) => {
-    const identifiers: Identifier[] = [makeOlIdentifier(d.key)];
-    if (d.isbn) for (const raw of d.isbn.slice(0, 5)) {
-      const i = raw.replace(/-/g, '');
-      const resource = i.length === 13 ? 'isbn13' : i.length === 10 ? 'isbn10' : 'isbn';
-      identifiers.push({ uri: `isbn:${i}`, resource });
+  const items: EditionItem[] = [];
+  for (const d of data.docs ?? []) {
+    try {
+      const editionKey = d.cover_edition_key ? `/books/${d.cover_edition_key}` : d.key;
+      const olid = parseEditionKey(editionKey);
+      const identifiers: Identifier[] = [makeOlIdentifier(editionKey)];
+      if (d.isbn) {
+        for (const raw of d.isbn.slice(0, 5)) {
+          identifiers.push(isbnIdentifier(raw));
+        }
+      }
+      const year = d.first_publish_year ?? d.publish_year?.[0];
+      items.push({
+        uri: editionUri(olid),
+        title: d.title,
+        subtitle: d.subtitle,
+        publishedYear: year,
+        place: d.place?.[0] as string | undefined,
+        language: d.language?.[0] as string | undefined,
+        description: extractDescription(d.description),
+        coverImageUrl: coverUrl(d.cover_i),
+        identifiers,
+        contributors: [],
+        createdAt,
+      });
+    } catch (err) {
+      log.warn({ stage: 'open-library-source', key: d.key, cover_edition_key: d.cover_edition_key, err: String(err) }, 'skip malformed edition doc');
     }
-    const year = d.first_publish_year ?? d.publish_year?.[0];
-    return {
-      uri: makeEditionUri(d.key),
-      title: d.title,
-      subtitle: d.subtitle,
-      publishedYear: year,
-      place: d.place?.[0],
-      language: d.language?.[0],
-      description: extractDescription(d.description),
-      coverImageUrl: coverUrl(d.cover_i),
-      identifiers,
-      contributors: [],
-      createdAt,
-    };
-  });
-  // cursor deferred to orchestrator (cursor-driven pagination is a follow-up)
+  }
   return { items, total: data.numFound ?? 0 };
 }
 
@@ -143,19 +162,26 @@ export async function searchWorks(
   const data = await fetchJson<OlSearchResponse<OlWorkDoc>>(url, log, signal);
   if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
-  const items: WorkItem[] = (data.docs ?? []).map((d) => ({
-    uri: makeWorkUri(d.key),
-    title: d.title,
-    subtitle: d.subtitle,
-    firstPublishedYear: d.first_publish_year,
-    originalLanguage: d.original_languages?.[0],
-    subjects: d.subject ?? [],
-    description: extractDescription(d.description),
-    contributors: [],
-    identifiers: [makeOlIdentifier(d.key)],
-    createdAt,
-  }));
-  // cursor deferred to orchestrator (cursor-driven pagination is a follow-up)
+  const items: WorkItem[] = [];
+  for (const d of data.docs ?? []) {
+    try {
+      const olid = parseWorkKey(d.key);
+      items.push({
+        uri: workUri(olid),
+        title: d.title,
+        subtitle: d.subtitle,
+        firstPublishedYear: d.first_publish_year,
+        originalLanguage: d.original_languages?.[0] as string | undefined,
+        subjects: d.subject ?? [],
+        description: extractDescription(d.description),
+        contributors: [],
+        identifiers: [makeOlIdentifier(d.key)],
+        createdAt,
+      });
+    } catch (err) {
+      log.warn({ stage: 'open-library-source', key: d.key, err: String(err) }, 'skip malformed work doc');
+    }
+  }
   return { items, total: data.numFound ?? 0 };
 }
 
@@ -171,18 +197,23 @@ export async function searchContributors(
   const data = await fetchJson<OlSearchResponse<OlAuthorDoc>>(url, log, signal);
   if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
-  const items: ContributorItem[] = (data.docs ?? []).map((d) => {
-    const aliases = d.alternate_names ?? [];
-    return {
-      uri: makeAuthorUri(d.key),
-      name: d.name,
-      aliases,
-      bornYear: yearFromDate(d.birth_date),
-      diedYear: yearFromDate(d.death_date),
-      identifiers: [makeOlIdentifier(d.key)],
-      createdAt,
-    };
-  });
-  // cursor deferred to orchestrator (cursor-driven pagination is a follow-up)
+  const items: ContributorItem[] = [];
+      for (const d of data.docs ?? []) {
+      try {
+        const olid = parseAuthorKey(d.key);
+        const aliases = d.alternate_names ?? [];
+        items.push({
+          uri: contributorUri(olid),
+          name: d.author_name,
+          aliases,
+          bornYear: yearFromDate(d.birth_date),
+          diedYear: yearFromDate(d.death_date),
+          identifiers: [makeOlIdentifier(d.key)],
+          createdAt,
+        });
+    } catch (err) {
+      log.warn({ stage: 'open-library-source', key: d.key, err: String(err) }, 'skip malformed contributor doc');
+    }
+  }
   return { items, total: data.numFound ?? 0 };
 }

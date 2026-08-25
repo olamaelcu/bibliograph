@@ -29,13 +29,17 @@ const log = pino({ level: 'silent' });
 
 function stubEverything() {
   return stubFetch(async (url: string) => {
-    if (url.includes('openlibrary.org/search.json')) {
+    if (url.includes('openlibrary.org/search') && (url.endsWith('.json') || url.includes('?'))) {
+      if (url.includes('/search/authors.json')) {
+        return new Response(JSON.stringify({
+          numFound: 1,
+          docs: [{ key: '/authors/OL12345A', author_name: 'OL Author', birth_date: '1800-01-01' }],
+        }), { headers: { 'content-type': 'application/json' } });
+      }
       const type = new URL(url).searchParams.get('type');
       const docs = type === 'work'
         ? [{ key: '/works/OL66554W', title: 'OL Work', first_publish_year: 1850 }]
-        : type === 'author'
-          ? [{ key: '/authors/OL12345A', name: 'OL Author', birth_date: '1800-01-01' }]
-          : [{ key: '/books/OL12345M', title: 'OL Edition', isbn: ['9780123456789'] }];
+        : [{ key: '/books/OL12345M', title: 'OL Edition', isbn: ['9780123456789'] }];
       return new Response(JSON.stringify({ numFound: 1, docs }), { headers: { 'content-type': 'application/json' } });
     }
     if (url.includes('googleapis.com/books')) {
