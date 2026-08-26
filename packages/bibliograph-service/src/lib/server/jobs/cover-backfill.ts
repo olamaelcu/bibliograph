@@ -10,6 +10,7 @@ import { googleBooksBreaker } from '../api/breakers';
 import { withRetry } from '../api/retry';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
+import { getBookByIsbn } from '../api/isbndb';
 
 type Db = typeof defaultDb;
 
@@ -117,6 +118,11 @@ export async function resolveCoverUrl(
   if (isbn) {
     const cover = await fetchGbByIsbn(isbn, log, signal);
     if (cover) return cover;
+    const isbndbBook = await getBookByIsbn(isbn, log, signal);
+    if (isbndbBook?.image) {
+      const cover = isbndbBook.image.replace(/^http:/, 'https:');
+      if (cover) return cover;
+    }
   }
 
   // Also try ISBN already present on OL item's volume via direct covers? already handled.

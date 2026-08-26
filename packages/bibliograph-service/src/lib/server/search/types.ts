@@ -77,7 +77,7 @@ export interface SearchResult<T> {
    * Lets the XRPC handler decide between 502 UpstreamUnavailable (total miss)
    * and including the field in the body (degraded partial response).
    */
-  degraded?: { upstream: 'openlibrary' | 'googlebooks' | 'wikipedia'; reason: string };
+  degraded?: { upstream: 'openlibrary' | 'googlebooks' | 'wikipedia' | 'isbndb'; reason: string };
 }
 
 export interface SearchSource<T> {

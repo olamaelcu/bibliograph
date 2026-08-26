@@ -5,10 +5,11 @@ import { OpenLibrarySource } from './open-library-source';
 import { GoogleBooksSource } from './google-books-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
 import { OpenLibraryEnricher } from './open-library-enricher';
+import { IsbndbEnricher, IsbndbWorkEnricher } from './isbndb-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import * as openLibraryApi from '../api/open-library';
 import { syncIngestEditions, syncIngestWorks, syncIngestContributors, syncIngestPublishers } from '../jobs/handlers';
-import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier } from './types';
+import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier, Enricher } from './types';
 
 export interface SearchServiceDeps {
   postgres: PostgresSource;
@@ -17,9 +18,13 @@ export interface SearchServiceDeps {
   googleBooksSource: GoogleBooksSource;
   googleBooks: GoogleBooksEnricher;
   openLibraryEnricher: OpenLibraryEnricher;
+  isbndbEnricher: IsbndbEnricher;
+  isbndbWorkEnricher: IsbndbWorkEnricher;
   authorWikipedia: AuthorWikipediaEnricher;
   contributorWikipedia: ContributorWikipediaEnricher;
 }
+
+type ItemLike = { uri: string };
 
 export class SearchService {
   private readonly fallbackLog: Logger;
@@ -49,6 +54,18 @@ export class SearchService {
     return merged;
   }
 
+  private async runEnrichers<T extends ItemLike>(
+    items: T[],
+    enrichers: ReadonlyArray<Enricher<T>>,
+    log: Logger,
+  ): Promise<T[]> {
+    let current = items;
+    for (const e of enrichers) {
+      current = await e.enrich(current, log);
+    }
+    return current;
+  }
+
   async searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
     const log = this.log();
 
@@ -57,19 +74,24 @@ export class SearchService {
       this.deps.googleBooksSource.searchEditions(query, AbortSignal.timeout(15_000)),
     ]);
 
+    const editionEnrichers: ReadonlyArray<Enricher<EditionItem>> = [
+      this.deps.openLibraryEnricher,
+      this.deps.googleBooks,
+      this.deps.isbndbEnricher,
+      this.deps.authorWikipedia,
+    ];
+
     let remoteItems: EditionItem[] = [];
     let remoteCursor: string | undefined;
     let remoteTotal: number | undefined;
     if (gb.items.length > 0) {
-      const enriched = (await this.deps.openLibraryEnricher.enrich(gb.items, log)) as EditionItem[];
-      remoteItems = (await this.deps.authorWikipedia.enrich(enriched, log)) as EditionItem[];
+      remoteItems = await this.runEnrichers(gb.items, editionEnrichers, log);
       remoteCursor = gb.cursor;
       remoteTotal = gb.total;
     } else {
       const ol = await this.deps.openLibrary.searchEditions(query);
       if (ol.items.length > 0) {
-        const enriched = await this.deps.googleBooks.enrich(ol.items, log);
-        remoteItems = (await this.deps.authorWikipedia.enrich(enriched, log)) as EditionItem[];
+        remoteItems = await this.runEnrichers(ol.items, editionEnrichers, log);
         remoteCursor = ol.cursor;
         remoteTotal = ol.total;
       }
@@ -107,18 +129,21 @@ export class SearchService {
       this.deps.googleBooksSource.searchWorks(query, AbortSignal.timeout(15_000)),
     ]);
 
+    const workEnrichers: ReadonlyArray<Enricher<WorkItem>> = [
+      this.deps.isbndbWorkEnricher,
+    ];
+
     let remoteItems: WorkItem[] = [];
     let remoteCursor: string | undefined;
     let remoteTotal: number | undefined;
     if (gb.items.length > 0) {
-      const enriched = (await this.deps.openLibraryEnricher.enrich(gb.items, log)) as WorkItem[];
-      remoteItems = (await this.deps.authorWikipedia.enrich(enriched, log)) as WorkItem[];
+      remoteItems = await this.runEnrichers(gb.items, workEnrichers, log);
       remoteCursor = gb.cursor;
       remoteTotal = gb.total;
     } else {
       const ol = await this.deps.openLibrary.searchWorks(query);
       if (ol.items.length > 0) {
-        remoteItems = (await this.deps.authorWikipedia.enrich(ol.items, log)) as WorkItem[];
+        remoteItems = await this.runEnrichers(ol.items, workEnrichers, log);
         remoteCursor = ol.cursor;
         remoteTotal = ol.total;
       }

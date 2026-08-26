@@ -9,11 +9,12 @@ import type { EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier 
 import { PUBLISHER_DID } from '../did';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionRkey, workRkey, contributorRkey, publisherRkey } from '../ol/keys';
 import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from '../gb/keys';
+import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
 import { backfillCoverForEdition } from './cover-backfill';
 
 const db: typeof defaultDb = defaultDb;
 
-type SourceKind = 'ol' | 'gb';
+type SourceKind = 'ol' | 'gb' | 'isbndb';
 
 function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   const i = idents.find((i) => i.resource === 'openlibrary');
@@ -31,14 +32,31 @@ function gbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   return gbIdentifierFromUri(i.uri) ?? undefined;
 }
 
-/** Determine which synthesis path applies for an item, returning OL key, GB volume id, or nothing. */
+function isbndbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
+  const i = idents.find((x) => x.resource === 'isbndb');
+  if (i) {
+    const isbn = isbndbIdentifierFromUri(i.uri);
+    if (isbn) return isbn;
+  }
+  for (const id of idents) {
+    if (id.resource === 'isbn13' || id.resource === 'isbn10' || id.resource === 'isbn') {
+      const clean = id.uri.replace(/^isbn:/, '').replace(/-/g, '');
+      if (/^\d{10}(\d{3})?$/.test(clean)) return clean;
+    }
+  }
+  return undefined;
+}
+
+/** Determine which synthesis path applies for an item, returning OL key, GB volume id, ISBNDb isbn, or nothing. */
 function identifySource(
   idents: Identifier[],
-): { kind: SourceKind; olKey: string; gbId: string } | null {
+): { kind: SourceKind; olKey: string; gbId: string; isbndbIsbn: string } | null {
   const olKey = olKeyFromIdentifiers(idents);
-  if (olKey) return { kind: 'ol', olKey, gbId: '' };
+  if (olKey) return { kind: 'ol', olKey, gbId: '', isbndbIsbn: '' };
   const gbId = gbKeyFromIdentifiers(idents);
-  if (gbId) return { kind: 'gb', olKey: '', gbId };
+  if (gbId) return { kind: 'gb', olKey: '', gbId, isbndbIsbn: '' };
+  const isbndbIsbn = isbndbKeyFromIdentifiers(idents);
+  if (isbndbIsbn) return { kind: 'isbndb', olKey: '', gbId: '', isbndbIsbn };
   return null;
 }
 
@@ -57,6 +75,15 @@ function publisherUriFor(item: PublisherItem): string | undefined {
   if (gbId) {
     try {
       const rkey = gbPublisherRkey(gbId);
+      return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${rkey}`;
+    } catch {
+      return undefined;
+    }
+  }
+  const isbndbIsbn = isbndbKeyFromIdentifiers(item.identifiers);
+  if (isbndbIsbn) {
+    try {
+      const rkey = isbndbPublisherRkey(isbndbIsbn);
       return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${rkey}`;
     } catch {
       return undefined;
@@ -145,6 +172,13 @@ async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: n
         } catch {
           continue;
         }
+      } else if (source?.kind === 'isbndb') {
+        try {
+          rkey = isbndbEditionRkey(source.isbndbIsbn);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
+        } catch {
+          continue;
+        }
       }
       if (!uri || !rkey) continue;
       const value = {
@@ -228,6 +262,13 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
       } else if (source?.kind === 'gb') {
         try {
           rkey = gbWorkRkey(source.gbId);
+          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
+        } catch {
+          continue;
+        }
+      } else if (source?.kind === 'isbndb') {
+        try {
+          rkey = isbndbWorkRkey(source.isbndbIsbn);
           uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
         } catch {
           continue;

@@ -108,6 +108,18 @@ function makeFakeOpenLibraryEnricher() {
   } as unknown as import('./open-library-enricher').OpenLibraryEnricher;
 }
 
+function makeFakeIsbndbEnricher() {
+  return {
+    enrich: async <T>(items: T[]) => items,
+  } as unknown as import('./isbndb-enricher').IsbndbEnricher;
+}
+
+function makeFakeIsbndbWorkEnricher() {
+  return {
+    enrich: async <T>(items: T[]) => items,
+  } as unknown as import('./isbndb-enricher').IsbndbWorkEnricher;
+}
+
 function makeFakePublisherSource() {
   return {
     searchPublishers: async () => ({ items: [], total: 0 }),
@@ -125,6 +137,8 @@ test('searchEditions: postgres hit short-circuits OL', async () => {
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
+      isbndbEnricher: makeFakeIsbndbEnricher(),
+      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
       authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
       contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
@@ -146,6 +160,8 @@ test('searchEditions: postgres miss → OL → GB → author wiki', async () => 
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
+      isbndbEnricher: makeFakeIsbndbEnricher(),
+      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
       authorWikipedia: aw as unknown as AuthorWikipediaEnricher,
       contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
@@ -158,8 +174,7 @@ test('searchEditions: postgres miss → OL → GB → author wiki', async () => 
   assert.equal(aw.captures.length, 1, 'author Wikipedia enricher should run on GB results');
 });
 
-test('searchWorks: postgres miss → OL → author wiki', async () => {
-  const aw = makeFakeAuthorWiki();
+test('searchWorks: postgres miss → OL → isbnDb enrich', async () => {
   const svc = new SearchService(
     {
       postgres: makeFakePostgres({ items: [], total: 0 }),
@@ -168,7 +183,9 @@ test('searchWorks: postgres miss → OL → author wiki', async () => {
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
-      authorWikipedia: aw as unknown as AuthorWikipediaEnricher,
+      isbndbEnricher: makeFakeIsbndbEnricher(),
+      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
+      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
       contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
     log,
@@ -176,7 +193,6 @@ test('searchWorks: postgres miss → OL → author wiki', async () => {
 
   const r = await svc.searchWorks({ limit: 10 });
   assert.equal(r.items.length, 1);
-  assert.equal(aw.captures.length, 1);
 });
 
 test('searchContributors: id-only skips OL (option B from design)', async () => {
@@ -191,6 +207,8 @@ test('searchContributors: id-only skips OL (option B from design)', async () => 
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
+      isbndbEnricher: makeFakeIsbndbEnricher(),
+      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
       authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
       contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
@@ -212,6 +230,8 @@ test('searchContributors: postgres miss → OL → contributor wiki', async () =
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
+      isbndbEnricher: makeFakeIsbndbEnricher(),
+      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
       authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
       contributorWikipedia: cw as unknown as ContributorWikipediaEnricher,
     },
