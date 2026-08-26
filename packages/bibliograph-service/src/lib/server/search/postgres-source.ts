@@ -181,3 +181,24 @@ export class PostgresSource {
     };
   }
 }
+
+/**
+ * Resolve every edition whose stored `contributors` JSONB contains the given
+ * contributor at-uri in a `subject.uri` slot. Ordered newest-first by
+ * `published_year` (NULLs last), tie-broken by `indexed_at` so a freshly
+ * re-ingested older edition still bubbles ahead of an older row.
+ *
+ * Returns at-uris only — callers fetch the full record via `getEdition`.
+ */
+export async function findEditionUrisByContributor(
+  contributorUri: string,
+  limit: number,
+): Promise<string[]> {
+  const rows = await defaultDb
+    .select({ uri: editions.uri })
+    .from(editions)
+    .where(sql`${editions.contributors} @> ${JSON.stringify([{ subject: { uri: contributorUri } }])}::jsonb`)
+    .orderBy(sql`${editions.publishedYear} DESC NULLS LAST`, desc(editions.indexedAt))
+    .limit(limit);
+  return rows.map((r) => r.uri);
+}
