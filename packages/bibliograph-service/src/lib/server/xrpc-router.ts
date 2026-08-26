@@ -29,7 +29,6 @@ import {
   NetOlamaelcuLivtetBiblioListShelvesWithBooks,
   NetOlamaelcuLivtetBiblioGetImageForBook,
   NetOlamaelcuLivtetBiblioGetImageForContributor,
-  NetOlamaelcuLivtetBiblioGetEditionsByContributor,
   NetOlamaelcuLivtetBiblioShelf,
   NetOlamaelcuLivtetBiblioBookShelving,
   NetOlamaelcuLivtetBiblioDefs,
@@ -51,7 +50,7 @@ import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } fro
 import { cidForLex, decode as cborDecode } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
-import { PostgresSource, findEditionUrisByContributor } from './search/postgres-source';
+import { PostgresSource } from './search/postgres-source';
 import { OpenLibrarySource } from './search/open-library-source';
 import { GoogleBooksEnricher } from './search/google-books-enricher';
 import { OpenLibraryEnricher } from './search/open-library-enricher';
@@ -318,12 +317,6 @@ const notFoundResponse = (error: string, message: string): Response =>
     status: 400,
     headers: { 'content-type': 'application/json' },
   });
-
-const invalidContributorResponse = (contributor: string): Response =>
-  new Response(
-    JSON.stringify({ error: 'InvalidContributor', message: `not a contributor at-uri: ${contributor}` }),
-    { status: 400, headers: { 'content-type': 'application/json' } },
-  );
 
 async function readLatestCommit(): Promise<{ cid: string; rev: string } | null> {
   const file = await readFullRepoCar();
@@ -851,18 +844,6 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
 router.addQuery(NetOlamaelcuLivtetBiblioGetImageForContributor.mainSchema, {
   async handler({ params }) {
     return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForContributor.$output);
-  },
-});
-
-router.addQuery(NetOlamaelcuLivtetBiblioGetEditionsByContributor.mainSchema, {
-  async handler({ params }) {
-    const contributor = params.contributor;
-    if (!/^at:\/\/[^/]+\/community\.lexicon\.book\.contributor\//.test(contributor)) {
-      return invalidContributorResponse(contributor);
-    }
-    const limit = Math.min(params.limit ?? 20, 100);
-    const uris = await findEditionUrisByContributor(contributor, limit);
-    return json({ uris } as unknown as NetOlamaelcuLivtetBiblioGetEditionsByContributor.$output);
   },
 });
 
