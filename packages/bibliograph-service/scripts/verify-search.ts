@@ -35,7 +35,7 @@ function stubEverything() {
       if (url.includes('/search/authors.json')) {
         return new Response(JSON.stringify({
           numFound: 1,
-          docs: [{ key: '/authors/OL12345A', author_name: 'OL Author', birth_date: '1800-01-01' }],
+          docs: [{ key: '/authors/OL12345A', name: 'OL Author', birth_date: '1800-01-01', top_work: 'OL Work', work_count: 5 }],
         }), { headers: { 'content-type': 'application/json' } });
       }
       const type = new URL(url).searchParams.get('type');
@@ -74,7 +74,7 @@ function buildRouter(): { router: XRPCRouter; restore: () => void } {
     const aw = new AuthorWikipediaEnricher();
     const cw = new ContributorWikipediaEnricher();
     const svc = new SearchService(
-      { postgres: pg, openLibrary: ol, googleBooksSource: gb, googleBooks: gbe, openLibraryEnricher: ole, authorWikipedia: aw, contributorWikipedia: cw },
+      { postgres: pg, openLibrary: ol, publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: gb, googleBooks: gbe, openLibraryEnricher: ole, authorWikipedia: aw, contributorWikipedia: cw },
       log,
     );
   router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
@@ -129,7 +129,7 @@ test('searchEditions falls back to OpenLibrary when Google Books is empty', asyn
   try {
     const router = new XRPCRouter();
     const svc = new SearchService(
-      { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+      { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
       log,
     );
     router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
@@ -196,7 +196,7 @@ test('searchContributors parses bare OpenLibrary author OLIDs (no /authors/ pref
   });
   const router = new XRPCRouter();
   const svc = new SearchService(
-    { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+    { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
     log,
   );
   router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
@@ -234,7 +234,7 @@ test('searchEditions skips work-only docs with no cover edition (no /books/ key)
   const router = new XRPCRouter();
   const pg = new PostgresSource(log);
   const svc = new SearchService(
-    { postgres: pg, openLibrary: new OpenLibrarySource(log), googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+      { postgres: pg, openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
     log,
   );
   router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {

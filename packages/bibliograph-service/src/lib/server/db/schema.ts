@@ -117,6 +117,7 @@ export const publishers = pgTable(
   (t) => ({
     didIdx: index('publishers_did_idx').on(t.did),
     indexedAtIdx: index('publishers_indexed_at_idx').on(t.indexedAt),
+    nameIdx: index('publishers_name_idx').on(t.name),
     // Note: self-FK on imprintOfUri is declared in the migration (drizzle-kit
     // can't infer types for self-referencing tables).
   }),

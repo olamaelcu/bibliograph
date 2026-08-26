@@ -108,6 +108,12 @@ function makeFakeOpenLibraryEnricher() {
   } as unknown as import('./open-library-enricher').OpenLibraryEnricher;
 }
 
+function makeFakePublisherSource() {
+  return {
+    searchPublishers: async () => ({ items: [], total: 0 }),
+  } as unknown as Pick<typeof import('../api/open-library'), 'searchPublishers'>;
+}
+
 test('searchEditions: postgres hit short-circuits OL', async () => {
   const emptyOl = makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [], total: 0 });
   const gb = makeFakeGoogleBooks();
@@ -115,6 +121,7 @@ test('searchEditions: postgres hit short-circuits OL', async () => {
     {
       postgres: makeFakePostgres({ items: [baseEdition], total: 1 }),
       openLibrary: emptyOl,
+      publisherSource: makeFakePublisherSource(),
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
@@ -135,6 +142,7 @@ test('searchEditions: postgres miss → OL → GB → author wiki', async () => 
     {
       postgres: makeFakePostgres({ items: [], total: 0 }),
       openLibrary: makeFakeOpenLibrary({ items: [baseEdition], total: 1 }, { items: [], total: 0 }, { items: [], total: 0 }),
+      publisherSource: makeFakePublisherSource(),
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
@@ -156,6 +164,7 @@ test('searchWorks: postgres miss → OL → author wiki', async () => {
     {
       postgres: makeFakePostgres({ items: [], total: 0 }),
       openLibrary: makeFakeOpenLibrary({ items: [], total: 0 }, { items: [baseWork], total: 1 }, { items: [], total: 0 }),
+      publisherSource: makeFakePublisherSource(),
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
@@ -178,6 +187,7 @@ test('searchContributors: id-only skips OL (option B from design)', async () => 
     {
       postgres: makeFakePostgres({ items: [baseContributor], total: 1 }),
       openLibrary: emptyOl,
+      publisherSource: makeFakePublisherSource(),
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),
@@ -198,6 +208,7 @@ test('searchContributors: postgres miss → OL → contributor wiki', async () =
     {
       postgres: makeFakePostgres({ items: [], total: 0 }),
       openLibrary: makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [baseContributor], total: 1 }),
+      publisherSource: makeFakePublisherSource(),
       googleBooksSource: makeFakeGoogleBooksSource(),
       googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
       openLibraryEnricher: makeFakeOpenLibraryEnricher(),

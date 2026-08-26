@@ -39,6 +39,15 @@ export function gbWorkUri(volumeId: string): string {
   return `at://${PUBLISHER_DID}/community.lexicon.book.work/${gbEditionRkey(volumeId)}`;
 }
 
+export function gbPublisherRkey(publisherId: string): string {
+  assertGbId(publisherId);
+  return `${GB_PREFIX}${publisherId}`;
+}
+
+export function gbPublisherUri(publisherId: string): string {
+  return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${gbPublisherRkey(publisherId)}`;
+}
+
 export function volumeIdFromGbRkey(rkey: string): string {
   if (!rkey.startsWith(GB_PREFIX)) throw new Error(`invalid gb rkey: ${rkey}`);
   if (rkey === GB_PREFIX) throw new Error(`invalid gb rkey: ${rkey}`);

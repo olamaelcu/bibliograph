@@ -49,7 +49,7 @@ function gbIsbnIdentifier(type: string | undefined, raw: string): Identifier | n
   if (!clean) return null;
   const resource = type === 'ISBN_13' || clean.length === 13 ? 'isbn13'
     : type === 'ISBN_10' || clean.length === 10 ? 'isbn10'
-    : 'isbn';
+      : 'isbn';
   return { uri: `isbn:${clean}`, resource };
 }
 
@@ -307,6 +307,9 @@ export async function enrichEditions(
             if (!enriched.description && info.description) enriched = { ...enriched, description: stripHtml(info.description) };
             const cover = coverFromLinks(info.imageLinks);
             if (!enriched.coverImageUrl && cover) enriched = { ...enriched, coverImageUrl: cover };
+            if (enriched.coverImageUrl) {
+              enriched.coverImageUrl = enriched.coverImageUrl.replace("&edge=curl", "");
+            }
             matched++;
           } else {
             missing++;

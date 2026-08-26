@@ -11,7 +11,7 @@ DATABASE_URL = "postgres://bibliograph:bibliograph@localhost:5432/bibliograph"
 run = ["docker compose up --detach"]
 
 [tasks.web-dev]
-run = ["pnpm run dev"]
+run = ["pnpm run dev --host"]
 
 [tasks.worker-dev]
 run = ["pnpm run worker"]
@@ -26,7 +26,9 @@ run = ["psql ${DATABASE_URL}"]
 
 [tasks.lex-keygen]
 description = "Generate an ATProto lex-publisher K-256 keypair (one-time)"
-run = ["pnpm --filter bibliograph-service exec tsx scripts/gen-lex-publisher-key.ts"]
+run = [
+  "pnpm --filter bibliograph-service exec tsx scripts/gen-lex-publisher-key.ts",
+]
 
 [tasks.lex-build]
 description = "Build the signed lex repo CAR files from lexicons/*.json"

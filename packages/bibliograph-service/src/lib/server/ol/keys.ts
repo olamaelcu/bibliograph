@@ -3,6 +3,7 @@ import { PUBLISHER_DID } from '../did';
 const OL_EDITION_RE = /^OL\d+M$/;
 const OL_WORK_RE = /^OL\d+W$/;
 const OL_AUTHOR_RE = /^OL\d+A$/;
+const OL_PUBLISHER_RE = /^OL\d+P$/;
 
 function assertOlId(id: string, re: RegExp, label: string): void {
   if (!re.test(id)) throw new Error(`invalid ${label} OLID: ${id}`);
@@ -30,6 +31,12 @@ export function parseAuthorKey(key: string): string {
   return id;
 }
 
+export function parsePublisherKey(key: string): string {
+  const id = stripPrefix(key, '/publishers/');
+  assertOlId(id, OL_PUBLISHER_RE, 'publisher');
+  return id;
+}
+
 export function editionRkey(olid: string): string {
   assertOlId(olid, OL_EDITION_RE, 'edition');
   return `ol.${olid}`;
@@ -45,6 +52,11 @@ export function contributorRkey(olid: string): string {
   return `ol.A${olid.slice(2)}`;
 }
 
+export function publisherRkey(olid: string): string {
+  assertOlId(olid, OL_PUBLISHER_RE, 'publisher');
+  return `ol.P${olid.slice(2)}`;
+}
+
 export function editionUri(olid: string): string {
   return `at://${PUBLISHER_DID}/community.lexicon.book.edition/${editionRkey(olid)}`;
 }
@@ -55,6 +67,10 @@ export function workUri(olid: string): string {
 
 export function contributorUri(olid: string): string {
   return `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${contributorRkey(olid)}`;
+}
+
+export function publisherUri(olid: string): string {
+  return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${publisherRkey(olid)}`;
 }
 
 export function olidFromEditionRkey(rkey: string): string {
@@ -75,5 +91,12 @@ export function olidFromContributorRkey(rkey: string): string {
   if (!rkey.startsWith('ol.A')) throw new Error(`invalid contributor rkey: ${rkey}`);
   const olid = `OL${rkey.slice(4)}`;
   if (!OL_AUTHOR_RE.test(olid)) throw new Error(`invalid contributor rkey: ${rkey}`);
+  return olid;
+}
+
+export function olidFromPublisherRkey(rkey: string): string {
+  if (!rkey.startsWith('ol.P')) throw new Error(`invalid publisher rkey: ${rkey}`);
+  const olid = `OL${rkey.slice(4)}`;
+  if (!OL_PUBLISHER_RE.test(olid)) throw new Error(`invalid publisher rkey: ${rkey}`);
   return olid;
 }
