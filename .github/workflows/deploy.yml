@@ -1,0 +1,29 @@
+name: Deploy to Dokku
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-bibliograph
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Dokku
+        uses: dokku/github-action@v1
+        with:
+          git_remote_url: 'ssh://dokku@lescayes.ts.olamaelcu.net:22/bibliograph'
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          git_push_flags: '--force'
+          branch: 'main'
