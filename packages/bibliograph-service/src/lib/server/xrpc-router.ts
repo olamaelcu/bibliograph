@@ -66,10 +66,10 @@ import { allowRequest } from './rate-limit';
 import { getBacklinks } from './constellation/client';
 import {
   hydrateShelvesByUri,
-  hydrateBookByUri,
   hydrateBooksByUri,
-  buildBookShelfView,
   fetchBookShelvingRecord,
+  resolveBookShelf,
+  catalogEditionUriFromRkey,
 } from './shelving/hydrate';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
@@ -1058,6 +1058,13 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
         return Response.json({ error: 'RecordNotFound', message: `no bookShelving record at ${uri}` }, { status: 404 });
       }
       const [view] = await hydrateBookShelves([row]);
+      if (!view) {
+        const fallbackUri = catalogEditionUriFromRkey(row.rkey);
+        return Response.json(
+          { error: 'RecordNotFound', message: `bookShelving record's book not resolvable in catalog${fallbackUri ? ` (tried ${fallbackUri})` : ''}` },
+          { status: 404 },
+        );
+      }
       return json({ bookShelf: view } as NetOlamaelcuLivtetBiblioGetBookOnShelf.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1072,19 +1079,30 @@ async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, book
   const shelfUris = Array.from(new Set(rows.map((r) => (r.value as { shelf?: string }).shelf).filter((u): u is string => !!u)));
   const bookUris = Array.from(new Set([
     bookUriHint,
-    ...rows.map((r) => (r.value as { book?: { uri?: string } }).book?.uri),
+    ...rows.flatMap((r) => {
+      const explicit = (r.value as { book?: { uri?: string } }).book?.uri;
+      if (explicit) return [explicit];
+      return [catalogEditionUriFromRkey(r.rkey)].filter((u): u is string => !!u);
+    }),
   ].filter((u): u is string => !!u)));
   const [shelfMap, bookMap] = await Promise.all([hydrateShelvesByUri(shelfUris), hydrateBooksByUri(bookUris)]);
-  return rows.map((r) => {
-    const v = r.value as { shelf?: string; book?: { uri?: string } };
-    const shelfUri = v.shelf;
-    const bookRefUri = v.book?.uri;
-    const shelfView: NetOlamaelcuLivtetBiblioDefs.ShelfView = shelfUri && shelfMap.has(shelfUri)
-      ? shelfMap.get(shelfUri)!
-      : { uri: (shelfUri ?? '') as never, name: '', $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const };
-    const bookView: NetOlamaelcuLivtetBiblioDefs.BookView = bookRefUri && bookMap.has(bookRefUri)
-      ? bookMap.get(bookRefUri)!
-      : { uri: (bookRefUri ?? '') as never, title: '', $type: 'net.olamaelcu.livtet.biblio.defs#bookView' as const };
-    return buildBookShelfView(r, shelfView, bookView);
-  });
+  const out: NetOlamaelcuLivtetBiblioDefs.BookShelfView[] = [];
+  for (const r of rows) {
+    const resolved = resolveBookShelf(r, bookMap, shelfMap);
+    if (!resolved.ok) {
+      log.warn(
+        {
+          stage: 'hydrateBookShelves.orphan',
+          uri: r.uri,
+          rkey: r.rkey,
+          did: r.did,
+          reason: resolved.reason,
+        },
+        'dropping bookShelving row: book not resolvable in catalog',
+      );
+      continue;
+    }
+    out.push(resolved.view!);
+  }
+  return out;
 }

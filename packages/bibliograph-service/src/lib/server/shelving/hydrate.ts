@@ -5,10 +5,41 @@ import type { RecordRow } from '../db/schema';
 import { pdsClient } from '../pds/resolve';
 import { NetOlamaelcuLivtetBiblioDefs } from '../lexicons/index.js';
 import { createLogger } from '../logger';
+import { gbEditionUri, isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
+import { editionUri, olidFromEditionRkey } from '../ol/keys';
 
 const log = createLogger('web');
 
 type Did = `did:${string}:${string}`;
+
+export function catalogEditionUriFromRkey(rkey: string): string | null {
+  if (isGbRkey(rkey)) {
+    try {
+      return gbEditionUri(volumeIdFromGbRkey(rkey));
+    } catch {
+      return null;
+    }
+  }
+  if (rkey.startsWith('ol.')) {
+    try {
+      return editionUri(olidFromEditionRkey(rkey));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+const SHELF_DISPLAY_NAMES: Record<string, string> = {
+  'reading': 'Currently Reading',
+  'to-read': 'To Read',
+  'read': 'Read',
+  'dnf': 'Did Not Finish',
+};
+
+export function displayNameForShelfRkey(rkey: string): string | null {
+  return SHELF_DISPLAY_NAMES[rkey] ?? null;
+}
 
 export async function hydrateShelvesByUri(
   uris: string[],
@@ -81,6 +112,42 @@ export function buildBookShelfView(
     updatedAt: v.updatedAt,
     $type: 'net.olamaelcu.livtet.biblio.defs#bookShelfView',
   };
+}
+
+export interface ResolvedBookShelf {
+  ok: boolean;
+  view?: NetOlamaelcuLivtetBiblioDefs.BookShelfView;
+  reason?: 'book-not-found' | 'shelf-not-found';
+}
+
+export function resolveBookShelf(
+  row: RecordRow,
+  bookMap: Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>,
+  shelfMap: Map<string, NetOlamaelcuLivtetBiblioDefs.ShelfView>,
+): ResolvedBookShelf {
+  const v = row.value as { shelf?: string; book?: { uri?: string } };
+
+  const bookRefUri = typeof v.book?.uri === 'string' && v.book.uri ? v.book.uri : null;
+  const fallbackBookUri = bookRefUri ? null : catalogEditionUriFromRkey(row.rkey);
+  const resolvedBookUri = bookRefUri ?? fallbackBookUri;
+  const bookView = resolvedBookUri ? bookMap.get(resolvedBookUri) : undefined;
+  if (!bookView) {
+    return { ok: false, reason: 'book-not-found' };
+  }
+
+  const shelfUri = typeof v.shelf === 'string' && v.shelf ? v.shelf : null;
+  const cachedShelf = shelfUri ? shelfMap.get(shelfUri) : undefined;
+  const shelfRkey = shelfUri ? shelfUri.split('/').pop() ?? '' : '';
+  const displayName = cachedShelf && cachedShelf.name ? cachedShelf.name : displayNameForShelfRkey(shelfRkey);
+  const shelfView: NetOlamaelcuLivtetBiblioDefs.ShelfView = shelfUri
+    ? {
+        uri: shelfUri as never,
+        name: displayName ?? (cachedShelf?.name ?? ''),
+        $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
+      }
+    : { uri: '' as never, name: '', $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const };
+
+  return { ok: true, view: buildBookShelfView(row, shelfView, bookView) };
 }
 
 export async function fetchBookShelvingRecord(
