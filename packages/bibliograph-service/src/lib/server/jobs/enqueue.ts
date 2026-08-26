@@ -65,3 +65,11 @@ export async function enqueueRecordDeleteBatch(uris: string[]): Promise<void> {
   const utils = await getUtils();
   await utils.addJob('tap-record-delete-batch', uris);
 }
+
+export async function enqueueCoverBackfill(uri: string, rkey: string): Promise<void> {
+  const utils = await getUtils();
+  await utils.addJob('backfill-edition-cover', { uri, rkey }, {
+    jobKey: `backfill-cover:${uri}`,
+    maxAttempts: 5,
+  });
+}

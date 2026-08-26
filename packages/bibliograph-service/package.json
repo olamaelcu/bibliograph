@@ -19,6 +19,7 @@
     "worker:search": "tsx src/worker-search-jobs.ts",
     "seed:publishers": "tsx scripts/seed-publishers.ts",
     "backfill:works": "tsx scripts/backfill-works.ts",
+    "backfill:covers": "tsx scripts/backfill-covers.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "lint": "eslint .",

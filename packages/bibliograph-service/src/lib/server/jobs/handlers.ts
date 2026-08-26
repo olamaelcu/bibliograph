@@ -4,11 +4,12 @@ import { eq, inArray } from 'drizzle-orm';
 import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
-import { editions, works, contributors, records, ingestDeadLetter, tapDeadLetter } from '../db/schema';
-import type { EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
+import { editions, works, contributors, records, ingestDeadLetter, tapDeadLetter, publishers } from '../db/schema';
+import type { EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier } from '../search/types';
 import { PUBLISHER_DID } from '../did';
-import { parseEditionKey, parseWorkKey, parseAuthorKey, editionRkey, workRkey, contributorRkey } from '../ol/keys';
-import { gbEditionRkey, gbWorkRkey, volumeIdFromGbRkey, gbIdentifierFromUri } from '../gb/keys';
+import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionRkey, workRkey, contributorRkey, publisherRkey } from '../ol/keys';
+import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from '../gb/keys';
+import { backfillCoverForEdition } from './cover-backfill';
 
 const db: typeof defaultDb = defaultDb;
 
@@ -39,6 +40,29 @@ function identifySource(
   const gbId = gbKeyFromIdentifiers(idents);
   if (gbId) return { kind: 'gb', olKey: '', gbId };
   return null;
+}
+
+function publisherUriFor(item: PublisherItem): string | undefined {
+  const olKey = olKeyFromIdentifiers(item.identifiers);
+  if (olKey) {
+    try {
+      const olid = parsePublisherKey(olKey);
+      const rkey = publisherRkey(olid);
+      return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${rkey}`;
+    } catch {
+      return undefined;
+    }
+  }
+  const gbId = gbKeyFromIdentifiers(item.identifiers);
+  if (gbId) {
+    try {
+      const rkey = gbPublisherRkey(gbId);
+      return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${rkey}`;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 async function writeIngestDLQ(uri: string, payload: unknown, errorMessage: string, attempts: number): Promise<void> {
@@ -344,6 +368,81 @@ async function ingestContributorBatch(items: ContributorItem[], log: Logger, att
   }
 }
 
+async function ingestPublisherBatch(items: PublisherItem[], log: Logger, attempts: number): Promise<void> {
+  try {
+    const allRows: unknown[] = [];
+    for (const item of items) {
+      const uri = publisherUriFor(item);
+      const rkey = uri ? uri.split('/').pop() : undefined;
+      if (!uri || !rkey) continue;
+      const value = {
+        $type: 'community.lexicon.book.publisher' as const,
+        uri,
+        name: item.name,
+        imprintOf: item.imprintOf,
+        foundingDate: item.foundingDate ?? undefined,
+        closingDate: item.closingDate ?? undefined,
+        identifiers: item.identifiers,
+        createdAt: item.createdAt,
+      };
+      const cid = await cidForLex(value as unknown as LexMap);
+      allRows.push({
+        uri,
+        cid: cid.toString(),
+        did: PUBLISHER_DID,
+        rkey,
+        name: item.name,
+        imprintOfUri: item.imprintOf?.uri ?? null,
+        imprintOfCid: item.imprintOf?.cid ?? null,
+        foundingDate: item.foundingDate ?? null,
+        closingDate: item.closingDate ?? null,
+        identifiers: item.identifiers,
+        createdAt: new Date(item.createdAt),
+      });
+    }
+    if (allRows.length === 0) return;
+    await db.insert(publishers).values(allRows as never).onConflictDoUpdate({
+      target: publishers.uri,
+      set: {
+        name: publishers.name,
+        imprintOfUri: publishers.imprintOfUri,
+        imprintOfCid: publishers.imprintOfCid,
+        foundingDate: publishers.foundingDate,
+        closingDate: publishers.closingDate,
+        identifiers: publishers.identifiers,
+        indexedAt: new Date(),
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error({ stage: 'ingest-publisher-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
+    for (const item of items) {
+      const uri = publisherUriFor(item) ?? `at://${PUBLISHER_DID}/community.lexicon.book.publisher/unknown`;
+      await writeIngestDLQ(uri, item, message, attempts);
+    }
+  }
+}
+
+// -- Sync ingest helpers for direct-await caller paths (SearchService) --
+// These mirror the batch handlers above but return synchronously so the caller
+// can wait for getRecord to be resolvable before returning the search response.
+
+export async function syncIngestEditions(items: EditionItem[], log: Logger): Promise<void> {
+  await ingestEditionBatch(items, log, 1);
+}
+
+export async function syncIngestWorks(items: WorkItem[], log: Logger): Promise<void> {
+  await ingestWorkBatch(items, log, 1);
+}
+
+export async function syncIngestContributors(items: ContributorItem[], log: Logger): Promise<void> {
+  await ingestContributorBatch(items, log, 1);
+}
+
+export async function syncIngestPublishers(items: PublisherItem[], log: Logger): Promise<void> {
+  await ingestPublisherBatch(items, log, 1);
+}
+
 // -- TAP record handlers (unchanged) --
 
 export const tapRecordUpsertTask: Task = async (payload, helpers) => {
@@ -448,6 +547,15 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
   }
 };
 
+export const backfillEditionCoverTask: Task = async (payload, helpers) => {
+  const { uri, rkey } = payload as { uri: string; rkey: string };
+  const log = helpers.logger as unknown as Logger;
+  const res = await backfillCoverForEdition(uri, rkey, log);
+  if (!res.updated) {
+    log.info({ stage: 'backfill-edition-cover', uri, rkey, reason: res.reason }, 'cover backfill skipped');
+  }
+};
+
 export const searchTaskList: TaskList = {
   'ingest-edition': ingestEditionTask,
   'ingest-work': ingestWorkTask,
@@ -455,6 +563,7 @@ export const searchTaskList: TaskList = {
   'ingest-edition-batch': ingestEditionBatchTask,
   'ingest-work-batch': ingestWorkBatchTask,
   'ingest-contributor-batch': ingestContributorBatchTask,
+  'backfill-edition-cover': backfillEditionCoverTask,
 };
 
 export const tapTaskList: TaskList = {

@@ -56,6 +56,7 @@ import { GoogleBooksEnricher } from './search/google-books-enricher';
 import { OpenLibraryEnricher } from './search/open-library-enricher';
 import { GoogleBooksSource } from './search/google-books-source';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
+import * as openLibraryApi from './api/open-library';
 import { SearchService } from './search/service';
 import { eq, inArray, and, sql } from 'drizzle-orm';
 import { db } from './db';
@@ -70,6 +71,9 @@ import {
   buildBookShelfView,
   fetchBookShelvingRecord,
 } from './shelving/hydrate';
+import { olidFromEditionRkey } from './ol/keys';
+import { isGbRkey } from './gb/keys';
+import { enqueueCoverBackfill } from './jobs/enqueue';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -85,6 +89,7 @@ const searchService = new SearchService(
   {
     postgres: postgresSource,
     openLibrary: openLibrarySource,
+    publisherSource: openLibraryApi,
     googleBooksSource,
     googleBooks: googleBooksEnricher,
     openLibraryEnricher,
@@ -238,25 +243,31 @@ router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
 });
 router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
   async handler({ params }) {
-    const result = await searchService.searchContributors({
-      q: params.q,
-      id: params.id,
-      limit: Math.min(params.limit ?? 20, 100),
-      cursor: params.cursor,
-    });
-    const items = result.items.map((r) => ({
-      $type: 'community.lexicon.book.contributor' as const,
-      uri: r.uri,
-      name: r.name,
-      aliases: r.aliases,
-      bio: r.bio,
-      bornYear: r.bornYear,
-      diedYear: r.diedYear,
-      linkedDid: r.linkedDid,
-      identifiers: r.identifiers,
-      createdAt: r.createdAt,
-    }));
-    return json({ items, cursor: result.cursor, total: result.total } as unknown as CommunityLexiconBookSearchContributors.$output);
+    try {
+      const result = await searchService.searchContributors({
+        q: params.q,
+        id: params.id,
+        limit: Math.min(params.limit ?? 20, 100),
+        cursor: params.cursor,
+      });
+      const items = result.items.map((r) => ({
+        $type: 'community.lexicon.book.contributor' as const,
+        uri: r.uri,
+        name: r.name,
+        aliases: r.aliases,
+        bio: r.bio,
+        bornYear: r.bornYear,
+        diedYear: r.diedYear,
+        ...(r.linkedDid !== undefined ? { linkedDid: r.linkedDid } : {}),
+        identifiers: r.identifiers,
+        createdAt: r.createdAt,
+      }));
+      const j = json({ items, cursor: result.cursor, total: result.total } as unknown as CommunityLexiconBookSearchContributors.$output);
+      return j;
+    } catch (e) {
+      console.error('CONTRIBUTOR_HANDLER_ERR:', e, (e as Error)?.stack);
+      throw e;
+    }
   },
 });
 router.addQuery(CommunityLexiconBookSearchPublishers.mainSchema, {
@@ -790,8 +801,35 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
 router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
   async handler({ params }) {
     const uri = params.uri as string;
+    if (!uri) {
+      return Response.json({ error: 'InvalidRequest', message: 'uri is required' }, { status: 400 });
+    }
+    const rkey = uri.split('/').pop() ?? '';
+    const isOl = rkey.startsWith('ol.');
+    const isGb = rkey.startsWith('gb.');
+    if (isOl) {
+      try { olidFromEditionRkey(rkey); } catch {
+        return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
+      }
+    } else if (isGb) {
+      if (!isGbRkey(rkey)) {
+        return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
+      }
+    } else {
+      return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
+    }
+
     const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
-    return json({ url: row?.coverImageUrl ?? undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
+    if (!row) {
+      return Response.json({ error: 'RecordNotFound', message: `no edition at ${uri}` }, { status: 404 });
+    }
+    if (row.coverImageUrl) {
+      return json({ url: row.coverImageUrl } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
+    }
+    void enqueueCoverBackfill(uri, rkey).catch((err) => {
+      log.warn({ err, uri, rkey, stage: 'getImageForBook.enqueue' }, 'cover backfill enqueue failed');
+    });
+    return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
   },
 });
 

@@ -2,7 +2,7 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { openLibraryBreaker } from './breakers';
-import { parseEditionKey, parseWorkKey, parseAuthorKey, editionUri, workUri, contributorUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey } from '../ol/keys.js';
+import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionUri, workUri, contributorUri, publisherUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey, olidFromPublisherRkey } from '../ol/keys';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
@@ -63,6 +63,7 @@ interface OlEditionDoc {
   language?: string[];
   isbn?: string[];
   cover_i?: number;
+  covers?: number[];
   description?: string | { value: string };
 }
 
@@ -82,6 +83,12 @@ interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_da
 function coverUrl(coverId: number | undefined): string | undefined {
   if (coverId === undefined) return undefined;
   return `https://covers.openlibrary.org/b/id/${coverId}-L.jpg`;
+}
+
+function coverUrlFromCovers(covers: number[] | undefined): string | undefined {
+  const first = covers?.find((c) => typeof c === 'number' && c > 0);
+  if (first === undefined) return undefined;
+  return `https://covers.openlibrary.org/b/id/${first}-L.jpg`;
 }
 
 function extractDescription(d: string | { value: string } | undefined): string | undefined {
@@ -360,7 +367,7 @@ async function getEditionByOlid(olid: string, log: Logger, signal?: AbortSignal)
     place: raw.place?.[0] as string | undefined,
     language: raw.language?.[0] as string | undefined,
     description: extractDescription(raw.description),
-    coverImageUrl: coverUrl(raw.cover_i),
+    coverImageUrl: coverUrl(raw.cover_i) ?? coverUrlFromCovers(raw.covers),
     identifiers,
     contributors: [],
     createdAt: new Date().toISOString(),
@@ -403,6 +410,55 @@ export async function getContributorByRkey(rkey: string, log: Logger, signal?: A
     aliases: raw.alternate_names ?? [],
     bornYear: yearFromDate(raw.birth_date),
     diedYear: yearFromDate(raw.death_date),
+    identifiers: [makeOlIdentifier(raw.key)],
+    createdAt: new Date().toISOString(),
+  };
+}
+
+interface OlPublisherDoc { key: string; name: string; location?: string; country?: string; founded?: string; status?: string; aliases?: string[] }
+
+export async function searchPublishers(
+  query: SearchQuery,
+  log: Logger,
+  externalSignal?: AbortSignal,
+): Promise<SearchResult<{ uri: string; name: string; identifiers: Identifier[]; createdAt: string }>> {
+  const limit = Math.min(query.limit, 100);
+  const page = 1;
+  const url = buildUrl(query.q, 'author', limit, page);
+  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const data = await fetchJson<OlSearchResponse<OlPublisherDoc & { key: string; name: string }>>(url, log, signal);
+  if (!data) return { items: [], total: 0 };
+  const createdAt = new Date().toISOString();
+  const items: Array<{ uri: string; name: string; identifiers: Identifier[]; createdAt: string }> = [];
+  for (const d of data.docs ?? []) {
+    try {
+      // OL author search sometimes returns publisher-shaped records (key starts with /publishers/).
+      if (!d.key.startsWith('/publishers/')) continue;
+      const olid = parsePublisherKey(d.key);
+      items.push({
+        uri: publisherUri(olid),
+        name: d.name,
+        identifiers: [makeOlIdentifier(d.key)],
+        createdAt,
+      });
+    } catch (err) {
+      log.warn({ stage: 'open-library-source', key: d.key, err: String(err) }, 'skip malformed publisher doc');
+    }
+  }
+  return { items, total: data.numFound ?? 0 };
+}
+
+export async function getPublisherByRkey(rkey: string, log: Logger, signal?: AbortSignal): Promise<{ uri: string; name: string; identifiers: Identifier[]; createdAt: string } | null> {
+  let olid: string;
+  try { olid = olidFromPublisherRkey(rkey); } catch { return null; }
+  const url = `https://openlibrary.org/publishers/${olid}.json`;
+  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const raw = await fetchJson<OlPublisherDoc>(url, log, s);
+  if (!raw) return null;
+  const parsed = parsePublisherKey(raw.key);
+  return {
+    uri: publisherUri(parsed),
+    name: raw.name,
     identifiers: [makeOlIdentifier(raw.key)],
     createdAt: new Date().toISOString(),
   };
