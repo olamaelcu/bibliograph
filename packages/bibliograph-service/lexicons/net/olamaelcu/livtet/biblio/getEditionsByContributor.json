@@ -1,0 +1,42 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getEditionsByContributor",
+  "description": "List editions whose contributor record matches the given at-uri. Resolves via the local contributors index (`subject.uri` containment on each edition's stored `contributors` JSONB). Useful for ID-based aggregation in pages such as \"More by these authors\" without falling back to fuzzy name search.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "contributor": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Contributor at-uri, e.g. `at://did:.../community.lexicon.book.contributor/ol.A12345A`."
+          },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+        },
+        "required": ["contributor"]
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uris"],
+          "properties": {
+            "uris": {
+              "type": "array",
+              "items": { "type": "string", "format": "at-uri" },
+              "maxLength": 100
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidContributor",
+          "description": "The supplied `contributor` is not a valid at-uri for a `community.lexicon.book.contributor` record."
+        }
+      ]
+    }
+  }
+}
