@@ -75,6 +75,7 @@ import {
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import { enqueueCoverBackfill } from './jobs/enqueue';
+import { buildBookContributorViews } from './book-contributor-view';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -446,6 +447,7 @@ async function serveBookRecordFromDb(
   if (collection === 'community.lexicon.book.edition') {
     const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
+    const bookContributors = await buildBookContributorViews(uri, row.contributors);
     const value = {
       $type: 'community.lexicon.book.edition',
       uri,
@@ -455,7 +457,7 @@ async function serveBookRecordFromDb(
       publishedYear: row.publishedYear ?? undefined,
       language: row.language ?? undefined,
       coverImageUrl: row.coverImageUrl ?? undefined,
-      contributors: row.contributors ?? [],
+      contributors: bookContributors,
       identifiers: row.identifiers ?? [],
       description: row.description ?? undefined,
       createdAt: row.createdAt.toISOString(),
@@ -466,6 +468,7 @@ async function serveBookRecordFromDb(
   if (collection === 'community.lexicon.book.work') {
     const [row] = await db.select().from(works).where(eq(works.uri, uri)).limit(1);
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
+    const bookContributors = await buildBookContributorViews(uri, row.contributors);
     const value = {
       $type: 'community.lexicon.book.work',
       uri,
@@ -474,7 +477,7 @@ async function serveBookRecordFromDb(
       originalLanguage: row.originalLanguage ?? undefined,
       firstPublishedYear: row.firstPublishedYear ?? undefined,
       subjects: row.subjects ?? [],
-      contributors: row.contributors ?? [],
+      contributors: bookContributors,
       identifiers: row.identifiers ?? [],
       description: row.description ?? undefined,
       createdAt: row.createdAt.toISOString(),

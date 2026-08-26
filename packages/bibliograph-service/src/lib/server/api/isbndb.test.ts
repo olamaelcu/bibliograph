@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
+import { eq } from 'drizzle-orm';
 import { enrichEditions, searchEditions, getBookByIsbn } from './isbndb';
 import { isbndbBreaker } from './breakers';
+import { db } from '../db';
+import { contributors } from '../db/schema';
 import type { EditionItem } from '../search/types';
 
 const log = pino({ level: 'silent' });
@@ -177,4 +180,29 @@ test('getBookByIsbn returns null when ISBNDB_API_KEY missing', async () => {
   delete process.env.ISBNDB_API_KEY;
   const result = await getBookByIsbn('9780134093413', log);
   assert.equal(result, null);
+});
+
+test('searchEditions populates contributors from b.authors', async () => {
+  resetBreaker();
+  process.env.ISBNDB_API_KEY = 'k';
+  const AUTHOR = 'ISBNdb Test Author Populated';
+  await db.delete(contributors).where(eq(contributors.name, AUTHOR));
+  const restore = stubFetch(async () => new Response(JSON.stringify({
+    book: {
+      title: 'ISBNdb Test Book',
+      isbn13: '9780134093413',
+      authors: [AUTHOR],
+    },
+  }), { headers: { 'content-type': 'application/json' } }));
+  try {
+    const result = await searchEditions({ q: '9780134093413', limit: 10 }, log);
+    assert.equal(result.items.length, 1);
+    const c = result.items[0]?.contributors ?? [];
+    assert.equal(c.length, 1, 'expected one populated contributor');
+    assert.equal(c[0]?.role, 'author');
+    assert.match(c[0]?.subject.uri ?? '', /\/isbndb\.a-isbndb-test-author-populated$/);
+  } finally {
+    restore();
+    await db.delete(contributors).where(eq(contributors.name, AUTHOR));
+  }
 });

@@ -4,6 +4,7 @@ import { withRetry } from './retry';
 import { isbndbBreaker } from './breakers';
 import type { EditionItem, WorkItem, Identifier, SearchQuery, SearchResult } from '../search/types';
 import { isbndbEditionUri, isbndbWorkUri } from '../isbndb/keys';
+import { resolveContributorsByName } from './contributor-name-resolver';
 
 const BASE = 'https://api2.isbndb.com';
 
@@ -87,10 +88,11 @@ function makeIdentifiers(b: IsbndbBook, primary: string): Identifier[] {
   return ids;
 }
 
-function mapIsbndbToEdition(b: IsbndbBook, createdAt: string): EditionItem | null {
+async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, log: Logger): Promise<EditionItem | null> {
   if (!b.title) return null;
   const primary = primaryIsbn(b);
   if (!primary) return null;
+  const contributors = await resolveContributorsByName(b.authors ?? [], 'isbndb', log);
   return {
     uri: isbndbEditionUri(primary),
     title: b.title,
@@ -100,16 +102,17 @@ function mapIsbndbToEdition(b: IsbndbBook, createdAt: string): EditionItem | nul
     description: descriptionFromIsbndb(b),
     coverImageUrl: coverFromImage(b.image),
     identifiers: makeIdentifiers(b, primary),
-    contributors: [],
+    contributors,
     createdAt,
   };
 }
 
-function mapIsbndbToWork(b: IsbndbBook, createdAt: string): WorkItem | null {
+async function mapIsbndbToWork(b: IsbndbBook, createdAt: string, log: Logger): Promise<WorkItem | null> {
   if (!b.title) return null;
   const primary = primaryIsbn(b);
   if (!primary) return null;
   const subjects = (b.subjects ?? []).filter((s): s is string => typeof s === 'string');
+  const contributors = await resolveContributorsByName(b.authors ?? [], 'isbndb', log);
   return {
     uri: isbndbWorkUri(primary),
     title: b.title,
@@ -118,7 +121,7 @@ function mapIsbndbToWork(b: IsbndbBook, createdAt: string): WorkItem | null {
     firstPublishedYear: yearFromDatePublished(b.date_published),
     subjects,
     description: descriptionFromIsbndb(b),
-    contributors: [],
+    contributors,
     identifiers: makeIdentifiers(b, primary),
     createdAt,
   };
@@ -195,7 +198,7 @@ export async function searchEditions(
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'fetch_failed' } };
   }
   const createdAt = new Date().toISOString();
-  const mapped = mapIsbndbToEdition(data.book, createdAt);
+  const mapped = await mapIsbndbToEdition(data.book, createdAt, log);
   return { items: mapped ? [mapped] : [], total: mapped ? 1 : 0 };
 }
 
@@ -226,7 +229,7 @@ export async function searchWorks(
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'fetch_failed' } };
   }
   const createdAt = new Date().toISOString();
-  const mapped = mapIsbndbToWork(data.book, createdAt);
+  const mapped = await mapIsbndbToWork(data.book, createdAt, log);
   return { items: mapped ? [mapped] : [], total: mapped ? 1 : 0 };
 }
 

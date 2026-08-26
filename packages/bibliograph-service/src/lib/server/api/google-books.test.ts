@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { enrichEditions } from './google-books';
+import { eq } from 'drizzle-orm';
+import { enrichEditions, searchEditions } from './google-books';
+import { db } from '../db';
+import { contributors } from '../db/schema';
 import type { EditionItem } from '../search/types';
 
 const log = pino({ level: 'silent' });
@@ -19,6 +22,10 @@ const baseItem: EditionItem = {
   contributors: [],
   createdAt: new Date().toISOString(),
 };
+
+async function cleanupAuthor(name: string): Promise<void> {
+  await db.delete(contributors).where(eq(contributors.name, name));
+}
 
 test('enrichEditions writes description + coverImageUrl from Google Books', async () => {
   process.env.GOOGLE_BOOKS_API_KEY = 'k';
@@ -64,4 +71,31 @@ test('enrichEditions no-ops when GOOGLE_BOOKS_API_KEY is missing', async () => {
     assert.equal(out.description, undefined);
     assert.equal(called, false);
   } finally { restore(); }
+});
+
+test('searchEditions populates contributors from volumeInfo.authors', async () => {
+  process.env.GOOGLE_BOOKS_API_KEY = 'k';
+  const AUTHOR = 'Gb Test Author Populated';
+  await cleanupAuthor(AUTHOR);
+  const restore = stubFetch(async () => new Response(JSON.stringify({
+    totalItems: 1,
+    items: [{
+      id: 'gbVolume123',
+      volumeInfo: {
+        title: 'GB Test Book',
+        authors: [AUTHOR],
+      },
+    }],
+  }), { headers: { 'content-type': 'application/json' } }));
+  try {
+    const result = await searchEditions({ q: 'gb test', limit: 10 }, log);
+    assert.equal(result.items.length, 1);
+    const c = result.items[0]?.contributors ?? [];
+    assert.equal(c.length, 1, 'expected one populated contributor');
+    assert.equal(c[0]?.role, 'author');
+    assert.match(c[0]?.subject.uri ?? '', /\/gb\.a-gb-test-author-populated$/);
+  } finally {
+    restore();
+    await cleanupAuthor(AUTHOR);
+  }
 });

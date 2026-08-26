@@ -4,6 +4,7 @@ import { withRetry } from './retry';
 import { googleBooksBreaker } from './breakers';
 import type { EditionItem, WorkItem, SearchQuery, SearchResult, Identifier } from '../search/types';
 import { gbEditionUri, gbWorkUri } from '../gb/keys';
+import { resolveContributorsByName } from './contributor-name-resolver';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
 
@@ -80,7 +81,7 @@ function descriptionFromGb(info: GbVolumeInfo | undefined, fallback: string | un
   return stripHtml(info?.description ?? fallback);
 }
 
-export function mapGbToEdition(v: GbVolume, createdAt: string): EditionItem | null {
+export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger): Promise<EditionItem | null> {
   const info = v.volumeInfo;
   if (!info?.title || !v.id) return null;
   const ids: Identifier[] = [makeGbVolumeIdentifier(v.id)];
@@ -91,6 +92,7 @@ export function mapGbToEdition(v: GbVolume, createdAt: string): EditionItem | nu
     if (ids.length >= 6) break;
   }
   if (info.canonicalVolumeLink) ids.push({ uri: info.canonicalVolumeLink, resource: 'googlebooks-canonical' });
+  const contributors = await resolveContributorsByName(info.authors ?? [], 'googlebooks', log);
   return {
     uri: gbEditionUri(v.id),
     title: info.title,
@@ -100,12 +102,12 @@ export function mapGbToEdition(v: GbVolume, createdAt: string): EditionItem | nu
     description: descriptionFromGb(info, v.searchInfo?.textSnippet),
     coverImageUrl: coverFromLinks(info.imageLinks),
     identifiers: ids,
-    contributors: [],
+    contributors,
     createdAt,
   };
 }
 
-export function mapGbToWork(v: GbVolume, createdAt: string): WorkItem | null {
+export async function mapGbToWork(v: GbVolume, createdAt: string, log: Logger): Promise<WorkItem | null> {
   const info = v.volumeInfo;
   if (!info?.title || !v.id) return null;
   const ids: Identifier[] = [makeGbVolumeIdentifier(v.id)];
@@ -116,6 +118,7 @@ export function mapGbToWork(v: GbVolume, createdAt: string): WorkItem | null {
   }
   const subjects = (info.categories ?? [])
     .flatMap((c) => c.split('/').map((s) => s.trim()).filter(Boolean));
+  const contributors = await resolveContributorsByName(info.authors ?? [], 'googlebooks', log);
   return {
     uri: gbWorkUri(v.id),
     title: info.title,
@@ -124,7 +127,7 @@ export function mapGbToWork(v: GbVolume, createdAt: string): WorkItem | null {
     firstPublishedYear: yearFromGbPublishedDate(info.publishedDate),
     subjects,
     description: descriptionFromGb(info, v.searchInfo?.textSnippet),
-    contributors: [],
+    contributors,
     identifiers: ids,
     createdAt,
   };
@@ -209,7 +212,7 @@ export async function searchEditions(
   const createdAt = new Date().toISOString();
   const items: EditionItem[] = [];
   for (const v of data.items ?? []) {
-    const mapped = mapGbToEdition(v, createdAt);
+    const mapped = await mapGbToEdition(v, createdAt, log);
     if (mapped) items.push(mapped);
   }
   const fetchedCount = data.items?.length ?? 0;
@@ -248,7 +251,7 @@ export async function searchWorks(
   const createdAt = new Date().toISOString();
   const items: WorkItem[] = [];
   for (const v of data.items ?? []) {
-    const mapped = mapGbToWork(v, createdAt);
+    const mapped = await mapGbToWork(v, createdAt, log);
     if (mapped) items.push(mapped);
   }
   const fetchedCount = data.items?.length ?? 0;

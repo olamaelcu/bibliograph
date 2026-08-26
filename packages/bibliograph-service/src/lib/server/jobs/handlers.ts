@@ -1,6 +1,6 @@
 import type { Logger } from 'pino';
 import type { Task, TaskList } from 'graphile-worker';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
@@ -216,12 +216,12 @@ async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: n
     await db.insert(editions).values(allRows as never).onConflictDoUpdate({
       target: editions.uri,
       set: {
-        title: editions.title,
-        subtitle: editions.subtitle,
-        description: editions.description,
-        coverImageUrl: editions.coverImageUrl,
-        identifiers: editions.identifiers,
-        contributors: editions.contributors,
+        title: sql`excluded.title`,
+        subtitle: sql`excluded.subtitle`,
+        description: sql`excluded.description`,
+        coverImageUrl: sql`excluded.cover_image_url`,
+        identifiers: sql`excluded.identifiers`,
+        contributors: sql`excluded.contributors`,
         indexedAt: new Date(),
       },
     });
@@ -308,11 +308,11 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
     await db.insert(works).values(allRows as never).onConflictDoUpdate({
       target: works.uri,
       set: {
-        title: works.title,
-        subtitle: works.subtitle,
-        description: works.description,
-        identifiers: works.identifiers,
-        contributors: works.contributors,
+        title: sql`excluded.title`,
+        subtitle: sql`excluded.subtitle`,
+        description: sql`excluded.description`,
+        identifiers: sql`excluded.identifiers`,
+        contributors: sql`excluded.contributors`,
         indexedAt: new Date(),
       },
     });
@@ -383,10 +383,10 @@ async function ingestContributorBatch(items: ContributorItem[], log: Logger, att
     await db.insert(contributors).values(allRows as never).onConflictDoUpdate({
       target: contributors.uri,
       set: {
-        name: contributors.name,
-        aliases: contributors.aliases,
-        bio: contributors.bio,
-        identifiers: contributors.identifiers,
+        name: sql`excluded.name`,
+        aliases: sql`excluded.aliases`,
+        bio: sql`excluded.bio`,
+        identifiers: sql`excluded.identifiers`,
         indexedAt: new Date(),
       },
     });
@@ -445,12 +445,12 @@ async function ingestPublisherBatch(items: PublisherItem[], log: Logger, attempt
     await db.insert(publishers).values(allRows as never).onConflictDoUpdate({
       target: publishers.uri,
       set: {
-        name: publishers.name,
-        imprintOfUri: publishers.imprintOfUri,
-        imprintOfCid: publishers.imprintOfCid,
-        foundingDate: publishers.foundingDate,
-        closingDate: publishers.closingDate,
-        identifiers: publishers.identifiers,
+        name: sql`excluded.name`,
+        imprintOfUri: sql`excluded.imprint_of_uri`,
+        imprintOfCid: sql`excluded.imprint_of_cid`,
+        foundingDate: sql`excluded.founding_date`,
+        closingDate: sql`excluded.closing_date`,
+        identifiers: sql`excluded.identifiers`,
         indexedAt: new Date(),
       },
     });

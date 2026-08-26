@@ -4,6 +4,7 @@ import { withRetry } from './retry';
 import { openLibraryBreaker } from './breakers';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionUri, workUri, contributorUri, publisherUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey, olidFromPublisherRkey } from '../ol/keys';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
+import { resolveOlContributors } from './open-library-contributors';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
@@ -52,6 +53,8 @@ interface OlSearchResponse<T> {
   docs?: T[];
 }
 
+interface OlAuthorRef { key: string }
+
 interface OlEditionDoc {
   key: string;
   cover_edition_key?: string;
@@ -65,7 +68,10 @@ interface OlEditionDoc {
   cover_i?: number;
   covers?: number[];
   description?: string | { value: string };
+  authors?: OlAuthorRef[];
 }
+
+interface OlWorkAuthorRole { author: OlAuthorRef; type?: { key: string } }
 
 interface OlWorkDoc {
   key: string;
@@ -76,6 +82,12 @@ interface OlWorkDoc {
   subject?: string[];
   description?: string | { value: string };
   cover_i?: number;
+  authors?: OlWorkAuthorRole[];
+}
+
+interface OlSearchEditionDoc extends OlEditionDoc {
+  author_key?: string[];
+  author_name?: string[];
 }
 
 interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
@@ -138,7 +150,7 @@ async function enrichOneEdition(item: EditionItem, log: Logger, signal: AbortSig
   const isbn = isbnFromIdentifiers(item);
   if (!isbn) return item;
   const url = buildUrl(`isbn:${isbn}`, 'edition', 1, 1);
-  const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
+  const data = await fetchJson<OlSearchResponse<OlSearchEditionDoc>>(url, log, signal);
   const doc = data?.docs?.[0];
   if (!doc) return item;
   let enriched = item;
@@ -157,6 +169,11 @@ async function enrichOneEdition(item: EditionItem, log: Logger, signal: AbortSig
   }
   if (!enriched.language && doc.language?.[0]) {
     enriched = { ...enriched, language: doc.language[0] };
+  }
+  if (enriched.contributors.length === 0 && doc.author_key && doc.author_key.length > 0) {
+    const authorKeys = doc.author_key
+      .map((k) => (k.startsWith('/authors/') ? k : `/authors/${k}`));
+    enriched = { ...enriched, contributors: await resolveOlContributors(authorKeys, log, signal) };
   }
   log.info({ stage: 'open-library-enricher', isbn, uri: enriched.uri }, 'ol enrich ok');
   return enriched;
@@ -202,6 +219,15 @@ async function enrichOneWork(item: WorkItem, log: Logger, signal: AbortSignal): 
   if (!enriched.firstPublishedYear && doc.first_publish_year) {
     enriched = { ...enriched, firstPublishedYear: doc.first_publish_year };
   }
+  if (enriched.contributors.length === 0 && doc.authors && doc.authors.length > 0) {
+    const authorKeys = doc.authors
+      .map((a) => a.author?.key)
+      .filter((k): k is string => typeof k === 'string')
+      .map((k) => (k.startsWith('/authors/') ? k : `/authors/${k}`));
+    if (authorKeys.length > 0) {
+      enriched = { ...enriched, contributors: await resolveOlContributors(authorKeys, log, signal) };
+    }
+  }
   log.info({ stage: 'open-library-enricher', title, uri: enriched.uri }, 'ol enrich ok');
   return enriched;
 }
@@ -237,7 +263,7 @@ export async function searchEditions(
   const page = 1;
   const url = buildUrl(query.q, 'edition', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  const data = await fetchJson<OlSearchResponse<OlEditionDoc>>(url, log, signal);
+  const data = await fetchJson<OlSearchResponse<OlSearchEditionDoc>>(url, log, signal);
   if (!data) return { items: [], total: 0 };
   const createdAt = new Date().toISOString();
   const items: EditionItem[] = [];
@@ -258,6 +284,12 @@ export async function searchEditions(
         }
       }
       const year = d.first_publish_year ?? d.publish_year?.[0];
+      const authorKeys = (d.author_key ?? []).map((k) =>
+        k.startsWith('/authors/') ? k : `/authors/${k}`,
+      );
+      const contributors = authorKeys.length > 0
+        ? await resolveOlContributors(authorKeys, log, signal)
+        : [];
       items.push({
         uri: editionUri(olid),
         title: d.title,
@@ -268,7 +300,7 @@ export async function searchEditions(
         description: extractDescription(d.description),
         coverImageUrl: coverUrl(d.cover_i),
         identifiers,
-        contributors: [],
+        contributors,
         createdAt,
       });
     } catch (err) {
@@ -294,6 +326,13 @@ export async function searchWorks(
   for (const d of data.docs ?? []) {
     try {
       const olid = parseWorkKey(d.key);
+      const authorKeys = (d.authors ?? [])
+        .map((a) => a.author?.key)
+        .filter((k): k is string => typeof k === 'string')
+        .map((k) => (k.startsWith('/authors/') ? k : `/authors/${k}`));
+      const contributors = authorKeys.length > 0
+        ? await resolveOlContributors(authorKeys, log, signal)
+        : [];
       items.push({
         uri: workUri(olid),
         title: d.title,
@@ -302,7 +341,7 @@ export async function searchWorks(
         originalLanguage: d.original_languages?.[0] as string | undefined,
         subjects: d.subject ?? [],
         description: extractDescription(d.description),
-        contributors: [],
+        contributors,
         identifiers: [makeOlIdentifier(d.key)],
         createdAt,
       });
@@ -359,6 +398,10 @@ async function getEditionByOlid(olid: string, log: Logger, signal?: AbortSignal)
   if (!raw) return null;
   const parsedOlid = parseEditionKey(raw.key);
   const identifiers: Identifier[] = [makeOlIdentifier(raw.key)];
+  const authorKeys = (raw.authors ?? []).map((a) => a.key);
+  const contributors = authorKeys.length > 0
+    ? await resolveOlContributors(authorKeys, log, s)
+    : [];
   return {
     uri: editionUri(parsedOlid),
     title: raw.title,
@@ -369,7 +412,7 @@ async function getEditionByOlid(olid: string, log: Logger, signal?: AbortSignal)
     description: extractDescription(raw.description),
     coverImageUrl: coverUrl(raw.cover_i) ?? coverUrlFromCovers(raw.covers),
     identifiers,
-    contributors: [],
+    contributors,
     createdAt: new Date().toISOString(),
   };
 }
@@ -382,6 +425,12 @@ export async function getWorkByRkey(rkey: string, log: Logger, signal?: AbortSig
   const raw = await fetchJson<OlWorkDoc>(url, log, s);
   if (!raw) return null;
   const parsed = parseWorkKey(raw.key);
+  const authorKeys = (raw.authors ?? [])
+    .map((a) => a.author?.key)
+    .filter((k): k is string => typeof k === 'string');
+  const contributors = authorKeys.length > 0
+    ? await resolveOlContributors(authorKeys, log, s)
+    : [];
   return {
     uri: workUri(parsed),
     title: raw.title,
@@ -390,7 +439,7 @@ export async function getWorkByRkey(rkey: string, log: Logger, signal?: AbortSig
     originalLanguage: raw.original_languages?.[0] as string | undefined,
     subjects: raw.subject ?? [],
     description: extractDescription(raw.description),
-    contributors: [],
+    contributors,
     identifiers: [makeOlIdentifier(raw.key)],
     createdAt: new Date().toISOString(),
   };
