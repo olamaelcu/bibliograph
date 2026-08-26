@@ -23,6 +23,7 @@
     "backfill:edition-contributors": "tsx scripts/backfill-edition-contributors.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:run": "tsx src/lib/server/db/migrate.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

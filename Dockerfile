@@ -34,4 +34,10 @@ RUN pnpm install --prod --ignore-scripts
 # `/srv/data/bibliograph/data/lex` files published by the build script.
 USER 1000
 EXPOSE 5000
-CMD ["node", "packages/bibliograph-service/build/index.js"]
+# Entrypoint runs the migrator (idempotent — see src/lib/server/db/migrate.ts)
+# before exec'ing the web process. Dokku's dockerfile builder ignores Procfile
+# `release:` entries, so the Dockerfile is the only hook point. The migrator
+# fails closed on any non-duplicate PG error, which crashes the container and
+# surfaces a clear deploy failure instead of starting the app against a stale
+# schema.
+ENTRYPOINT ["sh", "-c", "node_modules/.bin/tsx packages/bibliograph-service/src/lib/server/db/migrate.ts && exec node packages/bibliograph-service/build/index.js"]
