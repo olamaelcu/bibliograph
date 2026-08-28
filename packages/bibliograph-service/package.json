@@ -21,6 +21,8 @@
     "backfill:works": "tsx scripts/backfill-works.ts",
     "backfill:covers": "tsx scripts/backfill-covers.ts",
     "backfill:edition-contributors": "tsx scripts/backfill-edition-contributors.ts",
+    "backfill:contributor-images": "tsx scripts/backfill-contributor-images.ts",
+    "backfill:descriptions": "tsx scripts/backfill-descriptions.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:run": "tsx src/lib/server/db/migrate.ts",

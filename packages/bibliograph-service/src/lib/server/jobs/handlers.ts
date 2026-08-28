@@ -11,6 +11,8 @@ import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editi
 import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from '../gb/keys';
 import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
 import { backfillCoverForEdition } from './cover-backfill';
+import { backfillDescriptionForEdition } from './description-backfill';
+import { backfillContributorImageForUri } from './contributor-image-backfill';
 
 const db: typeof defaultDb = defaultDb;
 
@@ -597,6 +599,21 @@ export const backfillEditionCoverTask: Task = async (payload, helpers) => {
   }
 };
 
+export const backfillEditionDescriptionTask: Task = async (payload, helpers) => {
+  const { uri } = payload as { uri: string };
+  const log = helpers.logger as unknown as Logger;
+  const res = await backfillDescriptionForEdition(uri, log);
+  if (!res.updated) {
+    log.info({ stage: 'backfill-edition-description', uri, reason: res.reason }, 'description backfill skipped');
+  }
+};
+
+export const backfillContributorImageTask: Task = async (payload, helpers) => {
+  const { uri } = payload as { uri: string };
+  const log = helpers.logger as unknown as Logger;
+  await backfillContributorImageForUri(uri, log);
+};
+
 export const searchTaskList: TaskList = {
   'ingest-edition': ingestEditionTask,
   'ingest-work': ingestWorkTask,
@@ -605,6 +622,8 @@ export const searchTaskList: TaskList = {
   'ingest-work-batch': ingestWorkBatchTask,
   'ingest-contributor-batch': ingestContributorBatchTask,
   'backfill-edition-cover': backfillEditionCoverTask,
+  'backfill-edition-description': backfillEditionDescriptionTask,
+  'backfill-contributor-image': backfillContributorImageTask,
 };
 
 export const tapTaskList: TaskList = {

@@ -1,9 +1,10 @@
 import type { Logger } from 'pino';
-import { and, asc, desc, or, sql } from 'drizzle-orm';
+import { and, asc, desc, inArray, or, sql } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { db as defaultDb } from '../db/index';
 import { editions, works, contributors, publishers } from '../db/schema';
 import { PUBLISHER_DID } from '../did';
+import { pgLanguageVariants } from './language';
 import type {
   SearchQuery,
   SearchResult,
@@ -44,6 +45,8 @@ interface SearchTable {
   identifiers: PgColumn;
   indexedAt: PgColumn;
   uri: PgColumn;
+  /** Optional: language column for `lang` filtering. Editions + works only. */
+  language?: PgColumn;
 }
 
 /** Minimal fields the cursor encoder reads off every row. */
@@ -89,6 +92,17 @@ export class PostgresSource {
     if (query.id) {
       const identifiers = table.identifiers;
       for (const id of query.id) filterConds.push(sql`${identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
+    }
+    if (query.lang?.length && table.language) {
+      const variants = pgLanguageVariants(query.lang);
+      if (variants.length > 0) {
+        filterConds.push(inArray(table.language, variants));
+      } else {
+        // Caller asked for a language we can't map to any Postgres-visible form.
+        // Fail-closed: emit a predicate that's never true so we return zero rows
+        // instead of silently dropping the filter and returning wrong-language hits.
+        filterConds.push(sql`FALSE`);
+      }
     }
 
     let cursorCond: ReturnType<typeof sql> | undefined;

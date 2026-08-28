@@ -70,6 +70,10 @@ function descriptionFromIsbndb(b: IsbndbBook): string | undefined {
   return b.synopsis ?? b.overview ?? b.excerpt ?? undefined;
 }
 
+export function isbndbDescription(b: IsbndbBook): string | undefined {
+  return descriptionFromIsbndb(b);
+}
+
 function primaryIsbn(b: IsbndbBook): string | undefined {
   const raw = (b.isbn13 && b.isbn13.length === 13) ? b.isbn13 : (b.isbn && b.isbn.length === 13 ? b.isbn : undefined);
   if (raw) return raw.replace(/-/g, '');
@@ -125,6 +129,19 @@ async function mapIsbndbToWork(b: IsbndbBook, createdAt: string, log: Logger): P
     identifiers: makeIdentifiers(b, primary),
     createdAt,
   };
+}
+
+/**
+ * Accept loose ISBN inputs from upstream callers — `q` may arrive as
+ * `isbn:9781607785927`, `ISBN13:9781607785927`, a raw `9781607785927`,
+ * or a hyphenated `978-1-60-778592-7`. Returns the cleaned 10/13-digit
+ * string or `null` if the value is not an ISBN.
+ */
+export function isbnFromQuery(q: string | undefined): string | null {
+  if (!q) return null;
+  const m = /^\s*isbn\s*(\d{0,2})?\s*:\s*(.+)\s*$/i.exec(q);
+  const raw = (m ? m[2]! : q).replace(/-/g, '').trim();
+  return /^\d{10}(\d{3})?$/.test(raw) ? raw : null;
 }
 
 function parseRetryAfter(header: string | null): number | undefined {
@@ -184,8 +201,8 @@ export async function searchEditions(
     return missingKeyDegraded();
   }
   if (!query.q) return { items: [], total: 0 };
-  const isbn = query.q.replace(/-/g, '');
-  if (!/^\d{10}(\d{3})?$/.test(isbn)) {
+  const isbn = isbnFromQuery(query.q);
+  if (!isbn) {
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'non_isbn_query' } };
   }
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
@@ -215,8 +232,8 @@ export async function searchWorks(
     return missingKeyDegraded();
   }
   if (!query.q) return { items: [], total: 0 };
-  const isbn = query.q.replace(/-/g, '');
-  if (!/^\d{10}(\d{3})?$/.test(isbn)) {
+  const isbn = isbnFromQuery(query.q);
+  if (!isbn) {
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'non_isbn_query' } };
   }
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
@@ -368,8 +385,8 @@ export async function enrichWorks(
 
 export async function getBookByIsbn(isbn: string, log: Logger, signal?: AbortSignal): Promise<IsbndbBook | null> {
   if (!process.env.ISBNDB_API_KEY) return null;
-  const clean = isbn.replace(/-/g, '');
-  if (!/^\d{10}(\d{3})?$/.test(clean)) return null;
+  const clean = isbnFromQuery(isbn);
+  if (!clean) return null;
   const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const res = await isbndbFetch<IsbndbSingleResponse>(`${BASE}/book/${encodeURIComponent(clean)}`, log, s);
   return res?.book ?? null;

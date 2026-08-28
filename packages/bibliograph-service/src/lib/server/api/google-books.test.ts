@@ -99,3 +99,42 @@ test('searchEditions populates contributors from volumeInfo.authors', async () =
     await cleanupAuthor(AUTHOR);
   }
 });
+
+test('searchEditions: single-tag lang sets langRestrict=ISO 639-1', async () => {
+  process.env.GOOGLE_BOOKS_API_KEY = 'k';
+  let captured = '';
+  const restore = stubFetch(async (url) => {
+    captured = url;
+    return new Response(JSON.stringify({ totalItems: 0 }), { headers: { 'content-type': 'application/json' } });
+  });
+  try {
+    await searchEditions({ q: 'x', limit: 1, lang: ['fr-CA'] }, log);
+    assert.match(captured, /langRestrict=fr/);
+  } finally { restore(); }
+});
+
+test('searchEditions: multi-tag lang omits langRestrict (GB returns nothing on multi-tag)', async () => {
+  process.env.GOOGLE_BOOKS_API_KEY = 'k';
+  let captured = '';
+  const restore = stubFetch(async (url) => {
+    captured = url;
+    return new Response(JSON.stringify({ totalItems: 0 }), { headers: { 'content-type': 'application/json' } });
+  });
+  try {
+    await searchEditions({ q: 'x', limit: 1, lang: ['en', 'fr'] }, log);
+    assert.doesNotMatch(captured, /langRestrict=/);
+  } finally { restore(); }
+});
+
+test('searchEditions: unmapped single-tag lang omits langRestrict (fail-closed)', async () => {
+  process.env.GOOGLE_BOOKS_API_KEY = 'k';
+  let captured = '';
+  const restore = stubFetch(async (url) => {
+    captured = url;
+    return new Response(JSON.stringify({ totalItems: 0 }), { headers: { 'content-type': 'application/json' } });
+  });
+  try {
+    await searchEditions({ q: 'x', limit: 1, lang: ['xx'] }, log);
+    assert.doesNotMatch(captured, /langRestrict=/);
+  } finally { restore(); }
+});

@@ -43,6 +43,13 @@
       "when": 1787605060000,
       "tag": "0006_records_table",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787795120000,
+      "tag": "0007_contributor_image",
+      "breakpoints": true
     }
   ]
 }

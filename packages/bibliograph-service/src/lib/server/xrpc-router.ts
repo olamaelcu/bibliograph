@@ -55,6 +55,7 @@ import { OpenLibrarySource } from './search/open-library-source';
 import { GoogleBooksEnricher } from './search/google-books-enricher';
 import { OpenLibraryEnricher } from './search/open-library-enricher';
 import { GoogleBooksSource } from './search/google-books-source';
+import { IsbndbSource } from './search/isbndb-source';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './search/isbndb-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
 import * as openLibraryApi from './api/open-library';
@@ -74,7 +75,7 @@ import {
 } from './shelving/hydrate';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
-import { enqueueCoverBackfill } from './jobs/enqueue';
+import { enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
 import { buildBookContributorViews } from './book-contributor-view';
 
 export const log = createLogger('web');
@@ -83,6 +84,7 @@ log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
 const postgresSource = new PostgresSource(log);
 const openLibrarySource = new OpenLibrarySource(log);
 const googleBooksSource = new GoogleBooksSource(log);
+const isbndbSource = new IsbndbSource(log);
 const googleBooksEnricher = new GoogleBooksEnricher();
 const openLibraryEnricher = new OpenLibraryEnricher();
 const isbndbEnricher = new IsbndbEnricher();
@@ -95,6 +97,7 @@ const searchService = new SearchService(
     openLibrary: openLibrarySource,
     publisherSource: openLibraryApi,
     googleBooksSource,
+    isbndbSource,
     googleBooks: googleBooksEnricher,
     openLibraryEnricher,
     isbndbEnricher,
@@ -177,6 +180,7 @@ router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
       id: params.id,
       limit: Math.min(params.limit ?? 20, 100),
       cursor: params.cursor,
+      lang: params.lang,
     });
     const items = result.items.map((r) => ({
       $type: 'community.lexicon.book.edition' as const,
@@ -463,6 +467,11 @@ async function serveBookRecordFromDb(
       createdAt: row.createdAt.toISOString(),
     };
     const cid = await cidForLex(value as unknown as LexMap);
+    if (!row.description) {
+      void enqueueDescriptionBackfill(uri).catch((err) => {
+        log.warn({ err, uri, stage: 'serveBookRecordFromDb.description.enqueue' }, 'description backfill enqueue failed');
+      });
+    }
     return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
   }
   if (collection === 'community.lexicon.book.work') {

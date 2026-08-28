@@ -24,6 +24,7 @@ import { GoogleBooksEnricher } from '../src/lib/server/search/google-books-enric
 import { GoogleBooksSource } from '../src/lib/server/search/google-books-source.js';
 import { OpenLibraryEnricher } from '../src/lib/server/search/open-library-enricher.js';
 import { IsbndbEnricher, IsbndbWorkEnricher } from '../src/lib/server/search/isbndb-enricher.js';
+import { IsbndbSource } from '../src/lib/server/search/isbndb-source.js';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from '../src/lib/server/search/wikipedia-enricher.js';
 
 import { SearchService } from '../src/lib/server/search/service.js';
@@ -70,6 +71,7 @@ function buildRouter(): { router: XRPCRouter; restore: () => void } {
   const pg = new PostgresSource(log);
   const ol = new OpenLibrarySource(log);
     const gb = new GoogleBooksSource(log);
+    const ib = new IsbndbSource(log);
     const gbe = new GoogleBooksEnricher();
     const ole = new OpenLibraryEnricher();
     const ibe = new IsbndbEnricher();
@@ -77,7 +79,7 @@ function buildRouter(): { router: XRPCRouter; restore: () => void } {
     const aw = new AuthorWikipediaEnricher();
     const cw = new ContributorWikipediaEnricher();
     const svc = new SearchService(
-      { postgres: pg, openLibrary: ol, publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: gb, googleBooks: gbe, openLibraryEnricher: ole, isbndbEnricher: ibe, isbndbWorkEnricher: ibwe, authorWikipedia: aw, contributorWikipedia: cw },
+      { postgres: pg, openLibrary: ol, publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: gb, isbndbSource: ib, googleBooks: gbe, openLibraryEnricher: ole, isbndbEnricher: ibe, isbndbWorkEnricher: ibwe, authorWikipedia: aw, contributorWikipedia: cw },
       log,
     );
   router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
@@ -132,7 +134,7 @@ test('searchEditions falls back to OpenLibrary when Google Books is empty', asyn
   try {
     const router = new XRPCRouter();
     const svc = new SearchService(
-      { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+      { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
       log,
     );
     router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
@@ -199,7 +201,7 @@ test('searchContributors parses bare OpenLibrary author OLIDs (no /authors/ pref
   });
   const router = new XRPCRouter();
   const svc = new SearchService(
-    { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+    { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
     log,
   );
   router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
@@ -237,7 +239,7 @@ test('searchEditions skips work-only docs with no cover edition (no /books/ key)
   const router = new XRPCRouter();
   const pg = new PostgresSource(log);
   const svc = new SearchService(
-      { postgres: pg, openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
+      { postgres: pg, openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher() },
     log,
   );
   router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {

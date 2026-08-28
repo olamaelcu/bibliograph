@@ -96,6 +96,13 @@ function makeContributorRow(overrides: Partial<ContributorRow> = {}): Contributo
     bornYear: 1970,
     diedYear: null,
     identifiers: [],
+    imageUrl: null,
+    imageSource: null,
+    imageArtist: null,
+    imageLicense: null,
+    imageLicenseUrl: null,
+    imageAttributionRequired: false,
+    imageCheckedAt: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
     ...overrides,
@@ -325,4 +332,34 @@ test('malformed cursor is ignored — no where clause', async () => {
   await src.searchEditions({ cursor: 'not-base64-at-all!!!', limit: 10 });
 
   assert.equal(cap.whereCalled, false);
+});
+
+test('searchEditions: lang[] produces a where clause', async () => {
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+  const fakeDb = createFakeDb([makeEditionRow()], cap);
+  const src = new PostgresSource(silentLog, fakeDb);
+
+  await src.searchEditions({ q: 'x', lang: ['en', 'fr'], limit: 10 });
+
+  assert.equal(cap.whereCalled, true, 'lang[] should add to filterConds');
+});
+
+test('searchEditions: empty lang[] does NOT add a where clause', async () => {
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+  const fakeDb = createFakeDb([makeEditionRow()], cap);
+  const src = new PostgresSource(silentLog, fakeDb);
+
+  await src.searchEditions({ q: 'x', lang: [], limit: 10 });
+
+  assert.equal(cap.whereCalled, true, 'q alone already produces a where');
+});
+
+test('searchEditions: unmappable lang[] still produces a (FALSE) where clause (fail-closed)', async () => {
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+  const fakeDb = createFakeDb([makeEditionRow()], cap);
+  const src = new PostgresSource(silentLog, fakeDb);
+
+  await src.searchEditions({ lang: ['xx'], limit: 10 });
+
+  assert.equal(cap.whereCalled, true, 'unmappable lang[] should still produce a FALSE predicate so we return zero rows');
 });

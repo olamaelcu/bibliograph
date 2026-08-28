@@ -5,6 +5,7 @@ import { pino } from 'pino';
 import { SearchService } from './service';
 import type { PostgresSource } from './postgres-source';
 import type { OpenLibrarySource } from './open-library-source';
+import type { IsbndbSource } from './isbndb-source';
 import type { GoogleBooksEnricher } from './google-books-enricher';
 import type { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import type {
@@ -120,10 +121,53 @@ function makeFakeIsbndbWorkEnricher() {
   } as unknown as import('./isbndb-enricher').IsbndbWorkEnricher;
 }
 
+function makeFakeIsbndbSource(
+  editions: SearchResult<EditionItem> = { items: [], total: 0 },
+  works: SearchResult<WorkItem> = { items: [], total: 0 },
+): { source: IsbndbSource; calls: SearchQuery[] } {
+  const calls: SearchQuery[] = [];
+  return {
+    calls,
+    source: {
+      searchEditions: async (q: SearchQuery) => { calls.push(q); return editions; },
+      searchWorks: async (q: SearchQuery) => { calls.push(q); return works; },
+    } as unknown as IsbndbSource,
+  };
+}
+
+function mergeFakes(
+  fakes: { source: IsbndbSource; calls: SearchQuery[] },
+): IsbndbSource & { calls: SearchQuery[] } {
+  return { ...fakes.source, calls: fakes.calls } as unknown as IsbndbSource & { calls: SearchQuery[] };
+}
+
 function makeFakePublisherSource() {
   return {
     searchPublishers: async () => ({ items: [], total: 0 }),
   } as unknown as Pick<typeof import('../api/open-library'), 'searchPublishers'>;
+}
+
+function buildDeps(
+  fakes: Partial<{
+    pg: PostgresSource;
+    ol: OpenLibrarySource;
+    gb: import('./google-books-source').GoogleBooksSource;
+    ib: { source: IsbndbSource; calls: SearchQuery[] };
+  }>,
+) {
+  return {
+    postgres: fakes.pg ?? makeFakePostgres({ items: [], total: 0 }),
+    openLibrary: fakes.ol ?? makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [], total: 0 }),
+    publisherSource: makeFakePublisherSource(),
+    googleBooksSource: fakes.gb ?? makeFakeGoogleBooksSource(),
+    isbndbSource: (fakes.ib ? mergeFakes(fakes.ib) : makeFakeIsbndbSource().source) as IsbndbSource,
+    googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
+    openLibraryEnricher: makeFakeOpenLibraryEnricher(),
+    isbndbEnricher: makeFakeIsbndbEnricher(),
+    isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
+    authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
+    contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
+  };
 }
 
 test('searchEditions: postgres hit short-circuits OL', async () => {
@@ -131,16 +175,8 @@ test('searchEditions: postgres hit short-circuits OL', async () => {
   const gb = makeFakeGoogleBooks();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres({ items: [baseEdition], total: 1 }),
-      openLibrary: emptyOl,
-      publisherSource: makeFakePublisherSource(),
-      googleBooksSource: makeFakeGoogleBooksSource(),
+      ...buildDeps({ pg: makeFakePostgres({ items: [baseEdition], total: 1 }), ol: emptyOl }),
       googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
-      openLibraryEnricher: makeFakeOpenLibraryEnricher(),
-      isbndbEnricher: makeFakeIsbndbEnricher(),
-      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
-      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
-      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
     log,
   );
@@ -154,16 +190,12 @@ test('searchEditions: postgres miss → OL → GB → author wiki', async () => 
   const aw = makeFakeAuthorWiki();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres({ items: [], total: 0 }),
-      openLibrary: makeFakeOpenLibrary({ items: [baseEdition], total: 1 }, { items: [], total: 0 }, { items: [], total: 0 }),
-      publisherSource: makeFakePublisherSource(),
-      googleBooksSource: makeFakeGoogleBooksSource(),
+      ...buildDeps({
+        pg: makeFakePostgres({ items: [], total: 0 }),
+        ol: makeFakeOpenLibrary({ items: [baseEdition], total: 1 }, { items: [], total: 0 }, { items: [], total: 0 }),
+      }),
       googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
-      openLibraryEnricher: makeFakeOpenLibraryEnricher(),
-      isbndbEnricher: makeFakeIsbndbEnricher(),
-      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
       authorWikipedia: aw as unknown as AuthorWikipediaEnricher,
-      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
     },
     log,
   );
@@ -174,25 +206,94 @@ test('searchEditions: postgres miss → OL → GB → author wiki', async () => 
   assert.equal(aw.captures.length, 1, 'author Wikipedia enricher should run on GB results');
 });
 
-test('searchWorks: postgres miss → OL → isbnDb enrich', async () => {
+test('searchEditions: GB degraded + isbn:q → ISBNdb fallback', async () => {
+  const ib = makeFakeIsbndbSource({ items: [baseEdition], total: 1 });
+  let olCalled = false;
+  const ol = makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [], total: 0 });
+  ol.searchEditions = async () => { olCalled = true; return { items: [], total: 0 }; };
+  const gbDegraded = {
+    searchEditions: async () => ({ items: [], total: 0, degraded: { upstream: 'googlebooks', reason: 'fetch_failed' } }),
+    searchWorks: async () => ({ items: [], total: 0 }),
+  } as unknown as import('./google-books-source').GoogleBooksSource;
+  const svc = new SearchService(
+    buildDeps({ ol, ib, gb: gbDegraded }),
+    log,
+  );
+
+  const r = await svc.searchEditions({ q: 'isbn:9781607785927', limit: 10 });
+  assert.equal(r.items.length, 1);
+  assert.equal(ib.calls.length, 1, 'ISBNdb should be called when GB fails for ISBN-like q');
+  assert.equal(olCalled, false, 'OL should be skipped when ISBNdb hit');
+  assert.equal(r.degraded?.upstream, 'googlebooks');
+});
+
+test('searchEditions: GB degraded + non-ISBN q → ISBNdb skipped, OL called', async () => {
+  const ib = makeFakeIsbndbSource();
+  let ibCalled = false;
+  ib.source.searchEditions = async (q: SearchQuery) => { ibCalled = true; return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'non_isbn_query' } }; };
+  let olCalled = false;
+  const ol = makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [], total: 0 });
+  ol.searchEditions = async () => { olCalled = true; return { items: [baseEdition], total: 1 }; };
+  const svc = new SearchService(
+    buildDeps({ ol, ib }),
+    log,
+  );
+
+  const r = await svc.searchEditions({ q: 'sapiens', limit: 10 });
+  assert.equal(r.items.length, 1);
+  assert.equal(ibCalled, false, 'ISBNdb should not be called for non-ISBN q');
+  assert.equal(olCalled, true, 'OL should be called when GB fails for non-ISBN q');
+});
+
+test('searchEditions: GB success → ISBNdb not called', async () => {
+  const ib = makeFakeIsbndbSource();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres({ items: [], total: 0 }),
-      openLibrary: makeFakeOpenLibrary({ items: [], total: 0 }, { items: [baseWork], total: 1 }, { items: [], total: 0 }),
-      publisherSource: makeFakePublisherSource(),
-      googleBooksSource: makeFakeGoogleBooksSource(),
-      googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
-      openLibraryEnricher: makeFakeOpenLibraryEnricher(),
-      isbndbEnricher: makeFakeIsbndbEnricher(),
-      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
-      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
-      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
+      ...buildDeps({
+        gb: {
+          searchEditions: async () => ({ items: [baseEdition], total: 1 }),
+          searchWorks: async () => ({ items: [], total: 0 }),
+        } as unknown as import('./google-books-source').GoogleBooksSource,
+        ib,
+      }),
     },
+    log,
+  );
+
+  await svc.searchEditions({ q: 'isbn:9781607785927', limit: 10 });
+  assert.equal(ib.calls.length, 0, 'ISBNdb should not be called when GB succeeds');
+});
+
+test('searchWorks: postgres miss → OL → isbnDb enrich', async () => {
+  const svc = new SearchService(
+    buildDeps({
+      ol: makeFakeOpenLibrary({ items: [], total: 0 }, { items: [baseWork], total: 1 }, { items: [], total: 0 }),
+    }),
     log,
   );
 
   const r = await svc.searchWorks({ limit: 10 });
   assert.equal(r.items.length, 1);
+});
+
+test('searchWorks: GB degraded + isbn:q → ISBNdb fallback', async () => {
+  const ib = makeFakeIsbndbSource({ items: [], total: 0 }, { items: [baseWork], total: 1 });
+  let olCalled = false;
+  const ol = makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [], total: 0 });
+  ol.searchWorks = async () => { olCalled = true; return { items: [], total: 0 }; };
+  const gbDegraded = {
+    searchEditions: async () => ({ items: [], total: 0 }),
+    searchWorks: async () => ({ items: [], total: 0, degraded: { upstream: 'googlebooks', reason: 'fetch_failed' } }),
+  } as unknown as import('./google-books-source').GoogleBooksSource;
+  const svc = new SearchService(
+    buildDeps({ ol, ib, gb: gbDegraded }),
+    log,
+  );
+
+  const r = await svc.searchWorks({ q: 'isbn:9781607785927', limit: 10 });
+  assert.equal(r.items.length, 1);
+  assert.equal(ib.calls.length, 1, 'ISBNdb works endpoint should be called for ISBN-like q');
+  assert.equal(olCalled, false);
 });
 
 test('searchContributors: id-only skips OL (option B from design)', async () => {
@@ -201,16 +302,7 @@ test('searchContributors: id-only skips OL (option B from design)', async () => 
   emptyOl.searchContributors = async () => { olContributorsCalled = true; return { items: [], total: 0 }; };
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres({ items: [baseContributor], total: 1 }),
-      openLibrary: emptyOl,
-      publisherSource: makeFakePublisherSource(),
-      googleBooksSource: makeFakeGoogleBooksSource(),
-      googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
-      openLibraryEnricher: makeFakeOpenLibraryEnricher(),
-      isbndbEnricher: makeFakeIsbndbEnricher(),
-      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
-      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
-      contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
+      ...buildDeps({ pg: makeFakePostgres({ items: [baseContributor], total: 1 }), ol: emptyOl }),
     },
     log,
   );
@@ -224,15 +316,9 @@ test('searchContributors: postgres miss → OL → contributor wiki', async () =
   const cw = makeFakeContributorWiki();
   const svc = new SearchService(
     {
-      postgres: makeFakePostgres({ items: [], total: 0 }),
-      openLibrary: makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [baseContributor], total: 1 }),
-      publisherSource: makeFakePublisherSource(),
-      googleBooksSource: makeFakeGoogleBooksSource(),
-      googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
-      openLibraryEnricher: makeFakeOpenLibraryEnricher(),
-      isbndbEnricher: makeFakeIsbndbEnricher(),
-      isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
-      authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
+      ...buildDeps({
+        ol: makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [baseContributor], total: 1 }),
+      }),
       contributorWikipedia: cw as unknown as ContributorWikipediaEnricher,
     },
     log,
@@ -241,4 +327,37 @@ test('searchContributors: postgres miss → OL → contributor wiki', async () =
   const r = await svc.searchContributors({ limit: 10 });
   assert.equal(r.items.length, 1);
   assert.equal(cw.captures.length, 1);
+});
+
+test('searchEditions: forwards lang to postgres, OL, and GB sources', async () => {
+  const lang = ['en-US', 'fr'] as const;
+  let pgQuery: SearchQuery | undefined;
+  let olQuery: SearchQuery | undefined;
+  let gbQuery: SearchQuery | undefined;
+  const pgStub: PostgresSource = {
+    searchEditions: async (q: SearchQuery) => { pgQuery = q; return { items: [], total: 0 }; },
+    searchWorks: async () => ({ items: [], total: 0 }),
+    searchContributors: async () => ({ items: [], total: 0 }),
+  } as unknown as PostgresSource;
+  const olStub: OpenLibrarySource = {
+    searchEditions: async (q: SearchQuery) => { olQuery = q; return { items: [], total: 0 }; },
+    searchWorks: async () => ({ items: [], total: 0 }),
+    searchContributors: async () => ({ items: [], total: 0 }),
+  } as unknown as OpenLibrarySource;
+  const gbStub = {
+    searchEditions: async (q: SearchQuery) => { gbQuery = q; return { items: [], total: 0 }; },
+    searchWorks: async () => ({ items: [], total: 0 }),
+  } as unknown as import('./google-books-source').GoogleBooksSource;
+  const svc = new SearchService(
+    {
+      ...buildDeps({ pg: pgStub, ol: olStub, gb: gbStub }),
+    },
+    log,
+  );
+
+  await svc.searchEditions({ limit: 10, lang: [...lang] });
+
+  assert.deepEqual(pgQuery?.lang, [...lang], 'postgres sees lang');
+  assert.deepEqual(olQuery?.lang, [...lang], 'OL sees lang (on the pg-miss → OL fallback path it is only called when GB is empty)');
+  assert.deepEqual(gbQuery?.lang, [...lang], 'GB sees lang');
 });

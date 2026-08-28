@@ -3,6 +3,7 @@ import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { googleBooksBreaker } from './breakers';
 import type { EditionItem, WorkItem, SearchQuery, SearchResult, Identifier } from '../search/types';
+import { toGbLangRestrict } from '../search/language';
 import { gbEditionUri, gbWorkUri } from '../gb/keys';
 import { resolveContributorsByName } from './contributor-name-resolver';
 
@@ -11,7 +12,7 @@ const BASE = 'https://www.googleapis.com/books/v1/volumes';
 let warnedMissingKey = false;
 
 interface GbImageLinks { thumbnail?: string; smallThumbnail?: string; small?: string; medium?: string; large?: string; extraLarge?: string }
-interface GbVolumeInfo {
+export interface GbVolumeInfo {
   title?: string;
   subtitle?: string;
   authors?: string[];
@@ -81,6 +82,13 @@ function descriptionFromGb(info: GbVolumeInfo | undefined, fallback: string | un
   return stripHtml(info?.description ?? fallback);
 }
 
+export function googleBooksDescription(
+  info: GbVolumeInfo | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  return descriptionFromGb(info, fallback);
+}
+
 export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger): Promise<EditionItem | null> {
   const info = v.volumeInfo;
   if (!info?.title || !v.id) return null;
@@ -133,14 +141,30 @@ export async function mapGbToWork(v: GbVolume, createdAt: string, log: Logger): 
   };
 }
 
-function buildGbUrl(q: string, limit: number, startIndex: number, key: string): string {
+function buildGbUrl(q: string, limit: number, startIndex: number, key: string, langRestrict?: string): string {
   const u = new URL(BASE);
   u.searchParams.set('q', q);
   u.searchParams.set('maxResults', String(limit));
   u.searchParams.set('startIndex', String(startIndex));
   u.searchParams.set('printType', 'books');
   if (key) u.searchParams.set('key', key);
+  // GB `langRestrict=` accepts a single 2-letter ISO 639-1 tag only — it
+  // returns nothing on a multi-tag request. We only set it when the caller
+  // passed exactly one BCP-47 tag and it maps cleanly to ISO 639-1.
+  // Otherwise we omit the param and let the postgres-side `lang` filter
+  // handle the language scope after the merge.
+  if (langRestrict) u.searchParams.set('langRestrict', langRestrict);
   return u.toString();
+}
+
+/**
+ * Pick the single GB `langRestrict` value from a `lang[]` list, if any.
+ * Returns undefined if the list is empty, has more than one tag, or doesn't
+ * map cleanly to an ISO 639-1 code.
+ */
+function pickGbLangRestrict(lang?: string[]): string | undefined {
+  if (!lang || lang.length !== 1) return undefined;
+  return toGbLangRestrict(lang[0]!) ?? undefined;
 }
 
 type GbCursor = { v: 1; src: 'googlebooks'; s: number };
@@ -203,7 +227,7 @@ export async function searchEditions(
   }
   const limit = Math.min(query.limit, 40);
   const startIndex = decodeGbCursor(query.cursor);
-  const url = buildGbUrl(query.q, limit, startIndex, key);
+  const url = buildGbUrl(query.q, limit, startIndex, key, pickGbLangRestrict(query.lang));
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await gbFetch<GbSearchResponse>(url, log, signal);
   if (!data) {

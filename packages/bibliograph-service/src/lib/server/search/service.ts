@@ -3,11 +3,13 @@ import { getCorrelationLog } from '../correlation';
 import { PostgresSource } from './postgres-source';
 import { OpenLibrarySource } from './open-library-source';
 import { GoogleBooksSource } from './google-books-source';
+import { IsbndbSource } from './isbndb-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
 import { OpenLibraryEnricher } from './open-library-enricher';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './isbndb-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import * as openLibraryApi from '../api/open-library';
+import { isbnFromQuery } from '../api/isbndb';
 import { syncIngestEditions, syncIngestWorks, syncIngestContributors, syncIngestPublishers } from '../jobs/handlers';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier, Enricher } from './types';
 
@@ -16,6 +18,7 @@ export interface SearchServiceDeps {
   openLibrary: OpenLibrarySource;
   publisherSource: Pick<typeof openLibraryApi, 'searchPublishers'>;
   googleBooksSource: GoogleBooksSource;
+  isbndbSource: IsbndbSource;
   googleBooks: GoogleBooksEnricher;
   openLibraryEnricher: OpenLibraryEnricher;
   isbndbEnricher: IsbndbEnricher;
@@ -81,30 +84,14 @@ export class SearchService {
       this.deps.authorWikipedia,
     ];
 
-    let remoteItems: EditionItem[] = [];
-    let remoteCursor: string | undefined;
-    let remoteTotal: number | undefined;
-    if (gb.items.length > 0) {
-      remoteItems = await this.runEnrichers(gb.items, editionEnrichers, log);
-      remoteCursor = gb.cursor;
-      remoteTotal = gb.total;
-    } else {
-      const ol = await this.deps.openLibrary.searchEditions(query);
-      if (ol.items.length > 0) {
-        remoteItems = await this.runEnrichers(ol.items, editionEnrichers, log);
-        remoteCursor = ol.cursor;
-        remoteTotal = ol.total;
-      }
-    }
+    const remote = await this.resolveRemoteEditions(query, gb, log, editionEnrichers);
+    const merged = this.mergeItems(remote.items, pg.items);
+    const cursor = remote.cursor ?? pg.cursor;
+    const total = remote.total ?? pg.total ?? 0;
 
-    const merged = this.mergeItems(remoteItems, pg.items);
-    const cursor = remoteCursor ?? pg.cursor;
-    const total = remoteTotal ?? pg.total ?? 0;
-    const degraded = gb.degraded ?? (remoteItems.length === 0 ? (await this.deps.openLibrary.searchEditions(query)).degraded : undefined);
-
-    if (remoteItems.length > 0) {
+    if (remote.items.length > 0) {
       try {
-        await syncIngestEditions(remoteItems, log);
+        await syncIngestEditions(remote.items, log);
       } catch (err) {
         log.error({ stage: 'search-editions.sync-ingest', err }, 'sync ingest failed; continuing');
       }
@@ -112,13 +99,15 @@ export class SearchService {
 
     log.info({
       stage: 'search-editions',
-      remoteCount: remoteItems.length,
+      remoteCount: remote.items.length,
+      remoteSource: remote.source,
       localCount: pg.items.length,
       mergedCount: merged.length,
       total,
+      degraded: !!remote.degraded,
     }, 'search done');
 
-    return { items: merged, cursor, total, degraded };
+    return { items: merged, cursor, total, degraded: remote.degraded };
   }
 
   async searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
@@ -133,30 +122,14 @@ export class SearchService {
       this.deps.isbndbWorkEnricher,
     ];
 
-    let remoteItems: WorkItem[] = [];
-    let remoteCursor: string | undefined;
-    let remoteTotal: number | undefined;
-    if (gb.items.length > 0) {
-      remoteItems = await this.runEnrichers(gb.items, workEnrichers, log);
-      remoteCursor = gb.cursor;
-      remoteTotal = gb.total;
-    } else {
-      const ol = await this.deps.openLibrary.searchWorks(query);
-      if (ol.items.length > 0) {
-        remoteItems = await this.runEnrichers(ol.items, workEnrichers, log);
-        remoteCursor = ol.cursor;
-        remoteTotal = ol.total;
-      }
-    }
+    const remote = await this.resolveRemoteWorks(query, gb, log, workEnrichers);
+    const merged = this.mergeItems(remote.items, pg.items);
+    const cursor = remote.cursor ?? pg.cursor;
+    const total = remote.total ?? pg.total ?? 0;
 
-    const merged = this.mergeItems(remoteItems, pg.items);
-    const cursor = remoteCursor ?? pg.cursor;
-    const total = remoteTotal ?? pg.total ?? 0;
-    const degraded = gb.degraded;
-
-    if (remoteItems.length > 0) {
+    if (remote.items.length > 0) {
       try {
-        await syncIngestWorks(remoteItems, log);
+        await syncIngestWorks(remote.items, log);
       } catch (err) {
         log.error({ stage: 'search-works.sync-ingest', err }, 'sync ingest failed; continuing');
       }
@@ -164,13 +137,105 @@ export class SearchService {
 
     log.info({
       stage: 'search-works',
-      remoteCount: remoteItems.length,
+      remoteCount: remote.items.length,
+      remoteSource: remote.source,
       localCount: pg.items.length,
       mergedCount: merged.length,
       total,
+      degraded: !!remote.degraded,
     }, 'search done');
 
-    return { items: merged, cursor, total, degraded };
+    return { items: merged, cursor, total, degraded: remote.degraded };
+  }
+
+  private async resolveRemoteEditions(
+    query: SearchQuery,
+    gb: SearchResult<EditionItem>,
+    log: Logger,
+    enrichers: ReadonlyArray<Enricher<EditionItem>>,
+  ): Promise<{ items: EditionItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | 'openlibrary' | null; degraded?: SearchResult<EditionItem>['degraded'] }> {
+    if (gb.items.length > 0) {
+      return {
+        items: await this.runEnrichers(gb.items, enrichers, log),
+        cursor: gb.cursor,
+        total: gb.total,
+        source: 'googlebooks',
+        degraded: gb.degraded,
+      };
+    }
+    let degraded = gb.degraded;
+
+    if (isbnFromQuery(query.q)) {
+      const ib = await this.deps.isbndbSource.searchEditions(query, AbortSignal.timeout(15_000));
+      degraded = degraded ?? ib.degraded;
+      if (ib.items.length > 0) {
+        return {
+          items: await this.runEnrichers(ib.items, enrichers, log),
+          cursor: ib.cursor,
+          total: ib.total,
+          source: 'isbndb',
+          degraded,
+        };
+      }
+    }
+
+    const ol = await this.deps.openLibrary.searchEditions(query);
+    degraded = degraded ?? ol.degraded;
+    if (ol.items.length > 0) {
+      return {
+        items: await this.runEnrichers(ol.items, enrichers, log),
+        cursor: ol.cursor,
+        total: ol.total,
+        source: 'openlibrary',
+        degraded,
+      };
+    }
+    return { items: [], source: null, degraded };
+  }
+
+  private async resolveRemoteWorks(
+    query: SearchQuery,
+    gb: SearchResult<WorkItem>,
+    log: Logger,
+    enrichers: ReadonlyArray<Enricher<WorkItem>>,
+  ): Promise<{ items: WorkItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | 'openlibrary' | null; degraded?: SearchResult<WorkItem>['degraded'] }> {
+    if (gb.items.length > 0) {
+      return {
+        items: await this.runEnrichers(gb.items, enrichers, log),
+        cursor: gb.cursor,
+        total: gb.total,
+        source: 'googlebooks',
+        degraded: gb.degraded,
+      };
+    }
+    let degraded = gb.degraded;
+
+    if (isbnFromQuery(query.q)) {
+      const ib = await this.deps.isbndbSource.searchWorks(query, AbortSignal.timeout(15_000));
+      degraded = degraded ?? ib.degraded;
+      if (ib.items.length > 0) {
+        return {
+          items: await this.runEnrichers(ib.items, enrichers, log),
+          cursor: ib.cursor,
+          total: ib.total,
+          source: 'isbndb',
+          degraded,
+        };
+      }
+    }
+
+    const ol = await this.deps.openLibrary.searchWorks(query);
+    degraded = degraded ?? ol.degraded;
+    if (ol.items.length > 0) {
+      return {
+        items: await this.runEnrichers(ol.items, enrichers, log),
+        cursor: ol.cursor,
+        total: ol.total,
+        source: 'openlibrary',
+        degraded,
+      };
+    }
+    return { items: [], source: null, degraded };
   }
 
   async searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {

@@ -4,21 +4,30 @@ import { withRetry } from './retry';
 import { openLibraryBreaker } from './breakers';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionUri, workUri, contributorUri, publisherUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey, olidFromPublisherRkey } from '../ol/keys';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
+import { translateOlLanguages } from '../search/language';
 import { resolveOlContributors } from './open-library-contributors';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
-function buildUrl(q: string | undefined, type: 'edition' | 'work' | 'author', limit: number, page: number): string {
+function buildUrl(q: string | undefined, type: 'edition' | 'work' | 'author', limit: number, page: number, language?: string[]): string {
   const base = type === 'author' ? 'https://openlibrary.org/search/authors.json' : 'https://openlibrary.org/search.json';
   const u = new URL(base);
   if (q) u.searchParams.set('q', q);
   if (type !== 'author') u.searchParams.set('type', type);
   u.searchParams.set('limit', String(limit));
   u.searchParams.set('page', String(page));
+  // OL `language=` accepts the MARC 3-letter form only, and only as a comma-
+  // separated string of values. translateOlLanguages drops anything unmapped
+  // (fail-closed) — if we have nothing to send we omit the param rather than
+  // risk a wrong-language hit.
+  if (type !== 'author' && language?.length) {
+    const marc = translateOlLanguages(language);
+    if (marc.length > 0) u.searchParams.set('language', marc.join(','));
+  }
   return u.toString();
 }
 
-async function fetchJson<T>(url: string, log: Logger, signal: AbortSignal): Promise<T | null> {
+export async function fetchJson<T>(url: string, log: Logger, signal: AbortSignal): Promise<T | null> {
   if (!openLibraryBreaker.canCall()) {
     log.warn({ stage: 'open-library-source', breaker: openLibraryBreaker.getState() }, 'breaker open; skipping fetch');
     return null;
@@ -107,6 +116,12 @@ function extractDescription(d: string | { value: string } | undefined): string |
   if (typeof d === 'string') return d;
   if (d && typeof d.value === 'string') return d.value;
   return undefined;
+}
+
+export function openLibraryDescription(
+  d: string | { value: string } | undefined,
+): string | undefined {
+  return extractDescription(d);
 }
 
 function yearFromDate(d: string | undefined): number | undefined {
@@ -261,7 +276,7 @@ export async function searchEditions(
 ): Promise<SearchResult<EditionItem>> {
   const limit = Math.min(query.limit, 100);
   const page = 1;
-  const url = buildUrl(query.q, 'edition', limit, page);
+  const url = buildUrl(query.q, 'edition', limit, page, query.lang);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlSearchEditionDoc>>(url, log, signal);
   if (!data) return { items: [], total: 0 };

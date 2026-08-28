@@ -66,6 +66,13 @@ export interface SearchQuery {
   id?: string[];
   limit: number;
   cursor?: string;
+  /**
+   * BCP-47 language tags to filter results to. Editions whose
+   * `language` (or `originalLanguage` for works) doesn't match any tag
+   * (or its normalized 2-letter / 3-letter variant) are excluded.
+   * Empty / omitted = no language filter.
+   */
+  lang?: string[];
 }
 
 export interface SearchResult<T> {

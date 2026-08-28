@@ -73,3 +73,11 @@ export async function enqueueCoverBackfill(uri: string, rkey: string): Promise<v
     maxAttempts: 5,
   });
 }
+
+export async function enqueueDescriptionBackfill(uri: string): Promise<void> {
+  const utils = await getUtils();
+  await utils.addJob('backfill-edition-description', { uri }, {
+    jobKey: `backfill-description:${uri}`,
+    maxAttempts: 5,
+  });
+}

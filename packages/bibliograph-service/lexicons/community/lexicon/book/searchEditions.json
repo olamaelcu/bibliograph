@@ -16,7 +16,13 @@
             "description": "Identifiers to match (URI or URN form). Repeatable."
           },
           "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
-          "cursor": { "type": "string", "maxLength": 256 }
+          "cursor": { "type": "string", "maxLength": 256 },
+          "lang": {
+            "type": "array",
+            "items": { "type": "string", "format": "language" },
+            "maxLength": 16,
+            "description": "BCP-47 language tags to filter editions to. Editions whose `language` doesn't match any tag (or any of its normalized 2-letter / 3-letter variants) are excluded. Empty / omitted = no language filter."
+          }
         }
       },
       "output": {

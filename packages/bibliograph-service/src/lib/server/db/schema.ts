@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, integer, bigserial, bigint, index, foreignKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, timestamp, integer, boolean, bigserial, bigint, index, foreignKey } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const editions = pgTable(
@@ -86,12 +86,20 @@ export const contributors = pgTable(
       .$type<Array<{ uri: string; resource: string }>>()
       .notNull()
       .default(sql`'[]'::jsonb`),
+    imageUrl: text('image_url'),
+    imageSource: text('image_source'),
+    imageArtist: text('image_artist'),
+    imageLicense: text('image_license'),
+    imageLicenseUrl: text('image_license_url'),
+    imageAttributionRequired: boolean('image_attribution_required').notNull().default(false),
+    imageCheckedAt: timestamp('image_checked_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     didIdx: index('contributors_did_idx').on(t.did),
     indexedAtIdx: index('contributors_indexed_at_idx').on(t.indexedAt),
+    imageCheckedAtIdx: index('contributors_image_checked_at_idx').on(t.imageCheckedAt),
   }),
 );
 

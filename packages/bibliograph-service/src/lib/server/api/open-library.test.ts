@@ -64,6 +64,30 @@ test('searchEditions propagates 4xx as error log + empty result', async () => {
   } finally { restore(); }
 });
 
+test('searchEditions: lang[] translates to OL language= (MARC, comma-joined)', async () => {
+  let captured = '';
+  const restore = stubFetch(async (url) => {
+    captured = url;
+    return jsonResponse({ numFound: 0, docs: [] });
+  });
+  try {
+    await searchEditions({ q: 'x', limit: 1, lang: ['en-US', 'fr'] }, log);
+    assert.match(captured, /language=eng%2Cfre/);
+  } finally { restore(); }
+});
+
+test('searchEditions: unmapped lang[] tags omit the language= param (fail-closed)', async () => {
+  let captured = '';
+  const restore = stubFetch(async (url) => {
+    captured = url;
+    return jsonResponse({ numFound: 0, docs: [] });
+  });
+  try {
+    await searchEditions({ q: 'x', limit: 1, lang: ['xx'] }, log);
+    assert.doesNotMatch(captured, /language=/);
+  } finally { restore(); }
+});
+
 test('searchEditions populates contributors from author_key', async () => {
   const olid = 'OL7777777A';
   const restore = stubFetch(async (url) => {
