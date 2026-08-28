@@ -40,4 +40,4 @@ EXPOSE 5000
 # fails closed on any non-duplicate PG error, which crashes the container and
 # surfaces a clear deploy failure instead of starting the app against a stale
 # schema.
-ENTRYPOINT ["sh", "-c", "node_modules/.bin/tsx packages/bibliograph-service/src/lib/server/db/migrate.ts && exec node packages/bibliograph-service/build/index.js"]
+ENTRYPOINT ["sh", "-c", "packages/bibliograph-service/node_modules/.bin/tsx packages/bibliograph-service/src/lib/server/db/migrate.ts && exec node packages/bibliograph-service/build/index.js"]
