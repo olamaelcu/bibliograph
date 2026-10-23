@@ -1,6 +1,6 @@
 {
-  "id": "b8d22c44-4ea2-4750-811a-9a5bc61d9448",
-  "prevId": "2a1bb425-3103-4c90-ae30-19e1c28b8f3a",
+  "id": "348a4b55-7428-4026-b902-3b696c308f0b",
+  "prevId": "b8d22c44-4ea2-4750-811a-9a5bc61d9448",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -187,6 +187,93 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.edition_work_votes": {
+      "name": "edition_work_votes",
+      "schema": "",
+      "columns": {
+        "edition_uri": {
+          "name": "edition_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "voter_did": {
+          "name": "voter_did",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "work_uri": {
+          "name": "work_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "work_cid": {
+          "name": "work_cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "record_uri": {
+          "name": "record_uri",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "edition_work_votes_edition_idx": {
+          "name": "edition_work_votes_edition_idx",
+          "columns": [
+            {
+              "expression": "edition_uri",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "edition_work_votes_edition_uri_voter_did_pk": {
+          "name": "edition_work_votes_edition_uri_voter_did_pk",
+          "columns": [
+            "edition_uri",
+            "voter_did"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.editions": {
       "name": "editions",
       "schema": "",
@@ -235,6 +322,12 @@
         },
         "work_cid": {
           "name": "work_cid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "work_link_source": {
+          "name": "work_link_source",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -419,6 +512,69 @@
           ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.oauth_sessions": {
+      "name": "oauth_sessions",
+      "schema": "",
+      "columns": {
+        "did": {
+          "name": "did",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.oauth_states": {
+      "name": "oauth_states",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -732,6 +888,66 @@
           "columns": [
             {
               "expression": "repo_did",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.web_sessions": {
+      "name": "web_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "did": {
+          "name": "did",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "handle": {
+          "name": "handle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "web_sessions_expires_at_idx": {
+          "name": "web_sessions_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

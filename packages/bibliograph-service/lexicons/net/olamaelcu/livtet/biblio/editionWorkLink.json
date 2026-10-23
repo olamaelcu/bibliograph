@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.editionWorkLink",
+  "description": "One user's vote on which work an edition belongs to. Bibliograph applies the link to the catalog only when enough votes agree (see EDITION_WORK_CONSENSUS_THRESHOLD). The rkey is the edition's rkey, so each account holds at most one vote per edition; changing your mind updates the existing record.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["edition", "action", "createdAt"],
+        "properties": {
+          "edition": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The catalog edition this vote is about."
+          },
+          "work": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The work this edition should belong to. Required when action is 'link', omitted when action is 'unlink'."
+          },
+          "action": {
+            "type": "string",
+            "knownValues": ["link", "unlink"],
+            "description": "Whether the edition should be linked to `work`, or have its current work link removed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

@@ -48,6 +48,7 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     subtitle: null,
     workUri: null,
     workCid: null,
+    workLinkSource: null,
     publisherUri: null,
     publisherCid: null,
     place: 'New York',

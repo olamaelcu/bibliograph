@@ -41,6 +41,7 @@
     "@atproto/crypto": "^0.5.4",
     "@atproto/lex-cbor": "^0.1.6",
     "@atproto/lex-data": "^0.1.7",
+    "@atproto/oauth-client-node": "^0.5.12",
     "@atproto/repo": "^0.10.11",
     "@awesome.me/webawesome": "^3.12.0",
     "@lit-labs/ssr": "^4.1.0",

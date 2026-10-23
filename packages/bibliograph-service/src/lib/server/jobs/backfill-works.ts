@@ -38,6 +38,11 @@ const YEAR_TOLERANCE = 2;
 const OL_WORK_PREFIX = '/works/';
 const PAGE_SIZE = 100;
 
+// Editions whose link was decided by user votes are off limits: an automated
+// pass must never silently re-link something people voted to unlink, nor
+// re-link a work a consensus unlink removed.
+const notConsensusManaged = sql`coalesce(${editions.workLinkSource}, 'auto') <> 'consensus'`;
+
 export interface BackfillSummary {
   orphansFound: number;
   linked: number;
@@ -269,8 +274,8 @@ async function reconcileOneOrphan(
   const uri = workUriForRkey(rkey);
   const row = await upsertWorkRow(db, workItem, uri, log);
   const updated = await db.update(editions)
-    .set({ workUri: uri, workCid: row.cid })
-    .where(and(eq(editions.uri, edition.uri), isNull(editions.workUri)))
+    .set({ workUri: uri, workCid: row.cid, workLinkSource: 'auto' })
+    .where(and(eq(editions.uri, edition.uri), isNull(editions.workUri), notConsensusManaged))
     .returning({ uri: editions.uri });
   if (updated.length === 0) {
     log.debug({ stage: 'backfill-works', editionUri: edition.uri }, 'orphan already linked by concurrent run; skipped');
@@ -341,7 +346,7 @@ export async function runBackfill(opts: BackfillOpts): Promise<BackfillSummary> 
   log.info({ stage: 'backfill-works', pageSize }, 'phase 1: reconcile orphans');
   let cursor: string | null = null;
   for (;;) {
-    const conds: ReturnType<typeof sql>[] = [isNull(editions.workUri)];
+    const conds: ReturnType<typeof sql>[] = [isNull(editions.workUri), notConsensusManaged];
     if (cursor) conds.push(sql`${editions.uri} > ${cursor}`);
     const where = and(...conds);
     const rows: EditionRow[] = await db.select().from(editions)

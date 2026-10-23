@@ -35,6 +35,39 @@ Information is sourced from a few places:
   `GOOGLE_BOOKS_API_KEY`)
 - Author information is _gleamed_ from Wikipedia and OpenLibrary
 
+## Catalog curation
+
+The catalog records (`community.lexicon.book.*`) are served by Bibliograph, but
+corrections come from people. Anyone who signs in with an AT Protocol account
+can vote on which work an edition belongs to.
+
+- The vote is a record in the voter's **own** repository:
+  `net.olamaelcu.livtet.biblio.editionWorkLink`, keyed by the edition's rkey, so
+  an account holds at most one vote per edition and changing your mind updates
+  that record rather than stacking another one.
+- Bibliograph ingests votes through TAP into `edition_work_votes` and only
+  rewrites `editions.work_uri` once votes agree: `link votes − unlink votes >=
+  EDITION_WORK_CONSENSUS_THRESHOLD` (default `2`). With one vote per account,
+  a single dissenter cannot overwrite an established link. Set the threshold to
+  `1` to let one account curate a small or private catalog.
+- A decision is stamped `editions.work_link_source = 'consensus'`, and the
+  automatic reconciler (`pnpm backfill:works`) skips those rows — otherwise a
+  nightly run would silently undo a voted unlink.
+
+OAuth is least-privilege: the client asks only for
+`repo:net.olamaelcu.livtet.biblio.editionWorkLink`, never for general repo or
+profile access.
+
+| Variable | Dev default | Purpose |
+| --- | --- | --- |
+| `OAUTH_PUBLIC_ORIGIN` | `http://127.0.0.1:5176` | Origin used to build the redirect URI. Loopback redirects must be `127.0.0.1`/`[::1]`, not `localhost`. |
+| `OAUTH_CLIENT_ID` | _(unset)_ | Unset → an ATProto loopback client id carrying its metadata inline. Set to an HTTPS URL serving `/oauth-client-metadata.json` in production. |
+| `EDITION_WORK_CONSENSUS_THRESHOLD` | `2` | Net votes required to apply a link or unlink. |
+
+Sessions are server-side (`oauth_sessions` holds DPoP key material; the browser
+cookie only carries an opaque id), so a tampered cookie cannot claim another
+account's session.
+
 ## Observability
 
 Prometheus is available locally at <http://localhost:9090> (no auth, dev only).

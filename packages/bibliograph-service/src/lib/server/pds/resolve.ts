@@ -102,3 +102,20 @@ export async function pdsClient(actor: string, opts?: { signal?: AbortSignal }):
 export function clearPdsCache(): void {
   cache.clear();
 }
+
+/**
+ * Best-effort handle for a DID, read from its DID document (`alsoKnownAs`).
+ * Only used for display next to a signed-in session, so failures return null
+ * rather than blocking login.
+ */
+export async function actorHandle(did: string, opts?: { signal?: AbortSignal }): Promise<string | null> {
+  try {
+    const resolved = await actorResolver.resolve(
+      did as Parameters<typeof actorResolver.resolve>[0],
+      { signal: opts?.signal },
+    );
+    return resolved.handle ?? null;
+  } catch {
+    return null;
+  }
+}

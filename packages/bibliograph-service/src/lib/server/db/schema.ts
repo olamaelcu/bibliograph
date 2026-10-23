@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, integer, boolean, bigserial, bigint, index, foreignKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, timestamp, integer, boolean, bigserial, bigint, index, foreignKey, primaryKey } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const editions = pgTable(
@@ -12,6 +12,10 @@ export const editions = pgTable(
     subtitle: text('subtitle'),
     workUri: text('work_uri'),
     workCid: text('work_cid'),
+    // Who last decided `work_uri`: null/'auto' = the backfill-works reconciler,
+    // 'consensus' = applied from editionWorkLink votes. The reconciler leaves
+    // 'consensus' rows alone so a user-driven unlink is not silently undone.
+    workLinkSource: text('work_link_source'),
     publisherUri: text('publisher_uri'),
     publisherCid: text('publisher_cid'),
     place: text('place'),
@@ -191,3 +195,64 @@ export const tapDeadLetter = pgTable(
 
 export type IngestDeadLetterRow = typeof ingestDeadLetter.$inferSelect;
 export type TapDeadLetterRow = typeof tapDeadLetter.$inferSelect;
+
+// ─── Edition→work link votes ────────────────────────────────────────────────
+// Materialized from `net.olamaelcu.livtet.biblio.editionWorkLink` records in
+// users' own repos. One row per (edition, voter): a user changing their mind
+// updates their existing vote rather than stacking a second one. Consensus over
+// these rows is applied to `editions.work_uri` by edition-work-votes.ts.
+
+export const editionWorkVotes = pgTable(
+  'edition_work_votes',
+  {
+    editionUri: text('edition_uri').notNull(),
+    voterDid: text('voter_did').notNull(),
+    action: text('action').$type<'link' | 'unlink'>().notNull(),
+    workUri: text('work_uri'),
+    workCid: text('work_cid'),
+    recordUri: text('record_uri').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.editionUri, t.voterDid] }),
+    editionIdx: index('edition_work_votes_edition_idx').on(t.editionUri),
+  }),
+);
+
+// ─── OAuth client persistence ───────────────────────────────────────────────
+// Backing stores for @atproto/oauth-client-node. `value` holds the serialized
+// session/state, including DPoP key material, so it must never be exposed.
+
+export const oauthSessions = pgTable('oauth_sessions', {
+  did: text('did').primaryKey(),
+  value: jsonb('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const oauthStates = pgTable('oauth_states', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+
+// ─── Browser sessions ───────────────────────────────────────────────────────
+// The cookie carries only an opaque random id; the DID lives here, so a forged
+// cookie cannot claim someone else's OAuth session.
+
+export const webSessions = pgTable(
+  'web_sessions',
+  {
+    id: text('id').primaryKey(),
+    did: text('did').notNull(),
+    handle: text('handle'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    expiresAtIdx: index('web_sessions_expires_at_idx').on(t.expiresAt),
+  }),
+);
+
+export type EditionWorkVoteRow = typeof editionWorkVotes.$inferSelect;
+export type WebSessionRow = typeof webSessions.$inferSelect;

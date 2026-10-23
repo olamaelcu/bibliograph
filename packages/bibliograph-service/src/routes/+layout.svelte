@@ -43,7 +43,13 @@
     return false;
   }
 
-  let { children }: { children: Snippet } = $props();
+  let {
+    data,
+    children,
+  }: {
+    data: { viewer: { did: string; handle: string | null } | null };
+    children: Snippet;
+  } = $props();
 </script>
 
 <svelte:head>
@@ -97,6 +103,18 @@
         >
       {/each}
     </nav>
+    <div class="auth">
+      {#if data.viewer}
+        <span class="who" title={data.viewer.did}>
+          {data.viewer.handle ?? data.viewer.did}
+        </span>
+        <form method="POST" action="/logout">
+          <button type="submit">Sign out</button>
+        </form>
+      {:else}
+        <a class="signin" href="/login?next={encodeURIComponent(page.url.pathname + page.url.search)}">Sign in</a>
+      {/if}
+    </div>
   </header>
 
   {@render children()}
@@ -208,6 +226,46 @@
   .topbar .nav a.active {
     color: var(--wa-color-text-normal);
     border-bottom-color: var(--wa-color-brand-50);
+  }
+
+  /* ---- Auth --------------------------------------------------------- */
+
+  .auth {
+    display: flex;
+    align-items: center;
+    gap: var(--wa-space-s);
+    font-size: var(--wa-font-size-s);
+    white-space: nowrap;
+  }
+
+  .auth .who {
+    color: var(--wa-color-on-quiet);
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .auth form {
+    margin: 0;
+  }
+
+  .auth button,
+  .auth .signin {
+    padding: 0.25rem 0.7rem;
+    border: 1px solid var(--wa-form-control-border-color);
+    border-radius: var(--wa-border-radius-m);
+    background: transparent;
+    color: var(--wa-color-text-normal);
+    font-size: var(--wa-font-size-s);
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .auth button:hover,
+  .auth .signin:hover {
+    border-color: var(--wa-color-brand-50);
+    color: var(--wa-color-brand-50);
   }
 
   /* ---- Footer ------------------------------------------------------- */

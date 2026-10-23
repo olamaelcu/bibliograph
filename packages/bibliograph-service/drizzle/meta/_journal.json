@@ -50,6 +50,13 @@
       "when": 1787795120000,
       "tag": "0007_contributor_image",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792718919771,
+      "tag": "0008_edition_work_votes",
+      "breakpoints": true
     }
   ]
 }

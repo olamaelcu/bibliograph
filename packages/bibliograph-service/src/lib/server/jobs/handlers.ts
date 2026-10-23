@@ -13,6 +13,13 @@ import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifie
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
+import {
+  EDITION_WORK_LINK_COLLECTION,
+  applyConsensus,
+  consensusThreshold,
+  forgetVoteByRecordUri,
+  ingestVoteRecord,
+} from '../edition-work-votes';
 
 const db: typeof defaultDb = defaultDb;
 
@@ -524,6 +531,12 @@ export const tapRecordDeleteTask: Task = async (payload, helpers) => {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-delete', err, uri }, 'tap delete failed; writing to DLQ');
     await writeTapDLQ(did, collection, rkey, payload, message, helpers.job.attempts);
+    return;
+  }
+
+  if (collection === EDITION_WORK_LINK_COLLECTION) {
+    const editionUri = await forgetVoteByRecordUri(uri);
+    if (editionUri) await applyConsensus(editionUri, consensusThreshold());
   }
 };
 
@@ -543,9 +556,27 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
     }));
     await db.insert(records).values(rows as never).onConflictDoUpdate({
       target: records.uri,
-      set: { value: records.value, indexedAt: new Date() },
+      set: { value: sql`excluded.value`, indexedAt: new Date() },
     });
-    log.info({ stage: 'tap-record-upsert-batch', count: items.length }, 'batch upsert ok');
+
+    // Edition→work votes are only useful in `edition_work_votes`, not in the
+    // generic `records` mirror, so materialize them and let consensus decide
+    // whether the catalog changes.
+    const voteEditions = new Set<string>();
+    for (const it of items) {
+      const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
+      if (collection !== EDITION_WORK_LINK_COLLECTION) continue;
+      const editionUri = await ingestVoteRecord(it.uri, it.did, it.value);
+      if (editionUri) voteEditions.add(editionUri);
+    }
+    for (const editionUri of voteEditions) {
+      await applyConsensus(editionUri, consensusThreshold());
+    }
+
+    log.info(
+      { stage: 'tap-record-upsert-batch', count: items.length, voteEditions: voteEditions.size },
+      'batch upsert ok',
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-upsert-batch', err, count: items.length }, 'batch upsert failed; writing to DLQ');
@@ -570,7 +601,19 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
   try {
     if (uris.length === 0) return;
     await db.delete(records).where(inArray(records.uri, uris));
-    log.info({ stage: 'tap-record-delete-batch', count: uris.length }, 'batch delete ok');
+    const voteEditions = new Set<string>();
+    for (const uri of uris) {
+      if ((uri.split('/').slice(-2, -1)[0] ?? '') !== EDITION_WORK_LINK_COLLECTION) continue;
+      const editionUri = await forgetVoteByRecordUri(uri);
+      if (editionUri) voteEditions.add(editionUri);
+    }
+    for (const editionUri of voteEditions) {
+      await applyConsensus(editionUri, consensusThreshold());
+    }
+    log.info(
+      { stage: 'tap-record-delete-batch', count: uris.length, voteEditions: voteEditions.size },
+      'batch delete ok',
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-delete-batch', err, count: uris.length }, 'batch delete failed; writing to DLQ');
