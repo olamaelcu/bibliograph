@@ -34,6 +34,9 @@ export class CircuitBreaker {
     }
     return this.state;
   }
+  getFailures(): number {
+    return this.failures;
+  }
 
   canCall(): boolean {
     const s = this.getState();

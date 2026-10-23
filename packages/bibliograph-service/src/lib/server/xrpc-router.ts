@@ -29,6 +29,7 @@ import {
   NetOlamaelcuLivtetBiblioListShelvesWithBooks,
   NetOlamaelcuLivtetBiblioGetImageForBook,
   NetOlamaelcuLivtetBiblioGetImageForContributor,
+  NetOlamaelcuLivtetBiblioGetReviewsByBook,
   NetOlamaelcuLivtetBiblioShelf,
   NetOlamaelcuLivtetBiblioBookShelving,
   NetOlamaelcuLivtetBiblioDefs,
@@ -1056,6 +1057,76 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ err, did, shelfUri }, 'listBooksOnShelf: failed');
       return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
+  async handler({ params }) {
+    const bookUri = params.book as string;
+    const limit = Math.min(params.limit ?? 25, 100);
+    const cursor = params.cursor as string | undefined;
+    const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+    try {
+      // Query the records table for both NSIDs we may have stored (the
+      // platform's writer uses `net.olamaelcu.livtet.bookReview` while the
+      // lexicon file declares `net.olamaelcu.livtet.biblio.bookReview`).
+      // Handle every on-disk shape: book as plain string, as strongRef
+      // {uri,cid}, or as expandedBook {ref}.
+      const rows = await db
+        .select()
+        .from(records)
+        .where(
+          sql`${records.collection} IN ('net.olamaelcu.livtet.bookReview', 'net.olamaelcu.livtet.biblio.bookReview') AND (${records.value}->>'book' = ${bookUri} OR ${records.value}->'book'->>'uri' = ${bookUri} OR ${records.value}->'book'->>'ref' = ${bookUri})`,
+        )
+        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .limit(limit + 1)
+        .offset(offset);
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const outCursor = hasMore ? String(offset + limit) : undefined;
+
+      const reviews = page.map((r) => {
+        const v = r.value as Record<string, unknown>;
+        // Normalise book to plain at-uri string for the lexicon output
+        // (record expects `book: at-uri`, not strongRef).
+        let bookStr: string = bookUri;
+        const rawBook = v.book;
+        if (typeof rawBook === "string") bookStr = rawBook;
+        else if (rawBook && typeof rawBook === "object") {
+          const ro = rawBook as Record<string, unknown>;
+          if (typeof ro.uri === "string") bookStr = ro.uri;
+          else if (typeof ro.ref === "string") bookStr = ro.ref;
+        }
+        const rec: Record<string, unknown> = {
+          $type: "net.olamaelcu.livtet.biblio.bookReview",
+          text: typeof v.text === "string" ? v.text : "",
+          book: bookStr,
+          createdAt:
+            typeof v.createdAt === "string" ? v.createdAt : new Date().toISOString(),
+        };
+        if (typeof v.shelf === "string") rec.shelf = v.shelf;
+        else if (v.shelf && typeof v.shelf === "object") {
+          const so = v.shelf as Record<string, unknown>;
+          if (typeof so.uri === "string") rec.shelf = so.uri;
+        }
+        if (typeof v.rating === "number") rec.rating = v.rating;
+        return {
+          uri: r.uri as `${string}:${string}`,
+          did: r.did as `${string}:${string}`,
+          record: rec,
+        };
+      });
+
+      return json({
+        reviews,
+        cursor: outCursor,
+      } as unknown as NetOlamaelcuLivtetBiblioGetReviewsByBook.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, bookUri }, "getReviewsByBook: failed");
+      return Response.json({ error: "UpstreamUnavailable", message }, { status: 502 });
     }
   },
 });

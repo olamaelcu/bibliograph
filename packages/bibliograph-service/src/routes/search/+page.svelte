@@ -21,6 +21,7 @@
         $type: 'community.lexicon.book.contributor';
         uri?: string;
         name: string;
+        aliases?: string[];
       }
     | {
         $type: 'community.lexicon.book.publisher';
@@ -72,9 +73,18 @@
     return `/search?${params.toString()}`;
   }
 
+  function itemKind(uri?: string): string {
+    if (!uri) return 'contributors';
+    const m = uri.match(/\/(community\.lexicon\.book\.[^.]+)\//);
+    return m?.[1] ?? 'contributors';
+  }
+
   function heading(item: Item): string {
-    if (item.$type === 'community.lexicon.book.contributor' || item.$type === 'community.lexicon.book.publisher') {
-      return item.name;
+    const kind = itemKind(item.uri);
+    if (kind === 'community.lexicon.book.contributor' || kind === 'community.lexicon.book.publisher') {
+      const c = item as Item & { aliases?: string[] };
+      const alias = c.aliases?.[0];
+      return alias ? `${item.name} (${alias})` : item.name;
     }
     return item.title;
   }
@@ -159,6 +169,13 @@
           </div>
           {#if subtitle(item)}
             <p class="muted">{subtitle(item)}</p>
+          {/if}
+          {#if itemKind(item.uri) === 'community.lexicon.book.contributor'}
+            <p class="muted">
+              {#if item.bio}
+                {item.bio.slice(0, 200)}{#if item.bio.length > 200}…{/if}
+              {/if}
+            </p>
           {/if}
           {#if item.$type === 'community.lexicon.book.edition' && item.coverImageUrl}
             <img src={item.coverImageUrl} alt="" class="cover" loading="lazy" />

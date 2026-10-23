@@ -520,6 +520,27 @@
           "description": "Books on the shelf, in order."
         }
       }
+    },
+    "reviewView": {
+      "type": "object",
+      "required": ["uri", "did", "record"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the review record."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the review author."
+        },
+        "record": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.bookReview",
+          "description": "The review record value."
+        }
+      }
     }
   }
 }

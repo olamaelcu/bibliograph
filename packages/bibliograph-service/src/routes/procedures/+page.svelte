@@ -1,5 +1,8 @@
 <script lang="ts">
-  let { data }: { data: { endpoints: Array<{ nsid: string; description?: string }> } } = $props();
+  let {
+    data,
+  }: { data: { endpoints: Array<{ nsid: string; description?: string }> } } =
+    $props();
 </script>
 
 <main>
@@ -7,9 +10,8 @@
     <h1>Procedures</h1>
     {#if data.endpoints.length === 0}
       <p class="muted">
-        This AppView is read-only and does not implement any procedures.
-        Procedures are listed here automatically when one is registered via
-        <code>router.addProcedure(...)</code> in <code>xrpc-router.ts</code>.
+        This AppView is read-only (currently) and does not implement any
+        procedures (as of yet).
       </p>
     {:else}
       <p class="muted">
@@ -20,20 +22,23 @@
 
   {#if data.endpoints.length > 0}
     <section class="grid">
-    {#each data.endpoints as { nsid, description }}
-      <wa-card class="endpoint-card">
-        <div slot="header" class="card-header">
-          <code class="endpoint-id"><a href={`/procedure/${encodeURIComponent(nsid)}`}>{nsid}</a></code>
-          <wa-badge variant="success" appearance="tint">procedure</wa-badge>
-        </div>
-        {#if description}
-          <p>{description}</p>
-        {/if}
-        <p class="muted">
-          Try at <code><a href={`/xrpc/${nsid}`}>/xrpc/{nsid}</a></code>
-        </p>
-      </wa-card>
-    {/each}
+      {#each data.endpoints as { nsid, description }}
+        <wa-card class="endpoint-card">
+          <div slot="header" class="card-header">
+            <code class="endpoint-id"
+              ><a href={`/procedure/${encodeURIComponent(nsid)}`}>{nsid}</a
+              ></code
+            >
+            <wa-badge variant="success" appearance="tint">procedure</wa-badge>
+          </div>
+          {#if description}
+            <p>{description}</p>
+          {/if}
+          <p class="muted">
+            Try at <code><a href={`/xrpc/${nsid}`}>/xrpc/{nsid}</a></code>
+          </p>
+        </wa-card>
+      {/each}
     </section>
   {/if}
 </main>

@@ -23,6 +23,7 @@ export const verifyClient = new Client({
 const tap = new TapClient({ url: TAP_URL });
 
 const NET_PREFIX = 'net.olamaelcu.livtet.biblio.';
+const REVIEW_COLLECTION = 'net.olamaelcu.livtet.bookReview';
 
 type UpsertBufferItem = TapRecordUpsertItem & { ack: () => Promise<void> };
 type DeleteBufferItem = { uri: string; ack: () => Promise<void> };
@@ -87,7 +88,10 @@ export async function runTapConsumer(log: Logger): Promise<void> {
         await ack();
         continue;
       }
-      if (!event.collection.startsWith(NET_PREFIX)) {
+      if (
+        !event.collection.startsWith(NET_PREFIX) &&
+        event.collection !== REVIEW_COLLECTION
+      ) {
         await ack();
         continue;
       }

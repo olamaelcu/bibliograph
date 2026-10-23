@@ -63,7 +63,7 @@ function yearFromGbPublishedDate(s: string | undefined): number | undefined {
 
 function coverFromLinks(il: GbImageLinks | undefined): string | undefined {
   const link = il?.large ?? il?.medium ?? il?.thumbnail ?? il?.smallThumbnail ?? il?.small;
-  return link ? link.replace(/^http:/, 'https:') : undefined;
+  return link ? link.replace(/^http:/, 'https:').replace('&edge=curl', '') : undefined;
 }
 
 function stripHtml(s: string | undefined): string | undefined {
