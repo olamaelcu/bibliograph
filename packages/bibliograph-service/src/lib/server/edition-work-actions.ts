@@ -26,10 +26,11 @@ import {
   type VoteAction,
 } from './edition-work-votes';
 import { putUserRecord } from './auth/oauth';
+import { isLibrarian } from './labeler/labels';
 
 export class VoteError extends Error {
   constructor(
-    readonly code: 'edition-not-found' | 'work-not-found' | 'invalid-vote',
+    readonly code: 'edition-not-found' | 'work-not-found' | 'invalid-vote' | 'not-a-librarian',
     message: string,
   ) {
     super(message);
@@ -56,6 +57,13 @@ export async function submitEditionWorkVote(
   input: SubmitVoteInput,
   db: DbExecutor = defaultDb,
 ): Promise<SubmitVoteResult> {
+  // The label is the gate: authentication alone does not grant curation rights.
+  // Checked before anything is written so a non-librarian leaves no trace in
+  // their repo or in the vote table.
+  if (!(await isLibrarian(input.did, db))) {
+    throw new VoteError('not-a-librarian', 'Only accounts holding the librarian label can vote on editions');
+  }
+
   const [edition] = await db
     .select({ uri: editions.uri, cid: editions.cid })
     .from(editions)

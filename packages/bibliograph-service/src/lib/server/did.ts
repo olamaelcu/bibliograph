@@ -15,16 +15,16 @@ const PROTO = process.env.LEX_PUBLISHER_PROTO ?? 'https';
 
 const PLACEHOLDER_MULTIBASE = 'z6MkplaceholderDidWebOnlyKeyNotFunctional';
 
-let warnedMissingKey = false;
+const warnedMissing = new Set<string>();
 
-function getPublicMultibase(): string {
-  const key = process.env.ATP_SERVICE_KEY_MULTIBASE;
+function publicKeyMultibase(envVar: string, purpose: string): string {
+  const key = process.env[envVar];
   if (!key || key === PLACEHOLDER_MULTIBASE) {
-    if (!warnedMissingKey) {
-      warnedMissingKey = true;
+    if (!warnedMissing.has(envVar)) {
+      warnedMissing.add(envVar);
       console.warn(
-        '[did] ATP_SERVICE_KEY_MULTIBASE is not set; serving placeholder publicKeyMultibase. ' +
-          'Set ATP_SERVICE_KEY_MULTIBASE to enable verification of lex CAR responses.',
+        `[did] ${envVar} is not set; serving placeholder publicKeyMultibase. ` +
+          `Set ${envVar} to enable verification of ${purpose}.`,
       );
     }
     return PLACEHOLDER_MULTIBASE;
@@ -59,13 +59,28 @@ export function getDidDocument(): DidDocument {
         id: '#atproto',
         type: 'Multikey',
         controller: DID,
-        publicKeyMultibase: getPublicMultibase(),
+        publicKeyMultibase: publicKeyMultibase('ATP_SERVICE_KEY_MULTIBASE', 'lex CAR responses'),
+      },
+      {
+        // Labels are signed by this key (spec: `#atproto_label`). It may hold the
+        // same value as `#atproto`, but is kept separate so the labeler key can
+        // rotate without touching repository signing.
+        id: '#atproto_label',
+        type: 'Multikey',
+        controller: DID,
+        publicKeyMultibase: publicKeyMultibase('ATP_LABEL_KEY_MULTIBASE', 'labels'),
       },
     ],
     service: [
       {
         id: '#atproto_pds',
         type: 'AtprotoPersonalDataServer',
+        serviceEndpoint: `${PROTO}://${HOSTNAME}`,
+      },
+      {
+        // Labeler service endpoint: origin only, no path segment (per spec).
+        id: '#atproto_labeler',
+        type: 'AtprotoLabeler',
         serviceEndpoint: `${PROTO}://${HOSTNAME}`,
       },
     ],

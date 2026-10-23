@@ -68,6 +68,53 @@ Sessions are server-side (`oauth_sessions` holds DPoP key material; the browser
 cookie only carries an opaque id), so a tampered cookie cannot claim another
 account's session.
 
+## Librarian gate
+
+Voting on catalog edits is limited to accounts that hold the `librarian` label.
+Signing in is not enough: authentication proves who you are, the label decides
+whether you may curate.
+
+Bibliograph is itself the labeler. Its labeler identity is the same `did:web` as
+the publisher, so `/.well-known/did.json` advertises both `#atproto_label` (the
+label signing key) and `#atproto_labeler` (the `AtprotoLabeler` service, an
+origin with no path).
+
+| Endpoint | Where |
+| --- | --- |
+| `com.atproto.label.queryLabels` | XRPC query in the SvelteKit router |
+| `com.atproto.label.subscribeLabels` | WebSocket on the Node entrypoint |
+
+Labels are signed over the DRISL/dag-CBOR encoding of the schema fields
+(`ver` included, `sig` and `$type` excluded), SHA-256 hashed, with the raw hash
+bytes signed by the `#atproto_label` key. Revocation is a negation label
+(`neg: true`), per spec; the gate treats a negated label as absent.
+
+### Entrypoint note
+
+`com.atproto.label.subscribeLabels` is a WebSocket stream. `@sveltejs/adapter-node`
+generates a `build/index.js` that constructs its own `http.Server` and never
+exposes the `upgrade` event, so a SvelteKit route cannot serve it. Bibliograph
+therefore runs `server.ts`, which imports the emitted `build/handler.js`, hands
+HTTP to SvelteKit, and keeps upgrades for the label stream. `pnpm start`, the
+`Procfile`, and the Dockerfile `ENTRYPOINT` all use that entrypoint.
+
+`vite dev` does not run `server.ts`, so the stream only exists in a built server:
+run `pnpm build && pnpm start` to exercise it locally.
+
+### Requesting access
+
+A signed-in account without the label sees a request control on any edition page.
+The request lands in `/admin/applications`, readable only by DIDs listed in
+`ADMIN_DIDS` (empty = nobody). Approving emits the label; revoking emits a
+negation and marks the application revoked. The application table records the
+decision trail, but the label is the authority.
+
+| Variable | Dev default | Purpose |
+| --- | --- | --- |
+| `ATP_LABEL_SIGNING_KEY` | _(unset → labeler disabled)_ | K-256 private key (64 hex) used to sign labels. `pnpm --filter bibliograph-service label-keygen`. |
+| `ATP_LABEL_KEY_MULTIBASE` | _(unset → placeholder published)_ | Public half, published as `#atproto_label` in the DID document. Must match the signing key or every label fails verification. |
+| `ADMIN_DIDS` | _(unset → nobody)_ | Comma-separated DIDs allowed to review the queue. |
+
 ## Observability
 
 Prometheus is available locally at <http://localhost:9090> (no auth, dev only).

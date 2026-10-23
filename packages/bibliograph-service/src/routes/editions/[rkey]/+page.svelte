@@ -17,8 +17,10 @@
       value?: DetailValue;
       workStatus: EditionWorkStatus | null;
       candidates: Candidate[];
+      canCurate: boolean;
+      application: { status: 'pending' | 'approved' | 'rejected' | 'revoked' } | null;
     };
-    form?: { error?: string; ok?: boolean; applied?: string };
+    form?: { error?: string; ok?: boolean; applied?: string; requested?: boolean };
   } = $props();
 
   const status = $derived(data.workStatus);
@@ -125,6 +127,32 @@
               >Sign in with your AT Protocol account</a
             > to vote on this edition's work.
           </p>
+        {:else if !data.canCurate}
+          <div class="request">
+            {#if data.application?.status === 'pending' || form?.requested}
+              <p class="muted small">
+                Your librarian access request is queued for review. Voting unlocks once
+                a librarian issues the <code>librarian</code> label to your account.
+              </p>
+            {:else if data.application?.status === 'rejected'}
+              <p class="muted small">
+                Your librarian request was declined. You can ask again with more context.
+              </p>
+              <form method="POST" action="?/requestLibrarian" class="request-form">
+                <input type="text" name="note" maxlength="1000" placeholder="Why do you want to curate? (optional)" />
+                <button type="submit" class="secondary">Ask again</button>
+              </form>
+            {:else}
+              <p class="muted small">
+                Curation is limited to accounts holding the <code>librarian</code> label.
+                Request access and a librarian will review it.
+              </p>
+              <form method="POST" action="?/requestLibrarian" class="request-form">
+                <input type="text" name="note" maxlength="1000" placeholder="Why do you want to curate? (optional)" />
+                <button type="submit" class="secondary">Request librarian access</button>
+              </form>
+            {/if}
+          </div>
         {:else if data.candidates.length > 0 || status.workUri}
           <div class="actions">
             <form method="POST" action="?/linkWork" class="link-form">
@@ -190,6 +218,16 @@
   .count { color: var(--wa-color-on-quiet); }
 
   .actions { display: flex; flex-wrap: wrap; gap: var(--wa-space-m); align-items: flex-end; }
+  .request-form { display: flex; flex-wrap: wrap; gap: var(--wa-space-s); align-items: center; }
+  .request-form input {
+    min-width: 20rem;
+    padding: var(--wa-space-s) var(--wa-space-m);
+    border: 1px solid var(--wa-form-control-border-color);
+    border-radius: var(--wa-border-radius-m);
+    background: var(--wa-color-surface-default);
+    color: var(--wa-color-text-normal);
+    font-size: var(--wa-font-size-s);
+  }
   .link-form { display: flex; flex-direction: column; gap: var(--wa-space-s); }
   label { font-weight: 600; font-size: var(--wa-font-size-s); }
   select {

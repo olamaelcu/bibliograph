@@ -4,6 +4,7 @@ import {
   ComAtprotoIdentityResolveDid,
   ComAtprotoIdentityResolveHandle,
   ComAtprotoIdentityResolveIdentity,
+  ComAtprotoLabelQueryLabels,
   ComAtprotoRepoDescribeRepo,
   ComAtprotoRepoGetRecord,
   ComAtprotoServerDescribeServer,
@@ -78,6 +79,7 @@ import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import { enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
 import { buildBookContributorViews } from './book-contributor-view';
+import { queryLabels, labelToJson } from './labeler/labels';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -434,7 +436,27 @@ router.addQuery(ComAtprotoSyncGetBlocks.mainSchema, {
   },
 });
 
-// ─── com.atproto.repo.* handlers ─────────────────────────────────────────────
+// ─── Labeler ────────────────────────────────────────────────────────────────
+// Labels are issued by this appview (see labeler/labels.ts); the matching
+// com.atproto.label.subscribeLabels WebSocket lives on the Node entrypoint
+// (server.ts), because adapter-node does not expose HTTP upgrades to routes.
+
+router.addQuery(ComAtprotoLabelQueryLabels.mainSchema, {
+  async handler({ params }) {
+    const result = await queryLabels({
+      uriPatterns: params.uriPatterns,
+      sources: params.sources,
+      cursor: params.cursor ? Number(params.cursor) : undefined,
+      limit: params.limit,
+    });
+    return json({
+      labels: result.labels.map(labelToJson),
+      cursor: result.cursor !== undefined ? String(result.cursor) : undefined,
+    } as unknown as ComAtprotoLabelQueryLabels.$output);
+  },
+});
+
+// ─── com.atproto.repo.* handlers ───────────────────────────────
 // JSON views of the records served by this PDS. pdsls.dev (and many legacy
 // clients) call com.atproto.repo.getRecord with the same path as the sync
 // equivalent; this serves the record value as JSON {uri, cid, value} instead

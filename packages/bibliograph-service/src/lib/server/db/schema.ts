@@ -256,3 +256,52 @@ export const webSessions = pgTable(
 
 export type EditionWorkVoteRow = typeof editionWorkVotes.$inferSelect;
 export type WebSessionRow = typeof webSessions.$inferSelect;
+
+// ─── Labeler ────────────────────────────────────────────────────────────────
+// Issued labels are persisted with their signature: the DID document's
+// #atproto_label key can rotate, and only stored signatures let old labels be
+// re-served (or re-signed) consistently. `seq` is the public stream order used by
+// com.atproto.label.subscribeLabels, so it must be monotonic and gap-free enough
+// for cursor backfill — a bigserial is the simplest guarantee.
+
+export const labels = pgTable(
+  'labels',
+  {
+    seq: bigserial('seq', { mode: 'number' }).primaryKey(),
+    src: text('src').notNull(),
+    uri: text('uri').notNull(),
+    val: text('val').notNull(),
+    cid: text('cid'),
+    neg: boolean('neg').notNull().default(false),
+    cts: timestamp('cts', { withTimezone: true }).notNull(),
+    exp: timestamp('exp', { withTimezone: true }),
+    /** Signature over the dag-cbor encoding of the label, base64 (the `$bytes` form). */
+    sig: text('sig').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    subjectIdx: index('labels_subject_idx').on(t.uri),
+    subjectValIdx: index('labels_subject_val_idx').on(t.uri, t.val),
+  }),
+);
+
+// Applications for the `librarian` label, reviewed by an admin.
+
+export const librarianApplications = pgTable(
+  'librarian_applications',
+  {
+    did: text('did').primaryKey(),
+    handle: text('handle'),
+    note: text('note'),
+    status: text('status').$type<'pending' | 'approved' | 'rejected' | 'revoked'>().notNull().default('pending'),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    decidedBy: text('decided_by'),
+  },
+  (t) => ({
+    statusIdx: index('librarian_applications_status_idx').on(t.status, t.requestedAt),
+  }),
+);
+
+export type LabelRow = typeof labels.$inferSelect;
+export type LibrarianApplicationRow = typeof librarianApplications.$inferSelect;

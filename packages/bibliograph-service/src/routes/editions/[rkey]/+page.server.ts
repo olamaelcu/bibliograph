@@ -6,6 +6,8 @@ import {
 } from '$lib/server/edition-work-votes';
 import { submitEditionWorkVote, VoteError } from '$lib/server/edition-work-actions';
 import { PUBLISHER_DID } from '$lib/server/did';
+import { isLibrarian } from '$lib/server/labeler/labels';
+import { applicationFor, requestLibrarianAccess } from '$lib/server/labeler/librarian';
 import { log, searchService } from '$lib/server/xrpc-router';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -13,7 +15,15 @@ const CANDIDATE_LIMIT = 8;
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const record = await loadRecord('editions', params.rkey);
-  if (record.notFound) return { ...record, workStatus: null, candidates: [] };
+
+  // Curation rights come from the labeler, not from being signed in.
+  const viewerDid = locals.viewer?.did ?? null;
+  const canCurate = viewerDid ? await isLibrarian(viewerDid) : false;
+  const application = viewerDid ? await applicationFor(viewerDid) : null;
+
+  if (record.notFound) {
+    return { ...record, workStatus: null, candidates: [], canCurate, application };
+  }
 
   const editionUri = editionUriForRkey(params.rkey, PUBLISHER_DID);
   const workStatus = await getEditionWorkStatus(editionUri, locals.viewer?.did ?? null);
@@ -29,7 +39,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     }
   }
 
-  return { ...record, workStatus, candidates };
+  return { ...record, workStatus, candidates, canCurate, application };
 };
 
 async function castVote(
@@ -46,6 +56,10 @@ async function castVote(
     const form = await request.formData();
     workUri = String(form.get('workUri') ?? '').trim();
     if (!workUri) return fail(400, { error: 'Pick a work to link this edition to.' });
+  }
+
+  if (!(await isLibrarian(locals.viewer.did))) {
+    return fail(403, { error: 'Only accounts holding the librarian label can vote. Request access below.' });
   }
 
   try {
@@ -71,4 +85,19 @@ async function castVote(
 export const actions: Actions = {
   linkWork: (event) => castVote('link', event),
   unlinkWork: (event) => castVote('unlink', event),
+
+  /** Ask an admin to issue the librarian label to the signed-in account. */
+  requestLibrarian: async ({ locals, request }) => {
+    if (!locals.viewer) {
+      redirect(303, '/login?next=/');
+    }
+    const form = await request.formData();
+    const note = String(form.get('note') ?? '').trim().slice(0, 1000) || null;
+    const existing = await applicationFor(locals.viewer.did);
+    if (existing && (existing.status === 'approved' || existing.status === 'revoked')) {
+      return fail(400, { error: `Your application is already ${existing.status}.` });
+    }
+    await requestLibrarianAccess(locals.viewer.did, locals.viewer.handle, note);
+    return { ok: true, requested: true };
+  },
 };

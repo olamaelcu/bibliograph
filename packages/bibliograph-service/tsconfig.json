@@ -7,6 +7,7 @@
     "./vite.config.ts",
     "./drizzle.config.ts",
     "./worker.ts",
+    "./server.ts",
     "./eslint.config.js",
     "./svelte.config.js",
     "./lex.config.js",
