@@ -2,3 +2,6 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: false
+overrides:
+  cookie@<0.7.0: ^0.7.0
+  esbuild@<=0.24.2: ^0.28.2
