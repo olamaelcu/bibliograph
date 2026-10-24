@@ -28,7 +28,8 @@
     "db:run": "tsx src/lib/server/db/migrate.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "label-keygen": "tsx scripts/gen-label-key.ts"
+    "label-keygen": "tsx scripts/gen-label-key.ts",
+    "labels:seniority": "tsx scripts/issue-tenure-labels.ts"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.4",
@@ -47,6 +48,8 @@
     "@awesome.me/webawesome": "^3.12.0",
     "@lit-labs/ssr": "^4.1.0",
     "@lit-labs/ssr-client": "^1.1.8",
+    "@tanstack/store": "0.11.2",
+    "@tanstack/svelte-store": "^0.12.3",
     "drizzle-orm": "^0.45.2",
     "graphile-worker": "^0.17.3",
     "happy-dom": "^20.11.6",

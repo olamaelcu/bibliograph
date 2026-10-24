@@ -14,6 +14,19 @@ import http from 'node:http';
 import process from 'node:process';
 import { attachLabelStream } from './src/lib/server/labeler/stream';
 
+// Register before the build/handler.js import below. That import takes a
+// moment, and a signal arriving before the server is listening would otherwise
+// terminate the process with the default disposition (exit 143) rather than
+// exiting cleanly.
+let listening = false;
+function exitDuringBoot(signal: string): void {
+  if (listening) return;
+  console.error(`[server] ${signal} during startup; exiting cleanly`);
+  process.exit(0);
+}
+process.once('SIGTERM', () => exitDuringBoot('SIGTERM'));
+process.once('SIGINT', () => exitDuringBoot('SIGINT'));
+
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '0.0.0.0';
 
@@ -27,6 +40,7 @@ const server = http.createServer(handler);
 attachLabelStream(server);
 
 server.listen(port, host, () => {
+  listening = true;
   console.log(`Listening on ${host}:${port} (label stream on /xrpc/com.atproto.label.subscribeLabels)`);
 });
 

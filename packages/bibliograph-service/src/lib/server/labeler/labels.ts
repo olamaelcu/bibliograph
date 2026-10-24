@@ -22,7 +22,11 @@ import { PUBLISHER_DID } from '../did';
 /** The labeler identity. Same `did:web` as the publisher, per deployment choice. */
 export const LABELER_DID = PUBLISHER_DID;
 
-export const LIBRARIAN_LABEL = 'librarian';
+// Re-exported so callers have one import for "the labeler" without reaching
+// into the vocabulary module for the common case.
+export { LIBRARIAN_LABEL } from './vocabulary';
+
+import { isKnownLabel, subjectMatches, type LabelIdentifier } from './vocabulary';
 
 /** Cap on rows considered when serving a query; keeps memory bounded. */
 const MAX_SCAN = 10_000;
@@ -109,6 +113,15 @@ export async function emitLabel(
   input: LabelInput,
   db: DbExecutor = defaultDb,
 ): Promise<LabelRow> {
+  if (!isKnownLabel(input.val)) {
+    throw new Error(`"${input.val}" is not a declared Bibliograph label (see labeler/vocabulary.ts)`);
+  }
+  if (!subjectMatches(input.val, input.uri)) {
+    throw new Error(
+      `label "${input.val}" cannot apply to ${input.uri.startsWith('did:') ? 'an account' : 'a record'}`,
+    );
+  }
+
   const cts = input.cts ?? new Date();
   const fields = labelSigningFields({
     src: LABELER_DID,
@@ -169,9 +182,60 @@ export async function activeLabel(
   return row;
 }
 
+/**
+ * Whether a subject currently holds a given label. Works for both accounts (bare
+ * DID) and records (`at://` URI), because `activeLabel` only looks at `uri`.
+ */
+export async function hasLabel(
+  uri: string,
+  val: string,
+  db: DbExecutor = defaultDb,
+): Promise<boolean> {
+  return (await activeLabel(uri, val, db)) !== null;
+}
+
+/**
+ * Apply a declared label to an account or record. Throws for unknown values or a
+ * subject kind that does not match the definition.
+ */
+export async function grantLabel(
+  uri: string,
+  label: LabelIdentifier,
+  db: DbExecutor = defaultDb,
+): Promise<LabelRow> {
+  return emitLabel({ uri, val: label }, db);
+}
+
+/** Remove a label by negation. */
+export async function clearLabel(
+  uri: string,
+  label: LabelIdentifier,
+  db: DbExecutor = defaultDb,
+): Promise<LabelRow> {
+  return revokeLabel(uri, label, db);
+}
+
+/** Every subject currently holding `label`, newest row per subject deciding. */
+export async function activeSubjects(
+  label: string,
+  db: DbExecutor = defaultDb,
+): Promise<string[]> {
+  const rows = await db
+    .select({ uri: labels.uri, neg: labels.neg, cts: labels.cts, seq: labels.seq })
+    .from(labels)
+    .where(eq(labels.val, label))
+    .orderBy(labels.uri, desc(labels.cts), desc(labels.seq));
+
+  const newest = new Map<string, boolean>();
+  for (const row of rows) {
+    if (!newest.has(row.uri)) newest.set(row.uri, !row.neg);
+  }
+  return [...newest.entries()].filter(([, active]) => active).map(([uri]) => uri);
+}
+
 /** Whether an account currently holds the `librarian` label. */
 export async function isLibrarian(did: string, db: DbExecutor = defaultDb): Promise<boolean> {
-  return (await activeLabel(did, LIBRARIAN_LABEL, db)) !== null;
+  return hasLabel(did, 'librarian', db);
 }
 
 export interface QueryLabelsInput {

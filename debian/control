@@ -1,0 +1,36 @@
+Source: bibliograph
+Section: web
+Priority: optional
+Maintainer: Bibliograph Maintainers <maintainers@olamaelcu.net>
+Build-Depends: debhelper-compat (= 13)
+Rules-Requires-Root: binary-targets
+Standards-Version: 4.6.2
+Homepage: https://biblio.livtet.olamaelcu.net
+
+Package: bibliograph
+Architecture: any
+Depends: ${misc:Depends},
+ debconf (>= 0.5) | debconf-2.0,
+ nodejs (>= 22.0.0),
+ nginx,
+ ca-certificates
+Recommends: postgresql (>= 15)
+Description: ATProto book catalogue appview and labeler
+ A SvelteKit appview for the community.lexicon.book lexicons, backed by
+ PostgreSQL. It indexes records from the ATProto firehose via TAP, serves
+ XRPC queries, hosts the web catalogue, and issues its own labels so other
+ appviews can consume its curation decisions by DID.
+ .
+ This package installs the prebuilt server payload at /usr/lib/bibliograph and
+ runs it under systemd as the unprivileged "bibliograph" user: a web unit, a
+ worker unit consuming TAP, and a oneshot migrator both require. Configuration
+ lives in /etc/bibliograph/bibliograph.env.
+ .
+ The Node.js runtime is deliberately not bundled. Install it from the
+ NodeSource apt repository (https://deb.nodesource.com/node_22.x/ or newer),
+ which satisfies this package's versioned dependency with whatever newer
+ release it publishes. The distro's own nodejs (18.x on Debian 12 and Ubuntu
+ 24.04) does not.
+ .
+ PostgreSQL is only a Recommends: the database may be remote. Set DATABASE_URL
+ in the configuration file either way.

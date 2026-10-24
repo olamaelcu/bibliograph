@@ -1,0 +1,55 @@
+[Unit]
+Description=Bibliograph database migrations
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target postgresql.service
+Wants=network-online.target
+# Not enabled on its own: bibliograph.service and bibliograph-worker.service
+# pull it in with Requires=, which is what makes it re-run on every restart.
+# No RemainAfterExit, so a restart of either unit starts it again — that is how
+# new migrations reach an existing database on package upgrade. The migrator is
+# idempotent (drizzle records applied migrations in drizzle.__drizzle_migrations).
+
+[Service]
+Type=oneshot
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/bibliograph/bibliograph.env
+
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx src/lib/server/db/migrate.ts
+
+# Fails closed: any unrecognized PostgreSQL error aborts this unit, and the
+# units that Requires= it refuse to start, instead of running against a stale
+# schema.
+TimeoutStartSec=300s
+# Bounded stop: the upgrade restarts bibliograph.service, which stops this unit
+# if a migration is in flight. SIGTERM during that window would otherwise be
+# recorded as a failure, exactly as for the long-running units.
+SuccessExitStatus=143 130
+TimeoutStopSec=30s
+SyslogIdentifier=bibliograph-migrate
+
+StateDirectory=bibliograph
+StateDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+MemoryDenyWriteExecute=no

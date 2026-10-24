@@ -1,0 +1,15 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: bibliograph
+Source: https://github.com/olamaelcu/bibliograph
+
+Files: *
+Copyright: Bibliograph contributors
+License: MPL-2.0
+ This Source Code Form is subject to the terms of the Mozilla Public
+ License, v. 2.0. If a copy of the MPL was not distributed with this
+ file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ .
+ The packaged payload additionally contains a production dependency tree
+ installed from the JavaScript ecosystem; each module under
+ /usr/lib/bibliograph/node_modules keeps its own license, recorded in its
+ package.json.

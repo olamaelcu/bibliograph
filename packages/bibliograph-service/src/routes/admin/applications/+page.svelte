@@ -9,7 +9,19 @@
     decidedBy: string | null;
   };
 
-  let { data, form }: { data: { pending: Application[]; decided: Application[] }; form?: { error?: string; ok?: boolean } } = $props();
+  let {
+    data,
+    form,
+  }: {
+    data: {
+      pending: Application[];
+      decided: Application[];
+      administrators: string[];
+      seniors: string[];
+      viewerIsBootstrapAdmin: boolean;
+    };
+    form?: { error?: string; ok?: boolean };
+  } = $props();
 
   function short(did: string): string {
     return did.length > 28 ? `${did.slice(0, 18)}…${did.slice(-6)}` : did;
@@ -88,6 +100,60 @@
       </ul>
     {/if}
   </section>
+
+  <section>
+    <h2>Administrators ({data.administrators.length})</h2>
+    <p class="muted small">
+      Holding the <code>administrator</code> label is what grants this view. The
+      <code>ADMIN_DIDS</code> allowlist only bootstraps the first one.
+    </p>
+    {#if data.administrators.length > 0}
+      <ul class="queue">
+        {#each data.administrators as did}
+          <li>
+            <div class="who"><code class="did">{did}</code></div>
+            <div class="decide">
+              <form method="POST" action="?/revokeAdmin">
+                <input type="hidden" name="did" value={did} />
+                <button type="submit" class="secondary">Withdraw</button>
+              </form>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if data.viewerIsBootstrapAdmin}
+      <form method="POST" action="?/grantAdmin" class="grant-form">
+        <input type="text" name="did" placeholder="did:plc:…" required />
+        <button type="submit" class="primary">Grant administrator</button>
+      </form>
+    {/if}
+  </section>
+
+  <section>
+    <h2>Senior librarians ({data.seniors.length})</h2>
+    <p class="muted small">
+      Issued automatically by <code>pnpm labels:seniority</code> once an account has
+      held the librarian label long enough and voted often enough.
+    </p>
+    {#if data.seniors.length > 0}
+      <ul class="queue">
+        {#each data.seniors as did}
+          <li>
+            <div class="who"><code class="did">{did}</code></div>
+            <div class="decide">
+              <form method="POST" action="?/revokeSenior">
+                <input type="hidden" name="did" value={did} />
+                <button type="submit" class="secondary">Withdraw</button>
+              </form>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <p class="muted">Nobody qualifies yet.</p>
+    {/if}
+  </section>
 </main>
 
 <style>
@@ -114,6 +180,16 @@
   .did { font-size: var(--wa-font-size-xs); color: var(--wa-color-on-quiet); }
   .note { margin: 0.25rem 0; font-size: var(--wa-font-size-s); }
   .decide { display: flex; gap: var(--wa-space-s); }
+  .grant-form { display: flex; flex-wrap: wrap; gap: var(--wa-space-s); margin-block-start: var(--wa-space-m); }
+  .grant-form input {
+    min-width: 22rem;
+    padding: var(--wa-space-s) var(--wa-space-m);
+    border: 1px solid var(--wa-form-control-border-color);
+    border-radius: var(--wa-border-radius-m);
+    background: var(--wa-color-surface-default);
+    color: var(--wa-color-text-normal);
+    font-size: var(--wa-font-size-s);
+  }
   .decide form { margin: 0; }
   button {
     padding: var(--wa-space-s) var(--wa-space-m);

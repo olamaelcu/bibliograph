@@ -11,6 +11,8 @@ import {
 import { getTapQueueDepth } from './jobs/depth';
 
 const TAP_URL = process.env.TAP_URL ?? 'http://localhost:2480';
+// TAP's /channel requires basic auth; without this the socket is rejected 401.
+const TAP_ADMIN_PASSWORD = process.env.TAP_ADMIN_PASSWORD;
 const UPSTREAM_APPVIEW = process.env.UPSTREAM_APPVIEW ?? 'https://public.api.bsky.app';
 const TAP_BATCH_SIZE = Number(process.env.TAP_BATCH_SIZE ?? 100);
 const TAP_BATCH_INTERVAL_MS = Number(process.env.TAP_BATCH_INTERVAL_MS ?? 500);
@@ -20,7 +22,10 @@ export const verifyClient = new Client({
   handler: simpleFetchHandler({ service: UPSTREAM_APPVIEW }),
 });
 
-const tap = new TapClient({ url: TAP_URL });
+const tap = new TapClient({
+  url: TAP_URL,
+  ...(TAP_ADMIN_PASSWORD ? { adminPassword: TAP_ADMIN_PASSWORD } : {}),
+});
 
 const NET_PREFIX = 'net.olamaelcu.livtet.biblio.';
 const REVIEW_COLLECTION = 'net.olamaelcu.livtet.bookReview';
@@ -75,14 +80,35 @@ export async function runTapConsumer(log: Logger): Promise<void> {
     return false;
   }
 
-  async function shutdown(): Promise<void> {
-    log.info({ upserts: upsertBuffer.length, deletes: deleteBuffer.length }, 'flushing buffers on shutdown');
-    await flushBuffers();
-  }
-  process.once('SIGTERM', () => { void shutdown(); });
-  process.once('SIGINT', () => { void shutdown(); });
+  const subscription = tap.subscribe();
+  const events = subscription[Symbol.asyncIterator]();
+  let stopping = false;
 
-  for await (const { event, ack } of tap.subscribe()) {
+  async function shutdown(signal: string): Promise<void> {
+    if (stopping) return;
+    stopping = true;
+    log.info(
+      { upserts: upsertBuffer.length, deletes: deleteBuffer.length, signal },
+      'flushing buffers on shutdown',
+    );
+    // Never let systemd reach TimeoutStopSec and SIGKILL us.
+    setTimeout(() => process.exit(0), 5_000).unref();
+    await flushBuffers();
+    // Ask the subscription to close the websocket, but do NOT await it: the
+    // for-await loop below is parked on next(), and the iterator's return()
+    // does not settle that pending next(), so awaiting it would hang the
+    // process until the timer above fired. 200ms is enough for the close frame
+    // to leave, and the exit below closes whatever is left.
+    await Promise.race([
+      events.return?.() ?? Promise.resolve(),
+      new Promise((resolve) => setTimeout(resolve, 200).unref()),
+    ]);
+    process.exit(0);
+  }
+  process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.once('SIGINT', () => { void shutdown('SIGINT'); });
+
+  for await (const { event, ack } of events) {
     try {
       if (!isRecordEvent(event)) {
         await ack();
@@ -115,4 +141,11 @@ export async function runTapConsumer(log: Logger): Promise<void> {
     }
   }
   await flushBuffers();
+
+  // Reaching the end without a signal means TAP closed the subscription. Exiting
+  // 0 would look like a clean stop to systemd, whose Restart=on-failure would
+  // then never bring the consumer back, so this is deliberately a failure.
+  if (!stopping) {
+    throw new Error('TAP subscription ended unexpectedly');
+  }
 }

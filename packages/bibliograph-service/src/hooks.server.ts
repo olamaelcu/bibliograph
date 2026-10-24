@@ -4,6 +4,14 @@ import { SESSION_COOKIE, readWebSession } from '$lib/server/auth/session';
 
 // Session lookup is a DB round trip, so it is skipped for everything that can
 // never render a signed-in UI: XRPC, well-known documents, probes, and assets.
+//
+// Static-asset detection is an extension allowlist on purpose. A generic
+// `/\.[a-z0-9]+$/` test also matches real page routes whose final segment
+// contains a dot — and every catalog rkey does (`gb.IYeOAgAAQBAJ`, `ol.OL1M`) —
+// which silently skipped session resolution and made signed-in visitors look
+// anonymous on exactly the pages that need the viewer.
+const ASSET_EXTENSIONS = /\.(?:js|mjs|css|map|json|txt|xml|ico|png|jpe?g|gif|webp|avif|svg|woff2?|ttf|otf|wasm)$/i;
+
 function needsViewer(pathname: string): boolean {
   return !(
     pathname.startsWith('/xrpc/') ||
@@ -12,7 +20,7 @@ function needsViewer(pathname: string): boolean {
     pathname.startsWith('/oauth-client-metadata.json') ||
     pathname === '/health' ||
     pathname === '/metrics' ||
-    /\.[a-z0-9]+$/i.test(pathname)
+    ASSET_EXTENSIONS.test(pathname)
   );
 }
 

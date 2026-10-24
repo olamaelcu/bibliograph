@@ -59,9 +59,31 @@ export function isLoopbackClient(): boolean {
   return !process.env.OAUTH_CLIENT_ID;
 }
 
+/**
+ * A loopback client id is only valid when the redirect URI is itself loopback:
+ * the ATProto loopback metadata builder rejects anything that is not
+ * `http://127.0.0.1[:port]` (or `http://[::1][:port]`). Without this check the
+ * failure surfaces much later as an opaque valibot message —
+ * `URL must use the "http:" protocol` — when a user tries to sign in.
+ */
+function assertLoopbackOrigin(origin: string): void {
+  const url = new URL(origin);
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const loopback = hostname === '127.0.0.1' || hostname === '::1' || hostname === 'localhost';
+  if (url.protocol !== 'http:' || !loopback) {
+    throw new Error(
+      `OAUTH_CLIENT_ID is empty, so this app builds an ATProto loopback client id, ` +
+        `but OAUTH_PUBLIC_ORIGIN is "${origin}". Loopback redirect URIs must be ` +
+        `http://127.0.0.1 (or http://[::1]). For a public deployment set ` +
+        `OAUTH_CLIENT_ID=${origin}/oauth-client-metadata.json instead.`,
+    );
+  }
+}
+
 export function clientMetadata(): OAuthClientMetadataInput {
   const redirect_uris: [string, ...string[]] = [redirectUri()];
   if (isLoopbackClient()) {
+    assertLoopbackOrigin(publicOrigin());
     return buildAtprotoLoopbackClientMetadata({
       scope: OAUTH_SCOPE,
       // The redirect URI is built from `OAUTH_PUBLIC_ORIGIN`, which must be a

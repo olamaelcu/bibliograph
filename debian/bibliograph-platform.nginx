@@ -1,0 +1,111 @@
+# bibliograph-platform — installed by the bibliograph Debian package as a
+# conffile.
+#
+# Not live by default. The package symlinks this into /etc/nginx/sites-enabled/
+# only once a certificate for biblio.livtet.olamaelcu.net exists, because an
+# enabled server block that references a missing certificate makes `nginx -t`
+# fail and stops nginx from starting at all — which would take every other
+# vhost on the host down with it. Provision the certificate first, then run
+# `dpkg-reconfigure bibliograph` to enable this file.
+#
+# On lescayes.ts.olamaelcu.net, certbot runs with authenticator = webroot and
+# webroot_path = /var/lib/certbot, and this host's other sites live in
+# /etc/nginx/conf.d/site-*.conf managed by Ansible. This file is deliberately
+# outside that tree so dpkg and Ansible never write the same path.
+
+server {
+    listen      80;
+    listen      [::]:80;
+    server_name biblio.livtet.olamaelcu.net;
+
+    # HTTP-01 challenge, matching webroot_path in /etc/letsencrypt/renewal/.
+    # Kept on plain HTTP so renewal still works with an expired certificate.
+    location /.well-known/acme-challenge/ {
+        root /var/lib/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    # `listen ... ssl http2` and not `http2 on;`: the latter needs nginx
+    # >= 1.25.1, and this host runs 1.22 from Debian 12. The long form still
+    # works on 1.25.1+ with a deprecation warning.
+    listen      443 ssl http2;
+    listen      [::]:443 ssl http2;
+    server_name biblio.livtet.olamaelcu.net;
+
+    ssl_certificate     /etc/letsencrypt/live/biblio.livtet.olamaelcu.net/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/biblio.livtet.olamaelcu.net/privkey.pem;
+
+    ssl_protocols             TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache         shared:bibliograph:10m;
+    ssl_session_timeout       1d;
+    ssl_session_tickets       off;
+
+    # BODY_SIZE_LIMIT in the unit is 100M so backfill payloads reach the app
+    # and get the app's own error. nginx's 1m default would reject them first.
+    client_max_body_size 100m;
+
+    access_log /var/log/nginx/bibliograph.access.log;
+    error_log  /var/log/nginx/bibliograph.error.log;
+
+    # The labeler's label stream. This is a WebSocket on the bare origin — an
+    # atproto `#atproto_labeler` service endpoint carries no path — and it is
+    # served by server.ts, which is why the package does not run
+    # build/index.js. Without the Upgrade headers here the handshake is proxied
+    # as a plain GET and every consumer sees a 404.
+    location = /xrpc/com.atproto.label.subscribeLabels {
+        proxy_pass         http://bibliograph_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        "upgrade";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Port  $server_port;
+
+        # Labels are pushed as they are issued; buffering would hold them.
+        proxy_buffering off;
+        # A subscriber holds this connection open indefinitely.
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+
+    location / {
+        # Resolved from /etc/nginx/conf.d/bibliograph-upstream.conf, which the
+        # package generates from the bibliograph/port debconf answer. Do not put
+        # a literal port here — it would drift from the port the server binds.
+        proxy_pass         http://bibliograph_backend;
+        proxy_http_version 1.1;
+        # Everything below is ordinary HTTP; clearing Connection keeps the
+        # upstream connection poolable instead of forcing an upgrade.
+        proxy_set_header Connection        "";
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Forwarded-Port  $server_port;
+
+        # adapter-node reads PROTOCOL_HEADER / HOST_HEADER / ADDRESS_HEADER
+        # (set in /etc/bibliograph/bibliograph.env) to reconstruct the public
+        # origin from these headers. Without them, OAuth callbacks and redirects
+        # would be built against http://127.0.0.1.
+
+        proxy_connect_timeout 10s;
+        # Some XRPC calls hit remote resolvers; keep this above the app's own
+        # REQUEST_TIMEOUT_MS.
+        proxy_read_timeout    60s;
+        proxy_send_timeout    60s;
+
+        # SvelteKit streams SSR output; buffering delays time to first byte.
+        proxy_buffering off;
+    }
+}

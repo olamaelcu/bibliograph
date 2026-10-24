@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#MISE description="Stage the Debian payload tree (./packaging/payload/app)"
+#
+# The payload is what debian/rules installs at /usr/lib/bibliograph: the vite
+# output, the TypeScript sources the tsx runtime executes (server.ts, worker.ts,
+# the migrator, and the generated lexicon modules they import), the drizzle
+# migrations, and a production-only node_modules tree.
+#
+# There is no native addon to cross-build, so this runs on the packaging host
+# rather than in a container. The one ELF object in the result is esbuild's
+# binary, which tsx depends on and which npm publishes prebuilt per
+# architecture — the package is therefore Architecture: any, built per host.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+PAYLOAD="packaging/payload/app"
+PKG="bibliograph-service"
+SERVICE="packages/$PKG"
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+# 1. Build. This also regenerates src/lib/server/lexicons/ (gitignored), which
+#    the runtime imports, so the sources have to be staged *after* this.
+say "Building $PKG"
+pnpm --filter "$PKG" build
+
+[[ -f "$SERVICE/build/handler.js" ]] || die "build/handler.js was not emitted"
+[[ -f "$SERVICE/src/lib/server/lexicons/index.ts" ]] || die "lexicon modules were not generated"
+
+# 2. Workspace skeleton, so the payload's own pnpm install resolves against the
+#    committed lockfile rather than inventing versions.
+say "Staging $PAYLOAD"
+rm -rf packaging/payload
+mkdir -p "$PAYLOAD/$SERVICE"
+cp package.json pnpm-workspace.yaml pnpm-lock.yaml "$PAYLOAD/"
+
+# 3. Everything the runtime needs. drizzle/ is read by the migrator;
+#    scripts/ carries operator tools (key generation) and nothing is executed
+#    from it by the units.
+rsync -a --exclude node_modules --exclude .svelte-kit \
+  "$SERVICE/package.json" \
+  "$SERVICE/server.ts" \
+  "$SERVICE/worker.ts" \
+  "$SERVICE/tsconfig.json" \
+  "$SERVICE/src" \
+  "$SERVICE/build" \
+  "$SERVICE/drizzle" \
+  "$SERVICE/scripts" \
+  "$SERVICE/lexicons" \
+  "$PAYLOAD/$SERVICE/"
+
+# 4. Production dependency tree only. --prod drops the build toolchain (vite,
+#    svelte-check, drizzle-kit, typescript) that has no business on the host.
+say "Installing production dependencies"
+(cd "$PAYLOAD" && pnpm install --prod --ignore-scripts --frozen-lockfile)
+
+# 5. Fail closed on a payload that would install but not run.
+for required in \
+  "$SERVICE/build/handler.js" \
+  "$SERVICE/build/env.js" \
+  "$SERVICE/server.ts" \
+  "$SERVICE/worker.ts" \
+  "$SERVICE/src/lib/server/db/migrate.ts" \
+  "$SERVICE/src/lib/server/lexicons/index.ts" \
+  "$SERVICE/lexicons/net/olamaelcu/livtet/biblio" \
+  "$SERVICE/drizzle/meta/_journal.json" \
+  "$SERVICE/node_modules/.bin/tsx"
+do
+  [[ -e "$PAYLOAD/$required" ]] || die "payload is missing $required"
+done
+
+# The build toolchain must not ship: it would triple the package and is never
+# reachable from the runtime graph. Checked as *direct* dependencies: some
+# devDependencies are also transitive production ones (typescript arrives via
+# cosmiconfig and valibot, and cannot be excluded without breaking the tree),
+# so only a top-level link proves the workspace's devDeps were installed.
+for forbidden in vite svelte-check drizzle-kit eslint @sveltejs; do
+  if [[ -e "$PAYLOAD/$SERVICE/node_modules/$forbidden" ]]; then
+    die "dev dependency '$forbidden' leaked into the production payload"
+  fi
+done
+
+du -sh "$PAYLOAD" | sed 's/^/    /'
+say "Payload staged at ./$PAYLOAD"

@@ -6,8 +6,9 @@ import {
 } from '$lib/server/edition-work-votes';
 import { submitEditionWorkVote, VoteError } from '$lib/server/edition-work-actions';
 import { PUBLISHER_DID } from '$lib/server/did';
-import { isLibrarian } from '$lib/server/labeler/labels';
-import { applicationFor, requestLibrarianAccess } from '$lib/server/labeler/librarian';
+import { clearLabel, grantLabel, hasLabel, isLibrarian } from '$lib/server/labeler/labels';
+import { applicationFor, isAdministrator, requestLibrarianAccess } from '$lib/server/labeler/librarian';
+import { CONTROVERSIAL_LABEL } from '$lib/server/labeler/vocabulary';
 import { log, searchService } from '$lib/server/xrpc-router';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -15,17 +16,21 @@ const CANDIDATE_LIMIT = 8;
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   const record = await loadRecord('editions', params.rkey);
+  const editionUri = editionUriForRkey(params.rkey, PUBLISHER_DID);
 
   // Curation rights come from the labeler, not from being signed in.
   const viewerDid = locals.viewer?.did ?? null;
-  const canCurate = viewerDid ? await isLibrarian(viewerDid) : false;
-  const application = viewerDid ? await applicationFor(viewerDid) : null;
+  const [canCurate, application, controversial, canLabel] = await Promise.all([
+    viewerDid ? isLibrarian(viewerDid) : Promise.resolve(false),
+    viewerDid ? applicationFor(viewerDid) : Promise.resolve(null),
+    hasLabel(editionUri, CONTROVERSIAL_LABEL),
+    viewerDid ? isAdministrator(viewerDid) : Promise.resolve(false),
+  ]);
 
   if (record.notFound) {
-    return { ...record, workStatus: null, candidates: [], canCurate, application };
+    return { ...record, workStatus: null, candidates: [], canCurate, application, controversial, canLabel };
   }
 
-  const editionUri = editionUriForRkey(params.rkey, PUBLISHER_DID);
   const workStatus = await getEditionWorkStatus(editionUri, locals.viewer?.did ?? null);
 
   // Offer near matches by title so linking does not require pasting a URI.
@@ -39,7 +44,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
     }
   }
 
-  return { ...record, workStatus, candidates, canCurate, application };
+  return { ...record, workStatus, candidates, canCurate, application, controversial, canLabel };
 };
 
 async function castVote(
@@ -85,6 +90,19 @@ async function castVote(
 export const actions: Actions = {
   linkWork: (event) => castVote('link', event),
   unlinkWork: (event) => castVote('unlink', event),
+
+  /** Flip the `controversial` label on this edition record (administrators only). */
+  toggleControversial: async ({ params, locals }) => {
+    if (!locals.viewer) redirect(303, `/login?next=/editions/${params.rkey}`);
+    if (!(await isAdministrator(locals.viewer.did))) {
+      return fail(403, { error: 'Only administrators can label catalog records.' });
+    }
+    const uri = editionUriForRkey(params.rkey, PUBLISHER_DID);
+    const currently = await hasLabel(uri, CONTROVERSIAL_LABEL);
+    if (currently) await clearLabel(uri, CONTROVERSIAL_LABEL);
+    else await grantLabel(uri, CONTROVERSIAL_LABEL);
+    return { ok: true, controversial: !currently };
+  },
 
   /** Ask an admin to issue the librarian label to the signed-in account. */
   requestLibrarian: async ({ locals, request }) => {

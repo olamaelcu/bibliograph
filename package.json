@@ -13,7 +13,13 @@
     "lex:gen": "pnpm --filter bibliograph-service lex:gen",
     "verify:lex": "pnpm --filter bibliograph-service verify:lex",
     "db:generate": "pnpm --filter bibliograph-service db:generate",
-    "db:migrate": "pnpm --filter bibliograph-service db:migrate"
+    "db:migrate": "pnpm --filter bibliograph-service db:migrate",
+    "pkg:payload": "mise run package-payload",
+    "pkg:deb": "mise run package-deb",
+    "pkg:verify-deb": "mise run package-verify-deb",
+    "pkg:deploy": "mise run deploy-deb",
+    "pkg:tls": "mise run enable-tls",
+    "pkg:publish-lex": "mise run publish-lex"
   },
   "engines": {
     "node": "26.3.0"

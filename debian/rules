@@ -1,0 +1,73 @@
+#!/usr/bin/make -f
+# The payload (SvelteKit build, the TypeScript sources tsx executes, the
+# generated lexicon modules, the drizzle migrations, and a production-only
+# node_modules tree) is staged at ./packaging/payload/app by
+# `packaging/payload.sh`. Nothing in this rules file compiles anything: the
+# payload is built on the packaging host, which is safe here because the tree
+# contains no native addons. The only ELF object shipped is esbuild's bundled
+# binary, which arrives as a prebuilt per-architecture download from the npm
+# registry.
+#
+# Debian 12's debhelper is 13.11, where dh_installsysusers already exists but
+# is NOT part of the default sequence, so it has to be called explicitly.
+# Without it the "bibliograph" user is never created and no unit can start.
+
+# Note: debhelper 13.24 echoes every dh_install/dh_link command regardless of
+# this value — DH_VERBOSE=0 is accepted but does not silence it. The lever that
+# actually works is `dh $@ --quiet` (silences the per-command echo, not errors);
+# it is not wired up here because the output is harmless, just long.
+export DH_VERBOSE = 0
+
+PAYLOAD := packaging/payload/app
+
+%:
+	dh $@
+
+override_dh_auto_configure override_dh_auto_build override_dh_auto_test:
+	@echo "skipped: payload is prebuilt by 'packaging/payload.sh'"
+
+execute_after_dh_install:
+	dh_installsysusers
+
+override_dh_auto_install:
+	test -d $(PAYLOAD)
+	install -d debian/bibliograph/usr/lib/bibliograph
+	cp -a $(PAYLOAD)/. debian/bibliograph/usr/lib/bibliograph/
+	install -D -m 0644 debian/bibliograph.env \
+		debian/bibliograph/etc/bibliograph/bibliograph.env
+	install -D -m 0644 debian/bibliograph-platform.nginx \
+		debian/bibliograph/etc/nginx/sites-available/bibliograph-platform
+	# Template the postinst renders the nginx upstream from, using the
+	# bibliograph/port debconf answer.
+	install -D -m 0644 debian/bibliograph-upstream.conf.in \
+		debian/bibliograph/usr/share/bibliograph/bibliograph-upstream.conf.in
+	# Additional units for the same package. dh_installsystemd(1)
+	# "operates on all unit files installed by a package", so dropping them
+	# here is enough to get the enable/start/stop/restart blocks generated.
+	install -d debian/bibliograph/usr/lib/systemd/system
+	install -m 0644 debian/bibliograph-worker.service \
+		debian/bibliograph-migrate.service \
+		debian/bibliograph/usr/lib/systemd/system/
+
+override_dh_installsystemd:
+	# The migrator is pulled in by Requires= from the two long-running units
+	# and re-runs on every start, which is what applies new migrations on
+	# upgrade. Enabling or starting it on its own would only mean a no-op
+	# oneshot with no database to talk to yet.
+	dh_installsystemd -Xbibliograph-migrate.service
+	dh_installsystemd --no-enable --no-start bibliograph-migrate.service
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0640 debian/bibliograph/etc/bibliograph/bibliograph.env
+	find debian/bibliograph/usr/lib/bibliograph -type d -exec chmod 0755 {} +
+
+# The payload tree is installed wholesale by override_dh_auto_install; dh_missing
+# would otherwise report every file in it as unaccounted for.
+override_dh_missing:
+	@echo "skipped: payload tree is installed wholesale by override_dh_auto_install"
+
+# esbuild's binary is the only ELF object in the tree. It is not on the system
+# loader path, so dpkg-shlibdeps cannot resolve its dependencies.
+override_dh_strip override_dh_shlibdeps override_dh_makeshlibs:
+	@echo "skipped: payload ships as built"

@@ -1,0 +1,8 @@
+bibliograph (0.1.0) unstable; urgency=medium
+
+  * Initial Debian package. Replaces the Dokku/OCI delivery path with a
+    native package: payload under /usr/lib/bibliograph, systemd units for the
+    web process, the TAP worker and the migrator, a sysusers entry, and a
+    conffile at /etc/bibliograph/bibliograph.env.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 22 Oct 2026 00:00:00 +0000

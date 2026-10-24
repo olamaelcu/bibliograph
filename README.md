@@ -101,6 +101,41 @@ HTTP to SvelteKit, and keeps upgrades for the label stream. `pnpm start`, the
 `vite dev` does not run `server.ts`, so the stream only exists in a built server:
 run `pnpm build && pnpm start` to exercise it locally.
 
+### Label vocabulary
+
+All values live in `src/lib/server/labeler/vocabulary.ts`, shaped like
+`com.atproto.label.defs#labelValueDefinition` so they can be published in a
+labeler service record without translation. Every write is validated against it:
+an undeclared value, or a value applied to the wrong subject kind, throws before
+anything is signed.
+
+| Label | Subject | Behavior | Issued by |
+| --- | --- | --- | --- |
+| `librarian` | account | `none`/`inform`, default ignore | admin approval of an application |
+| `senior-librarian` | account | `none`/`inform`, default ignore | `pnpm labels:seniority`, automatically |
+| `administrator` | account | `none`/`inform`, default ignore | an existing administrator |
+| `controversial` | record (edition/work) | `none`/`inform`, default warn | administrators, from the record page |
+
+Credential labels deliberately never blur content: they say nothing about what
+the subject contains. `controversial` defaults to `warn` so the banner is visible
+without every subscriber configuring it — the point is that a reader sees the
+context.
+
+`senior-librarian` requires **both** tenure and contribution, since applying and
+then going quiet for a year should not earn it:
+`SENIOR_LIBRARIAN_MIN_DAYS` (default 365) since the first librarian label, and
+`SENIOR_LIBRARIAN_MIN_VOTES` (default 10) votes cast. Run
+`pnpm --filter bibliograph-service labels:seniority --dry-run` to see the
+evaluation without writing anything; the job is idempotent, so schedule it daily.
+
+### Administrators
+
+The admin view is gated by the `administrator` label, so anyone holding it —
+including accounts granted long after deployment — can review the queue without a
+redeploy. `ADMIN_DIDS` remains as a bootstrap only: it is the way to grant the
+first administrator on a fresh deployment, and to recover if a label is ever lost.
+An account in that list stays an admin even if the label is withdrawn.
+
 ### Requesting access
 
 A signed-in account without the label sees a request control on any edition page.

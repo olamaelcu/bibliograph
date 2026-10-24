@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+#MISE description="Validate the built .deb: layout, conffiles, maintainer scripts, units, nginx wiring"
+# Validate the built .deb: layout, conffiles, maintainer scripts, units, nginx
+# wiring. Every check corresponds to something that has actually broken a
+# Debian package: a missing conffile, a unit that never gets enabled, a missing
+# sysusers entry (so the service user does not exist), or an nginx site that
+# hardcodes a port instead of using the generated upstream.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+DEB="${1:-}"
+if [[ -z "$DEB" ]]; then
+  DEB="$(ls -1 dist/bibliograph_*.deb 2>/dev/null | head -1 || true)"
+fi
+if [[ -z "$DEB" || ! -f "$DEB" ]]; then
+  echo "ERROR: no .deb found; run 'packaging/build-deb.sh' first" >&2
+  exit 1
+fi
+echo "==> Inspecting $DEB"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+ok() { echo "  ok: $*"; }
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+CONTENTS="$(dpkg-deb --contents "$DEB")"
+dpkg-deb --fsys-tarfile "$DEB" > "$TMP/fsys.tar"
+dpkg-deb --ctrl-tarfile "$DEB" > "$TMP/ctrl.tar"
+
+extract() { tar -xOf "$TMP/fsys.tar" "./$1"; }
+
+echo "--- package metadata"
+dpkg-deb --info "$DEB" | sed -n '1,12p'
+
+echo "--- payload layout"
+for required in \
+  usr/lib/bibliograph/packages/bibliograph-service/build/handler.js \
+  usr/lib/bibliograph/packages/bibliograph-service/server.ts \
+  usr/lib/bibliograph/packages/bibliograph-service/worker.ts \
+  usr/lib/bibliograph/packages/bibliograph-service/src/lib/server/db/migrate.ts \
+  usr/lib/bibliograph/packages/bibliograph-service/drizzle/meta/_journal.json \
+  usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx \
+  etc/bibliograph/bibliograph.env \
+  etc/nginx/sites-available/bibliograph-platform \
+  usr/lib/systemd/system/bibliograph.service \
+  usr/lib/systemd/system/bibliograph-worker.service \
+  usr/lib/systemd/system/bibliograph-migrate.service \
+  usr/lib/sysusers.d/bibliograph.conf \
+  usr/share/bibliograph/bibliograph-upstream.conf.in
+do
+  grep -qF " ./$required" <<<"$CONTENTS" || fail "missing $required"
+done
+ok "all expected paths present"
+
+# The build toolchain must not have leaked in.
+# typescript is deliberately absent from this list: it is a genuine transitive
+# production dependency of cosmiconfig (graphile-worker) and valibot, so its
+# presence proves nothing about the devDependency set.
+for forbidden in '/node_modules/.pnpm/vite@' '/node_modules/.pnpm/drizzle-kit@' \
+                 '/node_modules/.pnpm/svelte-check@' '/node_modules/.pnpm/@sveltejs+kit@'; do
+  if grep -qF "$forbidden" <<<"$CONTENTS"; then
+    fail "dev dependency leaked into the package: $forbidden"
+  fi
+done
+ok "no build toolchain in the package"
+
+echo "--- ownership (everything must be root-owned)"
+if awk '{print $2}' <<<"$CONTENTS" | grep -qv '^root/root$'; then
+  awk '$2 !~ /^root\/root$/ {print}' <<<"$CONTENTS" | head -5
+  fail "non-root ownership in the package"
+fi
+ok "root-owned"
+
+echo "--- conffiles"
+CONFFILES="$(tar -xOf "$TMP/ctrl.tar" ./conffiles)"
+grep -qxF '/etc/bibliograph/bibliograph.env' <<<"$CONFFILES" || fail "bibliograph.env is not a conffile"
+grep -qxF '/etc/nginx/sites-available/bibliograph-platform' <<<"$CONFFILES" \
+  || fail "the nginx site file is not a conffile"
+# The site must be staged, never pre-enabled: an enabled vhost whose
+# ssl_certificate files are absent makes `nginx -t` fail globally and keeps
+# nginx from starting after a reboot, taking every other vhost down.
+if grep -qF " ./etc/nginx/sites-enabled/" <<<"$CONTENTS"; then
+  fail "the package ships a file directly into sites-enabled; it must be staged in sites-available and enabled by the postinst"
+fi
+mode="$(awk '$6 == "./etc/bibliograph/bibliograph.env" {print $1}' <<<"$CONTENTS")"
+[[ "$mode" == "-rw-r-----" ]] || fail "bibliograph.env mode is $mode, expected -rw-r----- (0640)"
+ok "conffiles registered, env is 0640"
+
+echo "--- dependencies"
+DEPS="$(dpkg-deb -f "$DEB" Depends)"
+grep -qE '(^|[,] *)nginx( |$|,)' <<<"$DEPS" || fail "package does not depend on nginx (Depends: $DEPS)"
+grep -qE 'debconf' <<<"$DEPS" || fail "package does not depend on debconf (Depends: $DEPS)"
+grep -qE 'nodejs \(>= 22' <<<"$DEPS" || fail "package does not require nodejs >= 22 (Depends: $DEPS)"
+ok "nginx, debconf and a versioned nodejs dependency"
+
+echo "--- nginx integration"
+NGINX_SITE="$(extract etc/nginx/sites-available/bibliograph-platform)"
+grep -qF 'proxy_pass         http://bibliograph_backend;' <<<"$NGINX_SITE" \
+  || fail "site does not proxy to the generated bibliograph_backend upstream"
+if grep -qE 'proxy_pass +http://127\.0\.0\.1' <<<"$NGINX_SITE"; then
+  fail "site hardcodes a loopback port instead of using the generated upstream"
+fi
+grep -qF 'server_name biblio.livtet.olamaelcu.net' <<<"$NGINX_SITE" \
+  || fail "site does not name biblio.livtet.olamaelcu.net"
+grep -qF 'client_max_body_size 100m' <<<"$NGINX_SITE" \
+  || fail "site does not raise client_max_body_size to 100m"
+# The label stream is the reason the package runs server.ts instead of
+# build/index.js; without these the WS handshake never survives the proxy.
+grep -qF 'location = /xrpc/com.atproto.label.subscribeLabels' <<<"$NGINX_SITE" \
+  || fail "site has no location block for the label stream"
+grep -qF 'proxy_set_header Upgrade' <<<"$NGINX_SITE" || fail "label stream does not forward Upgrade"
+grep -qF 'proxy_http_version 1.1' <<<"$NGINX_SITE" || fail "label stream does not use HTTP/1.1"
+ok "upstream indirection, body size, and WebSocket upgrade."
+
+echo "--- maintainer scripts"
+SCRIPTS="$(tar -tf "$TMP/ctrl.tar")"
+for s in ./postinst ./prerm ./postrm; do
+  grep -qxF "$s" <<<"$SCRIPTS" || fail "missing maintainer script $s"
+done
+POSTINST="$(tar -xOf "$TMP/ctrl.tar" ./postinst)"
+# dh_installsystemd generates these; their absence means no unit is ever
+# enabled or started on install.
+for needle in 'deb-systemd-helper enable' 'deb-systemd-invoke' 'systemd-sysusers'; do
+  grep -qF "$needle" <<<"$POSTINST" || fail "postinst is missing '$needle'"
+done
+grep -qF '/etc/bibliograph/port.conf' <<<"$POSTINST" || fail "postinst does not render port.conf"
+grep -qF '/etc/nginx/conf.d/bibliograph-upstream.conf' <<<"$POSTINST" \
+  || fail "postinst does not render the nginx upstream"
+grep -qF 'nginx -t' <<<"$POSTINST" || fail "postinst does not validate the nginx config before reloading"
+grep -qF 'NOT reloaded' <<<"$POSTINST" || fail "postinst does not warn when the nginx config is invalid"
+# Fail-safe enablement: only symlink the site when its certificate is present.
+grep -qF 'sites-available/bibliograph-platform' <<<"$POSTINST" \
+  || fail "postinst does not reference the staged site in sites-available"
+grep -qF 'no certificate at' <<<"$POSTINST" \
+  || fail "postinst does not explain why an uncertificated site is left disabled"
+grep -qE 'ln -s \.\./sites-available/bibliograph-platform' <<<"$POSTINST" \
+  || fail "postinst does not enable the site once a certificate exists"
+PRERM="$(tar -xOf "$TMP/ctrl.tar" ./prerm)"
+grep -qF 'deb-systemd-invoke stop' <<<"$PRERM" || fail "prerm does not stop the unit"
+ok "maintainer scripts wire systemd, sysusers and nginx"
+
+echo "--- debconf wiring"
+grep -qxF './templates' <<<"$SCRIPTS" || fail "package ships no debconf templates"
+grep -qxF './config' <<<"$SCRIPTS" || fail "package ships no debconf config script"
+TEMPLATES="$(tar -xOf "$TMP/ctrl.tar" ./templates)"
+grep -qF 'Template: bibliograph/port' <<<"$TEMPLATES" || fail "missing bibliograph/port template"
+grep -qF 'Default: 5000' <<<"$TEMPLATES" || fail "bibliograph/port has no default"
+UPSTREAM_IN="$(extract usr/share/bibliograph/bibliograph-upstream.conf.in)"
+grep -qF 'upstream bibliograph_backend' <<<"$UPSTREAM_IN" || fail "upstream template is missing"
+grep -qF '127.0.0.1:@PORT@' <<<"$UPSTREAM_IN" || fail "upstream template has no @PORT@ placeholder"
+ok "debconf question, config script and upstream template"
+
+echo "--- systemd units"
+# Extracted under their real unit names so Requires= cross-references resolve
+# when systemd-analyze runs with SYSTEMD_UNIT_PATH pointed at $TMP.
+WEB="$TMP/bibliograph.service"
+WORKER="$TMP/bibliograph-worker.service"
+MIGRATE="$TMP/bibliograph-migrate.service"
+extract usr/lib/systemd/system/bibliograph.service > "$WEB"
+extract usr/lib/systemd/system/bibliograph-worker.service > "$WORKER"
+extract usr/lib/systemd/system/bibliograph-migrate.service > "$MIGRATE"
+
+grep -qF 'StateDirectory=bibliograph' "$WEB" || fail "web unit does not declare StateDirectory"
+grep -qF 'EnvironmentFile=-/etc/bibliograph/bibliograph.env' "$WEB" \
+  || fail "web unit does not read the conffile"
+grep -qF 'EnvironmentFile=-/etc/bibliograph/port.conf' "$WEB" \
+  || fail "web unit does not read the debconf-rendered port"
+grep -qF 'tsx server.ts' "$WEB" || fail "web unit does not run server.ts"
+grep -qF 'Requires=bibliograph-migrate.service' "$WEB" \
+  || fail "web unit does not require the migrator"
+
+grep -qF 'tsx worker.ts' "$WORKER" || fail "worker unit does not run worker.ts"
+grep -qF 'Requires=bibliograph-migrate.service' "$WORKER" \
+  || fail "worker unit does not require the migrator"
+
+grep -qF 'Type=oneshot' "$MIGRATE" || fail "migrate unit is not oneshot"
+grep -qF 'StartLimitBurst=' "$WORKER" \
+  || fail "worker unit has no start limit; an unconfigured TAP would restart-loop"
+grep -qF 'migrate.ts' "$MIGRATE" || fail "migrate unit does not run the migrator"
+if grep -qF 'RemainAfterExit=yes' "$MIGRATE"; then
+  fail "migrate unit sets RemainAfterExit, so upgrades would never re-run it"
+fi
+grep -qF 'WantedBy=multi-user.target' "$WEB" || fail "web unit is not installable"
+grep -qF 'WantedBy=multi-user.target' "$WORKER" || fail "worker unit is not installable"
+
+if command -v systemd-analyze >/dev/null 2>&1; then
+  # All three units are verified together with SYSTEMD_UNIT_PATH pointing at the
+  # extraction dir, so Requires=bibliograph-migrate.service resolves instead of
+  # reporting a missing unit. A trailing colon keeps the system paths.
+  SYSTEMD_UNIT_PATH="$TMP:" systemd-analyze verify \
+    "$WEB" "$WORKER" "$MIGRATE" \
+    > "$TMP/verify.log" 2>&1 || true
+  # ExecStart points into /usr/lib/bibliograph, absent on the build host.
+  if grep -vE 'is not executable|Command .* is not executable' "$TMP/verify.log" \
+     | grep -v '^[[:space:]]*$' | grep -q .; then
+    cat "$TMP/verify.log"
+    fail "systemd-analyze reported unexpected problems"
+  fi
+  ok "units verify (only the expected missing-ExecStart warning)"
+else
+  echo "  SKIPPED: systemd-analyze not installed"
+fi
+
+echo "--- tsx entrypoint is executable"
+awk '$6 == "./usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx" {print $1}' <<<"$CONTENTS" \
+  | grep -q 'x' || fail "node_modules/.bin/tsx is not executable in the package"
+ok "tsx is executable"
+
+echo "--- lintian"
+if command -v lintian >/dev/null 2>&1; then
+  lintian "$DEB" || echo "  (lintian reported findings above)"
+else
+  echo "  SKIPPED: lintian is not installed (apt install lintian)"
+fi
+
+echo "==> $DEB passed the structural checks"

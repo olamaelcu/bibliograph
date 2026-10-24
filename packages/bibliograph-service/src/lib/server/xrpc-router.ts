@@ -7,7 +7,6 @@ import {
   ComAtprotoLabelQueryLabels,
   ComAtprotoRepoDescribeRepo,
   ComAtprotoRepoGetRecord,
-  ComAtprotoServerDescribeServer,
   ComAtprotoSyncGetBlocks,
   ComAtprotoSyncGetLatestCommit,
   ComAtprotoSyncGetRecord,
@@ -400,19 +399,13 @@ router.addQuery(ComAtprotoSyncGetRepoStatus.mainSchema, {
   },
 });
 
-router.addQuery(ComAtprotoServerDescribeServer.mainSchema, {
-  async handler() {
-    return json({
-      availableUserDomains: [PUBLISHER_HOSTNAME],
-      inviteCodeRequired: true,
-      did: PUBLISHER_DID,
-      links: {
-        privacyPolicy: 'https://livtet.olamaelcu.net/privacy',
-        termsOfService: 'https://livtet.olamaelcu.net/terms',
-      },
-    } as unknown as ComAtprotoServerDescribeServer.$output);
-  },
-});
+// com.atproto.server.describeServer is deliberately NOT implemented.
+//
+// There is no account surface here: every write path (createAccount,
+// createSession, createRecord, uploadBlob) is absent, so answering
+// describeServer would advertise registration that cannot succeed. Returning
+// "not found" is the honest signal; the DID's #atproto_pds entry exists for
+// lexicon resolution, not for account operations.
 
 router.addQuery(ComAtprotoSyncGetLatestCommit.mainSchema, {
   async handler({ params }) {

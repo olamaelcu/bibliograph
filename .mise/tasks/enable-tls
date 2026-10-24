@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+#MISE description="Obtain a TLS certificate for the app host, then enable the packaged nginx site"
+#
+# Run once per host, after `mise run deploy-deb`. Idempotent: an existing valid
+# certificate is left alone, and the site is re-enabled if it was disabled.
+#
+# Why this is a separate step rather than part of the package: the packaged
+# site references ssl_certificate paths that only exist after issuance, so
+# enabling it before the certificate exists makes `nginx -t` fail globally and
+# keeps nginx from starting after a reboot — taking every other vhost on the
+# host with it. The package therefore ships the site disabled and the postinst
+# enables it once the certificate is there; this task is what puts the
+# certificate there.
+#
+# The host already runs certbot with authenticator=webroot and
+# webroot_path=/var/lib/certbot, and its :80 default server returns 444 for
+# unknown names. Issuance therefore needs a temporary :80 server block for this
+# name only, which is created, validated and removed here.
+#
+# Overridable:
+#   DEPLOY_HOST      ssh destination        (default veve@lescayes)
+#   DEPLOY_HOSTNAME  public hostname        (default biblio.livtet.olamaelcu.net)
+#   DEPLOY_PACKAGE   package to reconfigure (default bibliograph)
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HOST="${DEPLOY_HOST:-veve@lescayes}"
+NAME="${DEPLOY_HOSTNAME:-biblio.livtet.olamaelcu.net}"
+PKG="${DEPLOY_PACKAGE:-bibliograph}"
+WEBROOT=/var/lib/certbot
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+say "Target: $HOST  hostname $NAME"
+
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo -n true' 2>/dev/null \
+  || die "cannot reach $HOST with passwordless sudo"
+
+PUBLIC_A="$(dig +short "$NAME" A | head -1)"
+[[ -n "$PUBLIC_A" ]] || die "$NAME has no A record; add it before requesting a certificate"
+say "DNS: $NAME -> $PUBLIC_A"
+
+ssh -o BatchMode=yes "$HOST" "sudo -n bash -s" <<EOF
+set -euo pipefail
+cd /
+NAME="$NAME"
+PKG="$PKG"
+WEBROOT="$WEBROOT"
+ACME_CONF=/etc/nginx/conf.d/zz-$PKG-acme.conf
+SITE_AVAILABLE=/etc/nginx/sites-available/$PKG-platform
+SITE_ENABLED=/etc/nginx/sites-enabled/$PKG-platform
+
+# ---- 0. This host must be the record's target ------------------------------
+here="\$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p' | head -1)"
+if [ -n "\$here" ] && [ "\$here" != "$PUBLIC_A" ]; then
+  echo "ERROR: $NAME resolves to $PUBLIC_A but this host is \$here" >&2
+  exit 1
+fi
+
+command -v certbot >/dev/null || { echo "ERROR: certbot is not installed" >&2; exit 1; }
+command -v nginx   >/dev/null || { echo "ERROR: nginx is not installed" >&2; exit 1; }
+
+# ---- 1. Certificate --------------------------------------------------------
+if [ -f "/etc/letsencrypt/live/\$NAME/fullchain.pem" ] &&
+   openssl x509 -checkend \$((30*24*3600)) -noout -in "/etc/letsencrypt/live/\$NAME/fullchain.pem" >/dev/null 2>&1; then
+  echo "    certificate for \$NAME is present and valid for >30 days; skipping issuance"
+else
+  echo "    issuing certificate for \$NAME (webroot \$WEBROOT)"
+  # Temporary :80 block so the HTTP-01 challenge has somewhere to land. The
+  # packaged site has this server block too, but enabling the whole file now
+  # would fail 'nginx -t' on the missing 443 certificate.
+  cat > "\$ACME_CONF" <<CONF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name \$NAME;
+    location /.well-known/acme-challenge/ {
+        root \$WEBROOT;
+    }
+    location / {
+        return 301 https://\\\$host\\\$request_uri;
+    }
+}
+CONF
+  trap 'rm -f "\$ACME_CONF"' EXIT
+  nginx -t
+  systemctl reload nginx
+  certbot certonly --webroot -w "\$WEBROOT" -d "\$NAME" \\
+    --key-type ecdsa --non-interactive --agree-tos
+  rm -f "\$ACME_CONF"
+  trap - EXIT
+  nginx -t
+  systemctl reload nginx
+fi
+
+# ---- 2. Let the package enable the site ------------------------------------
+# The postinst is what symlinks sites-available into sites-enabled, and it only
+# does so when the certificate exists; running it again is the intended hook.
+echo "    dpkg-reconfigure \$PKG"
+dpkg-reconfigure -f noninteractive "\$PKG"
+
+# ---- 3. Verify -------------------------------------------------------------
+if [ -L "\$SITE_ENABLED" ] || [ -e "\$SITE_ENABLED" ]; then
+  echo "    site enabled: \$SITE_ENABLED"
+else
+  echo "ERROR: \$SITE_ENABLED still missing after reconfigure" >&2
+  exit 1
+fi
+nginx -t
+systemctl reload nginx
+
+code=000
+for _ in \$(seq 1 20); do
+  code=\$(curl -s -o /dev/null -w '%{http_code}' -m 10 \\
+    --resolve "\$NAME:443:127.0.0.1" "https://\$NAME/health" || true)
+  [ "\$code" = "200" ] && break
+  sleep 1
+done
+echo "    https://\$NAME/health (via loopback) -> \$code"
+[ "\$code" = "200" ] || { echo "ERROR: the vhost is not serving" >&2; exit 1; }
+
+echo "    certificate:"
+openssl x509 -in "/etc/letsencrypt/live/\$NAME/fullchain.pem" -noout -subject -dates -ext subjectAltName 2>/dev/null | sed 's/^/      /'
+EOF
+
+say "Checking $NAME from here"
+curl -s -o /dev/null -w "    https://$NAME/health -> %{http_code}\n" -m 20 "https://$NAME/health"
+curl -s -o /dev/null -w "    https://$NAME/.well-known/did.json -> %{http_code}\n" -m 20 "https://$NAME/.well-known/did.json"
+curl -s -o /dev/null -w "    http://$NAME/ -> %{http_code} (expect 301)\n" -m 20 "http://$NAME/"
+
+say "Serving at https://$NAME"

@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+#MISE description="Install the built .deb on a remote host over ssh (default veve@lescayes)"
+#MISE depends=["package-deb"]
+#
+# Installs dist/bibliograph_*.deb on DEPLOY_HOST and provisions what the package
+# cannot do by itself: PostgreSQL, the application role and database, and
+# DATABASE_URL in the conffile. Idempotent — re-running upgrades in place and
+# leaves an existing DATABASE_URL alone.
+#
+# Order matters: the conffile is written only *after* the package is installed.
+# Writing it first makes dpkg treat it as an existing conffile and keep it
+# (--force-confold), which silently discards the shipped defaults.
+#
+# Overridable:
+#   DEPLOY_HOST   ssh destination              (default veve@lescayes)
+#   DEPLOY_PORT   application port for debconf (default 5000)
+#   DEPLOY_DB     database name                (default bibliograph)
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HOST="${DEPLOY_HOST:-veve@lescayes}"
+PORT_ANSWER="${DEPLOY_PORT:-5000}"
+DB_NAME="${DEPLOY_DB:-bibliograph}"
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+DEB="$(ls -1 dist/bibliograph_*.deb 2>/dev/null | head -1 || true)"
+[[ -n "$DEB" && -f "$DEB" ]] || die "no .deb in dist/; run 'mise run package-deb'"
+DEB_NAME="$(basename "$DEB")"
+DEB_SHA="$(sha256sum "$DEB" | cut -d' ' -f1)"
+REMOTE_DEB="/tmp/$DEB_NAME"
+
+say "Target: $HOST  ($DEB_NAME)"
+
+# ---------------------------------------------------------------- preflight ---
+say "Preflight: ssh and sudo"
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo -n true' 2>/dev/null \
+  || die "cannot reach $HOST with passwordless sudo (ssh -o BatchMode=yes $HOST 'sudo -n true')"
+
+REMOTE_ARCH="$(ssh -o BatchMode=yes "$HOST" 'dpkg --print-architecture')"
+DEB_ARCH="$(dpkg-deb -f "$DEB" Architecture)"
+[[ "$REMOTE_ARCH" == "$DEB_ARCH" ]] \
+  || die "architecture mismatch: package is $DEB_ARCH, host is $REMOTE_ARCH"
+
+REMOTE_NODE="$(ssh -o BatchMode=yes "$HOST" 'node --version 2>/dev/null || echo none')"
+case "$REMOTE_NODE" in
+  none) die "no node on $HOST; install NodeSource node_22.x or newer first" ;;
+  v*)
+    major="${REMOTE_NODE#v}"; major="${major%%.*}"
+    [[ "$major" -ge 22 ]] || die "node $REMOTE_NODE on $HOST; need >= 22"
+    ;;
+  *) die "unexpected node version '$REMOTE_NODE' on $HOST" ;;
+esac
+
+say "Preflight: node $REMOTE_NODE, arch $REMOTE_ARCH, nginx and capacity"
+# Runs as root: nginx lives in /usr/sbin, which is not on a normal user's PATH.
+ssh -o BatchMode=yes "$HOST" 'sudo -n bash -s' <<EOF
+set -e
+cd /
+command -v nginx >/dev/null || { echo "missing nginx" >&2; exit 1; }
+avail_kb=\$(awk '/^MemAvailable:/ {print \$2}' /proc/meminfo)
+if [ "\${avail_kb:-0}" -lt 350000 ]; then
+  echo "WARNING: only \$((avail_kb/1024)) MiB available; postgres + 2 node processes may OOM" >&2
+fi
+df -Pk / | awk 'NR==2 && \$4 < 3000000 {print "WARNING: low disk on /: " \$4/1024 " MiB"}' >&2 || true
+if ! getent hosts biblio.livtet.olamaelcu.net >/dev/null 2>&1; then
+  echo "NOTE: biblio.livtet.olamaelcu.net does not resolve; the nginx site will be staged but not enabled" >&2
+fi
+EOF
+
+# ------------------------------------------------------------------- upload ---
+say "Uploading to $HOST:$REMOTE_DEB"
+scp -q "$DEB" "$HOST:$REMOTE_DEB"
+REMOTE_SHA="$(ssh -o BatchMode=yes "$HOST" "sha256sum '$REMOTE_DEB' | cut -d' ' -f1")"
+[[ "$REMOTE_SHA" == "$DEB_SHA" ]] || die "checksum mismatch after upload ($REMOTE_SHA != $DEB_SHA)"
+
+# --------------------------------------------------- install and provision ---
+# One remote script so the generated password stays in a shell variable: the
+# database is created before the package (so the units can connect on their
+# first start) but the conffile is written only afterwards.
+say "Installing $DEB_NAME and provisioning PostgreSQL"
+ssh -o BatchMode=yes "$HOST" "sudo -n bash -s" <<EOF
+set -euo pipefail
+cd /
+export DEBIAN_FRONTEND=noninteractive
+
+ENV_FILE=/etc/bibliograph/bibliograph.env
+
+# Remembered before the install so that restoring a replaced conffile does not
+# throw away working credentials (and force a password rotation).
+old_db=""
+if [ -f "\$ENV_FILE" ]; then
+  old_db="\$(sed -n 's/^DATABASE_URL=//p' "\$ENV_FILE" | head -1)"
+fi
+
+# ---- 1. PostgreSQL ---------------------------------------------------------
+if ! command -v psql >/dev/null 2>&1; then
+  echo "    installing postgresql"
+  apt-get update -qq
+  apt-get install -y -qq postgresql >/dev/null
+fi
+systemctl enable --now postgresql >/dev/null 2>&1 || true
+
+# ---- 2. Install the package ------------------------------------------------
+echo "bibliograph bibliograph/port string $PORT_ANSWER" | debconf-set-selections
+
+# A conffile that is not the shipped one (e.g. left behind by an older run of
+# this task) would be preserved by --force-confold, silently dropping defaults
+# such as LOG_DIR. Detect that and take the packaged file instead.
+# dpkg only prompts (or applies a --force-conf* policy) when the packaged
+# conffile differs from the one in the previously installed version. Here it
+# does not — the file is identical between builds — so dpkg treats the on-disk
+# copy as user-modified and leaves it alone, whatever the policy says. The
+# packaged file is therefore restored explicitly below; apt itself only needs to
+# preserve local edits on a real upgrade.
+echo "    dpkg: installing $REMOTE_DEB"
+apt-get install -y -qq --reinstall \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  "$REMOTE_DEB" || {
+    echo "ERROR: installing $REMOTE_DEB failed" >&2
+    exit 1
+  }
+
+# A conffile that is not the packaged one (left behind by an earlier run of this
+# task, or written by hand) would keep the units broken: without the shipped
+# defaults there is no LOG_DIR, and the logger tries to mkdir ./logs inside a
+# read-only payload tree. install(1), not dpkg, is what fixes that.
+if ! grep -q 'Bibliograph runtime configuration' "\$ENV_FILE"; then
+  conf_tmp="\$(mktemp -d)"
+  dpkg-deb --fsys-tarfile "$REMOTE_DEB" \\
+    | tar -x -C "\$conf_tmp" ./etc/bibliograph/bibliograph.env
+  install -m 0640 -o root -g root \\
+    "\$conf_tmp/etc/bibliograph/bibliograph.env" "\$ENV_FILE"
+  rm -rf "\$conf_tmp"
+  echo "    restored the packaged conffile over a foreign \$ENV_FILE"
+fi
+
+rm -f "$REMOTE_DEB"
+
+# ---- 3. Database role, database and DATABASE_URL ---------------------------
+# Decided from the *installed* conffile, so a restored conffile also gets
+# credentials written back into it.
+if [ -n "\$old_db" ] && ! grep -q '^DATABASE_URL=.\+' "\$ENV_FILE"; then
+  # The conffile was restored from the package; put the working URL back.
+  printf 'DATABASE_URL=%s\n' "\$old_db" >> "\$ENV_FILE"
+  echo "    restored DATABASE_URL from the previous conffile"
+elif grep -q '^DATABASE_URL=.\+' "\$ENV_FILE"; then
+  echo "    DATABASE_URL already configured; leaving the database alone"
+else
+  pw="\$(openssl rand -hex 24)"
+  if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_NAME'" | grep -q 1; then
+    sudo -u postgres psql -qc "ALTER ROLE \"$DB_NAME\" WITH LOGIN PASSWORD '\$pw'"
+    echo "    role '$DB_NAME' already existed; password reset"
+  else
+    sudo -u postgres psql -qc "CREATE ROLE \"$DB_NAME\" WITH LOGIN PASSWORD '\$pw'"
+    echo "    created role '$DB_NAME'"
+  fi
+  if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
+    sudo -u postgres psql -qc "CREATE DATABASE \"$DB_NAME\" OWNER \"$DB_NAME\""
+    echo "    created database '$DB_NAME'"
+  fi
+  sed -i '/^DATABASE_URL=/d' "\$ENV_FILE"
+  printf 'DATABASE_URL=postgres://%s:%s@127.0.0.1:5432/%s\n' "$DB_NAME" "\$pw" "$DB_NAME" >> "\$ENV_FILE"
+  echo "    wrote DATABASE_URL to \$ENV_FILE"
+fi
+chmod 0640 "\$ENV_FILE"; chown root:root "\$ENV_FILE"
+# Left behind by an earlier --force-confold run of this task.
+rm -f "\$ENV_FILE.dpkg-dist"
+
+# ---- 3b. OAuth client id ---------------------------------------------------
+# Without OAUTH_CLIENT_ID the app builds an ATProto *loopback* client id, which
+# requires an http://127.0.0.1 origin — unusable behind an https public origin,
+# and it fails only when someone first tries to sign in. Derive it instead.
+if ! grep -q '^OAUTH_CLIENT_ID=.\+' "\$ENV_FILE"; then
+  oauth_origin="\$(awk -F= '/^OAUTH_PUBLIC_ORIGIN=/{print substr(\$0,index(\$0,"=")+1); exit}' "\$ENV_FILE")"
+  case "\$oauth_origin" in
+    https://*)
+      sed -i '/^OAUTH_CLIENT_ID=/d' "\$ENV_FILE"
+      printf 'OAUTH_CLIENT_ID=%s/oauth-client-metadata.json\n' "\$oauth_origin" >> "\$ENV_FILE"
+      echo "    set OAUTH_CLIENT_ID=\$oauth_origin/oauth-client-metadata.json"
+      ;;
+    *)
+      echo "    note: OAUTH_CLIENT_ID unset and OAUTH_PUBLIC_ORIGIN is not https; leaving loopback mode"
+      ;;
+  esac
+fi
+
+# ---- 4. Restart so the migrator re-runs against the final config -----------
+systemctl restart bibliograph-migrate.service >/dev/null 2>&1 || true
+systemctl restart bibliograph.service
+systemctl restart bibliograph-worker.service >/dev/null 2>&1 || true
+
+# ---- 5. Wait for the socket ------------------------------------------------
+code=000
+for _ in \$(seq 1 30); do
+  code=\$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:$PORT_ANSWER/" || true)
+  [ "\$code" != "000" ] && break
+  sleep 1
+done
+echo "    http 127.0.0.1:$PORT_ANSWER -> \$code"
+EOF
+
+# ------------------------------------------------------------ lex publish --
+# Only meaningful once ATP_SIGNING_KEY exists: the repo is signed with it, and
+# its public half is what the DID document publishes as #atproto.
+if ssh -o BatchMode=yes "$HOST" 'sudo -n grep -q "^ATP_SIGNING_KEY=." /etc/bibliograph/bibliograph.env' 2>/dev/null; then
+  say "Publishing lexicon repo"
+  mise run publish-lex
+else
+  printf '    skipping lexicon publish: ATP_SIGNING_KEY is not set in the conffile\n'
+fi
+
+# ---------------------------------------------------------------- post-check --
+say "Status on $HOST"
+ssh -o BatchMode=yes "$HOST" "sudo -n bash -s" <<EOF
+set -uo pipefail
+cd /
+for u in bibliograph-migrate bibliograph bibliograph-worker; do
+  printf '    %-22s %s\n' "\$u" "\$(systemctl is-active "\$u" 2>&1)"
+done
+if [ -L /etc/nginx/sites-enabled/bibliograph-platform ] \
+   || [ -e /etc/nginx/sites-enabled/bibliograph-platform ]; then
+  echo "    nginx site        enabled"
+else
+  echo "    nginx site        staged (no certificate)"
+fi
+if nginx -t >/dev/null 2>&1; then echo "    nginx -t          ok"; else echo "    nginx -t          FAILED"; fi
+awk '/^MemTotal:|^MemAvailable:/ {printf "    %-14s %d MiB\n", \$1, \$2/1024}' /proc/meminfo
+EOF
+
+say "Installed on $HOST"
+cat <<'NEXT'
+Next steps that the package cannot do for you:
+  * DNS:      point biblio.livtet.olamaelcu.net at this host
+  * TLS:      certbot certonly --webroot -w /var/www/html -d biblio.livtet.olamaelcu.net
+              then: ln -s ../sites-available/bibliograph-platform /etc/nginx/sites-enabled/
+                    nginx -t && systemctl reload nginx
+  * Secrets:  ATP_SIGNING_KEY, ATP_LABEL_SIGNING_KEY (see scripts/gen-label-key.ts),
+              ATP_SERVICE_HOST, OAUTH_PUBLIC_ORIGIN, ADMIN_DIDS in
+              /etc/bibliograph/bibliograph.env, then: systemctl restart bibliograph
+  * TAP:      TAP_URL and TAP_ADMIN_PASSWORD, else the worker stops after 5 attempts
+NEXT

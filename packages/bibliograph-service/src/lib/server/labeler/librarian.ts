@@ -10,9 +10,17 @@ import { db as defaultDb } from '../db/index';
 import { librarianApplications } from '../db/schema';
 import type { LibrarianApplicationRow } from '../db/schema';
 import type { DbExecutor } from '../stats';
-import { LIBRARIAN_LABEL, emitLabel, revokeLabel } from './labels';
+import { clearLabel, grantLabel, hasLabel } from './labels';
+import { ADMINISTRATOR_LABEL, LIBRARIAN_LABEL } from './vocabulary';
 
-/** DIDs allowed to review the queue. Empty → nobody (fail closed). */
+/**
+ * Bootstrap allowlist for the admin queue.
+ *
+ * The durable source of truth is the `administrator` label; this env list exists
+ * so a fresh deployment can grant the first one (and so a lost label cannot lock
+ * every human out). Once an account holds the label it stays an admin even after
+ * it is removed from this list.
+ */
 export function adminDids(raw: string | undefined = process.env.ADMIN_DIDS): Set<string> {
   if (!raw) return new Set();
   return new Set(
@@ -23,9 +31,23 @@ export function adminDids(raw: string | undefined = process.env.ADMIN_DIDS): Set
   );
 }
 
-export function isAdmin(did: string | null | undefined, raw?: string): boolean {
+export function isBootstrapAdmin(did: string | null | undefined, raw?: string): boolean {
   if (!did) return false;
   return adminDids(raw).has(did);
+}
+
+/**
+ * Administrators are accounts holding the `administrator` label, plus the
+ * bootstrap allowlist. Label-first, because the label is the same mechanism the
+ * rest of the catalog gates on.
+ */
+export async function isAdministrator(
+  did: string | null | undefined,
+  db: DbExecutor = defaultDb,
+): Promise<boolean> {
+  if (!did) return false;
+  if (isBootstrapAdmin(did)) return true;
+  return hasLabel(did, ADMINISTRATOR_LABEL, db);
 }
 
 export type ApplicationStatus = LibrarianApplicationRow['status'];
@@ -90,7 +112,7 @@ export async function approveApplication(
   adminDid: string,
   db: DbExecutor = defaultDb,
 ): Promise<LibrarianApplicationRow> {
-  const label = await emitLabel({ uri: did, val: LIBRARIAN_LABEL }, db);
+  const label = await grantLabel(did, LIBRARIAN_LABEL, db);
   const [row] = await db
     .update(librarianApplications)
     .set({ status: 'approved', decidedAt: new Date(), decidedBy: adminDid })
@@ -122,7 +144,7 @@ export async function revokeLibrarian(
   adminDid: string,
   db: DbExecutor = defaultDb,
 ): Promise<LibrarianApplicationRow> {
-  await revokeLabel(did, LIBRARIAN_LABEL, db);
+  await clearLabel(did, LIBRARIAN_LABEL, db);
   const [row] = await db
     .update(librarianApplications)
     .set({ status: 'revoked', decidedAt: new Date(), decidedBy: adminDid })

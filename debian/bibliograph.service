@@ -1,0 +1,79 @@
+[Unit]
+Description=Bibliograph web application
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+# The migrator is a oneshot with no RemainAfterExit, so it re-runs every time
+# this unit starts — including the restart debhelper performs on upgrade, which
+# is what applies new migrations to an existing database.
+Requires=bibliograph-migrate.service
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
+
+# Runtime defaults. The environment file is read after these so operators can
+# override any of them without editing this unit.
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=5000
+# The container build set this to accept large backfill payloads; keep it in
+# step with client_max_body_size in the nginx site.
+Environment=BODY_SIZE_LIMIT=100M
+EnvironmentFile=-/etc/bibliograph/bibliograph.env
+
+# Written by the package postinst from the bibliograph/port debconf answer.
+# Read last so it wins over Environment= above.
+EnvironmentFile=-/etc/bibliograph/port.conf
+
+# server.ts, not build/index.js: the labeler's label stream needs the
+# http.Server "upgrade" event, which adapter-node's generated entrypoint does
+# not expose.
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx server.ts
+
+Restart=on-failure
+RestartSec=5s
+# A signal that arrives before the Node interpreter has finished loading our
+# entrypoint hits the default disposition and exits 143, which systemd would
+# otherwise record as a failure (and, with Restart=on-failure, restart). The
+# application exits 0 itself once its handlers are installed; this only covers
+# the boot window.
+SuccessExitStatus=143 130
+TimeoutStopSec=20s
+LimitNOFILE=65536
+SyslogIdentifier=bibliograph
+
+# Every piece of application state lives in PostgreSQL; the state directory
+# only holds the operator-published lexicon CAR files read by the XRPC lex
+# publisher. Logs are written by pino to per-process files under LOG_DIR.
+StateDirectory=bibliograph bibliograph/lex
+StateDirectoryMode=0750
+LogsDirectory=bibliograph
+LogsDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# V8's JIT needs writable and executable pages. Enabling this hardening option
+# makes the server crash at startup.
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target

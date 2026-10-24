@@ -1,0 +1,39 @@
+#!/bin/sh
+# Ask for the application port during preconfiguration and reject anything that
+# is not a usable TCP port. Re-asked only while the answer is invalid, and only
+# until the retry budget is exhausted so unattended installs cannot hang.
+set -e
+
+. /usr/share/debconf/confmodule
+
+# do not run on abort-* / reconfigure-without-configure invocations
+if [ "$1" != "configure" ]; then
+    exit 0
+fi
+
+tries=0
+while [ "$tries" -lt 10 ]; do
+    db_input high bibliograph/port || true
+    db_go || true
+    db_get bibliograph/port || true
+    port="$RET"
+
+    if [ -n "$port" ] && [ "$port" -ge 1 ] 2>/dev/null && [ "$port" -le 65535 ] 2>/dev/null; then
+        exit 0
+    fi
+
+    db_input critical bibliograph/port_invalid || true
+    db_go || true
+
+    # Force a fresh prompt instead of re-displaying the rejected value.
+    db_fset bibliograph/port seen false || true
+    db_set bibliograph/port "" || true
+
+    tries=$((tries + 1))
+done
+
+# Out of retries (automation with a bad preseed): fall back to the default
+# rather than leaving an unusable answer in the database.
+db_set bibliograph/port 5000 || true
+
+exit 0

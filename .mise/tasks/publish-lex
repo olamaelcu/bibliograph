@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#MISE description="Build and publish the signed lexicon repo (CAR files) on the host"
+#
+# Produces, under LEX_OUT_DIR (/var/lib/bibliograph/lex):
+#   full.car              the whole repo: commit + MST + every schema record
+#   <nsid_safe>.car       one slice per NSID: commit + MST proof + record
+#
+# This is what makes the `#atproto_pds` entry in the DID document true. The
+# canonical resolution chain is:
+#
+#   com.atproto.lexicon.resolveLexicon
+#     -> resolve did:web:biblio.livtet.olamaelcu.net
+#     -> service #atproto_pds  (this host)
+#     -> com.atproto.sync.getRecord (com.atproto.lexicon.schema/<nsid>)
+#
+# Without CARs here, every com.atproto.sync.* and com.atproto.repo.* call
+# answers 400 RepoNotFound and published lexicons are undiscoverable.
+#
+# The repo is signed with ATP_SIGNING_KEY, whose public half the DID document
+# already publishes as #atproto. Rotating that key invalidates the existing
+# CARs; re-run this task after rotating.
+#
+# The web process reads the files per request, so no restart is needed.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HOST="${DEPLOY_HOST:-veve@lescayes}"
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+say "Publishing lexicon repo on $HOST"
+
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" 'sudo -n true' 2>/dev/null \
+  || die "cannot reach $HOST with passwordless sudo"
+
+ssh -o BatchMode=yes "$HOST" 'sudo -n bash -s' <<'EOF'
+set -euo pipefail
+cd /usr/lib/bibliograph/packages/bibliograph-service
+
+[ -d lexicons ] || { echo "ERROR: payload has no lexicons/; rebuild the package" >&2; exit 1; }
+
+# The signing key lives only in the conffile; this shell is root, so it can read
+# it, and the key never appears on a command line.
+set -a
+. /etc/bibliograph/bibliograph.env
+set +a
+: "${ATP_SIGNING_KEY:?ATP_SIGNING_KEY must be set in /etc/bibliograph/bibliograph.env}"
+
+LEX_OUT_DIR="${LEX_OUT_DIR:-/var/lib/bibliograph/lex}"
+export LEX_OUT_DIR
+install -d -o bibliograph -g bibliograph -m 0750 "$LEX_OUT_DIR"
+
+echo "    signing key: set (${#ATP_SIGNING_KEY} hex chars)"
+echo "    building into $LEX_OUT_DIR"
+./node_modules/.bin/tsx scripts/build-lex-repo.ts --verify
+
+chown -R bibliograph:bibliograph "$LEX_OUT_DIR"
+chmod 0750 "$LEX_OUT_DIR"
+find "$LEX_OUT_DIR" -type f -name '*.car' -exec chmod 0640 {} +
+echo "    populated:"
+ls -l "$LEX_OUT_DIR"
+
+DID="${LEX_PUBLISHER_DID:-did:web:${ATP_SERVICE_HOST:-biblio.livtet.olamaelcu.net}}"
+BASE=http://127.0.0.1:${PORT:-5000}
+
+status=$(curl -s -o /dev/null -w '%{http_code}' -m 10 \
+  "$BASE/xrpc/com.atproto.sync.getRepoStatus?did=$DID" || true)
+echo "    sync.getRepoStatus -> $status"
+[ "$status" = "200" ] || { echo "ERROR: repo is still not served" >&2; exit 1; }
+
+ctype=$(curl -s -o /dev/null -w '%{content_type}' -m 20 \
+  "$BASE/xrpc/com.atproto.sync.getRepo?did=$DID" || true)
+echo "    sync.getRepo       -> ${ctype:-none}"
+[ "$ctype" = "application/vnd.ipld.car" ] || { echo "ERROR: getRepo did not return a CAR" >&2; exit 1; }
+EOF
+
+say "Published"

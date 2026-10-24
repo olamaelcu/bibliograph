@@ -1,0 +1,65 @@
+[Unit]
+Description=Bibliograph TAP consumer
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+Requires=bibliograph-migrate.service
+# The consumer needs TAP_URL in the conffile. If that is not configured yet the
+# process exits immediately and would otherwise restart forever on a small host.
+# StartLimit* live in [Unit]: since systemd 229 the [Service] placement is
+# ignored with a warning.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/bibliograph/bibliograph.env
+
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx worker.ts
+
+# A TAP outage should not exhaust the start limit: back off gently and keep
+# trying, because the consumer is what keeps the index current.
+Restart=on-failure
+RestartSec=10s
+# A signal that arrives before the Node interpreter has finished loading our
+# entrypoint hits the default disposition and exits 143, which systemd would
+# otherwise record as a failure (and, with Restart=on-failure, restart). The
+# application exits 0 itself once its handlers are installed; this only covers
+# the boot window.
+SuccessExitStatus=143 130
+TimeoutStopSec=20s
+LimitNOFILE=65536
+SyslogIdentifier=bibliograph-worker
+
+StateDirectory=bibliograph
+StateDirectoryMode=0750
+LogsDirectory=bibliograph
+LogsDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target

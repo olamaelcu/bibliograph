@@ -2,29 +2,37 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
   approveApplication,
-  isAdmin,
+  isAdministrator,
+  isBootstrapAdmin,
   listApplications,
   rejectApplication,
   revokeLibrarian,
 } from '$lib/server/labeler/librarian';
+import { activeSubjects, clearLabel, grantLabel } from '$lib/server/labeler/labels';
+import { ADMINISTRATOR_LABEL, SENIOR_LIBRARIAN_LABEL } from '$lib/server/labeler/vocabulary';
 import { log } from '$lib/server/xrpc-router';
 
-/** Only admins (ADMIN_DIDS) may see or act on the queue. */
-function requireAdmin(did: string | undefined): string {
+/** Administrator = `administrator` label, or the bootstrap allowlist. */
+async function requireAdmin(did: string | undefined): Promise<string> {
   if (!did) redirect(303, '/login?next=/admin/applications');
-  if (!isAdmin(did)) error(403, 'This account is not a librarian admin.');
+  if (!(await isAdministrator(did))) error(403, 'This account is not an administrator.');
   return did;
 }
 
 export const load: PageServerLoad = async ({ locals }) => {
-  requireAdmin(locals.viewer?.did);
-  const [pending, decided] = await Promise.all([
+  const viewerDid = await requireAdmin(locals.viewer?.did);
+  const [pending, all, administrators, seniors] = await Promise.all([
     listApplications('pending'),
     listApplications('all'),
+    activeSubjects(ADMINISTRATOR_LABEL),
+    activeSubjects(SENIOR_LIBRARIAN_LABEL),
   ]);
   return {
     pending,
-    decided: decided.filter((row) => row.status !== 'pending'),
+    decided: all.filter((row) => row.status !== 'pending'),
+    administrators,
+    seniors,
+    viewerIsBootstrapAdmin: isBootstrapAdmin(viewerDid),
   };
 };
 
@@ -32,7 +40,7 @@ async function act(
   event: Parameters<NonNullable<Actions['approve']>>[0],
   run: (did: string, adminDid: string) => Promise<unknown>,
 ) {
-  const adminDid = requireAdmin(event.locals.viewer?.did);
+  const adminDid = await requireAdmin(event.locals.viewer?.did);
   const form = await event.request.formData();
   const did = String(form.get('did') ?? '').trim();
   if (!did.startsWith('did:')) return fail(400, { error: 'Expected a DID' });
@@ -50,4 +58,9 @@ export const actions: Actions = {
   approve: (event) => act(event, (did, admin) => approveApplication(did, admin)),
   reject: (event) => act(event, (did, admin) => rejectApplication(did, admin)),
   revoke: (event) => act(event, (did, admin) => revokeLibrarian(did, admin)),
+
+  /** Grant or withdraw the `administrator` label. */
+  grantAdmin: (event) => act(event, (did) => grantLabel(did, ADMINISTRATOR_LABEL)),
+  revokeAdmin: (event) => act(event, (did) => clearLabel(did, ADMINISTRATOR_LABEL)),
+  revokeSenior: (event) => act(event, (did) => clearLabel(did, SENIOR_LIBRARIAN_LABEL)),
 };

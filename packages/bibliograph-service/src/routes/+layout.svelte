@@ -14,6 +14,8 @@
   import "@awesome.me/webawesome/dist/components/icon/icon.js";
   import "@awesome.me/webawesome/dist/components/input/input.js";
   import { page } from "$app/state";
+  import { setViewer } from "$lib/stores/auth";
+  import NavProgress from "$lib/components/NavProgress.svelte";
   import type { Snippet } from "svelte";
 
   const navLinks = [
@@ -50,6 +52,12 @@
     data: { viewer: { did: string; handle: string | null } | null };
     children: Snippet;
   } = $props();
+
+  // Mirror the server's session into the client store. `$effect` runs in the
+  // browser only, so SSR never writes module-level state (see stores/auth.ts).
+  $effect(() => {
+    setViewer(data.viewer);
+  });
 </script>
 
 <svelte:head>
@@ -86,6 +94,9 @@
     })();
   </script>
 </svelte:head>
+
+<!-- Outside <wa-page> so no shadow-DOM stacking context can trap it. -->
+<NavProgress />
 
 <wa-page mobile-breakpoint="920">
   <header class="topbar" slot="header">

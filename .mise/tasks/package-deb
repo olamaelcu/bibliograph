@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#MISE description="Build the bibliograph .deb (payload is staged by package-payload, then dpkg-buildpackage runs)"
+#MISE depends=["package-payload"]
+#
+# Requires: debhelper (>= 13), dpkg-dev, fakeroot, rsync, node, pnpm.
+# Packaging compiles nothing: the payload arrives prebuilt from
+# `mise run package-payload`, so the host's libc does not leak into the result.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+for tool in dpkg-buildpackage dh fakeroot; do
+  command -v "$tool" >/dev/null || {
+    echo "ERROR: $tool is required (apt install debhelper dpkg-dev fakeroot)" >&2
+    exit 1
+  }
+done
+
+[[ -d packaging/payload/app ]] || {
+  echo "ERROR: no payload staged; run 'mise run package-payload'" >&2
+  exit 1
+}
+
+# debhelper state from a previous run would mask a broken rules file.
+rm -rf debian/.debhelper debian/bibliograph debian/files \
+  debian/debhelper-build-stamp debian/*.substvars
+
+echo "==> dpkg-buildpackage"
+# -b  binary package only (-us/-uc: do not sign)
+# -d  skip Build-Depends: Node is not available from apt and nothing here
+#     compiles — the payload arrives prebuilt.
+dpkg-buildpackage -b -us -uc -d
+
+mkdir -p dist
+# dpkg-buildpackage writes one level above the source tree.
+mv -f ../bibliograph_*.deb dist/ 2>/dev/null || true
+mv -f ../bibliograph_*.buildinfo dist/ 2>/dev/null || true
+mv -f ../bibliograph_*.changes dist/ 2>/dev/null || true
+
+echo "==> Built:"
+ls -l dist/
