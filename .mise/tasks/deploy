@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#MISE description="Deploy the built .deb package to any SSH host/user (only needs SSH to deploy)"
+# Only needs SSH host and user; deploys the .deb package post-building.
+#
+# Overrides:
+#   DEPLOY_HOST  ssh destination (required; default: veve@lescayes)
+# Example:
+#   DEPLOY_HOST=alice@sever mise run deploy
+
+set -euo pipefail
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HOST="${DEPLOY_HOST:-veve@lescayes}"
+
+if [ -z "$DEPLOY_HOST" ] && [ "$HOST" = "veve@lescayes" ]; then
+  echo "Using default DEPLOY_HOST=veve@lescayes (set DEPLOY_HOST to override)"
+fi
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+DEB="$(ls -1 dist/bibliograph_*.deb 2>/dev/null | head -1 || true)"
+[ -n "$DEB" ] && [ -f "$DEB" ] || die "no .deb in dist/; run 'mise run package-payload' then 'mise run package-deb'"
+DEB_NAME="$(basename "$DEB")"
+DEB_SHA="$(sha256sum "$DEB" | cut -d' ' -f1)"
+REMOTE_DEB="/tmp/$DEB_NAME"
+
+say "Deploying $DEB_NAME to $HOST"
+
+say "Preflight: ssh + sudo"
+ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no "$HOST" 'sudo -n true' 2>/dev/null \
+  || die "cannot reach $HOST (try: ssh -o BatchMode=yes $HOST 'sudo -n true')"
+
+say "Uploading .deb"
+scp -q -o StrictHostKeyChecking=no "$DEB" "$HOST:$REMOTE_DEB"
+REMOTE_SHA="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$HOST" "sha256sum '$REMOTE_DEB' | cut -d' ' -f1")"
+[ "$REMOTE_SHA" = "$DEB_SHA" ] || die "checksum mismatch ($REMOTE_SHA != $DEB_SHA)"
+
+say "Installing and provisioning on $HOST"
+ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$HOST" "sudo -n bash -s" <<EOF
+set -euo pipefail
+cd /
+export DEBIAN_FRONTEND=noninteractive
+
+ENV_FILE=/etc/bibliograph/bibliograph.env
+
+say() { printf '    ==> %s\n' "\$*"; }
+
+say "Installing $DEB_NAME"
+apt-get install -y -qq --reinstall \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  "$REMOTE_DEB" || { say "install failed"; exit 1; }
+
+say "Restarting bibliograph services"
+rm -f /etc/bibliograph/bibliograph.env.dpkg-dist 2>/dev/null || true
+systemctl restart bibliograph-migrate.service >/dev/null 2>&1 || true
+systemctl restart bibliograph.service
+systemctl restart bibliograph-worker.service >/dev/null 2>&1 || true
+
+say "Waiting for health check..."
+for _ in \$(seq 1 30); do
+  code=\$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://127.0.0.1:5000/" || true)
+  [ "\$code" != "000" ] && break
+  sleep 1
+done
+echo "    http -> \$code"
+EOF
+
+say "Installed $DEB_NAME on $HOST (version 0.1.0 with empty-contributor logging/metrics)"
+
+say "Post-install steps (manual):"
+cat <<'MANUAL'
+  * TLS: certbot certonly --webroot -w /var/www/html -d biblio.livtet.olamaelcu.net
+  * Site enable: ln -s ../sites-available/bibliograph-platform /etc/nginx/sites-enabled/
+              nginx -t && systemctl reload nginx
+  * Secrets: set ATP_SIGNING_KEY, ATP_LABEL_SIGNING_KEY, OAUTH_PUBLIC_ORIGIN,
+    ADMIN_DIDS in /etc/bibliograph/bibliograph.env
+  * TAP: set TAP_URL, TAP_ADMIN_PASSWORD
+MANUAL

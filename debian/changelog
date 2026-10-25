@@ -1,3 +1,11 @@
+bibliograph (0.1.1) unstable; urgency=medium
+
+  * Add logging/metrics for empty contributor names in searchEditions
+    (xrpc-router.ts, metrics.ts: invalidContributorResponsesTotal) and
+    getRecord (book-contributor-view.ts) responses.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 25 Oct 2026 00:00:00 +0000
+
 bibliograph (0.1.0) unstable; urgency=medium
 
   * Initial Debian package. Replaces the Dokku/OCI delivery path with a
