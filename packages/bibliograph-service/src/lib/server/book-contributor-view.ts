@@ -1,5 +1,6 @@
 import { inArray } from 'drizzle-orm';
 import { db } from './db';
+import { invalidContributorResponsesTotal } from './metrics';
 import { contributors } from './db/schema';
 
 /**
@@ -56,12 +57,20 @@ export async function buildBookContributorViews(
   for (const entry of entries) {
     const row = byUri.get(entry.subject.uri);
     if (!row) continue;
+    const name = row.name ?? '';
+    if (name.trim() === '') {
+      console.warn(
+        { contributorUri: row.uri, bookUri, reason: 'empty_name', endpoint: 'getRecord' },
+        'contributor with empty name in record response',
+      );
+      try { invalidContributorResponsesTotal.inc({ nsid: 'getRecord', reason: 'empty_name' }); } catch { /* metric may not be registered in this context */ }
+    }
     out.push({
       bookUri,
       role: entry.role,
       contributor: {
         uri: row.uri,
-        name: row.name,
+        name: name,
         identifiers: row.identifiers ?? [],
         createdAt: row.createdAt.toISOString(),
       },

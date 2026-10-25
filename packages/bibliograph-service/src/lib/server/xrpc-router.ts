@@ -44,6 +44,7 @@ import {
   resolveHandle,
 } from './lex/publisher.js';
 import { createLogger } from './logger';
+import { invalidContributorResponsesTotal } from './metrics';
 import { accessLog } from './access-log';
 import type { Logger } from 'pino';
 import { pdsClient, resolvePds } from './pds/resolve.js';
@@ -184,6 +185,25 @@ router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
       cursor: params.cursor,
       lang: params.lang,
     });
+
+    // Track contributors with empty/invalid names (lexicon requires minLength: 1)
+    let invalidContributorCount = 0;
+    for (const item of result.items) {
+      for (const c of item.contributors ?? []) {
+        const contributorUri = c.subject?.uri;
+        if (!contributorUri || String(contributorUri).trim() === '') {
+          invalidContributorCount++;
+          log.warn(
+            { contributorUri: contributorUri ?? 'unknown', endpoint: 'searchEditions', reason: 'empty_contributor_ref' },
+            'contributor with empty/missing reference in searchEditions response',
+          );
+        }
+      }
+    }
+    if (invalidContributorCount > 0) {
+      invalidContributorResponsesTotal.inc({ nsid: 'community.lexicon.book.searchEditions', reason: 'empty_name' });
+    }
+
     const items = result.items.map((r) => ({
       $type: 'community.lexicon.book.edition' as const,
       uri: r.uri,

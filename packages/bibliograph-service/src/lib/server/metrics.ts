@@ -4,6 +4,15 @@ export const metricsRegistry = new Registry();
 
 collectDefaultMetrics({ register: metricsRegistry });
 
+// Track XRPC responses that return contributors with empty/invalid names
+// (e.g. name === '' which violates lexicon minLength: 1)
+export const invalidContributorResponsesTotal = new Counter({
+  name: 'invalid_contributor_responses_total',
+  help: 'Number of search XRPC responses with invalid contributor names',
+  labelNames: ['nsid', 'reason'] as const,
+  registers: [metricsRegistry],
+});
+
 export const searchRequestsTotal = new Counter({
   name: 'search_requests_total',
   help: 'Number of search XRPC requests handled',
