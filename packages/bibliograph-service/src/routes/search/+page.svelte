@@ -22,6 +22,7 @@
         uri?: string;
         name: string;
         aliases?: string[];
+        bio?: string;
       }
     | {
         $type: 'community.lexicon.book.publisher';
@@ -80,11 +81,12 @@
   }
 
   function heading(item: Item): string {
-    const kind = itemKind(item.uri);
-    if (kind === 'community.lexicon.book.contributor' || kind === 'community.lexicon.book.publisher') {
-      const c = item as Item & { aliases?: string[] };
-      const alias = c.aliases?.[0];
+    if (item.$type === 'community.lexicon.book.contributor') {
+      const alias = item.aliases?.[0];
       return alias ? `${item.name} (${alias})` : item.name;
+    }
+    if (item.$type === 'community.lexicon.book.publisher') {
+      return item.name;
     }
     return item.title;
   }
@@ -170,7 +172,7 @@
           {#if subtitle(item)}
             <p class="muted">{subtitle(item)}</p>
           {/if}
-          {#if itemKind(item.uri) === 'community.lexicon.book.contributor'}
+          {#if item.$type === 'community.lexicon.book.contributor'}
             <p class="muted">
               {#if item.bio}
                 {item.bio.slice(0, 200)}{#if item.bio.length > 200}…{/if}

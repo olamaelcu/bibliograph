@@ -20,7 +20,7 @@ test('parseEditionKey accepts /books/OL123M', () => {
 });
 
 test('parseEditionKey rejects /works/', () => {
-  assert.throws(() => parseEditionKey('/works/OL66554W'), /edition key must start with \/books/);
+  assert.throws(() => parseEditionKey('/works/OL66554W'), /invalid edition OLID/);
 });
 
 test('parseEditionKey rejects malformed OLID', () => {
@@ -32,7 +32,7 @@ test('parseWorkKey accepts /works/OL66554W', () => {
 });
 
 test('parseWorkKey rejects /books/', () => {
-  assert.throws(() => parseWorkKey('/books/OL2741128M'), /work key must start with \/works/);
+  assert.throws(() => parseWorkKey('/books/OL2741128M'), /invalid work OLID/);
 });
 
 test('parseWorkKey rejects malformed OLID', () => {
@@ -44,7 +44,7 @@ test('parseAuthorKey accepts /authors/OL12345A', () => {
 });
 
 test('parseAuthorKey rejects /works/', () => {
-  assert.throws(() => parseAuthorKey('/works/OL66554W'), /author key must start with \/authors/);
+  assert.throws(() => parseAuthorKey('/works/OL66554W'), /invalid author OLID/);
 });
 
 test('editionRkey produces ol.OL123M', () => {

@@ -6,7 +6,7 @@ const LOG_DIR = process.env.LOG_DIR ?? 'logs';
 const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const PRETTY_STDOUT = process.env.NODE_ENV !== 'production';
 
-export type ProcessName = 'web' | 'worker';
+export type ProcessName = 'web' | 'worker' | 'health';
 
 export function createLogger(name: ProcessName) {
   fs.mkdirSync(LOG_DIR, { recursive: true });

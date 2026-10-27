@@ -21,7 +21,6 @@
   const navLinks = [
     { href: "/", label: "Home" },
     { href: "/queries", label: "Queries" },
-    { href: "/procedures", label: "Procedures" },
     { href: "/stats", label: "Stats" },
     { href: "/search", label: "Search" },
     // { href: "/records", label: "Records" },
@@ -30,14 +29,12 @@
 
   // A nav link is active when the current pathname equals its href OR
   // (for non-root links) starts with the href + '/'. Special aliases:
-  // /query/... also highlights /queries; /procedure/... highlights
-  // /procedures (singular / plural mismatch); the four detail-page kinds
+  // /query/... also highlights /queries; the four detail-page kinds
   // (/editions/, /works/, /contributors/, /publishers/) all highlight Search.
   function isActive(href: string, pathname: string): boolean {
     if (href === "/") return pathname === "/";
     if (pathname === href || pathname.startsWith(href + "/")) return true;
     if (href === "/queries" && pathname.startsWith("/query/")) return true;
-    if (href === "/procedures" && pathname.startsWith("/procedure/")) return true;
     if (href === "/search" && (
       pathname.startsWith("/editions/") || pathname.startsWith("/works/") ||
       pathname.startsWith("/contributors/") || pathname.startsWith("/publishers/")

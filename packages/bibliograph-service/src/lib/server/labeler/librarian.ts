@@ -10,7 +10,7 @@ import { db as defaultDb } from '../db/index';
 import { librarianApplications } from '../db/schema';
 import type { LibrarianApplicationRow } from '../db/schema';
 import type { DbExecutor } from '../stats';
-import { clearLabel, grantLabel, hasLabel } from './labels';
+import { clearLabel, grantLabel, hasLabel, isLibrarian } from './labels';
 import { ADMINISTRATOR_LABEL, LIBRARIAN_LABEL } from './vocabulary';
 
 /**
@@ -73,6 +73,9 @@ export async function requestLibrarianAccess(
   note: string | null,
   db: DbExecutor = defaultDb,
 ): Promise<LibrarianApplicationRow> {
+  if (!(await isLibrarian(did, db))) {
+    throw new Error('Only accounts holding the librarian label can request access (403).');
+  }
   const existing = await applicationFor(did, db);
   if (existing && (existing.status === 'approved' || existing.status === 'revoked')) {
     return existing;

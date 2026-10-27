@@ -1,6 +1,6 @@
 import { createLogger } from './logger';
 import { getTapQueueDepth } from './jobs/depth';
-import { openLibraryBreaker, googleBooksBreaker, wikipediaBreaker, isbndbBreaker, wikidataBreaker, commonsBreaker } from '../api/breakers';
+import { openLibraryBreaker, googleBooksBreaker, wikipediaBreaker, isbndbBreaker, wikidataBreaker, commonsBreaker } from './api/breakers';
 import { Pool } from 'pg';
 
 const log = createLogger('health');

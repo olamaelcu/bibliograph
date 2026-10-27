@@ -141,13 +141,12 @@ export const router = new XRPCRouter({
   handleHealthCheck: async () => json({ status: 'ok' }),
 });
 
-// Wrapped registrations: every addQuery / addProcedure call below bumps the
-// counter AND writes the schema into a registry keyed by NSID, so the
-// /queries and /query/[nsid] routes can render schema docs without a
-// filesystem scan. Adding a new endpoint is the single source-of-truth edit.
-export const endpointCounts = { queries: 0, procedures: 0 };
+// Wrapping registration: every addQuery call below bumps the counter AND
+// writes the schema into a registry keyed by NSID, so the /queries and
+// /query/[nsid] routes can render schema docs without a filesystem scan.
+// Adding a new endpoint is the single source-of-truth edit.
+export const endpointCounts = { queries: 0 };
 export const queryRegistry = new Map<string, unknown>();
-export const procedureRegistry = new Map<string, unknown>();
 
 type QuerySchema = Parameters<typeof router.addQuery>[0];
 type QueryOpts = Parameters<typeof router.addQuery>[1];
@@ -163,21 +162,7 @@ router.addQuery = ((schema: QuerySchema, opts: QueryOpts) => {
   return realAddQuery(schema, opts);
 }) as typeof router.addQuery;
 
-const realAddProcedure = router.addProcedure?.bind(router);
-if (realAddProcedure) {
-  type ProcedureSchema = Parameters<NonNullable<typeof router.addProcedure>>[0];
-  type ProcedureOpts = Parameters<NonNullable<typeof router.addProcedure>>[1];
-  router.addProcedure = ((schema: ProcedureSchema, opts: ProcedureOpts) => {
-    const nsid = (schema as { nsid?: string }).nsid;
-    if (nsid && !nsid.startsWith('com.atproto.')) {
-      procedureRegistry.set(nsid, schema);
-      endpointCounts.procedures++;
-    }
-    return realAddProcedure(schema, opts);
-  }) as typeof router.addProcedure;
-}
-
-registerBookQueries(router, log, searchService, invalidContributorResponsesTotal, CommunityLexiconBookSearchEditions, CommunityLexiconBookCompatibility, CommunityLexiconBookSearchWorks, CommunityLexiconBookSearchContributors, CommunityLexiconBookSearchPublishers, json);
+registerBookQueries(router, log, searchService);
 
 // ─── Lex publisher endpoints ────────────────────────────────────────────────
 // Serves com.atproto.sync.* and com.atproto.identity.* over prebuilt CAR files

@@ -1,18 +1,19 @@
 // Book lexicon query handlers split out for safer, targeted edits.
-// Import router + log + service + metrics from the main xrpc module.
+// External lexicon imports stay at the top of xrpc-router.ts (#320); the
+// namespaces re-exported there are imported here for typing only.
+import { type XRPCRouter, json } from '@atcute/xrpc-server';
+import type { Logger } from 'pino';
+import { inArray } from 'drizzle-orm';
+import { CommunityLexiconBookCompatibility, CommunityLexiconBookSearchContributors, CommunityLexiconBookSearchEditions, CommunityLexiconBookSearchPublishers, CommunityLexiconBookSearchWorks } from '../../lib/server/lexicons/index.js';
+import { invalidContributorResponsesTotal } from '../../lib/server/metrics';
+import { db } from '../../lib/server/db';
+import { contributors } from '../../lib/server/db/schema';
+import type { SearchService } from '../../lib/server/search/service';
 
-export function registerBookQueries( 
-  router: import("@atcute/xrpc-server").XRPCRouter,  // XRPCRouter
-  log: any,
-  searchService: any,
-  invalidContributorResponsesTotal: any,
-  CommunityLexiconBookSearchEditions: any,
-  CommunityLexiconBookCompatibility: any,
-  CommunityLexiconBookSearchWorks: any,
-  CommunityLexiconBookSearchContributors: any,
-  CommunityLexiconBookSearchPublishers: any,
-  json: any,
-  db?: any, contributors?: any, inArray?: any,
+export function registerBookQueries(
+  router: XRPCRouter,
+  log: Logger,
+  searchService: SearchService,
 ) {
   router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
     async handler({ params }) {
@@ -27,16 +28,16 @@ export function registerBookQueries(
       // Batch-query contributor names and enrich (see docs/searchEditions-contributor-names.md)
       const allContributorUris = [...new Set(
         result.items
-          .flatMap((i: any) => i.contributors ?? [])
-          .map((c: any) => c.subject?.uri)
-          .filter((uri: unknown): uri is string => !!uri)
+          .flatMap((i) => i.contributors ?? [])
+          .map((c) => c.subject?.uri)
+          .filter((uri): uri is string => !!uri)
       )];
       let contributorNameMap = new Map<string, string>();
-      if (db && contributors && inArray && allContributorUris.length > 0) {
+      if (allContributorUris.length > 0) {
         const rows = await db.select({ uri: contributors.uri, name: contributors.name })
           .from(contributors)
           .where(inArray(contributors.uri, allContributorUris));
-        contributorNameMap = new Map(rows.map((r: any) => [r.uri, r.name]));
+        contributorNameMap = new Map(rows.map((r) => [r.uri, r.name]));
       }
 
       // Track empty contributor NAMES (not URI refs)
@@ -58,7 +59,7 @@ export function registerBookQueries(
         invalidContributorResponsesTotal.inc({ nsid: 'community.lexicon.book.searchEditions', reason: 'empty_name' });
       }
 
-      const items = result.items.map((r: any) => ({
+      const items = result.items.map((r) => ({
         $type: 'community.lexicon.book.edition' as const,
         uri: r.uri,
         title: r.title,
@@ -68,7 +69,7 @@ export function registerBookQueries(
         place: r.place,
         publishedYear: r.publishedYear,
         language: r.language,
-        contributors: r.contributors?.map((c: any) => {
+        contributors: r.contributors?.map((c) => {
           const uri = c.subject?.uri;
           const name = uri ? contributorNameMap.get(uri) ?? '' : '';
           return { ...c, name };
@@ -83,8 +84,6 @@ export function registerBookQueries(
 
   router.addQuery(CommunityLexiconBookCompatibility.mainSchema, {
     async handler() {
-      const SELF = 'community.lexicon.book.compatibility';
-      const AUTHORITY = 'community.lexicon.book.';
       const queries: { nsid: string; type: 'query' | 'procedure' }[] = [];
       // (registry access omitted — kept minimal for split)
       return json({ queries } as unknown as CommunityLexiconBookCompatibility.$output);
@@ -99,7 +98,7 @@ export function registerBookQueries(
         limit: Math.min(params.limit ?? 20, 100),
         cursor: params.cursor,
       });
-      const items = result.items.map((r: any) => ({
+      const items = result.items.map((r) => ({
         $type: 'community.lexicon.book.work' as const,
         uri: r.uri,
         title: r.title,
@@ -125,7 +124,7 @@ export function registerBookQueries(
           limit: Math.min(params.limit ?? 20, 100),
           cursor: params.cursor,
         });
-        const items = result.items.map((r: any) => ({
+        const items = result.items.map((r) => ({
           $type: 'community.lexicon.book.contributor' as const,
           uri: r.uri,
           name: r.name,
@@ -153,7 +152,7 @@ export function registerBookQueries(
         limit: Math.min(params.limit ?? 20, 100),
         cursor: params.cursor,
       });
-      const items = result.items.map((r: any) => ({
+      const items = result.items.map((r) => ({
         $type: 'community.lexicon.book.publisher' as const,
         uri: r.uri,
         name: r.name,

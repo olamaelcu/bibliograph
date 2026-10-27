@@ -3,7 +3,7 @@
     data,
   }: {
     data: {
-      endpointCounts: { queries: number; procedures: number; records: number };
+      endpointCounts: { queries: number; records: number };
     };
   } = $props();
 </script>
@@ -35,19 +35,13 @@
           >{data.endpointCounts.queries} queries</wa-badge
         >
       </a>
-      <a href="/procedures">
-        <wa-badge variant="success" appearance="filled"
-          >{data.endpointCounts.procedures} procedures</wa-badge
-        >
-      </a>
       <span class="muted">· read-only · records live in your PDS</span>
     </div>
   </section>
 
   <section class="about">
     <p>
-      Every query and procedure is documented from the lexicon files and served
-      over
+      Every query is documented from the lexicon files and served over
       <code>/xrpc</code>. Callers authenticate with a DPoP-bound OAuth access
       token.
     </p>
