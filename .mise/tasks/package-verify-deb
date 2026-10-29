@@ -13,7 +13,7 @@ cd "$ROOT"
 
 DEB="${1:-}"
 if [[ -z "$DEB" ]]; then
-  DEB="$(ls -1 dist/bibliograph_*.deb 2>/dev/null | head -1 || true)"
+  DEB="$(ls -1 dist/bibliograph_*.deb 2>/dev/null | sort -V | tail -1 || true)"
 fi
 if [[ -z "$DEB" || ! -f "$DEB" ]]; then
   echo "ERROR: no .deb found; run 'packaging/build-deb.sh' first" >&2

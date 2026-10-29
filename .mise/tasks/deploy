@@ -20,7 +20,7 @@ fi
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-DEB="$(ls -1 dist/bibliograph_*.deb 2>/dev/null | head -1 || true)"
+DEB="$(ls -1 dist/bibliograph_*.deb 2>/dev/null | sort -V | tail -1 || true)"
 [ -n "$DEB" ] && [ -f "$DEB" ] || die "no .deb in dist/; run 'mise run package-payload' then 'mise run package-deb'"
 DEB_NAME="$(basename "$DEB")"
 DEB_SHA="$(sha256sum "$DEB" | cut -d' ' -f1)"
