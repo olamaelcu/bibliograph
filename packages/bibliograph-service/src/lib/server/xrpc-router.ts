@@ -65,7 +65,7 @@ import { SearchService } from './search/service';
 import { eq, inArray, and, sql } from 'drizzle-orm';
 import { db } from './db';
 import { editions, works, contributors, publishers, records } from './db/schema';
-import * as v from 'valibot';
+import * as v from '@atcute/lexicons/validations';
 import { allowRequest } from './rate-limit';
 import { getBacklinks } from './constellation/client';
 import {
@@ -1069,3 +1069,130 @@ async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, book
   }
   return out;
 }
+
+// ─── ATProto Feed Generator Endpoints ───────────────────────────────────────
+// Minimal inline schemas for feed-generator endpoints (app.bsky.feed.* not
+// exported by @atcute/atproto, so defined directly via valibot v.query.)
+
+const describeFeedGeneratorSchema = /*#__PURE__*/ v.query('app.bsky.feed.describeFeedGenerator', {
+  params: /*#__PURE__*/ v.object({
+    feed: /*#__PURE__*/ v.optional(v.resourceUriString()),
+  }),
+  output: {
+    type: 'lex',
+    schema: /*#__PURE__*/ v.object({
+      did: /*#__PURE__*/ v.didString(),
+      feeds: /*#__PURE__*/ v.array(v.object({
+        uri: /*#__PURE__*/ v.resourceUriString(),
+        displayName: /*#__PURE__*/ v.string(),
+        description: /*#__PURE__*/ v.optional(v.string()),
+      })),
+    }),
+  },
+});
+
+const getFeedSkeletonSchema = /*#__PURE__*/ v.query('app.bsky.feed.getFeedSkeleton', {
+  params: /*#__PURE__*/ v.object({
+    feed: /*#__PURE__*/ v.resourceUriString(),
+    cursor: /*#__PURE__*/ v.optional(v.string()),
+    limit: /*#__PURE__*/ v.optional(v.constrain(v.integer(), [v.integerRange(1, 100)], 5)),
+  }),
+  output: {
+    type: 'lex',
+    schema: /*#__PURE__*/ v.object({
+      feed: /*#__PURE__*/ v.array(v.object({
+        post: /*#__PURE__*/ v.resourceUriString(),
+        reason: /*#__PURE__*/ v.optional(v.string()),
+      })),
+      cursor: /*#__PURE__*/ v.optional(v.string()),
+    }),
+  },
+});
+
+router.addQuery(describeFeedGeneratorSchema, {
+  async handler({ params }) {
+    const feedUri = (params.feed as string | undefined) || `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed/reviews`;
+    return json({
+      did: PUBLISHER_DID,
+      feeds: [{
+        uri: feedUri,
+        displayName: 'Book Reviews',
+        description: 'Reviews of editions using net.olamaelcu.livtet.bookReview',
+      }],
+    } as unknown as typeof describeFeedGeneratorSchema.output);
+  },
+});
+
+router.addQuery(getFeedSkeletonSchema, {
+  async handler({ params }) {
+    const feedUri = params.feed as string;
+    const cursor = params.cursor as string | undefined;
+    const limit = Math.min((params.limit as number | undefined) ?? 5, 100);
+    const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+
+    // Derive optional subject from feed URI for constellation merge
+    let subjectUri: string | undefined;
+    const uriMatch = feedUri.match(/at:\/\/[^/]+\/[^/]+\/([^/]+)/);
+    if (uriMatch) {
+      subjectUri = uriMatch[1];
+    }
+
+    let feed = [];
+    let outCursor = undefined;
+
+    if (subjectUri && subjectUri.includes(':')) {
+      // If subject looks like an edition URI, merge constellation backlinks
+      try {
+        const backlinks = await getBacklinks({
+          subject: `at://${PUBLISHER_DID}/${subjectUri}`,
+          source: 'net.olamaelcu.livtet.bookReview:book',
+          limit,
+          cursor,
+        });
+        outCursor = backlinks.cursor;
+        feed = backlinks.records.map((r) => ({
+          post: r.uri,
+          reason: 'Backlink from edition review',
+        }));
+      } catch (err) {
+        log.warn({ err, feedUri }, 'feed: constellation merge failed');
+      }
+    }
+
+    // Fallback / supplement with DB pagination when no backlinks or non-subject feed
+    if (feed.length === 0) {
+      const rows = await db
+        .select()
+        .from(records)
+        .where(
+          sql`${records.collection} IN ('net.olamaelcu.livtet.bookReview', 'net.olamaelcu.livtet.biblio.bookReview')`,
+        )
+        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .limit(limit + 1)
+        .offset(offset);
+
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      outCursor = hasMore ? String(offset + limit) : undefined;
+
+      feed = page.map((r) => {
+        const v = r.value as Record<string, unknown>;
+        let bookStr = '';
+        const rawBook = v.book;
+        if (typeof rawBook === 'string') {
+          bookStr = rawBook;
+        } else if (rawBook && typeof rawBook === 'object') {
+          const ro = rawBook as Record<string, unknown>;
+          if (typeof ro.uri === 'string') bookStr = ro.uri;
+          else if (typeof ro.ref === 'string') bookStr = ro.ref;
+        }
+        return {
+          post: r.uri as string,
+          reason: bookStr || undefined,
+        };
+      });
+    }
+
+    return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+  },
+});

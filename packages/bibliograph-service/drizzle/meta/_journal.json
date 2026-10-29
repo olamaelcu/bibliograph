@@ -64,6 +64,13 @@
       "when": 1792720969507,
       "tag": "0009_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792800000000,
+      "tag": "0010_contributor_name_nonempty",
+      "breakpoints": true
     }
   ]
 }

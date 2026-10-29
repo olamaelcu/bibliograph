@@ -1,4 +1,4 @@
-import { pgTable, text, jsonb, timestamp, integer, boolean, bigserial, bigint, index, foreignKey, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, timestamp, integer, boolean, bigserial, bigint, index, foreignKey, primaryKey, check } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const editions = pgTable(
@@ -104,6 +104,9 @@ export const contributors = pgTable(
     didIdx: index('contributors_did_idx').on(t.did),
     indexedAtIdx: index('contributors_indexed_at_idx').on(t.indexedAt),
     imageCheckedAtIdx: index('contributors_image_checked_at_idx').on(t.imageCheckedAt),
+    // `NOT NULL` alone still admits '' / whitespace, which violates the
+    // lexicon's `minLength: 1`. Enforce the real invariant in the database.
+    nameNonEmpty: check('contributors_name_non_empty', sql`btrim(${t.name}) <> ''`),
   }),
 );
 

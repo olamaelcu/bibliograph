@@ -11,6 +11,7 @@ import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikiped
 import * as openLibraryApi from '../api/open-library';
 import { isbnFromQuery } from '../api/isbndb';
 import { syncIngestEditions, syncIngestWorks, syncIngestContributors, syncIngestPublishers } from '../jobs/handlers';
+import { validContributorName } from './contributor-name';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier, Enricher } from './types';
 
 export interface SearchServiceDeps {
@@ -242,7 +243,8 @@ export class SearchService {
     const log = this.log();
 
     if (!query.q && query.id && query.id.length > 0) {
-      return this.deps.postgres.searchContributors(query);
+      const localOnly = await this.deps.postgres.searchContributors(query);
+      return { ...localOnly, items: localOnly.items.filter((i) => validContributorName(i.name)) };
     }
 
     const [pg, ol] = await Promise.all([
@@ -250,12 +252,15 @@ export class SearchService {
       this.deps.openLibrary.searchContributors(query),
     ]);
 
-    let remoteItems: ContributorItem[] = [];
-    if (ol.items.length > 0) {
-      remoteItems = await this.deps.contributorWikipedia.enrich(ol.items, log);
-    }
+    const enrichedRemote = ol.items.length > 0
+      ? await this.deps.contributorWikipedia.enrich(ol.items, log)
+      : [];
+    // An empty/whitespace name violates the lexicon's minLength: 1, so it must
+    // never reach the wire nor be persisted by the sync ingest below.
+    const remoteItems: ContributorItem[] = enrichedRemote.filter((i) => validContributorName(i.name));
+    const localItems = pg.items.filter((i) => validContributorName(i.name));
 
-    const merged = this.mergeItems(remoteItems, pg.items);
+    const merged = this.mergeItems(remoteItems, localItems);
 
     if (remoteItems.length > 0) {
       try {
@@ -269,8 +274,9 @@ export class SearchService {
     log.info({
       stage: 'search-contributors',
       remoteCount: remoteItems.length,
-      localCount: pg.items.length,
+      localCount: localItems.length,
       mergedCount: merged.length,
+      droppedInvalid: (enrichedRemote.length - remoteItems.length) + (pg.items.length - localItems.length),
       total: ol.total || pg.total || 0,
     }, 'search done');
 

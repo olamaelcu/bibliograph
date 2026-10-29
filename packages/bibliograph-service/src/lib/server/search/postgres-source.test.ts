@@ -259,6 +259,18 @@ test('searchContributors queries contributors table and maps ContributorItem', a
   assert.equal(result.items[0]?.bio, 'Writes things');
 });
 
+test('searchContributors always constrains name to be non-empty', async () => {
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+  const fakeDb = createFakeDb([makeContributorRow()], cap);
+  const src = new PostgresSource(silentLog, fakeDb);
+
+  // No q and no id: previously this emitted an unfiltered scan, which could
+  // page in rows whose name is '' and violate the lexicon's minLength: 1.
+  await src.searchContributors({ limit: 10 });
+
+  assert.equal(cap.whereCalled, true, 'contributors search is always filtered by the name predicate');
+});
+
 test('searchContributors decodes v1 cursor (back-compat)', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeContributorRow()], cap);

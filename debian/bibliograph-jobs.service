@@ -1,0 +1,62 @@
+[Unit]
+Description=Bibliograph job worker (search ingest + TAP records)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+Requires=bibliograph-migrate.service
+# Without a reachable database the task lists exit immediately, which would
+# otherwise restart forever on a small host.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/bibliograph/bibliograph.env
+
+# Graphile Worker task lists for the search and TAP-record queues. The TAP
+# consumer (bibliograph-worker.service) only writes outbox buffers; this
+# process is what turns those buffers into rows in `records`.
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx src/worker-search-jobs.ts
+
+Restart=on-failure
+RestartSec=10s
+# A signal arriving before the Node interpreter finishes loading the entrypoint
+# hits the default disposition and exits 143, which systemd would record as a
+# failure.
+SuccessExitStatus=143 130
+TimeoutStopSec=20s
+LimitNOFILE=65536
+SyslogIdentifier=bibliograph-jobs
+
+StateDirectory=bibliograph
+StateDirectoryMode=0750
+LogsDirectory=bibliograph
+LogsDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+MemoryDenyWriteExecute=no
+
+[Install]
+WantedBy=multi-user.target

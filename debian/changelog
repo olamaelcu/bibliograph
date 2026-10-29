@@ -1,3 +1,13 @@
+bibliograph (0.1.2) unstable; urgency=medium
+
+  * Ship bibliograph-jobs.service, the unit that runs the Graphile Worker task
+    lists in src/worker-search-jobs.ts. Without it the queued
+    tap-record-upsert-batch jobs are never executed, so `records` never fills
+    and every getReviewsByBook answer is empty. Enabled and started by
+    dh_installsystemd like the other long-running units.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 29 Oct 2026 00:00:00 +0000
+
 bibliograph (0.1.1) unstable; urgency=medium
 
   * Add logging/metrics for empty contributor names in searchEditions

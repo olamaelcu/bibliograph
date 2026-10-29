@@ -46,11 +46,12 @@ override_dh_auto_install:
 	# here is enough to get the enable/start/stop/restart blocks generated.
 	install -d debian/bibliograph/usr/lib/systemd/system
 	install -m 0644 debian/bibliograph-worker.service \
+		debian/bibliograph-jobs.service \
 		debian/bibliograph-migrate.service \
 		debian/bibliograph/usr/lib/systemd/system/
 
 override_dh_installsystemd:
-	# The migrator is pulled in by Requires= from the two long-running units
+	# The migrator is pulled in by Requires= from the three long-running units
 	# and re-runs on every start, which is what applies new migrations on
 	# upgrade. Enabling or starting it on its own would only mean a no-op
 	# oneshot with no database to talk to yet.

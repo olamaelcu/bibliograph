@@ -83,6 +83,12 @@ export function getDidDocument(): DidDocument {
         type: 'AtprotoLabeler',
         serviceEndpoint: `${PROTO}://${HOSTNAME}`,
       },
+      {
+        id: '#atproto_feed',
+        type: 'AtprotoFeedGenerator',
+        serviceEndpoint: `${PROTO}://${HOSTNAME}`,
+      },
+
     ],
   };
 }

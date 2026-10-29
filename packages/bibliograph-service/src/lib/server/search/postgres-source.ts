@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { and, asc, desc, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core';
 import { db as defaultDb } from '../db/index';
 import { editions, works, contributors, publishers } from '../db/schema';
@@ -70,7 +70,17 @@ export class PostgresSource {
   }
 
   searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
-    return this.runSearch<ContributorItem>(contributors as unknown as SearchTable, contributors.name, this.mapContributorRow, query, 'contributor');
+    // `name` is NOT NULL but may still be '' / whitespace, which the lexicon's
+    // minLength: 1 rejects. Filter in SQL so `items` and `total` stay consistent
+    // with each other instead of dropping rows after counting them.
+    return this.runSearch<ContributorItem>(
+      contributors as unknown as SearchTable,
+      contributors.name,
+      this.mapContributorRow,
+      query,
+      'contributor',
+      sql`btrim(${contributors.name}) <> ''`,
+    );
   }
 
   searchPublishers(query: SearchQuery): Promise<SearchResult<PublisherItem>> {
@@ -83,11 +93,13 @@ export class PostgresSource {
     mapRow: (row: Record<string, unknown>) => TItem,
     query: SearchQuery,
     kind: 'edition' | 'work' | 'contributor' | 'publisher',
+    basePredicate?: SQL,
   ): Promise<SearchResult<TItem>> {
     const indexedAt = table.indexedAt;
     const uri = table.uri;
 
-    const filterConds: ReturnType<typeof sql>[] = [];
+    const filterConds: SQL[] = [];
+    if (basePredicate) filterConds.push(basePredicate);
     if (query.q) filterConds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
     if (query.id) {
       const identifiers = table.identifiers;

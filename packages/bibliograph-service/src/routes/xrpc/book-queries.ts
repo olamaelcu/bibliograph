@@ -6,6 +6,7 @@ import type { Logger } from 'pino';
 import { inArray } from 'drizzle-orm';
 import { CommunityLexiconBookCompatibility, CommunityLexiconBookSearchContributors, CommunityLexiconBookSearchEditions, CommunityLexiconBookSearchPublishers, CommunityLexiconBookSearchWorks } from '../../lib/server/lexicons/index.js';
 import { invalidContributorResponsesTotal } from '../../lib/server/metrics';
+import { validContributorName } from '../../lib/server/search/contributor-name';
 import { db } from '../../lib/server/db';
 import { contributors } from '../../lib/server/db/schema';
 import type { SearchService } from '../../lib/server/search/service';
@@ -124,7 +125,18 @@ export function registerBookQueries(
           limit: Math.min(params.limit ?? 20, 100),
           cursor: params.cursor,
         });
-        const items = result.items.map((r) => ({
+        // Final contract enforcement: every emitted name must satisfy the
+        // lexicon's minLength: 1, whatever the upstream sources handed back.
+        const validContributors = result.items.filter((r) => validContributorName(r.name));
+        const droppedCount = result.items.length - validContributors.length;
+        if (droppedCount > 0) {
+          log.warn(
+            { endpoint: 'searchContributors', reason: 'empty_name', count: droppedCount },
+            'dropped contributors with empty name from searchContributors response',
+          );
+          invalidContributorResponsesTotal.inc({ nsid: 'community.lexicon.book.searchContributors', reason: 'empty_name' }, droppedCount);
+        }
+        const items = validContributors.map((r) => ({
           $type: 'community.lexicon.book.contributor' as const,
           uri: r.uri,
           name: r.name,

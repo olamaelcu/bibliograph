@@ -2,6 +2,7 @@ import { inArray } from 'drizzle-orm';
 import { db } from './db';
 import { invalidContributorResponsesTotal } from './metrics';
 import { contributors } from './db/schema';
+import { validContributorName } from './search/contributor-name';
 
 /**
  * Shape the platform's `BookContributorSchema` expects for every
@@ -58,7 +59,7 @@ export async function buildBookContributorViews(
     const row = byUri.get(entry.subject.uri);
     if (!row) continue;
     const name = row.name ?? '';
-    if (name.trim() === '') {
+    if (!validContributorName(name)) {
       console.warn(
         { contributorUri: row.uri, bookUri, reason: 'empty_name', endpoint: 'getRecord' },
         'contributor with empty name in record response',

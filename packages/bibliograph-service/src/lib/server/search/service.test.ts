@@ -329,6 +329,46 @@ test('searchContributors: postgres miss → OL → contributor wiki', async () =
   assert.equal(cw.captures.length, 1);
 });
 
+test('searchContributors: drops empty/whitespace names from postgres and remote results', async () => {
+  const emptyLocal: ContributorItem = { ...baseContributor, uri: 'at://x/contributor/empty', name: '' };
+  const blankLocal: ContributorItem = { ...baseContributor, uri: 'at://x/contributor/blank', name: '   ' };
+  const emptyRemote: ContributorItem = { ...baseContributor, uri: 'at://x/contributor/remote-empty', name: '' };
+  const cw = makeFakeContributorWiki();
+  const svc = new SearchService(
+    {
+      ...buildDeps({
+        pg: makeFakePostgres({ items: [baseContributor, emptyLocal, blankLocal], total: 3 }),
+        ol: makeFakeOpenLibrary(
+          { items: [], total: 0 },
+          { items: [], total: 0 },
+          { items: [emptyRemote], total: 1 },
+        ),
+      }),
+      contributorWikipedia: cw as unknown as ContributorWikipediaEnricher,
+    },
+    log,
+  );
+
+  const r = await svc.searchContributors({ limit: 10 });
+
+  assert.deepEqual(r.items.map((i) => i.name), ['Jane Doe']);
+});
+
+test('searchContributors: id-only path drops empty names instead of returning them', async () => {
+  const svc = new SearchService(
+    {
+      ...buildDeps({
+        pg: makeFakePostgres({ items: [{ ...baseContributor, name: '' }], total: 1 }),
+      }),
+    },
+    log,
+  );
+
+  const r = await svc.searchContributors({ id: ['https://openlibrary.org/authors/OL1A'], limit: 10 });
+
+  assert.equal(r.items.length, 0);
+});
+
 test('searchEditions: forwards lang to postgres, OL, and GB sources', async () => {
   const lang = ['en-US', 'fr'] as const;
   let pgQuery: SearchQuery | undefined;
