@@ -1,4 +1,4 @@
-import { XRPCRouter, json } from '@atcute/xrpc-server';
+import { XRPCRouter, json, AuthRequiredError } from '@atcute/xrpc-server';
 import { cors } from '@atcute/xrpc-server/middlewares/cors';
 import {
   ComAtprotoIdentityResolveDid,
@@ -62,9 +62,9 @@ import { IsbndbEnricher, IsbndbWorkEnricher } from './search/isbndb-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
 import * as openLibraryApi from './api/open-library';
 import { SearchService } from './search/service';
-import { eq, inArray, and, sql } from 'drizzle-orm';
+import { eq, inArray, and, gt, sql } from 'drizzle-orm';
 import { db } from './db';
-import { editions, works, contributors, publishers, records } from './db/schema';
+import { editions, works, contributors, publishers, records, follows, webSessions } from './db/schema';
 import * as v from '@atcute/lexicons/validations';
 import { allowRequest } from './rate-limit';
 import { getBacklinks } from './constellation/client';
@@ -72,15 +72,26 @@ import {
   hydrateShelvesByUri,
   hydrateBooksByUri,
   fetchBookShelvingRecord,
+  fetchBookhiveBookRecord,
   resolveBookShelf,
   catalogEditionUriFromRkey,
 } from './shelving/hydrate';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
+import {
+  BOOKHIVE_BOOK_COLLECTION,
+  bhEditionUri,
+  bookhiveCatalogUri,
+  hiveIdFromBhRkey,
+  hiveIdFromCatalogUri,
+  isBhRkey,
+} from './bookhive/keys';
+import { BOOKHIVE_BACKLINK_SOURCE, normalizeBookhiveBook } from './bookhive/records';
 import { enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
 import { buildBookContributorViews } from './book-contributor-view';
 import { registerBookQueries } from '../../routes/xrpc/book-queries';
 import { queryLabels, labelToJson } from './labeler/labels';
+import { verifyFeedAuth, requireFeedAuth } from './auth/feed-auth';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -134,6 +145,37 @@ function rateLimitMiddleware(log: Logger) {
     }
     return next(request);
   };
+}
+
+
+// ─── Viewer identity from the storefront session cookie ───────────────────
+// XRPC routes are same-origin with the SPA, so the browser sends `bib_session`.
+// The cookie holds an opaque id; the DID lives in `web_sessions`.
+
+async function viewerDidFromRequest(request: Request): Promise<string | null> {
+	// First-party services (livtet-service) present the viewer explicitly.
+	// Follow records are public ATProto data, so naming a viewer here exposes
+	// nothing a repo sync would not; the storefront cookie stays the fallback
+	// for same-origin browser calls.
+	const viewerHeader = request.headers.get('x-viewer-did');
+	if (viewerHeader?.startsWith('did:')) return viewerHeader;
+
+	const cookieHeader = request.headers.get('cookie');
+	if (!cookieHeader) return null;
+	let sessionId: string | null = null;
+	for (const part of cookieHeader.split(';')) {
+		const [name, ...rest] = part.trim().split('=');
+		if (name === 'bib_session') {
+			sessionId = decodeURIComponent(rest.join('='));
+			break;
+		}
+	}
+	if (!sessionId) return null;
+	const [row] = await db
+		.select({ did: webSessions.did })
+		.from(webSessions)
+		.where(and(eq(webSessions.id, sessionId), gt(webSessions.expiresAt, new Date())));
+	return row?.did ?? null;
 }
 
 export const router = new XRPCRouter({
@@ -820,6 +862,26 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
         }
       }
 
+      // Bookhive users shelve a book by setting a status on their own book
+      // record, so their shelving hangs off the catalog record's backlinks
+      // rather than off a Bibliograph shelf.
+      const bookhiveSubject = await bookhiveSubjectForEdition(bookUri);
+      if (bookhiveSubject && merged.length < limit && !cursor) {
+        const backlinks = await getBacklinks({
+          subject: bookhiveSubject,
+          source: BOOKHIVE_BACKLINK_SOURCE,
+          limit,
+        });
+        const seen = new Set(merged.map((r) => r.uri));
+        for (const ref of backlinks.records) {
+          if (seen.has(ref.uri) || merged.length >= limit) continue;
+          const row = await fetchBookhiveBookRecord(ref.uri, ref.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+          if (!row) continue;
+          if (!normalizeBookhiveBook(row.value).shelf) continue;
+          merged.push(row);
+        }
+      }
+
       const bookShelves = await hydrateBookShelves(merged, bookUri);
       const outCursor = tier === 'tap' && hasMore ? String(merged.length) : undefined;
       return json({ bookShelves, cursor: outCursor } as NetOlamaelcuLivtetBiblioGetShelvingOfBook.$output);
@@ -943,16 +1005,22 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
     const cursor = params.cursor as string | undefined;
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
     try {
-      // Query the records table for both NSIDs we may have stored (the
-      // platform's writer uses `net.olamaelcu.livtet.bookReview` while the
-      // lexicon file declares `net.olamaelcu.livtet.biblio.bookReview`).
-      // Handle every on-disk shape: book as plain string, as strongRef
-      // {uri,cid}, or as expandedBook {ref}.
+      // Bookhive keeps the review on the user's book record and refs the catalog
+      // record through `hiveBookUri`, so that at-uri — the edition's `bookhive`
+      // identifier — is the extra matching term in the query below.
+      const subject = await bookhiveSubjectForEdition(bookUri);
       const rows = await db
         .select()
         .from(records)
         .where(
-          sql`${records.collection} IN ('net.olamaelcu.livtet.bookReview', 'net.olamaelcu.livtet.biblio.bookReview') AND (${records.value}->>'book' = ${bookUri} OR ${records.value}->'book'->>'uri' = ${bookUri} OR ${records.value}->'book'->>'ref' = ${bookUri})`,
+          sql`(
+            ${records.collection} IN ('net.olamaelcu.livtet.bookReview', 'net.olamaelcu.livtet.biblio.bookReview')
+            AND (${records.value}->>'book' = ${bookUri} OR ${records.value}->'book'->>'uri' = ${bookUri} OR ${records.value}->'book'->>'ref' = ${bookUri})
+          ) OR (
+            ${records.collection} = ${BOOKHIVE_BOOK_COLLECTION}
+            AND ${records.value}->>'hiveBookUri' = ${subject ?? ''}
+            AND coalesce(${records.value}->>'review', '') <> ''
+          )`,
         )
         .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
         .limit(limit + 1)
@@ -960,39 +1028,22 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
 
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
-      const outCursor = hasMore ? String(offset + limit) : undefined;
+      let outCursor = hasMore ? String(offset + limit) : undefined;
 
-      const reviews = page.map((r) => {
-        const v = r.value as Record<string, unknown>;
-        // Normalise book to plain at-uri string for the lexicon output
-        // (record expects `book: at-uri`, not strongRef).
-        let bookStr: string = bookUri;
-        const rawBook = v.book;
-        if (typeof rawBook === "string") bookStr = rawBook;
-        else if (rawBook && typeof rawBook === "object") {
-          const ro = rawBook as Record<string, unknown>;
-          if (typeof ro.uri === "string") bookStr = ro.uri;
-          else if (typeof ro.ref === "string") bookStr = ro.ref;
+      const reviews: BookReviewView[] = page.map((r) => r.collection === BOOKHIVE_BOOK_COLLECTION
+        ? reviewViewFromBookhiveRow(r, bookUri)
+        : reviewViewFromRow(r, bookUri));
+
+      // Mirrored reviews are what TAP has seen; the network tier catches reviews
+      // written since (or by repos no TAP instance follows) on the first page.
+      if (subject && reviews.length < limit && offset === 0) {
+        const known = new Set(reviews.map((r) => r.uri));
+        const external = await collectBookhiveReviews({ subject, bookUri, limit: limit - reviews.length });
+        for (const view of external.reviews) {
+          if (known.has(view.uri) || reviews.length >= limit) continue;
+          reviews.push(view);
         }
-        const rec: Record<string, unknown> = {
-          $type: "net.olamaelcu.livtet.biblio.bookReview",
-          text: typeof v.text === "string" ? v.text : "",
-          book: bookStr,
-          createdAt:
-            typeof v.createdAt === "string" ? v.createdAt : new Date().toISOString(),
-        };
-        if (typeof v.shelf === "string") rec.shelf = v.shelf;
-        else if (v.shelf && typeof v.shelf === "object") {
-          const so = v.shelf as Record<string, unknown>;
-          if (typeof so.uri === "string") rec.shelf = so.uri;
-        }
-        if (typeof v.rating === "number") rec.rating = v.rating;
-        return {
-          uri: r.uri as `${string}:${string}`,
-          did: r.did as `${string}:${string}`,
-          record: rec,
-        };
-      });
+      }
 
       return json({
         reviews,
@@ -1005,7 +1056,6 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
     }
   },
 });
-
 router.addQuery(NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
   async handler({ params }) {
     const uri = params.uri as string;
@@ -1036,6 +1086,109 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
     }
   },
 });
+
+interface BookReviewView {
+  uri: string;
+  did: string;
+  record: Record<string, unknown>;
+}
+
+/** jsonb columns arrive untyped; every reader here treats a non-object as empty. */
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+/** Native `bookReview` row → lexicon `reviewView`, normalising the book ref. */
+function reviewViewFromRow(row: typeof records.$inferSelect, bookUri: string): BookReviewView {
+  const v = asRecord(row.value);
+  // The record expects `book: at-uri`, but writers have stored a strongRef and
+  // an expandedBook in the wild, so all three shapes are folded to the uri.
+  let bookStr = bookUri;
+  const rawBook = v.book;
+  if (typeof rawBook === 'string') bookStr = rawBook;
+  else if (rawBook && typeof rawBook === 'object') {
+    const ref = asRecord(rawBook);
+    if (typeof ref.uri === 'string') bookStr = ref.uri;
+    else if (typeof ref.ref === 'string') bookStr = ref.ref;
+  }
+  const record: Record<string, unknown> = {
+    $type: 'net.olamaelcu.livtet.biblio.bookReview',
+    text: typeof v.text === 'string' ? v.text : '',
+    book: bookStr,
+    createdAt: typeof v.createdAt === 'string' ? v.createdAt : new Date().toISOString(),
+  };
+  if (typeof v.shelf === 'string') record.shelf = v.shelf;
+  else if (v.shelf && typeof v.shelf === 'object') {
+    const shelf = asRecord(v.shelf);
+    if (typeof shelf.uri === 'string') record.shelf = shelf.uri;
+  }
+  if (typeof v.rating === 'number') record.rating = v.rating;
+  return { uri: row.uri, did: row.did, record };
+}
+
+/** `buzz.bookhive.book` row → the same `reviewView`, translated, not rewritten. */
+function reviewViewFromBookhiveRow(row: typeof records.$inferSelect, bookUri: string): BookReviewView {
+  const review = normalizeBookhiveBook(row.value).review;
+  const record: Record<string, unknown> = {
+    $type: 'net.olamaelcu.livtet.biblio.bookReview',
+    text: review?.text ?? '',
+    book: bookUri,
+  };
+  if (review?.createdAt) record.createdAt = review.createdAt;
+  if (review?.rating !== undefined) record.rating = review.rating;
+  return { uri: row.uri, did: row.did, record };
+}
+
+/**
+ * Bookhive catalog record (at-uri) for a Bibliograph edition. `bh.` editions map
+ * straight through the rkey; editions from any other source carry the at-uri as
+ * a `bookhive` identifier, set when the catalog record was ingested.
+ */
+async function bookhiveSubjectForEdition(editionUri: string): Promise<string | null> {
+  const rkey = editionUri.slice(editionUri.lastIndexOf('/') + 1);
+  if (isBhRkey(rkey)) {
+    try {
+      return bookhiveCatalogUri(hiveIdFromBhRkey(rkey));
+    } catch {
+      return null;
+    }
+  }
+  const [row] = await db
+    .select({ identifiers: editions.identifiers })
+    .from(editions)
+    .where(eq(editions.uri, editionUri))
+    .limit(1);
+  for (const identifier of row?.identifiers ?? []) {
+    if (identifier.resource !== 'bookhive') continue;
+    if (hiveIdFromCatalogUri(identifier.uri)) return identifier.uri;
+  }
+  return null;
+}
+
+/**
+ * Reviews written by Bookhive users for one catalog subject: Constellation tells
+ * us who wrote them, each author's PDS supplies the record.
+ */
+async function collectBookhiveReviews(params: {
+  subject: string;
+  bookUri: string;
+  limit: number;
+}): Promise<{ reviews: BookReviewView[] }> {
+  const backlinks = await getBacklinks({
+    subject: params.subject,
+    source: BOOKHIVE_BACKLINK_SOURCE,
+    limit: params.limit,
+  });
+  const reviews: BookReviewView[] = [];
+  for (const ref of backlinks.records) {
+    if (reviews.length >= params.limit) break;
+    const row = await fetchBookhiveBookRecord(ref.uri, ref.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+    if (!row) continue;
+    if (!normalizeBookhiveBook(row.value).review) continue;
+    reviews.push(reviewViewFromBookhiveRow(row, params.bookUri));
+  }
+  return { reviews };
+}
 
 async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, bookUriHint?: string): Promise<NetOlamaelcuLivtetBiblioDefs.BookShelfView[]> {
   if (rows.length === 0) return [];
@@ -1070,11 +1223,55 @@ async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, book
   return out;
 }
 
+// Collection sets used by the feed skeletons. Reviews are the primary feed
+// content; shelving records are interleaved so followers see what people are
+// reading (and on which shelf), not only what they finished and reviewed.
+const FEED_REVIEW_COLLECTIONS = [
+	'net.olamaelcu.livtet.bookReview',
+	'net.olamaelcu.livtet.biblio.bookReview',
+];
+const SHELVING_COLLECTION = 'net.olamaelcu.livtet.biblio.bookShelving';
+// Bookhive's per-user book records carry both a review and a reading status, so
+// they read as either kind of activity depending on the record.
+const FEED_COLLECTIONS = [...FEED_REVIEW_COLLECTIONS, SHELVING_COLLECTION, BOOKHIVE_BOOK_COLLECTION];
+
+/**
+ * Reason string for a shelving entry: `shelving:<shelf-rkey>|<book-uri>`.
+ * Shelf rkey comes from the parent shelf AT-URI (`.../biblio.shelf/reading`),
+ * falling back to `metadata.status` on older records.
+ */
+function shelvingReason(value: Record<string, unknown>, bookUri: string): string | undefined {
+	let rkey: string | undefined;
+	const shelf = value.shelf;
+	if (typeof shelf === 'string') {
+		const segments = shelf.split('?')[0]?.split('/').filter(Boolean) ?? [];
+		const last = segments.at(-1);
+		if (last && last !== 'shelf') rkey = last;
+	}
+	if (!rkey) {
+		const metadata = value.metadata as Record<string, unknown> | undefined;
+		if (metadata && typeof metadata.status === 'string') rkey = metadata.status;
+	}
+	return [rkey ? `shelving:${rkey}` : 'shelving', bookUri].filter(Boolean).join('|') || undefined;
+}
+
+/**
+ * Reason string for a Bookhive entry: `bookhive:<shelf-rkey>|<edition-uri>`.
+ * Bookhive has no shelf records, so the rkey names the status instead, and the
+ * book is the `bh.` edition its catalog record maps to.
+ */
+function bookhiveReason(value: Record<string, unknown>): string | undefined {
+	const normalized = normalizeBookhiveBook(value);
+	const bookUri = normalized.editionUri ?? normalized.subjectUri;
+	const rkey = normalized.shelf?.rkey;
+	return [rkey ? `bookhive:${rkey}` : 'bookhive', bookUri].filter(Boolean).join('|') || undefined;
+}
+
 // ─── ATProto Feed Generator Endpoints ───────────────────────────────────────
-// Minimal inline schemas for feed-generator endpoints (app.bsky.feed.* not
+// Interim inline schemas until @atcute/lexicons exports com.atproto.feed.* (PR 4817); migrate to imported schemas when available.
 // exported by @atcute/atproto, so defined directly via valibot v.query.)
 
-const describeFeedGeneratorSchema = /*#__PURE__*/ v.query('app.bsky.feed.describeFeedGenerator', {
+const describeFeedGeneratorSchema = /*#__PURE__*/ v.query('com.atproto.feed.describeFeedGenerator', {
   params: /*#__PURE__*/ v.object({
     feed: /*#__PURE__*/ v.optional(v.resourceUriString()),
   }),
@@ -1086,12 +1283,13 @@ const describeFeedGeneratorSchema = /*#__PURE__*/ v.query('app.bsky.feed.describ
         uri: /*#__PURE__*/ v.resourceUriString(),
         displayName: /*#__PURE__*/ v.string(),
         description: /*#__PURE__*/ v.optional(v.string()),
+        requiresAuth: /*#__PURE__*/ v.optional(v.boolean()),
       })),
     }),
   },
 });
 
-const getFeedSkeletonSchema = /*#__PURE__*/ v.query('app.bsky.feed.getFeedSkeleton', {
+const getFeedSkeletonSchema = /*#__PURE__*/ v.query('com.atproto.feed.getFeedSkeleton', {
   params: /*#__PURE__*/ v.object({
     feed: /*#__PURE__*/ v.resourceUriString(),
     cursor: /*#__PURE__*/ v.optional(v.string()),
@@ -1111,71 +1309,62 @@ const getFeedSkeletonSchema = /*#__PURE__*/ v.query('app.bsky.feed.getFeedSkelet
 
 router.addQuery(describeFeedGeneratorSchema, {
   async handler({ params }) {
-    const feedUri = (params.feed as string | undefined) || `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed/reviews`;
+    const feedUri = (params.feed as string | undefined) || `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/public`;
     return json({
       did: PUBLISHER_DID,
-      feeds: [{
-        uri: feedUri,
-        displayName: 'Book Reviews',
-        description: 'Reviews of editions using net.olamaelcu.livtet.bookReview',
-      }],
+      feeds: [
+        {
+          uri: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/public`,
+          displayName: 'Bibliograph Static Feed',
+          description: 'Public static feed of book reviews (no authentication required)',
+        },
+        {
+          uri: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/dynamic`,
+          displayName: 'Bibliograph Dynamic Feed',
+          description: 'Dynamic personalized feed requiring JWT authentication',
+        },
+        {
+          uri: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/following`,
+          displayName: 'Bibliograph Following Feed',
+          description: 'Reviews and shelving by people you follow',
+          requiresAuth: true,
+        },
+        {
+          uri: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/extended`,
+          displayName: 'Bibliograph Extended Network',
+          description: 'Reviews and shelving by people followed by the people you follow (2 hops)',
+          requiresAuth: true,
+        },
+      ],
     } as unknown as typeof describeFeedGeneratorSchema.output);
   },
 });
 
 router.addQuery(getFeedSkeletonSchema, {
-  async handler({ params }) {
-    const feedUri = params.feed as string;
-    const cursor = params.cursor as string | undefined;
-    const limit = Math.min((params.limit as number | undefined) ?? 5, 100);
+  async handler(ctx) {
+    const feedUri = ctx.params.feed as string;
+    const cursor = ctx.params.cursor as string | undefined;
+    const limit = Math.min((ctx.params.limit as number | undefined) ?? 5, 100);
     const offset = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
 
-    // Derive optional subject from feed URI for constellation merge
-    let subjectUri: string | undefined;
-    const uriMatch = feedUri.match(/at:\/\/[^/]+\/[^/]+\/([^/]+)/);
-    if (uriMatch) {
-      subjectUri = uriMatch[1];
-    }
+    // Parse the feed URI to determine the feed type.
+    // Supported patterns:
+    //   at://<did>/net.olamaelcu.livtet.biblio.feed.generator/public      (public)
+    //   at://<did>/net.olamaelcu.livtet.biblio.feed.generator/dynamic     (requires auth)
+    //   at://<did>/net.olamaelcu.livtet.biblio.feed.generator/edition/{rkey}
+    const nsidMatch = feedUri.match(/^at:\/\/[^/]+\/(.+)$/);
+    const nsid = nsidMatch ? nsidMatch[1] : '';
+    const feedParts = nsid.split('/');
+    const isGeneratorFeed = nsid.startsWith('net.olamaelcu.livtet.biblio.feed.generator');
+    const feedType = isGeneratorFeed ? feedParts[1] : null;
 
-    let feed = [];
-    let outCursor = undefined;
-
-    if (subjectUri && subjectUri.includes(':')) {
-      // If subject looks like an edition URI, merge constellation backlinks
-      try {
-        const backlinks = await getBacklinks({
-          subject: `at://${PUBLISHER_DID}/${subjectUri}`,
-          source: 'net.olamaelcu.livtet.bookReview:book',
-          limit,
-          cursor,
-        });
-        outCursor = backlinks.cursor;
-        feed = backlinks.records.map((r) => ({
-          post: r.uri,
-          reason: 'Backlink from edition review',
-        }));
-      } catch (err) {
-        log.warn({ err, feedUri }, 'feed: constellation merge failed');
-      }
-    }
-
-    // Fallback / supplement with DB pagination when no backlinks or non-subject feed
-    if (feed.length === 0) {
-      const rows = await db
-        .select()
-        .from(records)
-        .where(
-          sql`${records.collection} IN ('net.olamaelcu.livtet.bookReview', 'net.olamaelcu.livtet.biblio.bookReview')`,
-        )
-        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
-        .limit(limit + 1)
-        .offset(offset);
-
-      const hasMore = rows.length > limit;
-      const page = hasMore ? rows.slice(0, limit) : rows;
-      outCursor = hasMore ? String(offset + limit) : undefined;
-
-      feed = page.map((r) => {
+    // ── Helper: build feed entries from DB rows ──────────────────────
+    // `reason` carries what the client needs to render an entry without a
+    // second fetch: the reviewed book URI for reviews, and
+    // `shelving:<shelf-rkey>|<book-uri>` for shelving records (shelf rkey is
+    // one of reading / read / to-read / dnf).
+    function dbToFeed(rows: Array<typeof records.$inferSelect>): Array<{ post: string; reason?: string }> {
+      return rows.map((r) => {
         const v = r.value as Record<string, unknown>;
         let bookStr = '';
         const rawBook = v.book;
@@ -1188,11 +1377,248 @@ router.addQuery(getFeedSkeletonSchema, {
         }
         return {
           post: r.uri as string,
-          reason: bookStr || undefined,
+          reason: r.collection === SHELVING_COLLECTION
+            ? shelvingReason(v, bookStr)
+            : r.collection === BOOKHIVE_BOOK_COLLECTION
+              ? bookhiveReason(v)
+              : bookStr || undefined,
         };
       });
     }
 
-    return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+    /**
+     * Author DIDs whose activity feeds a social skeleton.
+     *
+     * - `following`: 1 hop — people the viewer follows.
+     * - `extended`:  2 hops — people followed by the people the viewer follows,
+     *   minus the viewer and minus anyone already followed (the point of the
+     *   feed is discovery, so already-known authors are already in `/following`).
+     *
+     * Hop sizes are capped: a 2-hop expansion grows fast, and the skeleton only
+     * needs a bounded candidate set per page.
+     */
+    async function feedAuthorDids(viewerDid: string, kind: string): Promise<string[]> {
+      const MAX_HOP1 = 200;
+      const MAX_HOP2 = 500;
+      const hop1Rows = await db
+        .select({ did: follows.followedDid })
+        .from(follows)
+        .where(eq(follows.followerDid, viewerDid))
+        .limit(MAX_HOP1);
+      const hop1 = [...new Set(hop1Rows.map((r) => r.did).filter(Boolean))];
+      if (kind === 'following' || hop1.length === 0) return kind === 'following' ? hop1 : [];
+      const hop2Rows = await db
+        .select({ did: follows.followedDid })
+        .from(follows)
+        .where(inArray(follows.followerDid, hop1))
+        .limit(MAX_HOP2);
+      const exclude = new Set<string>([viewerDid, ...hop1]);
+      return [...new Set(hop2Rows.map((r) => r.did).filter(Boolean))].filter((d) => !exclude.has(d));
+    }
+
+    function dbToFeedPaginated(offset: number, limit: number) {
+      return { offset, limit };
+    }
+
+    // ── Helper: paginate DB records ───────────────────────────────────
+    async function paginateFromDb(offsetNum: number, limitNum: number) {
+      const rows = await db
+        .select()
+        .from(records)
+        .where(inArray(records.collection, FEED_COLLECTIONS))
+        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .limit(limitNum + 1)
+        .offset(offsetNum);
+
+      const hasMore = rows.length > limitNum;
+      const page = hasMore ? rows.slice(0, limitNum) : rows;
+      const outCursor = hasMore ? String(offsetNum + limitNum) : undefined;
+      return { feed: dbToFeed(page), cursor: outCursor };
+    }
+
+    // ── Static / social feeds (public / following / extended) ───────────
+    // at://<did>/net.olamaelcu.livtet.biblio.feed.generator/{public|following|extended}
+    if (feedType === 'public' || feedType === 'static' || feedType === 'following' || feedType === 'extended') {
+      const request = ctx.request;
+      const viewerDid = await viewerDidFromRequest(request);
+      let feed: Array<{ post: string; reason?: string }> = [];
+      let outCursor: string | undefined;
+      if (viewerDid && (feedType === 'following' || feedType === 'extended')) {
+        const ids = await feedAuthorDids(viewerDid, feedType);
+        if (ids.length > 0) {
+          const reviewRows = await db.select().from(records).where(
+            and(
+              inArray(records.collection, FEED_COLLECTIONS),
+              inArray(records.did, ids),
+            )
+          ).orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`).limit(limit + 1).offset(offset);
+          const hasMore = reviewRows.length > limit;
+          const page = hasMore ? reviewRows.slice(0, limit) : reviewRows;
+          outCursor = hasMore ? String(offset + limit) : undefined;
+          feed = dbToFeed(page);
+        }
+      }
+      if (feed.length === 0) {
+        const result = await paginateFromDb(offset, limit);
+        feed = result.feed;
+        outCursor = result.cursor;
+      }
+      return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+    }
+
+    // ── Dynamic feed (requires auth) ──────────────────────────────────
+    // at://<did>/net.olamaelcu.livtet.biblio.feed.generator/dynamic
+    if (feedType === 'dynamic') {
+      const request = ctx.request;
+      const userDid = await requireFeedAuth(request);
+
+      // Personalize by querying reviews from authors the user follows.
+      // Falls back to general feed if social graph is unavailable.
+      let followingDids: string[] = [];
+      try {
+        const following = await getBacklinks({
+          subject: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.social/following`,
+          source: 'net.olamaelcu.livtet.biblio.social:follow',
+          limit: 100,
+          cursor,
+        });
+        followingDids = (following.records || [])
+          .map((r) => (r as { value?: Record<string, unknown> }).value?.target?.did)
+          .filter((d): d is string => !!d);
+      } catch (err) {
+        log.warn({ err, userDid }, 'feed: could not fetch following list for dynamic feed');
+      }
+
+      let feed: Array<{ post: string; reason?: string }> = [];
+      let outCursor: string | undefined;
+
+      if (followingDids.length > 0) {
+        // Filter DB records to those authored by followed users
+        const inClause = followingDids.map((d) => `'${d}'`).join(', ');
+        const rows = await db
+          .select()
+          .from(records)
+          .where(
+            and(
+              inArray(records.collection, FEED_COLLECTIONS),
+              sql`${records.did} IN (${sql.raw(inClause)})`,
+            ),
+          )
+          .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+          .limit(limit + 1)
+          .offset(offset);
+
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        outCursor = hasMore ? String(offset + limit) : undefined;
+        feed = dbToFeed(page);
+      }
+
+      // Fallback to general feed if no followed authors or no results
+      if (feed.length === 0) {
+        const result = await paginateFromDb(offset, limit);
+        feed = result.feed;
+        outCursor = result.cursor;
+      }
+
+      return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+    }
+
+    // ── Edition-specific feed (public) ────────────────────────────────
+    // at://<did>/net.olamaelcu.livtet.biblio.feed.generator/edition/{rkey}
+    if (feedType === 'edition') {
+      const rkey = feedParts[2];
+      if (!rkey) {
+        throw new Error('Edition RKEY is missing from feed URI');
+      }
+
+      let feed: Array<{ post: string; reason?: string }> = [];
+      let outCursor: string | undefined;
+
+      try {
+        const backlinks = await getBacklinks({
+          subject: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.edition/${rkey}`,
+          source: 'net.olamaelcu.livtet.bookReview:book',
+          limit,
+          cursor,
+        });
+        outCursor = backlinks.cursor;
+        feed = backlinks.records.map((r) => ({
+          post: r.uri,
+          reason: 'Backlink from edition review',
+        }));
+      } catch (err) {
+        log.warn({ err, feedUri }, 'feed: constellation merge failed for edition feed');
+      }
+
+      // Bookhive reviews of the same edition, resolved through the catalog record
+      // the edition carries as its `bookhive` identifier.
+      try {
+        const subject = await bookhiveSubjectForEdition(`at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.edition/${rkey}`);
+        if (subject && feed.length < limit) {
+          const bookhive = await getBacklinks({
+            subject,
+            source: BOOKHIVE_BACKLINK_SOURCE,
+            limit: limit - feed.length,
+          });
+          const seen = new Set(feed.map((f) => f.post));
+          for (const ref of bookhive.records) {
+            if (seen.has(ref.uri) || feed.length >= limit) continue;
+            feed.push({ post: ref.uri, reason: 'Bookhive review backlink' });
+          }
+        }
+      } catch (err) {
+        log.warn({ err, feedUri }, 'feed: bookhive merge failed for edition feed');
+      }
+
+      // Fallback to DB if constellation returns no results
+      if (feed.length === 0) {
+        const result = await paginateFromDb(offset, limit);
+        feed = result.feed;
+        outCursor = result.cursor;
+      }
+
+      return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+    }
+
+    // Unrecognized feed URI — return empty feed
+    return json({ feed: [], cursor: undefined } as unknown as typeof getFeedSkeletonSchema.output);
+  },
+});
+
+// ─── Social graph follow/unfollow (DB-authoritative) ─────────────────────
+// Viewer DID comes from the JWT (requireFeedAuth, lxm com.atproto.feed.getFeedSkeleton).
+const followUnfollowSchema = /*#__PURE__*/ v.query('net.olamaelcu.livtet.biblio.follow', {
+  params: /*#__PURE__*/ v.object({
+    followed: /*#__PURE__*/ v.didString(),
+    action: /*#__PURE__*/ v.optional(v.literalEnum(['follow', 'unfollow']), 'follow'),
+  }),
+  output: {
+    type: 'lex',
+    schema: /*#__PURE__*/ v.object({ ok: /*#__PURE__*/ v.boolean() }),
+  },
+});
+
+router.addQuery(followUnfollowSchema, {
+  async handler({ params, request }) {
+    const followed = params.followed as string;
+    const action = (params.action as string | undefined) || 'follow';
+    const viewerDid = await viewerDidFromRequest(request);
+    if (!viewerDid) {
+      throw new AuthRequiredError({
+        status: 401,
+        error: 'AuthenticationRequired',
+        message: 'follow/unfollow requires a Bibliograph session cookie',
+        wwwAuthenticate: { scheme: 'Bearer' },
+      });
+    }
+    if (action === 'unfollow') {
+      await db.delete(follows).where(
+        and(eq(follows.followerDid, viewerDid), eq(follows.followedDid, followed)),
+      );
+    } else {
+      await db.insert(follows).values({ followerDid: viewerDid, followedDid: followed }).onConflictDoNothing();
+    }
+    return json({ ok: true } as unknown as typeof followUnfollowSchema.output);
   },
 });

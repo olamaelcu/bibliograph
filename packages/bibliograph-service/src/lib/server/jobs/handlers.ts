@@ -9,6 +9,7 @@ import type { EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier 
 import { PUBLISHER_DID } from '../did';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionRkey, workRkey, contributorRkey, publisherRkey } from '../ol/keys';
 import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from '../gb/keys';
+import { bhEditionRkey, hiveIdFromCatalogUri, isHiveId } from '../bookhive/keys';
 import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
@@ -23,7 +24,7 @@ import {
 
 const db: typeof defaultDb = defaultDb;
 
-type SourceKind = 'ol' | 'gb' | 'isbndb';
+type SourceKind = 'ol' | 'gb' | 'isbndb' | 'bh';
 
 function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   const i = idents.find((i) => i.resource === 'openlibrary');
@@ -56,17 +57,50 @@ function isbndbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   return undefined;
 }
 
+/**
+ * Hive id carried by a `bookhive` identifier — the catalog record's at-uri
+ * (`at://…/buzz.bookhive.catalogBook/{hiveId}`), or the bare hive id.
+ */
+function bhHiveIdFromIdentifiers(idents: Identifier[]): string | undefined {
+  const bookhive = idents.find((x) => x.resource === 'bookhive');
+  if (!bookhive) return undefined;
+  const hiveId = hiveIdFromCatalogUri(bookhive.uri);
+  if (hiveId) return hiveId;
+  return isHiveId(bookhive.uri) ? bookhive.uri : undefined;
+}
+
 /** Determine which synthesis path applies for an item, returning OL key, GB volume id, ISBNDb isbn, or nothing. */
 function identifySource(
   idents: Identifier[],
-): { kind: SourceKind; olKey: string; gbId: string; isbndbIsbn: string } | null {
+): { kind: SourceKind; olKey: string; gbId: string; isbndbIsbn: string; hiveId: string } | null {
   const olKey = olKeyFromIdentifiers(idents);
-  if (olKey) return { kind: 'ol', olKey, gbId: '', isbndbIsbn: '' };
+  if (olKey) return { kind: 'ol', olKey, gbId: '', isbndbIsbn: '', hiveId: '' };
   const gbId = gbKeyFromIdentifiers(idents);
-  if (gbId) return { kind: 'gb', olKey: '', gbId, isbndbIsbn: '' };
+  if (gbId) return { kind: 'gb', olKey: '', gbId, isbndbIsbn: '', hiveId: '' };
   const isbndbIsbn = isbndbKeyFromIdentifiers(idents);
-  if (isbndbIsbn) return { kind: 'isbndb', olKey: '', gbId: '', isbndbIsbn };
+  if (isbndbIsbn) return { kind: 'isbndb', olKey: '', gbId: '', isbndbIsbn, hiveId: '' };
+  const hiveId = bhHiveIdFromIdentifiers(idents);
+  if (hiveId) return { kind: 'bh', olKey: '', gbId: '', isbndbIsbn: '', hiveId };
   return null;
+}
+
+/**
+ * Edition uri an item with these identifiers is stored under, or undefined when
+ * the identifiers carry no usable source key. Both the ingest loop and the DLQ
+ * writer derive it from here so the two can never disagree about the key.
+ */
+function editionUriFor(idents: Identifier[]): string | undefined {
+  const source = identifySource(idents);
+  if (!source) return undefined;
+  const base = `at://${PUBLISHER_DID}/community.lexicon.book.edition/`;
+  try {
+    if (source.kind === 'ol') return `${base}${editionRkey(parseEditionKey(source.olKey))}`;
+    if (source.kind === 'gb') return `${base}${gbEditionRkey(source.gbId)}`;
+    if (source.kind === 'isbndb') return `${base}${isbndbEditionRkey(source.isbndbIsbn)}`;
+    return `${base}${bhEditionRkey(source.hiveId)}`;
+  } catch {
+    return undefined;
+  }
 }
 
 function publisherUriFor(item: PublisherItem): string | undefined {
@@ -163,33 +197,9 @@ async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: n
   try {
     const allRows: unknown[] = [];
     for (const item of items) {
-      const source = identifySource(item.identifiers);
-      let uri: string | undefined;
-      let rkey: string | undefined;
-      if (source?.kind === 'ol') {
-        try {
-          const olid = parseEditionKey(source.olKey);
-          rkey = editionRkey(olid);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
-        } catch {
-          continue;
-        }
-      } else if (source?.kind === 'gb') {
-        try {
-          rkey = gbEditionRkey(source.gbId);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
-        } catch {
-          continue;
-        }
-      } else if (source?.kind === 'isbndb') {
-        try {
-          rkey = isbndbEditionRkey(source.isbndbIsbn);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${rkey}`;
-        } catch {
-          continue;
-        }
-      }
-      if (!uri || !rkey) continue;
+      const uri = editionUriFor(item.identifiers);
+      if (!uri) continue;
+      const rkey = uri.slice(uri.lastIndexOf('/') + 1);
       const value = {
         $type: 'community.lexicon.book.edition' as const,
         title: item.title,
@@ -238,16 +248,7 @@ async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: n
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'ingest-edition-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
     for (const item of items) {
-      const olKey = olKeyFromIdentifiers(item.identifiers);
-      let uri = 'at://unknown/community.lexicon.book.edition/unknown';
-      if (olKey) {
-        try {
-          const olid = parseEditionKey(olKey);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/${editionRkey(olid)}`;
-        } catch {
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.edition/unknown`; // malformed
-        }
-      }
+      const uri = editionUriFor(item.identifiers) ?? 'at://unknown/community.lexicon.book.edition/unknown';
       await writeIngestDLQ(uri, item, message, attempts);
     }
   }

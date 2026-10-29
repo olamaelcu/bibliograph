@@ -7,12 +7,21 @@ import { NetOlamaelcuLivtetBiblioDefs } from '../lexicons/index.js';
 import { createLogger } from '../logger';
 import { gbEditionUri, isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { editionUri, olidFromEditionRkey } from '../ol/keys';
+import { bhEditionUri, isBhRkey, hiveIdFromBhRkey, BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
+import { normalizeBookhiveBook } from '../bookhive/records';
 
 const log = createLogger('web');
 
 type Did = `did:${string}:${string}`;
 
 export function catalogEditionUriFromRkey(rkey: string): string | null {
+  if (isBhRkey(rkey)) {
+    try {
+      return bhEditionUri(hiveIdFromBhRkey(rkey));
+    } catch {
+      return null;
+    }
+  }
   if (isGbRkey(rkey)) {
     try {
       return gbEditionUri(volumeIdFromGbRkey(rkey));
@@ -125,6 +134,11 @@ export function resolveBookShelf(
   bookMap: Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>,
   shelfMap: Map<string, NetOlamaelcuLivtetBiblioDefs.ShelfView>,
 ): ResolvedBookShelf {
+  // Bookhive has no shelf records: the reading status is inline on the user's
+  // book record, so the shelving view is derived rather than hydrated.
+  if (row.collection === BOOKHIVE_BOOK_COLLECTION) {
+    return resolveBookhiveShelf(row, bookMap);
+  }
   const v = row.value as { shelf?: string; book?: { uri?: string } };
 
   const bookRefUri = typeof v.book?.uri === 'string' && v.book.uri ? v.book.uri : null;
@@ -150,9 +164,53 @@ export function resolveBookShelf(
   return { ok: true, view: buildBookShelfView(row, shelfView, bookView) };
 }
 
-export async function fetchBookShelvingRecord(
+/**
+ * Shelving view for a `buzz.bookhive.book` record.
+ *
+ * Bookhive keeps the reading status inline (there is no shelf record), so the
+ * shelf view carries the display name only and the status travels in
+ * `metadata.status` — that is the field clients should read. The record uri is
+ * the user's own book record, which is what actually places the book on their
+ * shelf, so it is used as the view uri.
+ */
+function resolveBookhiveShelf(
+  row: RecordRow,
+  bookMap: Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>,
+): ResolvedBookShelf {
+  const normalized = normalizeBookhiveBook(row.value);
+  const bookView = normalized.editionUri ? bookMap.get(normalized.editionUri) : undefined;
+  if (!bookView) return { ok: false, reason: 'book-not-found' };
+  const shelf = normalized.shelf;
+  const raw = row.value;
+  const createdAt = raw && typeof raw === 'object' && 'createdAt' in raw && typeof raw.createdAt === 'string'
+    ? raw.createdAt
+    : undefined;
+  const shelfView: NetOlamaelcuLivtetBiblioDefs.ShelfView = {
+    uri: '' as never,
+    name: shelf?.name ?? '',
+    $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
+  };
+  const metadata = shelf
+    ? ({ status: shelf.status } as NetOlamaelcuLivtetBiblioDefs.BookShelfMetadata)
+    : ({} as NetOlamaelcuLivtetBiblioDefs.BookShelfMetadata);
+  return {
+    ok: true,
+    view: {
+      uri: row.uri as never,
+      shelf: shelfView,
+      book: bookView,
+      metadata,
+      did: row.did as Did,
+      createdAt,
+      $type: 'net.olamaelcu.livtet.biblio.defs#bookShelfView',
+    },
+  };
+}
+
+async function fetchPdsRecord(
   uri: string,
   did: string,
+  collection: `${string}.${string}.${string}`,
   signal: AbortSignal,
 ): Promise<RecordRow | null> {
   const [cached] = await db.select().from(records).where(eq(records.uri, uri)).limit(1);
@@ -162,7 +220,7 @@ export async function fetchBookShelvingRecord(
     const raw = await client.get('com.atproto.repo.getRecord', {
       params: {
         repo: did as Did,
-        collection: 'net.olamaelcu.livtet.biblio.bookShelving',
+        collection,
         rkey: uri.split('/').pop()!,
       },
       signal,
@@ -176,13 +234,30 @@ export async function fetchBookShelvingRecord(
       cid: r.cid ?? 'bafyplaceholder',
       did,
       rkey: r.uri.split('/').pop() ?? '',
-      collection: 'net.olamaelcu.livtet.biblio.bookShelving',
+      collection,
       value: r.value as never,
       createdAt: new Date(),
       indexedAt: new Date(),
     };
   } catch (err) {
-    log.error({ stage: 'shelving.fetchBookShelvingRecord', uri, did, err: err instanceof Error ? err.message : String(err) }, 'PDS read failed');
+    log.error({ stage: 'shelving.fetchPdsRecord', uri, did, collection, err: err instanceof Error ? err.message : String(err) }, 'PDS read failed');
     return null;
   }
+}
+
+export function fetchBookShelvingRecord(
+  uri: string,
+  did: string,
+  signal: AbortSignal,
+): Promise<RecordRow | null> {
+  return fetchPdsRecord(uri, did, 'net.olamaelcu.livtet.biblio.bookShelving', signal);
+}
+
+/** Read a Bookhive user's book record (review + reading status) from its PDS. */
+export function fetchBookhiveBookRecord(
+  uri: string,
+  did: string,
+  signal: AbortSignal,
+): Promise<RecordRow | null> {
+  return fetchPdsRecord(uri, did, BOOKHIVE_BOOK_COLLECTION, signal);
 }

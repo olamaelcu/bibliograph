@@ -224,5 +224,63 @@ test('resolveBookShelf: preserves uri, did, metadata, createdAt, updatedAt', () 
   assert.equal(result.view!.updatedAt, '2026-08-26T00:00:00.000Z');
 });
 
+// ─── resolveBookShelf: bookhive rows ────────────────────────────────────────
+
+const HIVE_ID = 'bk_Wf9C5GP9iEGH6hqNNtwW';
+const EDITION_URI_BH = `at://${PUBLISHER_DID}/community.lexicon.book.edition/bh.${HIVE_ID}`;
+
+function makeBookhiveRow(opts: { status?: string; hiveBookUri?: string | null } = {}): RecordRow {
+  return {
+    uri: 'at://did:plc:reader/buzz.bookhive.book/3lct6cguexs2p',
+    cid: 'bafyplaceholder',
+    did: 'did:plc:reader',
+    rkey: '3lct6cguexs2p',
+    collection: 'buzz.bookhive.book',
+    value: {
+      hiveId: HIVE_ID,
+      ...(opts.hiveBookUri === null
+        ? {}
+        : { hiveBookUri: opts.hiveBookUri ?? `at://did:plc:enu2j5xjlqsjaylv3du4myh4/buzz.bookhive.catalogBook/${HIVE_ID}` }),
+      status: opts.status ?? 'buzz.bookhive.defs#finished',
+      review: 'A good read',
+      createdAt: '2026-08-26T00:00:00.000Z',
+      // eslint-disable-next-line @typescript-eslint/no-restricted-types
+    } as never,
+    createdAt: new Date('2026-08-26T00:00:00Z'),
+    indexedAt: new Date('2026-08-26T00:00:00Z'),
+  };
+}
+
+test('resolveBookShelf: bookhive status becomes metadata.status', () => {
+  const bookMap = new Map([[EDITION_URI_BH, makeBookView(EDITION_URI_BH)]]);
+  const result = resolveBookShelf(makeBookhiveRow(), bookMap, new Map());
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.view!.metadata, { status: 'read' });
+  assert.equal(result.view!.shelf.name, 'Read');
+  assert.equal(result.view!.uri, 'at://did:plc:reader/buzz.bookhive.book/3lct6cguexs2p');
+  assert.equal(result.view!.book.uri, EDITION_URI_BH);
+  assert.equal(result.view!.createdAt, '2026-08-26T00:00:00.000Z');
+});
+
+test('resolveBookShelf: bookhive reading status maps to its own shelf', () => {
+  const bookMap = new Map([[EDITION_URI_BH, makeBookView(EDITION_URI_BH)]]);
+  const result = resolveBookShelf(makeBookhiveRow({ status: 'buzz.bookhive.defs#reading' }), bookMap, new Map());
+  assert.deepEqual(result.view!.metadata, { status: 'reading' });
+  assert.equal(result.view!.shelf.name, 'Currently Reading');
+});
+
+test('resolveBookShelf: bookhive row is dropped when its edition is not in the catalog', () => {
+  const result = resolveBookShelf(makeBookhiveRow(), new Map(), new Map());
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'book-not-found');
+});
+
+test('resolveBookShelf: bookhive row without hiveBookUri still resolves through hiveId', () => {
+  const bookMap = new Map([[EDITION_URI_BH, makeBookView(EDITION_URI_BH)]]);
+  const result = resolveBookShelf(makeBookhiveRow({ hiveBookUri: null }), bookMap, new Map());
+  assert.equal(result.ok, true);
+  assert.equal(result.view!.book.uri, EDITION_URI_BH);
+});
+
 // Reference unrelated constant to satisfy unused-import linters.
 void SHELVING_URI;

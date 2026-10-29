@@ -307,4 +307,14 @@ export const librarianApplications = pgTable(
 );
 
 export type LabelRow = typeof labels.$inferSelect;
+export const follows = pgTable('follows', {
+  followerDid: text('follower_did').notNull(),
+  followedDid: text('followed_did').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.followerDid, t.followedDid] }),
+  followedIdx: index('follows_followed_did_idx').on(t.followedDid),
+}));
+
+export type FollowRow = typeof follows.$inferSelect;
 export type LibrarianApplicationRow = typeof librarianApplications.$inferSelect;

@@ -8,6 +8,7 @@ import {
   enqueueRecordDeleteBatch,
   type TapRecordUpsertItem,
 } from './jobs/enqueue';
+import { BOOKHIVE_BOOK_COLLECTION } from './bookhive/keys';
 import { getTapQueueDepth } from './jobs/depth';
 
 const TAP_URL = process.env.TAP_URL ?? 'http://localhost:2480';
@@ -29,6 +30,9 @@ const tap = new TapClient({
 
 const NET_PREFIX = 'net.olamaelcu.livtet.biblio.';
 const REVIEW_COLLECTION = 'net.olamaelcu.livtet.bookReview';
+// Bookhive users' own book records carry their reviews and reading status, so
+// mirroring them is what lets those reviews show up in Bibliograph feeds.
+const MIRRORED_COLLECTIONS = new Set([REVIEW_COLLECTION, BOOKHIVE_BOOK_COLLECTION]);
 
 type UpsertBufferItem = TapRecordUpsertItem & { ack: () => Promise<void> };
 type DeleteBufferItem = { uri: string; ack: () => Promise<void> };
@@ -116,7 +120,7 @@ export async function runTapConsumer(log: Logger): Promise<void> {
       }
       if (
         !event.collection.startsWith(NET_PREFIX) &&
-        event.collection !== REVIEW_COLLECTION
+        !MIRRORED_COLLECTIONS.has(event.collection)
       ) {
         await ack();
         continue;

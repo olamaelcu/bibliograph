@@ -54,6 +54,24 @@ curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/app.bsky.feed.getFeedSkeleton?
 curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/app.bsky.feed.getFeedSkeleton?feed=at://did:web:biblio.livtet.olamaelcu.net/net.olamaelcu.livtet.biblio.feed/reviews/abc123&limit=5'
 ```
 
+
+## Bookhive entries
+
+`buzz.bookhive.book` records are feed content alongside Bibliograph's own
+reviews and shelving. One Bookhive record carries a review *and* a reading
+status, so it is mirrored through TAP and rendered by collection:
+
+| Collection | `reason` |
+| --- | --- |
+| `net.olamaelcu.livtet.bookReview`, `net.olamaelcu.livtet.biblio.bookReview` | the reviewed book at-uri |
+| `net.olamaelcu.livtet.biblio.bookShelving` | `shelving:<shelf-rkey>` + `<book-uri>` |
+| `buzz.bookhive.book` | `bookhive:<shelf-rkey>` + `<bh-edition-uri>` |
+
+The edition-specific feed additionally merges Bookhive reviews of the same
+edition through Constellation source `buzz.bookhive.book:hiveBookUri`, resolving
+the edition's `bookhive` identifier to the catalog record that is the backlink
+subject.
+
 ## Technical Details
 
 ### Schema Definitions

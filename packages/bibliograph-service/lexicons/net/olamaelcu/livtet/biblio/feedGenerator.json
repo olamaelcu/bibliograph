@@ -1,0 +1,19 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.feed.generator",
+  "description": "ATProto feed generator for book reviews and editions.",
+  "defs": {
+    "feedGeneratorConfig": {
+      "type": "object",
+      "description": "Feed generator configuration.",
+      "required": ["serviceEndpoint"],
+      "properties": {
+        "serviceEndpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "The service endpoint URL for the feed generator."
+        }
+      }
+    }
+  }
+}

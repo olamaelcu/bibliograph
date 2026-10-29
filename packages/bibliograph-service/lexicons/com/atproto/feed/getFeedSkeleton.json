@@ -1,0 +1,71 @@
+{
+  "lexicon": 1,
+  "id": "com.atproto.feed.getFeedSkeleton",
+  "description": "Get a skeleton of feed items from a feed generator.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Retrieve skeleton feed items (post references) for a given feed URI.",
+      "parameters": {
+        "type": "params",
+        "required": [
+          "feed"
+        ],
+        "properties": {
+          "feed": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the feed."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Pagination cursor."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 5,
+            "description": "Maximum number of items to return."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "feed"
+          ],
+          "properties": {
+            "feed": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "#feedItem"
+              }
+            },
+            "cursor": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "feedItem": {
+      "type": "object",
+      "required": [
+        "post"
+      ],
+      "properties": {
+        "post": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

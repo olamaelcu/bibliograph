@@ -1,3 +1,4 @@
+import { BOOKHIVE_BACKLINK_SOURCE } from '../bookhive/records';
 import { createLogger } from '../logger';
 
 const log = createLogger('web');
@@ -9,7 +10,11 @@ export const CONSTELLATION_USER_AGENT = 'bibliograph/0.1.0 (+https://biblio.livt
 export type ShelvingSource =
   | 'net.olamaelcu.livtet.biblio.bookShelving:book.ref'
   | 'net.olamaelcu.livtet.biblio.bookShelving:shelf';
-export type ReviewSource = 'net.olamaelcu.livtet.bookReview:book';
+/** `buzz.bookhive.book` records ref their catalog record through `hiveBookUri`. */
+export type BookhiveSource = typeof BOOKHIVE_BACKLINK_SOURCE;
+export type ReviewSource = 'net.olamaelcu.livtet.bookReview:book' | BookhiveSource;
+export type SocialSource = 'net.olamaelcu.livtet.biblio.social:follow';
+export type BacklinkSource = ShelvingSource | ReviewSource | SocialSource;
 
 export interface BacklinkRecord {
   uri: string;
@@ -23,7 +28,7 @@ export interface BacklinkPage {
 
 export interface GetBacklinksParams {
   subject: string;
-  source: ShelvingSource | ReviewSource;
+  source: BacklinkSource;
   did?: string;
   limit: number;
   cursor?: string;

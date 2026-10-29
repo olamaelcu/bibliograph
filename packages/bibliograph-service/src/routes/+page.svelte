@@ -46,6 +46,41 @@
       token.
     </p>
   </section>
+
+  <section class="feeds">
+    <h2>Feeds</h2>
+    <p>
+      Feed generator at <code>net.olamaelcu.livtet.biblio.feed.generator</code>
+      exposes four feeds via <code>com.atproto.feed.getFeedSkeleton</code>.
+      Entries are book reviews and shelving events — a book placed on
+      <em>Reading</em>, <em>Read</em>, <em>To Read</em> or <em>Did Not Finish</em>
+      — newest first:
+    </p>
+    <ul>
+      <li>
+        <strong>Public (static)</strong>
+        <code>at://PUBLISHER/net.olamaelcu.livtet.biblio.feed.generator/public</code>
+        — no auth; general book reviews
+      </li>
+      <li>
+        <strong>Dynamic</strong>
+        <code>at://PUBLISHER/net.olamaelcu.livtet.biblio.feed.generator/dynamic</code>
+        — JWT auth; personalized via Constellation follow backlinks
+      </li>
+      <li>
+        <strong>Following</strong>
+        <code>at://PUBLISHER/net.olamaelcu.livtet.biblio.feed.generator/following</code>
+        — session auth; reviews and shelving by the DIDs you follow
+        (<code>requiresAuth: true</code>)
+      </li>
+      <li>
+        <strong>Extended network</strong>
+        <code>at://PUBLISHER/net.olamaelcu.livtet.biblio.feed.generator/extended</code>
+        — session auth; activity by people <em>your follows</em> follow (2 hops),
+        excluding people you already follow (<code>requiresAuth: true</code>)
+      </li>
+    </ul>
+  </section>
 </main>
 
 <style>

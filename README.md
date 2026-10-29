@@ -26,6 +26,34 @@ analysis of book reviews on protocol from Livtet. For compatibility with other
 applications like [Bookhive][], Bibliograph normalizes those reviews into
 Bibliograph reviews so they can appear to Bibliograph-powered applications.
 
+### Bookhive
+
+[Bookhive][] publishes its catalog and its users' book records on-protocol from
+a single PDS (`did:plc:enu2j5xjlqsjaylv3du4myh4`), which Bibliograph consumes in
+both directions:
+
+- **Catalog → editions.** `buzz.bookhive.catalogBook` records are ingested as
+  `community.lexicon.book.edition` rows keyed `bh.{hiveId}`
+  (`pnpm ingest:bookhive`), carrying the catalog record's at-uri as a `bookhive`
+  identifier (plus the `goodreads` id when that is the upstream source).
+- **User records → reviews and shelving.** A `buzz.bookhive.book` record holds
+  the review text, a 1–10 star rating and a reading status
+  (`reading` / `finished` / `wantToRead` / `abandoned`) all at once, and refs its
+  catalog record through `hiveBookUri`. Bibliograph never rewrites those
+  records: `getReviewsByBook` translates them into `biblio.bookReview` values and
+  `getShelvingOfBook` maps the status onto `defs#bookShelfMetadata.status`, both
+  only for the edition that carries the matching `bookhive` identifier.
+- **Discovery.** Records are mirrored through TAP (`buzz.bookhive.book`) and
+  resolved through Constellation with source `buzz.bookhive.book:hiveBookUri`,
+  so reviews written since the last mirror — or by repos no TAP instance follows
+  — are still found on the first page.
+
+`buzz.bookhive.buzz` (book comments) is deliberately **not** ingested: comments
+ref the user book record and each other, never the catalog record, so
+Constellation cannot attach them to a Bibliograph edition and mirroring them
+would only cost storage. Set `BOOKHIVE_PDS` to point somewhere other than
+`https://bluesky.nickthesick.com`.
+
 ### Material Discovery
 
 Information is sourced from a few places:
