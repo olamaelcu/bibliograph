@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
+import { searchProviderRequestsTotal } from '../metrics';
 import { googleBooksBreaker } from './breakers';
 import type { EditionItem, WorkItem, SearchQuery, SearchResult, Identifier } from '../search/types';
 import { toGbLangRestrict } from '../search/language';
@@ -201,10 +202,12 @@ async function gbFetch<T>(url: string, log: Logger, signal: AbortSignal): Promis
       return (await res.json()) as T;
     }, log);
     googleBooksBreaker.recordSuccess();
+    searchProviderRequestsTotal.inc({ provider: 'googlebooks', status: 'success' });
     return body;
   } catch (err) {
     googleBooksBreaker.recordFailure();
     log.error({ stage: 'google-books-source', err, url }, 'googlebooks fetch failed');
+    searchProviderRequestsTotal.inc({ provider: 'googlebooks', status: 'failure' });
     return null;
   }
 }

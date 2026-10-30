@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
+import { searchProviderRequestsTotal } from '../metrics';
 import { isbndbBreaker } from './breakers';
 import type { EditionItem, WorkItem, Identifier, SearchQuery, SearchResult } from '../search/types';
 import { isbndbEditionUri, isbndbWorkUri } from '../isbndb/keys';
@@ -176,10 +177,12 @@ async function isbndbFetch<T>(url: string, log: Logger, signal: AbortSignal, ini
       retryOn: (status) => status === 429 || (status >= 500 && status < 600),
     });
     isbndbBreaker.recordSuccess();
+    searchProviderRequestsTotal.inc({ provider: 'isbndb', status: 'success' });
     return body;
   } catch (err) {
     isbndbBreaker.recordFailure();
     log.error({ stage: 'isbndb-source', err, url }, 'isbndb fetch failed');
+    searchProviderRequestsTotal.inc({ provider: 'isbndb', status: 'failure' });
     return null;
   }
 }

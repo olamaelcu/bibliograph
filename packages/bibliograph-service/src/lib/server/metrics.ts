@@ -26,6 +26,12 @@ export const upstreamRequestsTotal = new Counter({
   labelNames: ['upstream', 'outcome'] as const,
   registers: [metricsRegistry],
 });
+export const searchProviderRequestsTotal = new Counter({
+  name: 'search_provider_requests_total',
+  help: 'Search requests to upstream providers',
+  labelNames: ['provider', 'status'] as const,
+  registers: [metricsRegistry],
+});
 
 export const searchLatencyMs = new Histogram({
   name: 'search_latency_ms',

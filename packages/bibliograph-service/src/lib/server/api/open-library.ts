@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
+import { searchProviderRequestsTotal } from '../metrics';
 import { openLibraryBreaker } from './breakers';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionUri, workUri, contributorUri, publisherUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey, olidFromPublisherRkey } from '../ol/keys';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
@@ -47,10 +48,12 @@ export async function fetchJson<T>(url: string, log: Logger, signal: AbortSignal
       return res.json() as Promise<T>;
     }, log);
     openLibraryBreaker.recordSuccess();
+    searchProviderRequestsTotal.inc({ provider: 'openlibrary', status: 'success' });
     return body;
   } catch (err) {
     openLibraryBreaker.recordFailure();
     log.error({ stage: 'open-library-source', err, url }, 'openlibrary fetch failed');
+    searchProviderRequestsTotal.inc({ provider: 'openlibrary', status: 'failure' });
     return null;
   }
 }
