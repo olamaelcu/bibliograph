@@ -9,6 +9,7 @@ import { gbEditionUri, isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { editionUri, olidFromEditionRkey } from '../ol/keys';
 import { bhEditionUri, isBhRkey, hiveIdFromBhRkey, BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
 import { normalizeBookhiveBook } from '../bookhive/records';
+import { isIsbndbRkey, isbnFromIsbndbRkey, isbndbEditionUri } from '../isbndb/keys';
 
 const log = createLogger('web');
 
@@ -25,6 +26,13 @@ export function catalogEditionUriFromRkey(rkey: string): string | null {
   if (isGbRkey(rkey)) {
     try {
       return gbEditionUri(volumeIdFromGbRkey(rkey));
+    } catch {
+      return null;
+    }
+  }
+  if (isIsbndbRkey(rkey)) {
+    try {
+      return isbndbEditionUri(isbnFromIsbndbRkey(rkey));
     } catch {
       return null;
     }
@@ -129,6 +137,32 @@ export interface ResolvedBookShelf {
   reason?: 'book-not-found' | 'shelf-not-found';
 }
 
+/**
+ * Catalog URI a shelving row points at: the record's own `book.uri`, or the
+ * edition URI derived from its rkey when the record predates the field. Single
+ * definition so `resolveBookShelf`, the hydration pass and the shelf backfill
+ * script can never disagree about which edition a row needs.
+ */
+export function bookUriForRow(row: RecordRow): string | null {
+  const value = row.value;
+  if (value && typeof value === 'object' && 'book' in value) {
+    const book = value.book;
+    if (book && typeof book === 'object' && 'uri' in book) {
+      const uri = book.uri;
+      if (typeof uri === 'string' && uri) return uri;
+    }
+  }
+  return catalogEditionUriFromRkey(row.rkey);
+}
+
+/** Shelf URI a shelving row points at, or null when the record omits it. */
+export function shelfUriForRow(row: RecordRow): string | null {
+  const value = row.value;
+  if (!value || typeof value !== 'object' || !('shelf' in value)) return null;
+  const shelf = value.shelf;
+  return typeof shelf === 'string' && shelf ? shelf : null;
+}
+
 export function resolveBookShelf(
   row: RecordRow,
   bookMap: Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>,
@@ -139,17 +173,13 @@ export function resolveBookShelf(
   if (row.collection === BOOKHIVE_BOOK_COLLECTION) {
     return resolveBookhiveShelf(row, bookMap);
   }
-  const v = row.value as { shelf?: string; book?: { uri?: string } };
-
-  const bookRefUri = typeof v.book?.uri === 'string' && v.book.uri ? v.book.uri : null;
-  const fallbackBookUri = bookRefUri ? null : catalogEditionUriFromRkey(row.rkey);
-  const resolvedBookUri = bookRefUri ?? fallbackBookUri;
+  const resolvedBookUri = bookUriForRow(row);
   const bookView = resolvedBookUri ? bookMap.get(resolvedBookUri) : undefined;
   if (!bookView) {
     return { ok: false, reason: 'book-not-found' };
   }
 
-  const shelfUri = typeof v.shelf === 'string' && v.shelf ? v.shelf : null;
+  const shelfUri = shelfUriForRow(row);
   const cachedShelf = shelfUri ? shelfMap.get(shelfUri) : undefined;
   const shelfRkey = shelfUri ? shelfUri.split('/').pop() ?? '' : '';
   const displayName = cachedShelf && cachedShelf.name ? cachedShelf.name : displayNameForShelfRkey(shelfRkey);

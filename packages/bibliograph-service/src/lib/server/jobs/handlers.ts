@@ -89,7 +89,7 @@ function identifySource(
  * the identifiers carry no usable source key. Both the ingest loop and the DLQ
  * writer derive it from here so the two can never disagree about the key.
  */
-function editionUriFor(idents: Identifier[]): string | undefined {
+export function editionUriFor(idents: Identifier[]): string | undefined {
   const source = identifySource(idents);
   if (!source) return undefined;
   const base = `at://${PUBLISHER_DID}/community.lexicon.book.edition/`;
@@ -193,7 +193,7 @@ export const ingestContributorBatchTask: Task = async (payload, helpers) => {
   await ingestContributorBatch(items, helpers.logger as unknown as Logger, helpers.job.attempts);
 };
 
-async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: number): Promise<void> {
+export async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: number): Promise<void> {
   try {
     const allRows: unknown[] = [];
     for (const item of items) {

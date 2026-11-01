@@ -394,3 +394,20 @@ export async function getBookByIsbn(isbn: string, log: Logger, signal?: AbortSig
   const res = await isbndbFetch<IsbndbSingleResponse>(`${BASE}/book/${encodeURIComponent(clean)}`, log, s);
   return res?.book ?? null;
 }
+
+/**
+ * Fetch one ISBNdb book by ISBN and map it to an edition.
+ *
+ * Returns null when ISBNDB_API_KEY is unset (the source is disabled) or when the
+ * provider has nothing for that ISBN. Callers treat null as "not resolvable
+ * here", never as an error: shelf hydration falls back to leaving the row out.
+ */
+export async function getEditionByIsbn(
+  isbn: string,
+  log: Logger,
+  signal?: AbortSignal,
+): Promise<EditionItem | null> {
+  const book = await getBookByIsbn(isbn, log, signal);
+  if (!book) return null;
+  return mapIsbndbToEdition(book, new Date().toISOString(), log);
+}

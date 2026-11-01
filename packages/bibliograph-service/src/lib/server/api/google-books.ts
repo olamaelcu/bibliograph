@@ -359,3 +359,25 @@ export async function enrichEditions(
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker()));
   return out;
 }
+
+/**
+ * Fetch one volume by its Google Books id and map it to an edition.
+ *
+ * Unlike search, this direct `volumes/{id}` lookup is not gated on
+ * GOOGLE_BOOKS_API_KEY: the endpoint answers keyless (with a lower quota), so
+ * shelf hydration still works on deployments that never configured a key. When
+ * the key is present it is sent to raise the quota.
+ */
+export async function getEditionByVolumeId(
+  volumeId: string,
+  log: Logger,
+  externalSignal?: AbortSignal,
+): Promise<EditionItem | null> {
+  const key = process.env.GOOGLE_BOOKS_API_KEY;
+  const suffix = key ? `?key=${encodeURIComponent(key)}` : '';
+  const url = `${BASE}/${encodeURIComponent(volumeId)}${suffix}`;
+  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const volume = await gbFetch<GbVolume>(url, log, signal);
+  if (!volume) return null;
+  return mapGbToEdition(volume, new Date().toISOString(), log);
+}

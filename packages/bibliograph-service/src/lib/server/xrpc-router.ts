@@ -67,6 +67,9 @@ import { db } from './db';
 import { editions, works, contributors, publishers, records, follows, webSessions } from './db/schema';
 import * as v from '@atcute/lexicons/validations';
 import { allowRequest } from './rate-limit';
+import { fetchEditionForUri } from './shelving/edition-fetch';
+import { ingestEditionBatch } from './jobs/handlers';
+import type { EditionItem } from './search/types';
 import { getBacklinks } from './constellation/client';
 import {
   hydrateShelvesByUri,
@@ -75,6 +78,8 @@ import {
   fetchBookhiveBookRecord,
   resolveBookShelf,
   catalogEditionUriFromRkey,
+  bookUriForRow,
+  shelfUriForRow,
 } from './shelving/hydrate';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
@@ -1206,28 +1211,103 @@ async function collectBookhiveReviews(params: {
   return { reviews };
 }
 
+// Lazy edition resolution. A shelving row whose edition is absent from the
+// catalog used to be dropped outright, which left shelves looking empty even
+// though the records were on the user's PDS. The row is now resolved from the
+// provider that owns its rkey prefix, persisted through the normal ingest path,
+// and re-hydrated for the same response.
+//
+// The pass is bounded on purpose: a page of 50 orphans must not fan out to 50
+// provider calls, and a provider outage must not stretch a shelf page. Failures
+// are remembered for a while so a page full of unresolvable rows does not retry
+// them on every request.
+const LAZY_EDITION_MAX = 6;
+const LAZY_EDITION_BUDGET_MS = 2_500;
+const LAZY_EDITION_MISS_TTL_MS = 10 * 60_000;
+const lazyEditionMissUntil = new Map<string, number>();
+
+/** URIs worth trying this request: deduped, not recently failed, and capped. */
+function lazyEditionCandidates(uris: Array<string | null>): string[] {
+  const now = Date.now();
+  const out: string[] = [];
+  for (const uri of uris) {
+    if (!uri || out.includes(uri)) continue;
+    const until = lazyEditionMissUntil.get(uri);
+    if (until !== undefined && until > now) continue;
+    out.push(uri);
+    if (out.length >= LAZY_EDITION_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * Fetch and persist the editions behind `uris`. Returns the URIs that are now
+ * in the catalog; the caller re-selects them rather than trusting the provider
+ * payload, so a row whose derived URI disagrees with the reference stays an
+ * orphan instead of resolving to the wrong book.
+ */
+async function resolveMissingEditions(uris: Array<string | null>): Promise<string[]> {
+  const candidates = lazyEditionCandidates(uris);
+  if (candidates.length === 0) return [];
+  const signal = AbortSignal.timeout(LAZY_EDITION_BUDGET_MS);
+  const settled = await Promise.allSettled(
+    candidates.map((uri) => fetchEditionForUri(uri, log, signal)),
+  );
+  const items: EditionItem[] = [];
+  settled.forEach((result, i) => {
+    const uri = candidates[i]!;
+    const item = result.status === 'fulfilled' ? result.value : null;
+    if (!item) {
+      lazyEditionMissUntil.set(uri, Date.now() + LAZY_EDITION_MISS_TTL_MS);
+      return;
+    }
+    items.push(item);
+  });
+  if (items.length === 0) return [];
+  await ingestEditionBatch(items, log, 1).catch((err: unknown) => {
+    log.warn({ stage: 'hydrateBookShelves.lazy-ingest', err }, 'persisting lazily fetched editions failed');
+  });
+  const stored = await hydrateBooksByUri(candidates);
+  const resolved = [...stored.keys()];
+  for (const uri of candidates) {
+    if (!stored.has(uri)) lazyEditionMissUntil.set(uri, Date.now() + LAZY_EDITION_MISS_TTL_MS);
+  }
+  return resolved;
+}
+
 async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, bookUriHint?: string): Promise<NetOlamaelcuLivtetBiblioDefs.BookShelfView[]> {
   if (rows.length === 0) return [];
-  const shelfUris = Array.from(new Set(rows.map((r) => (r.value as { shelf?: string }).shelf).filter((u): u is string => !!u)));
+  const shelfUris = Array.from(new Set(rows.map((r) => shelfUriForRow(r)).filter((u): u is string => !!u)));
   const bookUris = Array.from(new Set([
     bookUriHint,
-    ...rows.flatMap((r) => {
-      const explicit = (r.value as { book?: { uri?: string } }).book?.uri;
-      if (explicit) return [explicit];
-      return [catalogEditionUriFromRkey(r.rkey)].filter((u): u is string => !!u);
-    }),
-  ].filter((u): u is string => !!u)));
+    ...rows.map((r) => bookUriForRow(r)).filter((u): u is string => !!u),
+  ]));
   const [shelfMap, bookMap] = await Promise.all([hydrateShelvesByUri(shelfUris), hydrateBooksByUri(bookUris)]);
+
+  const firstPass = rows.map((row) => ({ row, resolved: resolveBookShelf(row, bookMap, shelfMap) }));
+  const missing = firstPass.filter((entry) => !entry.resolved.ok).map((entry) => bookUriForRow(entry.row));
+  if (missing.length > 0) {
+    const resolvedUris = await resolveMissingEditions(missing);
+    if (resolvedUris.length > 0) {
+      // Re-select instead of trusting the provider mapping: only rows the
+      // catalog now actually holds can resolve.
+      const refilled = await hydrateBooksByUri(resolvedUris);
+      for (const [uri, view] of refilled) bookMap.set(uri, view);
+    }
+  }
+
   const out: NetOlamaelcuLivtetBiblioDefs.BookShelfView[] = [];
-  for (const r of rows) {
-    const resolved = resolveBookShelf(r, bookMap, shelfMap);
+  for (const entry of firstPass) {
+    const resolved = entry.resolved.ok
+      ? entry.resolved
+      : resolveBookShelf(entry.row, bookMap, shelfMap);
     if (!resolved.ok) {
       log.warn(
         {
           stage: 'hydrateBookShelves.orphan',
-          uri: r.uri,
-          rkey: r.rkey,
-          did: r.did,
+          uri: bookUriForRow(entry.row) ?? entry.row.uri,
+          rkey: entry.row.rkey,
+          did: entry.row.did,
           reason: resolved.reason,
         },
         'dropping bookShelving row: book not resolvable in catalog',
