@@ -1,27 +1,77 @@
 <script lang="ts">
-  import RecordCard from '$lib/components/RecordCard.svelte';
-  import type { DetailValue } from '$lib/types/record-detail';
-  let { data }: { data: { kind: 'contributors'; rkey: string; notFound: boolean; value?: DetailValue } } = $props();
+  // Contributor detail route: hero with lifespan chips, then the metadata card
+  // with the bio, aliases and identifiers.
+  import DetailFrame from "$lib/components/records/DetailFrame.svelte";
+  import RecordBody from "$lib/components/records/RecordBody.svelte";
+  import RecordHero from "$lib/components/records/RecordHero.svelte";
+  import RecordCard from "$lib/components/RecordCard.svelte";
+  import type { DetailValue } from "$lib/types/record-detail";
+  import type { BodyColumn, Chip } from "$lib/record-page";
+  import { identifierItems, isContributorValue } from "$lib/record-page";
+
+  let {
+    data,
+  }: {
+    data: {
+      kind: "contributors";
+      rkey: string;
+      notFound: boolean;
+      value?: DetailValue;
+    };
+  } = $props();
+
+  const chips = $derived.by((): Chip[] => {
+    const value = data.value;
+    if (!isContributorValue(value)) return [];
+    const list: Chip[] = [];
+    if (value.bornYear) list.push({ label: `b. ${value.bornYear}` });
+    if (value.diedYear) list.push({ label: `d. ${value.diedYear}` });
+    return list;
+  });
+
+  const columns = $derived.by((): BodyColumn[] => {
+    const value = data.value;
+    if (!isContributorValue(value)) return [];
+    const list: BodyColumn[] = [];
+    if (value.linkedDid) {
+      list.push({
+        title: "Linked account",
+        items: [{ text: value.linkedDid, code: true }],
+      });
+    }
+    list.push({ title: "Identifiers", items: identifierItems(value.identifiers) });
+    return list;
+  });
 </script>
 
-<main>
-  <p><a href="/search">← Back to search</a></p>
-  {#if data.notFound}
-    <section class="missing">
-      <h1>Contributor not found</h1>
-      <p class="muted">No contributor record exists for rkey <code>{data.rkey}</code>.</p>
+<DetailFrame label="Contributor" rkey={data.rkey} notFound={data.notFound}>
+  {#if isContributorValue(data.value)}
+    <section class="detail">
+      <RecordHero
+        kicker="Contributor"
+        kickerDetail={data.rkey}
+        title={data.value.name}
+        subtitle={data.value.aliases.length > 0
+          ? `also known as ${data.value.aliases.join(", ")}`
+          : undefined}
+        {chips}
+      />
+
+      <RecordBody
+        description={data.value.bio}
+        tags={data.value.aliases}
+        {columns}
+      />
     </section>
   {:else if data.value}
     <RecordCard value={data.value} />
   {/if}
-</main>
+</DetailFrame>
 
 <style>
-  main { padding: var(--wa-space-l); max-width: 60rem; margin: 0 auto; }
-  main > p { color: var(--wa-color-on-quiet); margin: 0 0 var(--wa-space-m); }
-  main > p a { color: var(--wa-color-text-link); text-decoration: none; }
-  main > p a:hover { text-decoration: underline; }
-  .missing { padding: var(--wa-space-l) 0; }
-  .missing h1 { margin: 0 0 var(--wa-space-s); }
-  .muted { color: var(--wa-color-on-quiet); }
+  .detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--wa-space-l);
+  }
 </style>

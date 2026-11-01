@@ -32,6 +32,7 @@ export const editions = pgTable(
     description: text('description'),
     coverImageUrl: text('cover_image_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    descriptionCheckedAt: timestamp('description_checked_at', { withTimezone: true }),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -90,6 +91,7 @@ export const works = pgTable(
       .default(sql`'[]'::jsonb`),
     description: text('description'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
+    descriptionCheckedAt: timestamp('description_checked_at', { withTimezone: true }),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -109,6 +111,7 @@ export const contributors = pgTable(
     aliases: jsonb('aliases').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     linkedDid: text('linked_did'),
     bio: text('bio'),
+    bioCheckedAt: timestamp('bio_checked_at', { withTimezone: true }),
     bornYear: integer('born_year'),
     diedYear: integer('died_year'),
     identifiers: jsonb('identifiers')

@@ -5,16 +5,11 @@
     WorkValue,
     ContributorValue,
     PublisherValue,
-    Identifier,
   } from "$lib/types/record-detail";
+  import { identifierLabel, rkeyFromUri } from "$lib/record-page";
   type Value = DetailValue;
 
   let { value }: { value: Value } = $props();
-
-  function rkeyFromUri(uri: string): string {
-    const at = uri.lastIndexOf("/");
-    return at >= 0 ? uri.slice(at + 1) : uri;
-  }
 
   function isEdition(v: Value): v is EditionValue {
     return v.$type === "community.lexicon.book.edition";
@@ -29,12 +24,6 @@
     return v.$type === "community.lexicon.book.publisher";
   }
 
-  function identifierLabel(id: Identifier): string {
-    const tail = id.uri.includes(":")
-      ? id.uri.split(":").slice(1).join(":")
-      : id.uri;
-    return `${tail} · ${id.resource}`;
-  }
 </script>
 
 {#if isEdition(value)}

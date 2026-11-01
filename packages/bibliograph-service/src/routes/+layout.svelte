@@ -4,15 +4,30 @@
   // Hydration support must be imported BEFORE any WebAwesome component.
   // This enables Declarative Shadow DOM hydration when SSR'd content reaches the client.
   import "@lit-labs/ssr-client/lit-element-hydrate-support.js";
+  import "@awesome.me/webawesome/dist/components/animated-image/animated-image.js";
+  import "@awesome.me/webawesome/dist/components/avatar/avatar.js";
   import "@awesome.me/webawesome/dist/components/page/page.js";
   import "@awesome.me/webawesome/dist/components/badge/badge.js";
+  import "@awesome.me/webawesome/dist/components/breadcrumb/breadcrumb.js";
+  import "@awesome.me/webawesome/dist/components/breadcrumb-item/breadcrumb-item.js";
   import "@awesome.me/webawesome/dist/components/button/button.js";
   import "@awesome.me/webawesome/dist/components/button-group/button-group.js";
   import "@awesome.me/webawesome/dist/components/callout/callout.js";
   import "@awesome.me/webawesome/dist/components/card/card.js";
   import "@awesome.me/webawesome/dist/components/copy-button/copy-button.js";
+  import "@awesome.me/webawesome/dist/components/details/details.js";
+  import "@awesome.me/webawesome/dist/components/divider/divider.js";
   import "@awesome.me/webawesome/dist/components/icon/icon.js";
   import "@awesome.me/webawesome/dist/components/input/input.js";
+  import "@awesome.me/webawesome/dist/components/option/option.js";
+  import "@awesome.me/webawesome/dist/components/progress-bar/progress-bar.js";
+  import "@awesome.me/webawesome/dist/components/progress-ring/progress-ring.js";
+  import "@awesome.me/webawesome/dist/components/select/select.js";
+  import "@awesome.me/webawesome/dist/components/tab/tab.js";
+  import "@awesome.me/webawesome/dist/components/tab-group/tab-group.js";
+  import "@awesome.me/webawesome/dist/components/tab-panel/tab-panel.js";
+  import "@awesome.me/webawesome/dist/components/tag/tag.js";
+  import "@awesome.me/webawesome/dist/components/tooltip/tooltip.js";
   import { page } from "$app/state";
   import { setViewer } from "$lib/stores/auth";
   import NavProgress from "$lib/components/NavProgress.svelte";
@@ -46,7 +61,10 @@
     data,
     children,
   }: {
-    data: { viewer: { did: string; handle: string | null } | null };
+    data: {
+      viewer: { did: string; handle: string | null } | null;
+      viewerIsAdmin: boolean;
+    };
     children: Snippet;
   } = $props();
 
@@ -113,6 +131,9 @@
     </nav>
     <div class="auth">
       {#if data.viewer}
+        {#if data.viewerIsAdmin}
+          <a class="admin" href="/admin">Admin</a>
+        {/if}
         <span class="who" title={data.viewer.did}>
           {data.viewer.handle ?? data.viewer.did}
         </span>
@@ -258,7 +279,8 @@
   }
 
   .auth button,
-  .auth .signin {
+  .auth .signin,
+  .auth .admin {
     padding: 0.25rem 0.7rem;
     border: 1px solid var(--wa-form-control-border-color);
     border-radius: var(--wa-border-radius-m);
@@ -271,7 +293,13 @@
   }
 
   .auth button:hover,
-  .auth .signin:hover {
+  .auth .signin:hover,
+  .auth .admin:hover {
+    border-color: var(--wa-color-brand-50);
+    color: var(--wa-color-brand-50);
+  }
+
+  .auth .admin {
     border-color: var(--wa-color-brand-50);
     color: var(--wa-color-brand-50);
   }

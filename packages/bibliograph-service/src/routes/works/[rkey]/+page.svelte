@@ -1,12 +1,27 @@
 <script lang="ts">
-  import RecordCard from '$lib/components/RecordCard.svelte';
-  import type { DetailValue } from '$lib/types/record-detail';
+  // Work detail route. Same skeleton as the edition page minus the vote dock:
+  // hero with contributors, metadata card with the work's subjects.
+  import ActionFeedback from "$lib/components/records/ActionFeedback.svelte";
+  import ControversialToggle from "$lib/components/records/ControversialToggle.svelte";
+  import DetailFrame from "$lib/components/records/DetailFrame.svelte";
+  import RecordBody from "$lib/components/records/RecordBody.svelte";
+  import RecordHero from "$lib/components/records/RecordHero.svelte";
+  import RecordCard from "$lib/components/RecordCard.svelte";
+  import type { DetailValue } from "$lib/types/record-detail";
+  import type { BodyColumn, Chip } from "$lib/record-page";
+  import {
+    contributorItems,
+    identifierItems,
+    isWorkValue,
+    peopleFromContributions,
+  } from "$lib/record-page";
+
   let {
     data,
     form,
   }: {
     data: {
-      kind: 'works';
+      kind: "works";
       rkey: string;
       notFound: boolean;
       value?: DetailValue;
@@ -15,64 +30,64 @@
     };
     form?: { error?: string; ok?: boolean };
   } = $props();
+
+  const chips = $derived.by((): Chip[] => {
+    const value = data.value;
+    if (!isWorkValue(value)) return [];
+    const list: Chip[] = [];
+    if (value.firstPublishedYear) {
+      list.push({ label: `first published ${value.firstPublishedYear}` });
+    }
+    if (value.originalLanguage) {
+      list.push({ label: value.originalLanguage });
+    }
+    if (data.controversial) list.push({ label: "Controversial", tone: "danger" });
+    return list;
+  });
+
+  const columns = $derived.by((): BodyColumn[] => {
+    const value = data.value;
+    if (!isWorkValue(value)) return [];
+    return [
+      { title: "Contributors", items: contributorItems(value.contributors) },
+      { title: "Identifiers", items: identifierItems(value.identifiers) },
+    ];
+  });
 </script>
 
-<main>
-  <p><a href="/search">← Back to search</a></p>
-  {#if data.notFound}
-    <section class="missing">
-      <h1>Work not found</h1>
-      <p class="muted">No work record exists for rkey <code>{data.rkey}</code>.</p>
+<DetailFrame label="Work" rkey={data.rkey} notFound={data.notFound}>
+  {#if isWorkValue(data.value)}
+    <section class="detail">
+      <RecordHero
+        kicker="Work"
+        kickerDetail={data.rkey}
+        title={data.value.title}
+        subtitle={data.value.subtitle}
+        {chips}
+        people={peopleFromContributions(data.value.contributors)}
+      />
+
+      <ActionFeedback {form} success="Controversial label updated." />
+      <ControversialToggle
+        controversial={data.controversial}
+        canLabel={data.canLabel}
+      />
+
+      <RecordBody
+        description={data.value.description}
+        tags={data.value.subjects}
+        {columns}
+      />
     </section>
   {:else if data.value}
-    {#if data.controversial}
-      <aside class="controversial">
-        <strong>Controversial</strong>
-        <span>Frequently challenged, restricted, or banned.</span>
-      </aside>
-    {/if}
-    {#if form?.error}
-      <wa-callout variant="danger" style="margin-block-end: var(--wa-space-m)">{form.error}</wa-callout>
-    {/if}
-    {#if data.canLabel}
-      <form method="POST" action="?/toggleControversial" class="label-form">
-        <button type="submit" class="secondary">
-          {data.controversial ? 'Remove controversial label' : 'Mark as controversial'}
-        </button>
-      </form>
-    {/if}
     <RecordCard value={data.value} />
   {/if}
-</main>
+</DetailFrame>
 
 <style>
-  main { padding: var(--wa-space-l); max-width: 60rem; margin: 0 auto; }
-  main > p { color: var(--wa-color-on-quiet); margin: 0 0 var(--wa-space-m); }
-  main > p a { color: var(--wa-color-text-link); text-decoration: none; }
-  main > p a:hover { text-decoration: underline; }
-  .missing { padding: var(--wa-space-l) 0; }
-  .missing h1 { margin: 0 0 var(--wa-space-s); }
-  .muted { color: var(--wa-color-on-quiet); }
-  .controversial {
+  .detail {
     display: flex;
-    gap: var(--wa-space-s);
-    align-items: baseline;
-    padding: var(--wa-space-s) var(--wa-space-m);
-    margin-block-end: var(--wa-space-m);
-    border: 1px solid var(--wa-color-warning-50, #b8860b);
-    border-radius: var(--wa-border-radius-m);
-    font-size: var(--wa-font-size-s);
-    background: var(--wa-color-surface-raised);
-  }
-  .label-form { margin-block-end: var(--wa-space-m); }
-  .label-form button {
-    padding: var(--wa-space-s) var(--wa-space-m);
-    border: 1px solid var(--wa-form-control-border-color);
-    border-radius: var(--wa-border-radius-m);
-    background: transparent;
-    color: var(--wa-color-text-normal);
-    font-weight: 600;
-    font-size: var(--wa-font-size-s);
-    cursor: pointer;
+    flex-direction: column;
+    gap: var(--wa-space-l);
   }
 </style>

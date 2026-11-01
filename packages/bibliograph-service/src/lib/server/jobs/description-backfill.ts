@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { eq } from 'drizzle-orm';
+import { eq, isNull, and } from 'drizzle-orm';
 import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
@@ -189,14 +189,17 @@ export async function backfillDescriptionForEdition(
   if (row.description) return { updated: false, reason: 'already_has_description' };
 
   const description = await resolveDescription(row, log, signal);
-  if (!description) return { updated: false, reason: 'no_description_found' };
+  if (!description) {
+    await db.update(editions).set({ descriptionCheckedAt: new Date() }).where(eq(editions.uri, uri));
+    return { updated: false, reason: 'no_description_found' };
+  }
 
   const value = editionValueForCid(row, description);
   const cid = (await cidForLex(value as unknown as LexMap)).toString();
 
   const updated = await db
     .update(editions)
-    .set({ description, cid, indexedAt: new Date() })
+    .set({ description, cid, indexedAt: new Date(), descriptionCheckedAt: new Date() })
     .where(eq(editions.uri, uri))
     .returning({ uri: editions.uri });
 
@@ -205,4 +208,15 @@ export async function backfillDescriptionForEdition(
   log.info({ stage: 'description-backfill', uri, length: description.length, cid }, 'description backfilled');
 
   return { updated: true, description, reason: 'ok' };
+}
+export async function findEditionsMissingDescription(
+  db: Db = defaultDb,
+  limit = 200,
+): Promise<string[]> {
+  const rows = await db
+    .select({ uri: editions.uri })
+    .from(editions)
+    .where(and(isNull(editions.description), isNull(editions.descriptionCheckedAt)))
+    .limit(limit);
+  return rows.map((r) => r.uri);
 }

@@ -104,7 +104,7 @@ interface OlSearchEditionDoc extends OlEditionDoc {
   author_name?: string[];
 }
 
-interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; }
+interface OlAuthorDoc { key: string; name: string; birth_date?: string; death_date?: string; top_work?: string; work_count?: number; alternate_names?: string[]; bio?: { value?: string; type?: string } | string; }
 
 function coverUrl(coverId: number | undefined): string | undefined {
   if (coverId === undefined) return undefined;
@@ -494,7 +494,25 @@ export async function getContributorByRkey(rkey: string, log: Logger, signal?: A
   };
 }
 
-interface OlPublisherDoc { key: string; name: string; location?: string; country?: string; founded?: string; status?: string; aliases?: string[] }
+function extractBio(d: string | { value?: string; type?: string } | undefined): string | undefined {
+  if (typeof d === 'string') return d;
+  if (d && typeof d.value === 'string') return d.value;
+  return undefined;
+}
+
+export async function getContributorBioByRkey(
+  rkey: string, log: Logger, signal?: AbortSignal,
+): Promise<string | undefined> {
+  let olid: string;
+  try { olid = olidFromContributorRkey(rkey); } catch { return undefined; }
+  const url = `https://openlibrary.org/authors/${olid}.json`;
+  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const raw = await fetchJson<OlAuthorDoc & { key: string }>(url, log, s);
+  if (!raw) return undefined;
+  return extractBio(raw.bio);
+}
+
+interface OlPublisherDoc { key: string; name: string; location?: string; country?: string; aliases?: string[] }
 
 export async function searchPublishers(
   query: SearchQuery,

@@ -1,8 +1,8 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { requireAdmin } from '$lib/server/admin';
 import {
   approveApplication,
-  isAdministrator,
   isBootstrapAdmin,
   listApplications,
   rejectApplication,
@@ -12,15 +12,8 @@ import { activeSubjects, clearLabel, grantLabel } from '$lib/server/labeler/labe
 import { ADMINISTRATOR_LABEL, SENIOR_LIBRARIAN_LABEL } from '$lib/server/labeler/vocabulary';
 import { log } from '$lib/server/xrpc-router';
 
-/** Administrator = `administrator` label, or the bootstrap allowlist. */
-async function requireAdmin(did: string | undefined): Promise<string> {
-  if (!did) redirect(303, '/login?next=/admin/applications');
-  if (!(await isAdministrator(did))) error(403, 'This account is not an administrator.');
-  return did;
-}
-
 export const load: PageServerLoad = async ({ locals }) => {
-  const viewerDid = await requireAdmin(locals.viewer?.did);
+  const viewerDid = await requireAdmin(locals.viewer, '/admin/applications');
   const [pending, all, administrators, seniors] = await Promise.all([
     listApplications('pending'),
     listApplications('all'),
@@ -40,7 +33,7 @@ async function act(
   event: Parameters<NonNullable<Actions['approve']>>[0],
   run: (did: string, adminDid: string) => Promise<unknown>,
 ) {
-  const adminDid = await requireAdmin(event.locals.viewer?.did);
+  const adminDid = await requireAdmin(event.locals.viewer, '/admin/applications');
   const form = await event.request.formData();
   const did = String(form.get('did') ?? '').trim();
   if (!did.startsWith('did:')) return fail(400, { error: 'Expected a DID' });
