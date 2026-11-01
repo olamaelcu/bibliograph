@@ -22,6 +22,7 @@
     "backfill:covers": "tsx scripts/backfill-covers.ts",
     "backfill:edition-contributors": "tsx scripts/backfill-edition-contributors.ts",
     "backfill:contributor-images": "tsx scripts/backfill-contributor-images.ts",
+    "backfill:shelving-editions": "tsx scripts/backfill-shelving-editions.ts",
     "backfill:descriptions": "tsx scripts/backfill-descriptions.ts",
     "ingest:bookhive": "tsx scripts/ingest-bookhive-catalog.ts",
     "db:generate": "drizzle-kit generate",

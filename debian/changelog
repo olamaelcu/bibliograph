@@ -1,3 +1,22 @@
+bibliograph (0.1.4) unstable; urgency=medium
+
+  * Resolve shelving rows whose edition is missing from the catalog instead of
+    dropping them. `catalogEditionUriFromRkey` also maps `isbndb.*` rkeys now:
+    without that mapping a record whose `book.ref` was absent (every record the
+    app writes) could not be tied to its edition URI at all, so 1593 shelving
+    rows were unresolvable even once the catalog held them.
+  * Shelf hydration now asks the provider that owns an edition's rkey prefix
+    (OpenLibrary, Google Books, ISBNdb) when the row is absent, persists the
+    result through the normal ingest path, and re-hydrates for the same
+    response. Bounded to 6 editions per request with a 2.5 s budget, and misses
+    are remembered for 10 minutes so a page of unresolvable rows does not retry
+    them on every call.
+  * Add `mise`/`pnpm run backfill:shelving-editions`: scans shelving records for
+    editions the catalog lacks and fills them from their provider, or from
+    another catalog database (`--copy-from`) when one is available.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 31 Oct 2026 00:00:00 +0000
+
 bibliograph (0.1.3) unstable; urgency=medium
 
   * Fix the PDS fallback shared by listShelves, listShelvesWithBooks and
