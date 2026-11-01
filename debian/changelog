@@ -1,3 +1,25 @@
+bibliograph (0.1.5) unstable; urgency=medium
+
+  * Keep the ISBNs an OpenLibrary edition document carries. The direct edition
+    mapper read the cover, year, language and contributors but dropped
+    `isbn_13`/`isbn_10`, so every `ol.*` record was indexed with no ISBN at
+    all — 1173 of the 1186 ISBN-less catalog editions — even though
+    OpenLibrary publishes them.
+  * Add an ISBN backfill job. It resolves the authority an edition was derived
+    from (OpenLibrary edition, Google Books volume, or the ISBNdb rkey) and
+    appends the ISBNs that authority reports, recomputing the record CID. When
+    the authority has none it searches OpenLibrary and Google Books, prunes the
+    candidates on title, author surname, year and page count, and records what
+    it found in `edition_isbn_enrichment` without writing identifiers — the
+    fuzzy tier runs in shadow mode because a wrong ISBN repoints a reader's
+    shelf at a different physical book.
+  * Run the backfill from `bibliograph-isbn-backfill.timer` every 15 minutes.
+    Each tick enqueues one bounded batch of 200 rows for the existing jobs
+    service; the bookkeeping table makes the scan finite, so a tick with
+    nothing left to do costs one indexed query.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 01 Nov 2026 19:05:00 +0000
+
 bibliograph (0.1.4) unstable; urgency=medium
 
   * Resolve shelving rows whose edition is missing from the catalog instead of
