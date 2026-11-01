@@ -29,6 +29,39 @@ test('getEditionByRkey returns null on 404', async () => {
   (globalThis as any).fetch = origFetch;
 });
 
+test('getEditionByRkey keeps the ISBNs the edition document carries', async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        key: '/books/OL3292288M',
+        title: 'Romance and rights',
+        isbn_10: ['1578067057'],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )) as typeof fetch;
+  const item = await getEditionByRkey('ol.OL3292288M', { info:()=>{}, warn:()=>{}, error:()=>{} } as never);
+  assert.ok(item);
+  assert.deepEqual(
+    item!.identifiers.filter((identifier) => identifier.resource !== 'openlibrary'),
+    [{ uri: 'isbn:1578067057', resource: 'isbn10' }],
+  );
+  (globalThis as any).fetch = origFetch;
+});
+
+test('getEditionByRkey does not invent an ISBN when the document has none', async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ key: '/books/OL3292288M', title: 'Romance and rights' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch;
+  const item = await getEditionByRkey('ol.OL3292288M', { info:()=>{}, warn:()=>{}, error:()=>{} } as never);
+  assert.ok(item);
+  assert.equal(item!.identifiers.some((identifier) => identifier.uri.startsWith('isbn:')), false);
+  (globalThis as any).fetch = origFetch;
+});
+
 test('getWorkByRkey maps OL JSON to WorkItem', async () => {
   const origFetch = globalThis.fetch;
   (globalThis as any).fetch = async (url: RequestInfo) => {

@@ -77,6 +77,8 @@ interface OlEditionDoc {
   place?: string[];
   language?: string[];
   isbn?: string[];
+  isbn_10?: string[];
+  isbn_13?: string[];
   cover_i?: number;
   covers?: number[];
   description?: string | { value: string };
@@ -416,6 +418,16 @@ async function getEditionByOlid(olid: string, log: Logger, signal?: AbortSignal)
   if (!raw) return null;
   const parsedOlid = parseEditionKey(raw.key);
   const identifiers: Identifier[] = [makeOlIdentifier(raw.key)];
+  // The edition document is the authority on this edition's ISBNs
+  // (`isbn_13`/`isbn_10`; search docs use `isbn`). Without them an `ol.*`
+  // edition is indexed with no ISBN at all, which is what left the catalog
+  // with editions a reader's shelf cannot match.
+  for (const value of [...(raw.isbn_13 ?? []), ...(raw.isbn_10 ?? []), ...(raw.isbn ?? [])]) {
+    const identifier = isbnIdentifier(value);
+    if (identifiers.some((existing) => existing.uri === identifier.uri)) continue;
+    identifiers.push(identifier);
+    if (identifiers.length >= 6) break;
+  }
   const authorKeys = (raw.authors ?? []).map((a) => a.key);
   const contributors = authorKeys.length > 0
     ? await resolveOlContributors(authorKeys, log, s)
