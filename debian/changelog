@@ -1,3 +1,29 @@
+bibliograph (0.1.6) unstable; urgency=medium
+
+  * Attach Wikidata identity links to editions, works and contributors. A new
+    enricher resolves each item's Open Library ID through Wikidata's SPARQL
+    endpoint (`P648`) and appends what it finds to the record's existing
+    `identifiers` array: the item's own `wikidata` Q-id, plus `viaf` and
+    `isni` when it carries `P214`/`P213`. The links belong there rather than in
+    new top-level fields because every XRPC handler hand-maps its response, so
+    a `wikidataUri` property would be dropped at the boundary and never
+    persisted; `identifiers` already declares all three resources in its
+    lexicon `knownValues`.
+  * Join on the Open Library ID, not the ISBN. `P212` (ISBN-13) was measured at
+    20.7s per query and returned nothing for real catalog ISBNs, while `P648`
+    is indexed and answers in about a second.
+  * Bind by identifier only, never by name. Several Wikidata items claim the
+    same OLID, so the highest sitelink count wins and the lowest Q-number
+    breaks ties. An exact-label match on a contributor name would bind
+    whichever homonym Wikidata ranks highest, and sync ingest persists the
+    result, so name-only contributors pass through untouched.
+  * Keep the lookup off the critical path: a match is cached for a day and a
+    miss for an hour, queries are chunked 50 identifiers at a time and spaced
+    a second apart, and an open breaker, a 429 or a failing endpoint degrades
+    to the unenriched items instead of failing the search.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 01 Nov 2026 21:40:00 +0000
+
 bibliograph (0.1.5) unstable; urgency=medium
 
   * Keep the ISBNs an OpenLibrary edition document carries. The direct edition
