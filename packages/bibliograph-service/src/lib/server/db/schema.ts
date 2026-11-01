@@ -43,6 +43,31 @@ export const editions = pgTable(
   }),
 );
 
+/**
+ * ISBN enrichment bookkeeping (migration 0012).
+ *
+ * Kept out of `editions` on purpose: it is backfill state, not part of the
+ * served record, and a row here is what makes the scan finite — without it
+ * every run re-asks upstream about the same ISBN-less book.
+ */
+export const editionIsbnEnrichment = pgTable('edition_isbn_enrichment', {
+  uri: text('uri')
+    .primaryKey()
+    .references(() => editions.uri, { onDelete: 'cascade' }),
+  checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+  result: text('result').notNull(),
+  candidates: jsonb('candidates').$type<
+    Array<{
+      source: string;
+      isbn: string;
+      title?: string;
+      score: number;
+      accepted: boolean;
+      reject?: string;
+    }>
+  >(),
+});
+
 export const works = pgTable(
   'works',
   {

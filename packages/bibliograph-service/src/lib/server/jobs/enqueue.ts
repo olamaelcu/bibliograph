@@ -81,3 +81,11 @@ export async function enqueueDescriptionBackfill(uri: string): Promise<void> {
     maxAttempts: 5,
   });
 }
+
+export async function enqueueIsbnBackfill(uri: string, rkey: string): Promise<void> {
+  const utils = await getUtils();
+  await utils.addJob('backfill-edition-isbn', { uri, rkey }, {
+    jobKey: `backfill-isbn:${uri}`,
+    maxAttempts: 5,
+  });
+}

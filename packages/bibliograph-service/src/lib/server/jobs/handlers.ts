@@ -14,6 +14,7 @@ import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifie
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
+import { backfillIsbnForEdition } from './isbn-backfill';
 import {
   EDITION_WORK_LINK_COLLECTION,
   applyConsensus,
@@ -658,6 +659,15 @@ export const backfillContributorImageTask: Task = async (payload, helpers) => {
   await backfillContributorImageForUri(uri, log);
 };
 
+export const backfillEditionIsbnTask: Task = async (payload, helpers) => {
+  const { uri, rkey } = payload as { uri: string; rkey: string };
+  const log = helpers.logger as unknown as Logger;
+  const res = await backfillIsbnForEdition(uri, rkey, log);
+  if (!res.updated) {
+    log.info({ stage: 'backfill-edition-isbn', uri, rkey, reason: res.reason }, 'isbn backfill skipped');
+  }
+};
+
 export const searchTaskList: TaskList = {
   'ingest-edition': ingestEditionTask,
   'ingest-work': ingestWorkTask,
@@ -668,6 +678,7 @@ export const searchTaskList: TaskList = {
   'backfill-edition-cover': backfillEditionCoverTask,
   'backfill-edition-description': backfillEditionDescriptionTask,
   'backfill-contributor-image': backfillContributorImageTask,
+  'backfill-edition-isbn': backfillEditionIsbnTask,
 };
 
 export const tapTaskList: TaskList = {
