@@ -690,10 +690,80 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
   },
 });
 
+/**
+ * Cursor format shared by the paginated listings: `<tier>:<value>`.
+ *
+ * `listShelves` and `listBooksOnShelf` both answer from the local mirror and
+ * from a fallback that pages differently (Constellation hands back an opaque
+ * cursor, the PDS scan hands back a repo cursor), so a continuation has to say
+ * which source it belongs to. Without that it fell back to the mirror query,
+ * ignored the cursor it was handed and answered from the first slice — which is
+ * why paging stopped after one page.
+ *
+ * Cursors issued before the tagging keep working: a bare number was a mirror
+ * offset, anything else was an opaque Constellation cursor.
+ */
+function parseCursor(cursor: string | undefined): { tier: string; value: string } | undefined {
+  if (!cursor) return undefined;
+  const tagged = /^(tap|con|pds):/.exec(cursor);
+  if (tagged) {
+    const value = cursor.slice(tagged[0].length);
+    return value ? { tier: tagged[1] ?? '', value } : undefined;
+  }
+  return { tier: /^\d+$/.test(cursor) ? 'tap' : 'con', value: cursor };
+}
+
+function shelfViewOf(r: typeof records.$inferSelect) {
+  return {
+    uri: r.uri as `${string}:${string}`,
+    name: ((r.value as { name?: string }).name) ?? '',
+    $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
+  };
+}
+
 router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
   async handler({ params }) {
     const { did, limit = 50, cursor } = params;
+    const repo = did as `did:${string}:${string}`;
     try {
+      const resume = parseCursor(cursor);
+
+      const scanPdsShelves = async (startCursor?: string) => {
+        const { client } = await pdsClient(did);
+        const raw = await client.get('com.atproto.repo.listRecords', {
+          params: { repo, collection: 'net.olamaelcu.livtet.biblio.shelf', limit, cursor: startCursor },
+          signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+        });
+        const parsed = safeParseListRecords(raw);
+        if (!parsed.ok) {
+          log.warn({ stage: 'listShelves.parse', did, issues: parsed.issues }, 'listRecords response did not match schema');
+          return { rows: [] as Array<typeof records.$inferSelect>, cursor: undefined };
+        }
+        const rows = parsed.data.records.map((r) => ({
+          uri: r.uri,
+          cid: 'bafyplaceholder',
+          did: did as string,
+          rkey: r.uri.split('/').pop() ?? '',
+          collection: 'net.olamaelcu.livtet.biblio.shelf',
+          value: r.value as never,
+          createdAt: new Date(),
+          indexedAt: new Date(),
+        }));
+        return { rows, cursor: parsed.data.cursor };
+      };
+
+      // A continuation resumes the source that issued the cursor. Reading the
+      // mirror again and ignoring the cursor is what pinned every page to the
+      // first slice.
+      if (resume?.tier === 'pds') {
+        const { rows, cursor: next } = await scanPdsShelves(resume.value);
+        return json({
+          shelves: rows.map(shelfViewOf),
+          cursor: next ? `pds:${next}` : undefined,
+        } as NetOlamaelcuLivtetBiblioListShelves.$output);
+      }
+
+      const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
       const cacheRows = await db
         .select()
         .from(records)
@@ -703,50 +773,30 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
             eq(records.collection, 'net.olamaelcu.livtet.biblio.shelf'),
           ),
         )
-        .limit(limit + 1);
+        // Offset paging needs a total order to be stable across requests.
+        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .limit(limit + 1)
+        .offset(offset);
       const hasMore = cacheRows.length > limit;
-      let merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
-      let tier = 'tap' as 'tap' | 'pds';
+      const merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
+      let nextCursor: string | undefined = hasMore ? `tap:${offset + limit}` : undefined;
 
-      if (merged.length < limit && !cursor) {
-        tier = 'pds';
+      if (!resume && merged.length < limit) {
         try {
-          const { client } = await pdsClient(did);
-          const raw = await client.get('com.atproto.repo.listRecords', {
-            params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.shelf', limit, cursor },
-            signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
-          });
-          const parsed = safeParseListRecords(raw);
-          if (!parsed.ok) {
-            log.warn({ stage: 'listShelves.parse', did, issues: parsed.issues }, 'listRecords response did not match schema');
-          }
-          if (parsed.ok) {
-            const { records: pdsRecords, cursor: pdsCursor } = parsed.data;
-            const fetched = pdsRecords.map((r) => ({
-              uri: r.uri,
-              cid: 'bafyplaceholder',
-              did: did as string,
-              rkey: r.uri.split('/').pop() ?? '',
-              collection: 'net.olamaelcu.livtet.biblio.shelf',
-              value: r.value as never,
-              createdAt: new Date(),
-              indexedAt: new Date(),
-            }));
-            const seen = new Set(merged.map((r) => r.uri));
-            for (const row of fetched) if (!seen.has(row.uri)) merged.push(row);
-          }
+          const { rows, cursor: next } = await scanPdsShelves();
+          const seen = new Set(merged.map((r) => r.uri));
+          // The whole PDS page is merged on purpose: breaking out early would
+          // strand the rest of it, because the cursor only moves to the next
+          // page. The mixed mirror-plus-PDS page can therefore carry up to twice
+          // the requested limit, which paging clients handle as a full page.
+          for (const row of rows) if (!seen.has(row.uri)) merged.push(row);
+          if (next) nextCursor = `pds:${next}`;
         } catch (err: unknown) {
           log.warn({ err, did }, 'listShelves: PDS scan failed (cache-only result returned)');
         }
       }
 
-      const shelves = merged.map((r) => ({
-        uri: r.uri as `${string}:${string}`,
-        name: ((r.value as { name?: string }).name) ?? '',
-        $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
-      }));
-      const outCursor = tier === 'tap' && hasMore ? String(merged.length) : undefined;
-      return json({ shelves, cursor: outCursor } as NetOlamaelcuLivtetBiblioListShelves.$output);
+      return json({ shelves: merged.map(shelfViewOf), cursor: nextCursor } as NetOlamaelcuLivtetBiblioListShelves.$output);
     } catch (err: unknown) {
       log.warn({ err, did }, 'listShelves: failed');
       return json({ shelves: [], cursor: undefined } as NetOlamaelcuLivtetBiblioListShelves.$output);
@@ -914,6 +964,44 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
   },
 });
 
+/**
+ * `listBooksOnShelf` answers from three tiers whose continuation state looks
+ * nothing alike: the TAP mirror pages by row offset, Constellation hands back an
+ * opaque cursor, and the PDS scan hands back a repo cursor. The cursor we return
+ * therefore names its tier.
+ *
+ * Without that, a continuation page could not tell which tier to resume. It fell
+ * back to the TAP query, ignored the cursor it was handed, and answered page two
+ * from the rows of page one — so paging a shelf stopped after the first page.
+ *
+ * Cursors from before the tagging keep working: a bare number was a TAP offset,
+ * anything else came from Constellation.
+ */
+type BooksOnShelfCursor =
+  | { tier: 'tap'; offset: number }
+  | { tier: 'constellation'; value: string }
+  | { tier: 'pds'; value: string };
+
+/**
+ * Upper bound on how many PDS pages one request may walk while looking for the
+ * records of a single shelf: the scan reads the whole bookShelving collection
+ * and filters it, so a shelf holding a handful of a very large collection would
+ * otherwise fan out without limit. Stopping early still returns the cursor, and
+ * the next request resumes from it.
+ */
+const MAX_PDS_SCAN_PAGES = 40;
+
+function parseBooksOnShelfCursor(cursor: string | undefined): BooksOnShelfCursor | undefined {
+  const parsed = parseCursor(cursor);
+  if (!parsed) return undefined;
+  if (parsed.tier === 'tap') {
+    const offset = Number.parseInt(parsed.value, 10);
+    return Number.isFinite(offset) && offset > 0 ? { tier: 'tap', offset } : undefined;
+  }
+  if (parsed.tier === 'pds') return { tier: 'pds', value: parsed.value };
+  return { tier: 'constellation', value: parsed.value };
+}
+
 router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
   async handler({ params }) {
     const shelfUri = params.shelf as string;
@@ -925,6 +1013,86 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
       return Response.json({ error: 'InvalidRequest', message: 'shelf must be an AT-URI' }, { status: 400 });
     }
     try {
+      const resume = parseBooksOnShelfCursor(cursor);
+
+      const pullBacklinks = async (atCursor?: string) => {
+        const backlinks = await getBacklinks({
+          subject: shelfUri,
+          source: 'net.olamaelcu.livtet.biblio.bookShelving:shelf',
+          did,
+          limit,
+          cursor: atCursor,
+        });
+        const rows: Array<typeof records.$inferSelect> = [];
+        for (const bl of backlinks.records) {
+          if (rows.length >= limit) break;
+          const row = await fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+          if (row) rows.push(row);
+        }
+        return { rows, cursor: backlinks.cursor };
+      };
+
+      const scanPds = async (startCursor?: string) => {
+        const { client } = await pdsClient(did);
+        let cur = startCursor;
+        const fetched: Array<typeof records.$inferSelect> = [];
+        let pages = 0;
+        while (fetched.length < limit && pages < MAX_PDS_SCAN_PAGES) {
+          pages += 1;
+          const page = await client.get('com.atproto.repo.listRecords', {
+            params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.bookShelving', limit, cursor: cur },
+            signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+          });
+          const parsed = safeParseListRecords(page);
+          if (!parsed.ok) {
+            log.warn({ stage: 'listBooksOnShelf.parse', did, shelfUri, issues: parsed.issues }, 'listRecords response did not match schema');
+            break;
+          }
+          const recs = parsed.data.records;
+          cur = parsed.data.cursor;
+          for (const r of recs) {
+            const shelfRef = (r.value.shelf as string | undefined);
+            if (shelfRef === shelfUri) {
+              fetched.push({
+                uri: r.uri,
+                cid: 'bafyplaceholder',
+                did,
+                rkey: r.uri.split('/').pop() ?? '',
+                collection: 'net.olamaelcu.livtet.biblio.bookShelving',
+                value: r.value as never,
+                createdAt: new Date(),
+                indexedAt: new Date(),
+              });
+            }
+          }
+          if (!cur) break;
+        }
+        // Whole PDS pages are consumed on purpose. Stopping mid-page would drop
+        // the matches after the cut: the cursor points at the next page, so
+        // nothing would ever go back for them. A page never yields more than its
+        // own size, and that size is this response's `limit`, so the accumulation
+        // cannot overshoot the page it is meant to fill.
+        return { rows: fetched, cursor: cur };
+      };
+
+      // A continuation belongs entirely to the tier that issued the cursor.
+      // Merging tiers again would re-send what the first page already returned.
+      if (resume?.tier === 'constellation') {
+        const { rows, cursor: next } = await pullBacklinks(resume.value);
+        return json({
+          bookShelves: await hydrateBookShelves(rows),
+          cursor: next ? `con:${next}` : undefined,
+        } as NetOlamaelcuLivtetBiblioListBooksOnShelf.$output);
+      }
+      if (resume?.tier === 'pds') {
+        const { rows, cursor: next } = await scanPds(resume.value);
+        return json({
+          bookShelves: await hydrateBookShelves(rows),
+          cursor: next ? `pds:${next}` : undefined,
+        } as NetOlamaelcuLivtetBiblioListBooksOnShelf.$output);
+      }
+
+      const offset = resume?.tier === 'tap' ? resume.offset : 0;
       const cacheRows = await db
         .select()
         .from(records)
@@ -935,82 +1103,50 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
             sql`${records.value}->>'shelf' = ${shelfUri}`,
           ),
         )
-        .limit(limit + 1);
+        // An offset page needs a total order, otherwise Postgres may answer the
+        // same offset with a different slice and records repeat or vanish.
+        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .limit(limit + 1)
+        .offset(offset);
       const hasMore = cacheRows.length > limit;
-      let merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
-      let tier = 'tap' as 'tap' | 'constellation' | 'pds';
+      const merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
+      let nextCursor: string | undefined = hasMore ? `tap:${offset + limit}` : undefined;
 
-      if (merged.length < limit && !cursor) {
-        const backlinks = await getBacklinks({
-          subject: shelfUri,
-          source: 'net.olamaelcu.livtet.biblio.bookShelving:shelf',
-          did,
-          limit,
-        });
-        if (backlinks.records.length > 0) {
-          tier = 'constellation';
+      if (!resume && merged.length < limit) {
+        try {
           const seen = new Set(merged.map((r) => r.uri));
-          for (const bl of backlinks.records) {
-            if (seen.has(bl.uri)) continue;
-            const row = await fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
-            if (row) merged.push(row);
+          const { rows, cursor: next } = await scanPds();
+          for (const row of rows) {
+            if (seen.has(row.uri)) continue;
+            merged.push(row);
+            seen.add(row.uri);
             if (merged.length >= limit) break;
           }
-          if (backlinks.cursor && merged.length >= limit) {
-            return json({
-              bookShelves: await hydrateBookShelves(merged),
-              cursor: backlinks.cursor,
-            } as NetOlamaelcuLivtetBiblioListBooksOnShelf.$output);
-          }
-        }
-      }
-
-      if (merged.length < limit && !cursor) {
-        tier = 'pds';
-        try {
-          const { client } = await pdsClient(did);
-          let cur: string | undefined;
-          const fetched: typeof merged = [];
-          while (fetched.length < limit) {
-            const page = await client.get('com.atproto.repo.listRecords', {
-              params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.bookShelving', limit, cursor: cur },
-              signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
-            });
-            const parsed = safeParseListRecords(page);
-            if (!parsed.ok) {
-              log.warn({ stage: 'listBooksOnShelf.parse', did, shelfUri, issues: parsed.issues }, 'listRecords response did not match schema');
-              break;
-            }
-            const recs = parsed.data.records;
-            cur = parsed.data.cursor;
-            for (const r of recs) {
-              const shelfRef = (r.value.shelf as string | undefined);
-              if (shelfRef === shelfUri) {
-                fetched.push({
-                  uri: r.uri,
-                  cid: 'bafyplaceholder',
-                  did,
-                  rkey: r.uri.split('/').pop() ?? '',
-                  collection: 'net.olamaelcu.livtet.biblio.bookShelving',
-                  value: r.value as never,
-                  createdAt: new Date(),
-                  indexedAt: new Date(),
-                });
-              }
-              if (fetched.length >= limit) break;
-            }
-            if (!cur) break;
-          }
-          const seen = new Set(merged.map((r) => r.uri));
-          for (const row of fetched) if (!seen.has(row.uri)) merged.push(row);
+          if (next) nextCursor = `pds:${next}`;
         } catch (err: unknown) {
           log.warn({ err, did, shelfUri }, 'listBooksOnShelf: PDS scan failed (cache+constellation only)');
         }
       }
 
+      // The PDS scan costs one request per hundred records; hydrating the same
+      // records through Constellation backlinks costs one request each, which
+      // trips the PDS rate limit on any shelf worth paginating. Scan first and
+      // keep the backlink tier for repos the scan cannot serve at all.
+      if (!resume && merged.length === 0) {
+        try {
+          const { rows, cursor: next } = await pullBacklinks();
+          for (const row of rows) {
+            merged.push(row);
+            if (merged.length >= limit) break;
+          }
+          if (next && merged.length > 0) nextCursor = `con:${next}`;
+        } catch (err: unknown) {
+          log.warn({ err, did, shelfUri }, 'listBooksOnShelf: constellation scan failed (empty shelf returned)');
+        }
+      }
+
       const bookShelves = await hydrateBookShelves(merged);
-      const outCursor = tier === 'tap' && hasMore ? String(merged.length) : undefined;
-      return json({ bookShelves, cursor: outCursor } as NetOlamaelcuLivtetBiblioListBooksOnShelf.$output);
+      return json({ bookShelves, cursor: nextCursor } as NetOlamaelcuLivtetBiblioListBooksOnShelf.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ err, did, shelfUri }, 'listBooksOnShelf: failed');
