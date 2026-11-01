@@ -7,6 +7,7 @@ import type { PostgresSource } from './postgres-source';
 import type { OpenLibrarySource } from './open-library-source';
 import type { IsbndbSource } from './isbndb-source';
 import type { GoogleBooksEnricher } from './google-books-enricher';
+import type { WikidataContributorEnricher, WikidataEditionEnricher } from './wikidata-enricher';
 import type { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import type {
   SearchQuery,
@@ -96,6 +97,28 @@ function makeFakeContributorWiki(): { enrich: ContributorWikipediaEnricher['enri
   };
 }
 
+function makeFakeWikidataEdition(): { enrich: WikidataEditionEnricher['enrich']; captures: (EditionItem | WorkItem)[] } {
+  const captures: (EditionItem | WorkItem)[] = [];
+  return {
+    captures,
+    enrich: (async (items: (EditionItem | WorkItem)[], _log: Logger) => {
+      captures.push(...items);
+      return items;
+    }) as WikidataEditionEnricher['enrich'],
+  };
+}
+
+function makeFakeWikidataContributor(): { enrich: WikidataContributorEnricher['enrich']; captures: ContributorItem[] } {
+  const captures: ContributorItem[] = [];
+  return {
+    captures,
+    enrich: (async (items: ContributorItem[], _log: Logger) => {
+      captures.push(...items);
+      return items;
+    }) as WikidataContributorEnricher['enrich'],
+  };
+}
+
 function makeFakeGoogleBooksSource() {
   return {
     searchEditions: async () => ({ items: [], total: 0 }),
@@ -167,6 +190,8 @@ function buildDeps(
     isbndbWorkEnricher: makeFakeIsbndbWorkEnricher(),
     authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
     contributorWikipedia: makeFakeContributorWiki() as unknown as ContributorWikipediaEnricher,
+    wikidataEdition: makeFakeWikidataEdition() as unknown as WikidataEditionEnricher,
+    wikidataContributor: makeFakeWikidataContributor() as unknown as WikidataContributorEnricher,
   };
 }
 

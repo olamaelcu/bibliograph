@@ -59,6 +59,7 @@ import { OpenLibraryEnricher } from './search/open-library-enricher';
 import { GoogleBooksSource } from './search/google-books-source';
 import { IsbndbSource } from './search/isbndb-source';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './search/isbndb-enricher';
+import { WikidataContributorEnricher, WikidataEditionEnricher } from './search/wikidata-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
 import * as openLibraryApi from './api/open-library';
 import { SearchService } from './search/service';
@@ -110,6 +111,8 @@ const openLibraryEnricher = new OpenLibraryEnricher();
 const isbndbEnricher = new IsbndbEnricher();
 const isbndbWorkEnricher = new IsbndbWorkEnricher();
 const authorWikipediaEnricher = new AuthorWikipediaEnricher();
+const wikidataEditionEnricher = new WikidataEditionEnricher();
+const wikidataContributorEnricher = new WikidataContributorEnricher();
 const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
 const searchService = new SearchService(
   {
@@ -124,6 +127,8 @@ const searchService = new SearchService(
     isbndbWorkEnricher,
     authorWikipedia: authorWikipediaEnricher,
     contributorWikipedia: contributorWikipediaEnricher,
+    wikidataEdition: wikidataEditionEnricher,
+    wikidataContributor: wikidataContributorEnricher,
   },
   log,
 );

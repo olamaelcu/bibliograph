@@ -8,6 +8,7 @@ import { GoogleBooksEnricher } from './google-books-enricher';
 import { OpenLibraryEnricher } from './open-library-enricher';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './isbndb-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
+import { WikidataContributorEnricher, WikidataEditionEnricher } from './wikidata-enricher';
 import * as openLibraryApi from '../api/open-library';
 import { isbnFromQuery } from '../api/isbndb';
 import { syncIngestEditions, syncIngestWorks, syncIngestContributors, syncIngestPublishers } from '../jobs/handlers';
@@ -26,6 +27,8 @@ export interface SearchServiceDeps {
   isbndbWorkEnricher: IsbndbWorkEnricher;
   authorWikipedia: AuthorWikipediaEnricher;
   contributorWikipedia: ContributorWikipediaEnricher;
+  wikidataEdition: WikidataEditionEnricher;
+  wikidataContributor: WikidataContributorEnricher;
 }
 
 type ItemLike = { uri: string };
@@ -83,6 +86,7 @@ export class SearchService {
       this.deps.googleBooks,
       this.deps.isbndbEnricher,
       this.deps.authorWikipedia,
+      this.deps.wikidataEdition,
     ];
 
     const remote = await this.resolveRemoteEditions(query, gb, log, editionEnrichers);
@@ -121,6 +125,7 @@ export class SearchService {
 
     const workEnrichers: ReadonlyArray<Enricher<WorkItem>> = [
       this.deps.isbndbWorkEnricher,
+      this.deps.wikidataEdition,
     ];
 
     const remote = await this.resolveRemoteWorks(query, gb, log, workEnrichers);
@@ -253,7 +258,10 @@ export class SearchService {
     ]);
 
     const enrichedRemote = ol.items.length > 0
-      ? await this.deps.contributorWikipedia.enrich(ol.items, log)
+      ? await this.deps.wikidataContributor.enrich(
+        await this.deps.contributorWikipedia.enrich(ol.items, log),
+        log,
+      )
       : [];
     // An empty/whitespace name violates the lexicon's minLength: 1, so it must
     // never reach the wire nor be persisted by the sync ingest below.
