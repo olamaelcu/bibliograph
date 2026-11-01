@@ -124,7 +124,8 @@ generates a `build/index.js` that constructs its own `http.Server` and never
 exposes the `upgrade` event, so a SvelteKit route cannot serve it. Bibliograph
 therefore runs `server.ts`, which imports the emitted `build/handler.js`, hands
 HTTP to SvelteKit, and keeps upgrades for the label stream. `pnpm start`, the
-`Procfile`, and the Dockerfile `ENTRYPOINT` all use that entrypoint.
+`start` script, and the packaged `bibliograph.service` (whose `ExecStart` runs
+`tsx server.ts`) all use that entrypoint.
 
 `vite dev` does not run `server.ts`, so the stream only exists in a built server:
 run `pnpm build && pnpm start` to exercise it locally.

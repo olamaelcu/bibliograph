@@ -318,16 +318,20 @@ linked as a direct dependency.
 Note that `typescript` *is* present in the production tree, transitively via
 `cosmiconfig` (graphile-worker) and `valibot`. That is unavoidable and harmless.
 
-## What differs from the Docker/Dokku path
+## Why a package instead of a container
 
-| Before (Docker + Procfile) | Now (Debian package) |
+The Dokku/Docker path (image build, `Procfile`, push-to-deploy) was retired with
+0.1.5. Nothing in the repository builds a container any more; this table is the
+rationale for what replaced it.
+
+| Container deploy (before) | Debian package (now) |
 | --- | --- |
 | `ENTRYPOINT` ran the migrator then exec'd the web process | dedicated oneshot unit, `Requires=`d by both long-running units |
-| `Procfile` `worker:` line | `bibliograph-worker.service` |
-| `ENV` baked into the image | `/etc/bibliograph/bibliograph.env` conffile, 0640 root:root, read by PID 1 |
-| `EXPOSE 5000`, `HOST=0.0.0.0` behind Dokku's proxy | unit binds `127.0.0.1`; the package ships the nginx site that proxies to it |
+| process types declared in a `Procfile` | `bibliograph-worker.service`, `bibliograph-jobs.service` |
+| environment baked into the image | `/etc/bibliograph/bibliograph.env` conffile, 0640 root:root, read by PID 1 |
+| `EXPOSE 5000`, `HOST=0.0.0.0` behind the platform proxy | unit binds `127.0.0.1`; the package ships the nginx site that proxies to it |
 | `docker save` + `rsync` + `docker load` | `apt install`, previous version kept in the apt cache |
-| logs to stdout captured by Docker | pino files under `/var/log/bibliograph` plus stdout in the journal |
+| logs to stdout captured by the container runtime | pino files under `/var/log/bibliograph` plus stdout in the journal |
 
 ## Upgrade and rollback
 
