@@ -48,6 +48,8 @@ override_dh_auto_install:
 	install -m 0644 debian/bibliograph-worker.service \
 		debian/bibliograph-jobs.service \
 		debian/bibliograph-migrate.service \
+		debian/bibliograph-isbn-backfill.service \
+		debian/bibliograph-isbn-backfill.timer \
 		debian/bibliograph/usr/lib/systemd/system/
 
 override_dh_installsystemd:
@@ -55,8 +57,12 @@ override_dh_installsystemd:
 	# and re-runs on every start, which is what applies new migrations on
 	# upgrade. Enabling or starting it on its own would only mean a no-op
 	# oneshot with no database to talk to yet.
-	dh_installsystemd -Xbibliograph-migrate.service
-	dh_installsystemd --no-enable --no-start bibliograph-migrate.service
+	# `bibliograph-isbn-backfill.service` is a oneshot owned by its .timer, so
+	# only the timer is enabled and started.
+	dh_installsystemd -Xbibliograph-migrate.service -Xbibliograph-isbn-backfill.service
+	dh_installsystemd --no-enable --no-start \
+		bibliograph-migrate.service \
+		bibliograph-isbn-backfill.service
 
 override_dh_fixperms:
 	dh_fixperms

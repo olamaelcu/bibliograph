@@ -1,0 +1,52 @@
+[Unit]
+Description=Bibliograph ISBN backfill (one bounded batch)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+# The bookkeeping columns (`isbn_enrich_at`, …) come from migration 0012, so the
+# scan must not run against a database the migrator has not touched yet.
+Requires=bibliograph-migrate.service
+
+[Service]
+Type=oneshot
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/bibliograph/bibliograph.env
+
+# One bounded batch per tick. The scan only reads unstamped rows and enqueues
+# `backfill-edition-isbn` jobs; `bibliograph-jobs.service` does the fetching, and
+# graphile's jobKey keeps a slow worker from being handed the same row twice.
+# 200 rows per tick drains the ~1.2k backlog in a couple of hours and costs one
+# indexed query when there is nothing left to do.
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx scripts/backfill-edition-isbns.ts --limit 200
+
+# A slow database should not hold the unit open for the next tick.
+TimeoutStartSec=600s
+SuccessExitStatus=143 130
+SyslogIdentifier=bibliograph-isbn-backfill
+
+StateDirectory=bibliograph
+StateDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+MemoryDenyWriteExecute=no

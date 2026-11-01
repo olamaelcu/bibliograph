@@ -1,0 +1,24 @@
+[Unit]
+Description=Run the Bibliograph ISBN backfill every 15 minutes
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+Requires=bibliograph-migrate.service
+
+[Timer]
+# First pass shortly after boot, then one batch per quarter hour. `OnUnitActiveSec`
+# measures from the previous run rather than the wall clock, so a long batch
+# pushes the next tick instead of stacking runs behind it.
+OnBootSec=5min
+OnUnitActiveSec=15min
+# Spread across hosts, and allow a minute of scheduling slop: nothing here is
+# time-critical, and a synchronised fleet would hit OpenLibrary together.
+RandomizedDelaySec=60
+AccuracySec=1min
+# Each run processes a bounded, stamped batch, so a tick missed while the host
+# was down needs no catch-up: the next one picks up the same pending rows.
+Persistent=false
+Unit=bibliograph-isbn-backfill.service
+
+[Install]
+WantedBy=timers.target
