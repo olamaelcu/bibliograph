@@ -74,6 +74,28 @@ Based on the codebase:
 2. **`searchWork`** - may include contributor URIs in work records
 3. **`searchContributors`** - dedicated endpoint for finding contributors
 
+## Wikidata identity links on contributors
+
+`searchContributors` enriches OL-sourced contributors through
+`WikidataContributorEnricher`, which appends Wikidata identity links to the
+existing `identifiers` array:
+
+| `resource` | `uri` example |
+|---|---|
+| `wikidata` | `https://www.wikidata.org/entity/Q34660` |
+| `viaf` | `https://viaf.org/viaf/116796842` |
+| `isni` | `https://isni.org/isni/000000012148628X` |
+
+These land in `identifiers` rather than new top-level fields because
+`community.lexicon.book.*` hand-maps every response field: a new field would be
+dropped at the XRPC boundary and never persisted. `identifiers` already declares
+`wikidata`/`viaf`/`isni` in its `knownValues`.
+
+The join key is the contributor's own Open Library author ID (Wikidata `P648`).
+Names are deliberately not used as a lookup key — an exact-label match on a
+common name binds the wrong entity, and the result is written to the database by
+sync ingest. Items with no OLID are passed through unchanged.
+
 ## Empty-name invariant
 
 `community.lexicon.book.contributor` declares `name` with `minLength: 1`, and the
@@ -175,3 +197,5 @@ The worktree was left untouched.
 5. `packages/bibliograph-service/src/lib/server/search/contributor-name.ts` — `validContributorName`
 6. `packages/bibliograph-service/src/lib/server/search/postgres-source.ts` — SQL predicate
 7. `packages/bibliograph-service/drizzle/0010_contributor_name_nonempty.sql` — CHECK constraint
+8. `packages/bibliograph-service/src/lib/server/search/wikidata-enricher.ts` — `WikidataContributorEnricher`
+9. `packages/bibliograph-service/src/lib/server/api/wikidata.ts` — SPARQL lookup + `identifiers` merge
