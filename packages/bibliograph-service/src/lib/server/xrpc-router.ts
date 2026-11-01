@@ -553,7 +553,12 @@ interface PdsListRecordsResponse {
 const PdsListRecordSchema = v.object({
   uri: v.string(),
   cid: v.optional(v.string()),
-  value: v.record(v.string(), v.unknown()),
+  // A record's `value` is shaped by its own collection, and the callers only
+  // pick the fields they need (shelf `name`, bookShelving `shelf`), so it is
+  // carried through unvalidated. `v.record` is the lexicon-record builder — it
+  // requires an object schema with a literal `$type` and threw a TypeError on
+  // every `listRecords` page, which silently emptied both shelf scans.
+  value: v.unknown(),
 });
 const PdsListRecordsSchema = v.object({
   records: v.array(PdsListRecordSchema),
@@ -569,8 +574,19 @@ function safeParseListRecords(raw: unknown): { ok: true; data: PdsListRecordsRes
     ? wrapper.data
     : raw;
   const result = v.safeParse(PdsListRecordsSchema, inner);
-  if (result.success) {
-    return { ok: true, data: { records: result.output.records, cursor: result.output.cursor } };
+  if (result.ok) {
+    const records: PdsListRecordsResponse['records'] = [];
+    for (const record of result.value.records) {
+      const value = record.value;
+      records.push({
+        uri: record.uri,
+        cid: record.cid,
+        // Non-object values can't carry a `name`/`shelf` field; keep the record
+        // row rather than dropping it, so callers see the same shape either way.
+        value: value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {},
+      });
+    }
+    return { ok: true, data: { records, cursor: result.value.cursor } };
   }
   return { ok: false, issues: result.issues.map((i) => ({ message: i.message, path: i.path })) };
 }
