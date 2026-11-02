@@ -118,6 +118,29 @@ Closed at four layers, all keyed off one predicate,
 Live data is already clean — 2639 rows locally and 410 sampled over the wire had
 zero empty names — so this is invariant enforcement, not a data repair.
 
+## Result images on `/search`
+
+`/search` renders one thumbnail per row: the edition cover for `?kind=editions`,
+the contributor portrait for `?kind=contributors`. Neither is added to a lexicon
+response — both come from local cache columns:
+
+| Kind | Source column | Wire field |
+|---|---|---|
+| editions | `editions.cover_image_url` | `coverImageUrl` (declared on `community.lexicon.book.edition`) |
+| contributors | `contributors.image_url` | none — `community.lexicon.book.contributor` has no image field |
+
+`ContributorItem.imageUrl` is filled by `PostgresSource.mapContributorRow` and
+survives the remote/local merge in `SearchService.mergeItems`, because
+OL-derived items carry no `imageUrl` key and so cannot overwrite the cached one.
+The column itself is populated by the `backfill-contributor-image` job
+(`pnpm backfill:contributor-images`); until that has run for a contributor, its
+row renders text-only.
+
+The search sources are kind-agnostic, so `routes/search/+page.server.ts` stamps
+`$type` on each item after the fetch and the page branches on it to pick cover
+vs portrait. Images are `loading="lazy"` inside a fixed-size box, so rows do not
+reflow as they arrive.
+
 ## Verification
 
 Live production (GET, not POST — the endpoint rejects POST with

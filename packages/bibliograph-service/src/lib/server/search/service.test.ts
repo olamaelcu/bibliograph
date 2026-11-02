@@ -354,6 +354,31 @@ test('searchContributors: postgres miss → OL → contributor wiki', async () =
   assert.equal(cw.captures.length, 1);
 });
 
+test('searchContributors: keeps the locally cached portrait when the remote item has none', async () => {
+  const local: ContributorItem = { ...baseContributor, imageUrl: 'https://commons.test/jd.jpg' };
+  // Remote items are built from the community record, which has no image field.
+  const remote: ContributorItem = { ...baseContributor, bio: 'from OL' };
+  const svc = new SearchService(
+    {
+      ...buildDeps({
+        pg: makeFakePostgres({ items: [local], total: 1 }),
+        ol: makeFakeOpenLibrary(
+          { items: [], total: 0 },
+          { items: [], total: 0 },
+          { items: [remote], total: 1 },
+        ),
+      }),
+    },
+    log,
+  );
+
+  const r = await svc.searchContributors({ limit: 10 });
+
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0]?.imageUrl, 'https://commons.test/jd.jpg');
+  assert.equal(r.items[0]?.bio, 'from OL', 'remote still wins on fields it carries');
+});
+
 test('searchContributors: drops empty/whitespace names from postgres and remote results', async () => {
   const emptyLocal: ContributorItem = { ...baseContributor, uri: 'at://x/contributor/empty', name: '' };
   const blankLocal: ContributorItem = { ...baseContributor, uri: 'at://x/contributor/blank', name: '   ' };

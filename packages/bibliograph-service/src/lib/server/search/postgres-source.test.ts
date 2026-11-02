@@ -271,6 +271,22 @@ test('searchContributors always constrains name to be non-empty', async () => {
   assert.equal(cap.whereCalled, true, 'contributors search is always filtered by the name predicate');
 });
 
+test('searchContributors maps the cached portrait to imageUrl', async () => {
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+
+  const withImage = new PostgresSource(
+    silentLog,
+    createFakeDb([makeContributorRow({ imageUrl: 'https://commons.test/jd.jpg' })], cap),
+  );
+  const mapped = await withImage.searchContributors({ limit: 10 });
+  assert.equal(mapped.items[0]?.imageUrl, 'https://commons.test/jd.jpg');
+
+  // A checked-but-empty row keeps image_url NULL; it must not surface as null.
+  const withoutImage = new PostgresSource(silentLog, createFakeDb([makeContributorRow()], cap));
+  const unmapped = await withoutImage.searchContributors({ limit: 10 });
+  assert.equal(unmapped.items[0]?.imageUrl, undefined);
+});
+
 test('searchContributors decodes v1 cursor (back-compat)', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const fakeDb = createFakeDb([makeContributorRow()], cap);

@@ -45,6 +45,13 @@ export interface ContributorItem {
   bornYear?: number;
   diedYear?: number;
   linkedDid?: string;
+  /**
+   * Cached portrait URL resolved by the contributor-image backfill. Lives on
+   * the local `contributors` row only — it is not part of the
+   * `community.lexicon.book.contributor` record, so remote/OL results never
+   * carry it.
+   */
+  imageUrl?: string;
   identifiers: Identifier[];
   createdAt: string;
 }

@@ -23,6 +23,7 @@
         name: string;
         aliases?: string[];
         bio?: string;
+        imageUrl?: string;
       }
     | {
         $type: 'community.lexicon.book.publisher';
@@ -89,6 +90,13 @@
       return item.name;
     }
     return item.title;
+  }
+
+  /** The one image a result row can show: edition cover or contributor portrait. */
+  function thumbnail(item: Item): string | undefined {
+    if (item.$type === 'community.lexicon.book.edition') return item.coverImageUrl;
+    if (item.$type === 'community.lexicon.book.contributor') return item.imageUrl;
+    return undefined;
   }
 
   function subtitle(item: Item): string {
@@ -160,28 +168,31 @@
       {/if}
       {#each data.items as item (item.uri ?? heading(item))}
         <wa-card>
-          <div slot="header" class="card-header">
-            <a href={`/${data.kind}/${rkeyFromUri(item.uri)}`}>{heading(item)}</a>
-            {#if item.$type === 'community.lexicon.book.edition' && item.subtitle}
-              <span class="muted">— {item.subtitle}</span>
+          <div class="result">
+            {#if thumbnail(item)}
+              <img
+                class="thumb"
+                class:portrait={item.$type === 'community.lexicon.book.contributor'}
+                src={thumbnail(item)}
+                alt=""
+                loading="lazy"
+              />
             {/if}
-            {#if item.$type === 'community.lexicon.book.work' && item.subtitle}
-              <span class="muted">— {item.subtitle}</span>
-            {/if}
-          </div>
-          {#if subtitle(item)}
-            <p class="muted">{subtitle(item)}</p>
-          {/if}
-          {#if item.$type === 'community.lexicon.book.contributor'}
-            <p class="muted">
-              {#if item.bio}
-                {item.bio.slice(0, 200)}{#if item.bio.length > 200}…{/if}
+            <div class="result-body">
+              <div class="card-header">
+                <a href={`/${data.kind}/${rkeyFromUri(item.uri)}`}>{heading(item)}</a>
+                {#if (item.$type === 'community.lexicon.book.edition' || item.$type === 'community.lexicon.book.work') && item.subtitle}
+                  <span class="muted">— {item.subtitle}</span>
+                {/if}
+              </div>
+              {#if subtitle(item)}
+                <p class="muted">{subtitle(item)}</p>
               {/if}
-            </p>
-          {/if}
-          {#if item.$type === 'community.lexicon.book.edition' && item.coverImageUrl}
-            <img src={item.coverImageUrl} alt="" class="cover" loading="lazy" />
-          {/if}
+              {#if item.$type === 'community.lexicon.book.contributor' && item.bio}
+                <p class="muted">{item.bio.slice(0, 200)}{#if item.bio.length > 200}…{/if}</p>
+              {/if}
+            </div>
+          </div>
         </wa-card>
       {/each}
     </section>
@@ -202,8 +213,19 @@
   .search-form wa-input { flex: 1 1 16rem; }
   .empty { padding: var(--wa-space-l); text-align: center; color: var(--wa-color-on-quiet); }
   .results { display: flex; flex-direction: column; gap: var(--wa-space-s); }
+  .result { display: flex; gap: var(--wa-space-s); align-items: flex-start; }
   .card-header { display: flex; gap: var(--wa-space-s); align-items: baseline; flex-wrap: wrap; }
   .card-header a { color: var(--wa-color-text-link); font-weight: 600; text-decoration: none; }
   .card-header a:hover { text-decoration: underline; }
-  .cover { max-width: 8rem; border-radius: 6px; border: 1px solid var(--wa-form-control-border-color); margin-top: var(--wa-space-s); }
+  .result-body { display: flex; flex-direction: column; gap: var(--wa-space-3xs); min-width: 0; }
+  /* Fixed box so a row never reflows while the image is still loading. */
+  .thumb {
+    flex: 0 0 auto;
+    width: 4rem;
+    height: 6rem;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--wa-form-control-border-color);
+  }
+  .thumb.portrait { height: 4rem; border-radius: 50%; }
 </style>

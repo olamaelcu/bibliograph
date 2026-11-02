@@ -188,6 +188,7 @@ export class PostgresSource {
       bornYear: (r.bornYear as number | null) ?? undefined,
       diedYear: (r.diedYear as number | null) ?? undefined,
       linkedDid: (r.linkedDid as string | null) ?? undefined,
+      imageUrl: (r.imageUrl as string | null) ?? undefined,
       identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
       createdAt: (r.createdAt as Date).toISOString(),
     };
