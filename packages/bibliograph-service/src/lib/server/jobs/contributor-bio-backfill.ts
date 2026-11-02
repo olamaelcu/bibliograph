@@ -32,7 +32,10 @@ export async function resolveContributorBio(
 ): Promise<string | undefined> {
   const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   // Primary: Wikipedia by contributor name.
-  const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear, diedYear: row.diedYear, linkedDid: row.linkedDid, identifiers: row.identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, s);
+  // The column types are nullable; the enricher's inputs are optional. Absent and
+  // null mean the same thing to it, so normalize rather than spread the null
+  // through a type that has no room for it.
+  const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear ?? undefined, diedYear: row.diedYear ?? undefined, linkedDid: row.linkedDid ?? undefined, identifiers: row.identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, s);
   const wikiBio = bio[0]?.bio;
   if (wikiBio) return wikiBio;
 

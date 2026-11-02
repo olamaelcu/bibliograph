@@ -99,6 +99,7 @@ import {
   bookUriForRow,
   shelfUriForRow,
 } from './shelving/hydrate';
+import { shelfEntryConditions, shelfRkeyForBookhiveStatus } from './shelving/shelf-rows';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import {
@@ -630,9 +631,20 @@ const PdsListRecordsSchema = v.object({
   cursor: v.optional(v.string()),
 });
 
-function safeParseListRecords(raw: unknown): { ok: true; data: PdsListRecordsResponse } | { ok: false; issues: ReadonlyArray<{ message: string; path?: unknown }> } {
+/**
+ * One failure of `listRecords`, in the shape both producers below agree on:
+ * valibot's own issues carry a `code` and a `path` but not a `message`, and a
+ * value that is not an object carries a `message` but no code.
+ */
+interface ListRecordsIssue {
+  code: string;
+  message?: string;
+  path?: unknown;
+}
+
+function safeParseListRecords(raw: unknown): { ok: true; data: PdsListRecordsResponse } | { ok: false; issues: ReadonlyArray<ListRecordsIssue> } {
   if (!raw || typeof raw !== 'object') {
-    return { ok: false, issues: [{ message: 'raw is not an object' }] };
+    return { ok: false, issues: [{ code: 'invalid_type', message: 'raw is not an object' }] };
   }
   const wrapper = raw as { ok?: unknown; data?: unknown };
   const inner = wrapper.ok === true && wrapper.data && typeof wrapper.data === 'object'
@@ -653,7 +665,7 @@ function safeParseListRecords(raw: unknown): { ok: true; data: PdsListRecordsRes
     }
     return { ok: true, data: { records, cursor: result.value.cursor } };
   }
-  return { ok: false, issues: result.issues.map((i) => ({ message: i.message, path: i.path })) };
+  return { ok: false, issues: result.issues.map((i) => ({ code: i.code, path: i.path })) };
 }
 
 router.addQuery(NetOlamaelcuLivtetBiblioGetReadingGoal.mainSchema, {
@@ -881,9 +893,17 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
       if (!isGbRkey(rkey)) {
         return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
       }
+    } else if (isBhRkey(rkey)) {
+      // `bh.` editions are Bookhive catalog mirrors. Their cover comes from the
+      // catalog record at ingest, so the row is the whole answer: rejecting the
+      // rkey sent every Bookhive cover down the caller's own record-read
+      // fallback — one extra PDS read per tile — and the backfill below, which
+      // only knows how to ask OpenLibrary and Google Books, can never serve
+      // them.
     } else {
       return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
     }
+    const isBh = isBhRkey(rkey);
 
     const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
     if (!row) {
@@ -891,6 +911,9 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
     }
     if (row.coverImageUrl) {
       return json({ url: row.coverImageUrl } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
+    }
+    if (isBh) {
+      return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
     void enqueueCoverBackfill(uri, rkey).catch((err) => {
       log.warn({ err, uri, rkey, stage: 'getImageForBook.enqueue' }, 'cover backfill enqueue failed');
@@ -1043,6 +1066,28 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelversOfBook.mainSchema, {
     const shelvingRkey = (params.shelvingRkey as string | undefined) ?? shelvingRkeyFor(bookUri);
     try {
       const resume = parseCursor(params.cursor);
+      // Bookhive readers shelve by setting a status on their own copy of the
+      // book, so their DIDs are rows in the mirror, not backlinks: there is no
+      // shelf record to resolve. They ride along on every tier's answer, since
+      // the shelving cursor cannot express them.
+      const bookhiveSubject = await bookhiveSubjectForEdition(bookUri);
+      const bookhiveDids = bookhiveSubject
+        ? (
+            await db
+              .select({ did: records.did })
+              .from(records)
+              .where(
+                shelfEntryConditions({
+                  apps: ['bookhive'],
+                  bookhiveSubject,
+                }),
+              )
+              .orderBy(records.uri)
+              .limit(limit)
+          ).map((row) => row.did)
+        : [];
+      const withBookhive = (dids: string[]) => [...new Set([...dids, ...bookhiveDids])];
+
       if (resume?.tier === 'con') {
         const page = await getBacklinks({
           subject: bookUri,
@@ -1052,7 +1097,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelversOfBook.mainSchema, {
         });
         return json({
           bookUri,
-          dids: collectShelverDids(shelvingRkey, page.records),
+          dids: withBookhive(collectShelverDids(shelvingRkey, page.records)),
           cursor: page.cursor ? `con:${page.cursor}` : undefined,
         } as NetOlamaelcuLivtetBiblioGetShelversOfBook.$output);
       }
@@ -1077,7 +1122,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelversOfBook.mainSchema, {
       if (mirror.length > limit) {
         return json({
           bookUri,
-          dids: collectShelverDids(shelvingRkey, mirror.slice(0, limit)),
+          dids: withBookhive(collectShelverDids(shelvingRkey, mirror.slice(0, limit))),
           cursor: `tap:${offset + limit}`,
         } as NetOlamaelcuLivtetBiblioGetShelversOfBook.$output);
       }
@@ -1088,7 +1133,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelversOfBook.mainSchema, {
         : { records: [] };
       return json({
         bookUri,
-        dids: collectShelverDids(shelvingRkey, [...mirror, ...page.records]),
+        dids: withBookhive(collectShelverDids(shelvingRkey, [...mirror, ...page.records])),
         cursor: page.cursor ? `con:${page.cursor}` : undefined,
       } as NetOlamaelcuLivtetBiblioGetShelversOfBook.$output);
     } catch (err: unknown) {
@@ -1232,11 +1277,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
         .select()
         .from(records)
         .where(
-          and(
-            eq(records.did, did),
-            eq(records.collection, 'net.olamaelcu.livtet.biblio.bookShelving'),
-            sql`${records.value}->>'shelf' = ${shelfUri}`,
-          ),
+          shelfEntryConditions({ shelfUris: [shelfUri], did }),
         )
         // An offset page needs a total order, otherwise Postgres may answer the
         // same offset with a different slice and records repeat or vanish.
@@ -1487,10 +1528,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
         .select()
         .from(records)
         .where(
-          and(
-            eq(records.collection, SHELVING_COLLECTION),
-            inArray(sql`${records.value}->>'shelf'`, shelfUris),
-          ),
+          shelfEntryConditions({ shelfUris }),
         );
       const shelfMap = await hydrateShelvesByUri(shelfUris);
       const bookMap = await hydrateBooksByUri(
@@ -1498,8 +1536,13 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
       );
 
       const byShelf = new Map<string, Array<typeof records.$inferSelect>>();
+      // A Bookhive row names no shelf record, so it is filed under the shelf of
+      // this page whose rkey its status maps to.
+      const shelfUriByRkey = new Map(page.map((row) => [row.rkey, row.uri]));
       for (const row of bookRows) {
-        const shelfUri = shelfUriForRow(row);
+        const shelfUri = shelfUriForRow(row)
+          ?? shelfUriByRkey.get(shelfRkeyForBookhiveStatus(asRecord(row.value).status) ?? '')
+          ?? null;
         if (!shelfUri) continue;
         const existing = byShelf.get(shelfUri);
         if (existing) existing.push(row);
@@ -1631,7 +1674,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioListRecentShelving.mainSchema, {
         .from(records)
         .where(
           and(
-            eq(records.collection, SHELVING_COLLECTION),
+            // Both apps' shelving, not just Livtet's: a Bookhive reader's shelf
+            // lives on their own book record, and dropping it here is what made
+            // the network's newest shelving depend on which app wrote it.
+            shelfEntryConditions(),
             resume
               ? sql`(${records.indexedAt}, ${records.uri}) < (${resume.indexedAt}::timestamptz, ${resume.uri}::text)`
               : undefined,
@@ -1665,9 +1711,14 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
       return Response.json({ error: 'InvalidRequest', message: 'uri must be an AT-URI' }, { status: 400 });
     }
     try {
-      let row = await fetchBookShelvingRecord(uri, did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+      // A Bookhive record is the shelving row itself — same view, different
+      // collection — so the read is chosen by what the uri names rather than
+      // by assuming Livtet wrote it.
+      const row = uri.includes(`/${BOOKHIVE_BOOK_COLLECTION}/`)
+        ? await fetchBookhiveBookRecord(uri, did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS))
+        : await fetchBookShelvingRecord(uri, did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
       if (!row) {
-        return Response.json({ error: 'RecordNotFound', message: `no bookShelving record at ${uri}` }, { status: 404 });
+        return Response.json({ error: 'RecordNotFound', message: `no shelving record at ${uri}` }, { status: 404 });
       }
       const [view] = await hydrateBookShelves([row]);
       if (!view) {
@@ -1857,7 +1908,7 @@ async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, book
   if (rows.length === 0) return [];
   const shelfUris = Array.from(new Set(rows.map((r) => shelfUriForRow(r)).filter((u): u is string => !!u)));
   const bookUris = Array.from(new Set([
-    bookUriHint,
+    ...(bookUriHint ? [bookUriHint] : []),
     ...rows.map((r) => bookUriForRow(r)).filter((u): u is string => !!u),
   ]));
   const [shelfMap, bookMap] = await Promise.all([hydrateShelvesByUri(shelfUris), hydrateBooksByUri(bookUris)]);
@@ -1966,7 +2017,7 @@ const getFeedSkeletonSchema = /*#__PURE__*/ v.query('com.atproto.feed.getFeedSke
   params: /*#__PURE__*/ v.object({
     feed: /*#__PURE__*/ v.resourceUriString(),
     cursor: /*#__PURE__*/ v.optional(v.string()),
-    limit: /*#__PURE__*/ v.optional(v.constrain(v.integer(), [v.integerRange(1, 100)], 5)),
+    limit: /*#__PURE__*/ v.optional(v.constrain(v.integer(), [v.integerRange(1, 100)]), 5),
   }),
   output: {
     type: 'lex',
@@ -2009,7 +2060,7 @@ router.addQuery(describeFeedGeneratorSchema, {
           requiresAuth: true,
         },
       ],
-    } as unknown as typeof describeFeedGeneratorSchema.output);
+    } as unknown as v.InferXRPCBodyOutput<typeof describeFeedGeneratorSchema['output']>);
   },
 });
 
@@ -2026,7 +2077,7 @@ router.addQuery(getFeedSkeletonSchema, {
     //   at://<did>/net.olamaelcu.livtet.biblio.feed.generator/dynamic     (requires auth)
     //   at://<did>/net.olamaelcu.livtet.biblio.feed.generator/edition/{rkey}
     const nsidMatch = feedUri.match(/^at:\/\/[^/]+\/(.+)$/);
-    const nsid = nsidMatch ? nsidMatch[1] : '';
+    const nsid = nsidMatch?.[1] ?? '';
     const feedParts = nsid.split('/');
     const isGeneratorFeed = nsid.startsWith('net.olamaelcu.livtet.biblio.feed.generator');
     const feedType = isGeneratorFeed ? feedParts[1] : null;
@@ -2136,7 +2187,7 @@ router.addQuery(getFeedSkeletonSchema, {
         feed = result.feed;
         outCursor = result.cursor;
       }
-      return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+      return json({ feed, cursor: outCursor } as unknown as v.InferXRPCBodyOutput<typeof getFeedSkeletonSchema['output']>);
     }
 
     // ── Dynamic feed (requires auth) ──────────────────────────────────
@@ -2197,7 +2248,7 @@ router.addQuery(getFeedSkeletonSchema, {
         outCursor = result.cursor;
       }
 
-      return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+      return json({ feed, cursor: outCursor } as unknown as v.InferXRPCBodyOutput<typeof getFeedSkeletonSchema['output']>);
     }
 
     // ── Edition-specific feed (public) ────────────────────────────────
@@ -2254,11 +2305,11 @@ router.addQuery(getFeedSkeletonSchema, {
         outCursor = result.cursor;
       }
 
-      return json({ feed, cursor: outCursor } as unknown as typeof getFeedSkeletonSchema.output);
+      return json({ feed, cursor: outCursor } as unknown as v.InferXRPCBodyOutput<typeof getFeedSkeletonSchema['output']>);
     }
 
     // Unrecognized feed URI — return empty feed
-    return json({ feed: [], cursor: undefined } as unknown as typeof getFeedSkeletonSchema.output);
+    return json({ feed: [], cursor: undefined } as unknown as v.InferXRPCBodyOutput<typeof getFeedSkeletonSchema['output']>);
   },
 });
 

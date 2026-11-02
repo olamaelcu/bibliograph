@@ -44,7 +44,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       'google-books': gbRes.status === 'fulfilled' ? (gbRes.value?.items ?? []) : [],
       'open-library': olRes.status === 'fulfilled' ? (olRes.value?.items ?? []) : [],
     };
-    log.info({ stage: 'isbn-search', q: isbn, isbndb: results.isbndb.length, 'google-books': results['google-books'].length, 'open-library': results['open-library'].length }, 'ISBN import page search');
+    // `results` is keyed by provider, so every read is optional under
+    // `noUncheckedIndexedAccess`; the counts are diagnostics, so a provider that
+    // did not answer reports zero rather than crashing the page.
+    log.info({ stage: 'isbn-search', q: isbn, isbndb: results['isbndb']?.length ?? 0, 'google-books': results['google-books']?.length ?? 0, 'open-library': results['open-library']?.length ?? 0 }, 'ISBN import page search');
   }
 
   return {

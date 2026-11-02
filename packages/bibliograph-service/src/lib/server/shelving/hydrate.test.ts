@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  bookUriForRow,
   catalogEditionUriFromRkey,
   displayNameForShelfRkey,
   resolveBookShelf,
@@ -280,6 +281,27 @@ test('resolveBookShelf: bookhive row without hiveBookUri still resolves through 
   const result = resolveBookShelf(makeBookhiveRow({ hiveBookUri: null }), bookMap, new Map());
   assert.equal(result.ok, true);
   assert.equal(result.view!.book.uri, EDITION_URI_BH);
+});
+
+test('bookUriForRow: a bookhive row resolves to its mirrored edition', () => {
+  // The hydration pass batches by this function, so a row it cannot place is
+  // dropped before `resolveBookShelf` ever sees it. A bookhive rkey is a TID,
+  // which the catalog-rkey derivation cannot read, so the branch is load-bearing.
+  assert.equal(bookUriForRow(makeBookhiveRow()), EDITION_URI_BH);
+});
+
+test('bookUriForRow: a bookhive row without any hive identity has no book', () => {
+  const row = makeBookhiveRow({ hiveBookUri: null });
+  (row.value as Record<string, unknown>).hiveId = undefined;
+  assert.equal(bookUriForRow(row), null);
+});
+
+test('bookUriForRow: a livtet row still reads its own strongRef first', () => {
+  const row = makeShelvingRow({
+    rkey: 'dune',
+    bookRef: { uri: 'at://did:web:biblio.test/community.lexicon.book.edition/ol.OL1W' },
+  });
+  assert.equal(bookUriForRow(row), 'at://did:web:biblio.test/community.lexicon.book.edition/ol.OL1W');
 });
 
 // Reference unrelated constant to satisfy unused-import linters.

@@ -39,7 +39,10 @@ function createFakeDb(rows: unknown[], capture: CallCapture): DbExecutor {
 const silentLog = pino({ level: 'silent' });
 
 function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
-  return {
+  // Merge `overrides` with Object.assign instead of spreading them into the
+  // literal: spreading a `Partial<T>` re-widens every column to `| undefined`,
+  // which the row type does not allow. Object.assign intersects them back.
+  const base: EditionRow = {
     uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/r1',
     cid: 'bafytest',
     did: 'did:web:biblio.livtet.olamaelcu.net',
@@ -60,12 +63,16 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     coverImageUrl: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
-    ...overrides,
+    descriptionCheckedAt: null,
   };
+  return Object.assign(base, overrides);
 }
 
 function makeWorkRow(overrides: Partial<WorkRow> = {}): WorkRow {
-  return {
+  // Merge `overrides` with Object.assign instead of spreading them into the
+  // literal: spreading a `Partial<T>` re-widens every column to `| undefined`,
+  // which the row type does not allow. Object.assign intersects them back.
+  const base: WorkRow = {
     uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/r1',
     cid: 'bafytest',
     did: 'did:web:biblio.livtet.olamaelcu.net',
@@ -80,12 +87,16 @@ function makeWorkRow(overrides: Partial<WorkRow> = {}): WorkRow {
     description: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
-    ...overrides,
+    descriptionCheckedAt: null,
   };
+  return Object.assign(base, overrides);
 }
 
 function makeContributorRow(overrides: Partial<ContributorRow> = {}): ContributorRow {
-  return {
+  // Merge `overrides` with Object.assign instead of spreading them into the
+  // literal: spreading a `Partial<T>` re-widens every column to `| undefined`,
+  // which the row type does not allow. Object.assign intersects them back.
+  const base: ContributorRow = {
     uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/r1',
     cid: 'bafytest',
     did: 'did:web:biblio.livtet.olamaelcu.net',
@@ -106,8 +117,9 @@ function makeContributorRow(overrides: Partial<ContributorRow> = {}): Contributo
     imageCheckedAt: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
-    ...overrides,
+    bioCheckedAt: null,
   };
+  return Object.assign(base, overrides);
 }
 
 function encodeV1Cursor(t: string, u: string): string {

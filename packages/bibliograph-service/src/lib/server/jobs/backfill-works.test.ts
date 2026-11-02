@@ -23,7 +23,10 @@ import { PUBLISHER_DID } from '../did';
 const silentLog = pino({ level: 'silent' });
 
 function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
-  return {
+  // Merge `overrides` with Object.assign instead of spreading them into the
+  // literal: spreading a `Partial<T>` re-widens every column to `| undefined`,
+  // which the row type does not allow. Object.assign intersects them back.
+  const base: EditionRow = {
     uri: 'at://did:plc:user/community.lexicon.book.edition/rec1',
     cid: 'bafye1',
     did: 'did:plc:user',
@@ -44,12 +47,16 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     coverImageUrl: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
-    ...overrides,
+    descriptionCheckedAt: null,
   };
+  return Object.assign(base, overrides);
 }
 
 function makeWorkRow(overrides: Partial<WorkRow> = {}): WorkRow {
-  return {
+  // Merge `overrides` with Object.assign instead of spreading them into the
+  // literal: spreading a `Partial<T>` re-widens every column to `| undefined`,
+  // which the row type does not allow. Object.assign intersects them back.
+  const base: WorkRow = {
     uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol-work-OL1W',
     cid: 'bafyw1',
     did: PUBLISHER_DID,
@@ -64,8 +71,9 @@ function makeWorkRow(overrides: Partial<WorkRow> = {}): WorkRow {
     description: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
-    ...overrides,
+    descriptionCheckedAt: null,
   };
+  return Object.assign(base, overrides);
 }
 
 function makeWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {

@@ -114,6 +114,14 @@ export interface ResolvedBookShelf {
  * script can never disagree about which edition a row needs.
  */
 export function bookUriForRow(row: RecordRow): string | null {
+  // A Bookhive record names no edition: its book is the `bh.` edition its
+  // catalog record (`hiveBookUri`, or `hiveId` alone) maps to. Without this
+  // branch those rows fall through to the rkey derivation below, which cannot
+  // read a TID — the edition never reaches the batch, and every Bookhive row
+  // is dropped as book-not-found.
+  if (row.collection === BOOKHIVE_BOOK_COLLECTION) {
+    return normalizeBookhiveBook(row.value).editionUri;
+  }
   const value = row.value;
   if (value && typeof value === 'object' && 'book' in value) {
     const book = value.book;

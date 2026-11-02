@@ -1,3 +1,28 @@
+bibliograph (0.1.22) unstable; urgency=medium
+
+  * Shelf reads now include Bookhive shelving. A `buzz.bookhive.book` record is
+    the reader's own copy of the book with the reading status inline, so it *is*
+    their shelving row; `shelving/shelf-rows.ts` gives every shelf read one
+    predicate over both collections plus the shelf-rkey <-> Bookhive-status
+    mapping, and `getShelversOfBook` reports those DIDs from the mirror because
+    they have no shelf record to resolve through backlinks.
+  * Serve Bookhive covers from their catalog row. `getImageForBook` rejected
+    every `bh.` rkey, which sent each tile into a per-record PDS read and then
+    into a backfill that only knows OpenLibrary and Google Books - it could
+    never serve one.
+  * Index the jsonb paths the shelf and review reads filter on (migration 0016:
+    `value->>'shelf'`, `value->'book'->>'uri'`, `value->>'hiveBookUri'`). They
+    were sequential scans: `listShelvesWithBooks` measured 90-108 s against
+    21,853 mirrored records. `if not exists`, because production already has
+    them.
+  * Type the `listRecords` failure path explicitly. Valibot issues carry a code
+    and no message, so the previous shape only lined up by accident.
+  * Clear the remaining type errors: nullable bio columns normalise to undefined
+    for the enricher, the admin ISBN import reads provider counts optionally, and
+    that import logs under its own process name.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 15:07:41 -0500
+
 bibliograph (0.1.21) unstable; urgency=medium
 
   * Run the graphile task lists inside `bibliograph-worker.service`, retiring

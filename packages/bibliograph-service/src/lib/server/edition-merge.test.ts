@@ -12,7 +12,10 @@ const AUTHOR = 'at://did:web:biblio.test/community.lexicon.book.contributor/auth
 const TRANSLATOR = 'at://did:web:biblio.test/community.lexicon.book.contributor/translator';
 
 function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
-  return {
+  // Merge `overrides` with Object.assign instead of spreading them into the
+  // literal: spreading a `Partial<T>` re-widens every column to `| undefined`,
+  // which the row type does not allow. Object.assign intersects them back.
+  const base: EditionRow = {
     uri: PRIMARY,
     cid: 'bafyprimary',
     did: 'did:web:biblio.test',
@@ -33,8 +36,9 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     coverImageUrl: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
-    ...overrides,
+    descriptionCheckedAt: null,
   };
+  return Object.assign(base, overrides);
 }
 
 function primaryFixture(overrides: Partial<EditionRow> = {}): EditionRow {

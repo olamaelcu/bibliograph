@@ -6,7 +6,15 @@ const LOG_DIR = process.env.LOG_DIR ?? 'logs';
 const LOG_LEVEL = process.env.LOG_LEVEL ?? 'info';
 const PRETTY_STDOUT = process.env.NODE_ENV !== 'production';
 
-export type ProcessName = 'web' | 'worker' | 'health' | 'feed-auth' | 'did-document-resolver';
+export type ProcessName =
+  | 'web'
+  | 'worker'
+  | 'health'
+  | 'feed-auth'
+  | 'did-document-resolver'
+  // The admin ISBN import logs under its own file so a search failure reads as
+  // the import it came from rather than as a web request.
+  | 'isbn-import';
 
 export function createLogger(name: ProcessName) {
   fs.mkdirSync(LOG_DIR, { recursive: true });
