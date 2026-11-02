@@ -99,6 +99,13 @@
       "when": 1793637200000,
       "tag": "0015_records_did_collection",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793649000000,
+      "tag": "0016_records_jsonb_indexes",
+      "breakpoints": true
     }
   ]
 }

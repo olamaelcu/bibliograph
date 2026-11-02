@@ -182,6 +182,15 @@ export const records = pgTable(
     collectionIdx: index('records_collection_idx').on(t.collection),
     didCollectionIdx: index('records_did_collection_idx').on(t.did, t.collection),
     indexedAtIdx: index('records_indexed_at_idx').on(t.indexedAt),
+    // The shelving and review reads filter on jsonb paths, not columns:
+    // `listBooksOnShelf`/`listShelvesWithBooks` match `value->>'shelf'`,
+    // `getShelvingOfBook`/`getShelversOfBook` match `value->'book'->>'uri'`, and
+    // the Bookhive join matches `value->>'hiveBookUri'`. Without these every one
+    // of them was a sequential scan: `listShelvesWithBooks` measured 90-108 s on
+    // production, and 10 s after the indexes were added.
+    shelfUriIdx: index('records_shelf_uri_idx').on(sql`(value->>'shelf')`),
+    bookUriIdx: index('records_book_uri_idx').on(sql`(value->'book'->>'uri')`),
+    hiveBookUriIdx: index('records_hivebook_idx').on(sql`(value->>'hiveBookUri')`),
   }),
 );
 
