@@ -1,3 +1,25 @@
+bibliograph (0.1.20) unstable; urgency=medium
+
+  * Unstick the TAP consumer. Ingestion stalled for 14 minutes on 2026-11-02
+    with 2,863 events sitting in TAP's outbox and `retrying timed out event`
+    every two minutes: acks were created for a whole batch up front and then
+    awaited after the queue write, while `@atcute/tap` drains its ack queue as
+    more messages arrive — so the read loop parked waiting on acks the server
+    would only send once the loop kept reading.
+  * Acks are now queued from the read loop and never awaited. They are still
+    only issued after the batch is durably in `graphile_worker`, so the
+    at-least-once handoff is unchanged; an ack lost to a crash just means TAP
+    redelivers, and every upsert is keyed by uri.
+  * A failed enqueue no longer acks. The old path logged the failure and then
+    awaited the same acks, which acknowledged TAP for records it had dropped —
+    silent loss with no dead-letter trail. Now the batch stays unacked so TAP
+    redelivers it.
+  * Flush on a timer instead of only on the next event. A quiet tail left the
+    last events buffered until TAP's outbox timed out, which turned a one-event
+    trickle into a permanent two-minute retry loop.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 12:34:58 -0500
+
 bibliograph (0.1.19) unstable; urgency=medium
 
   * Repair the legacy `bookShelving` rows instead of teaching readers a second

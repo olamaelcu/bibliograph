@@ -41,40 +41,66 @@ function isRecordEvent(e: TapEvent): e is Extract<TapEvent, { type: 'record' }> 
   return e.type === 'record';
 }
 
+/**
+ * Acknowledge events TAP already has durably recorded in our queue.
+ *
+ * The acks are deliberately **not awaited**: `@atcute/tap` drains its ack queue as
+ * messages arrive, so awaiting them inside the read loop parks the loop while the
+ * server waits for the acks — which is exactly how ingestion stalled for 14
+ * minutes on 2026-11-02 with 2,863 events stuck in TAP's outbox. Queueing them and
+ * keeping the loop reading lets the client flush them in its own order; an ack
+ * lost to a crash only means TAP redelivers, and every upsert is keyed by uri.
+ */
+function ackEvents(batch: Array<{ ack: () => Promise<void> }>, log: Logger): void {
+  for (const item of batch) {
+    void item.ack().catch((err: unknown) => {
+      log.warn({ err }, 'ack failed; TAP will redeliver the event');
+    });
+  }
+}
+
 export async function runTapConsumer(log: Logger): Promise<void> {
   log.info({ tap: TAP_URL, upstream: UPSTREAM_APPVIEW, batchSize: TAP_BATCH_SIZE, batchIntervalMs: TAP_BATCH_INTERVAL_MS }, 'listening to TAP');
 
   const upsertBuffer: UpsertBufferItem[] = [];
   const deleteBuffer: DeleteBufferItem[] = [];
   let lastFlushAt = Date.now();
+  let flushing = false;
 
   async function flushBuffers(): Promise<void> {
     if (upsertBuffer.length === 0 && deleteBuffer.length === 0) return;
-    if (upsertBuffer.length > 0) {
-      const items = upsertBuffer.map(({ uri, did, rkey, value }) => ({ uri, did, rkey, value }));
-      const acks = upsertBuffer.map(({ ack }) => ack());
-      upsertBuffer.length = 0;
-      try {
-        await enqueueRecordUpsertBatch(items);
-        await Promise.all(acks);
-      } catch (err) {
-        log.error({ stage: 'tap-consumer', err, count: items.length }, 'batch upsert enqueue failed');
-        await Promise.all(acks);
+    if (flushing) return;
+    flushing = true;
+    try {
+      if (upsertBuffer.length > 0) {
+        const batch = upsertBuffer.splice(0, upsertBuffer.length);
+        const items = batch.map(({ uri, did, rkey, value }) => ({ uri, did, rkey, value }));
+        try {
+          await enqueueRecordUpsertBatch(items);
+        } catch (err) {
+          // No ack on failure: the events stay TAP's responsibility and its outbox
+          // redelivers them. Dropping them from the buffer keeps memory bounded,
+          // and acking here — which this used to do — lost the records outright.
+          log.error({ stage: 'tap-consumer', err, count: items.length }, 'batch upsert enqueue failed; leaving events unacked for redelivery');
+          return;
+        }
+        ackEvents(batch, log);
       }
-    }
-    if (deleteBuffer.length > 0) {
-      const uris = deleteBuffer.map(({ uri }) => uri);
-      const acks = deleteBuffer.map(({ ack }) => ack());
-      deleteBuffer.length = 0;
-      try {
-        await enqueueRecordDeleteBatch(uris);
-        await Promise.all(acks);
-      } catch (err) {
-        log.error({ stage: 'tap-consumer', err, count: uris.length }, 'batch delete enqueue failed');
-        await Promise.all(acks);
+      if (deleteBuffer.length > 0) {
+        const batch = deleteBuffer.splice(0, deleteBuffer.length);
+        const uris = batch.map(({ uri }) => uri);
+        try {
+          await enqueueRecordDeleteBatch(uris);
+        } catch (err) {
+          log.error({ stage: 'tap-consumer', err, count: uris.length }, 'batch delete enqueue failed; leaving events unacked for redelivery');
+          return;
+        }
+        ackEvents(batch, log);
       }
+    } finally {
+      lastFlushAt = Date.now();
+      flushing = false;
     }
-    lastFlushAt = Date.now();
   }
 
   function shouldFlush(): boolean {
@@ -88,6 +114,12 @@ export async function runTapConsumer(log: Logger): Promise<void> {
   const events = subscription[Symbol.asyncIterator]();
   let stopping = false;
 
+  // A timer, not an "on next event" check: a quiet tail would otherwise leave the
+  // last events buffered and unacked until TAP's outbox timed out and redelivered
+  // them, which is what made a one-event trickle look like a retry storm.
+  const flushTimer = setInterval(() => { void flushBuffers(); }, TAP_BATCH_INTERVAL_MS);
+  flushTimer.unref();
+
   async function shutdown(signal: string): Promise<void> {
     if (stopping) return;
     stopping = true;
@@ -95,6 +127,7 @@ export async function runTapConsumer(log: Logger): Promise<void> {
       { upserts: upsertBuffer.length, deletes: deleteBuffer.length, signal },
       'flushing buffers on shutdown',
     );
+    clearInterval(flushTimer);
     // Never let systemd reach TimeoutStopSec and SIGKILL us.
     setTimeout(() => process.exit(0), 5_000).unref();
     await flushBuffers();
@@ -115,14 +148,14 @@ export async function runTapConsumer(log: Logger): Promise<void> {
   for await (const { event, ack } of events) {
     try {
       if (!isRecordEvent(event)) {
-        await ack();
+        ackEvents([{ ack }], log);
         continue;
       }
       if (
         !event.collection.startsWith(NET_PREFIX) &&
         !MIRRORED_COLLECTIONS.has(event.collection)
       ) {
-        await ack();
+        ackEvents([{ ack }], log);
         continue;
       }
       // Conditional ack safety net: if the TAP queue is over the threshold, skip
@@ -141,7 +174,7 @@ export async function runTapConsumer(log: Logger): Promise<void> {
       if (shouldFlush()) await flushBuffers();
     } catch (err) {
       log.error({ err }, 'processing error');
-      try { await ack(); } catch { /* ignore */ }
+      ackEvents([{ ack }], log);
     }
   }
   await flushBuffers();
