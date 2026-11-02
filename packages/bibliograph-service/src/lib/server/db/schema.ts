@@ -37,6 +37,11 @@ export const editions = pgTable(
   },
   (t) => ({
     indexedAtIdx: index('editions_indexed_at_idx').on(t.indexedAt),
+    // `getEditionsByContributor` orders by the record's own stamp. Without this
+    // index its contributor filter (an `EXISTS` over the contributors jsonb,
+    // which no index can serve) would scan and sort every match instead of
+    // stopping once `limit` rows have been handed out.
+    createdAtIdx: index('editions_created_at_idx').on(t.createdAt.desc(), t.uri),
     didIdx: index('editions_did_idx').on(t.did),
     // editions.work_uri / editions.publisher_uri FKs are declared in the
     // initial migration (kept out of the schema to avoid the self-reference
@@ -177,11 +182,21 @@ export const records = pgTable(
     value: jsonb('value').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
+    // The record's own `createdAt`, which is what the feed and listing reads sort
+    // by (`db/record-recency`). Generated so the sort is indexable: Postgres only
+    // accepts IMMUTABLE generation expressions, and text→timestamptz is merely
+    // STABLE (it reads the session timezone), so what is stored is the ISO string
+    // itself. Blank when the record carries none — under `desc` a blank sorts
+    // last, which keeps the key total and the keyset cursor free of NULLs.
+    recordCreatedAt: text('record_created_at')
+      .notNull()
+      .generatedAlwaysAs(sql`coalesce(value->>'createdAt', '')`),
   },
   (t) => ({
     collectionIdx: index('records_collection_idx').on(t.collection),
     didCollectionIdx: index('records_did_collection_idx').on(t.did, t.collection),
     indexedAtIdx: index('records_indexed_at_idx').on(t.indexedAt),
+    recordCreatedAtIdx: index('records_record_created_at_idx').on(t.recordCreatedAt.desc(), t.uri.desc()),
     // The shelving and review reads filter on jsonb paths, not columns:
     // `listBooksOnShelf`/`listShelvesWithBooks` match `value->>'shelf'`,
     // `getShelvingOfBook`/`getShelversOfBook` match `value->'book'->>'uri'`, and

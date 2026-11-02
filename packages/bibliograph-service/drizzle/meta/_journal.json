@@ -106,6 +106,20 @@
       "when": 1793649000000,
       "tag": "0016_records_jsonb_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793700000000,
+      "tag": "0017_records_record_created_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793800000000,
+      "tag": "0018_editions_created_at",
+      "breakpoints": true
     }
   ]
 }
