@@ -2,7 +2,12 @@ import type { Logger } from 'pino';
 import { eq } from 'drizzle-orm';
 import { db as defaultDb } from '../db/index';
 import { contributors } from '../db/schema';
-import { resolveContributorImage } from '../contributor-image/resolver';
+import { UpstreamDeferred } from '../api/deferred';
+import {
+  resolveContributorImage,
+  type ContributorImageResolver,
+  type ResolvedContributorImage,
+} from '../contributor-image/resolver';
 
 /**
  * Look up and persist a contributor's image + license metadata.
@@ -20,12 +25,13 @@ import { resolveContributorImage } from '../contributor-image/resolver';
  * Returns `updated: true` when a new image was found and persisted.
  */
 
-type Db = typeof defaultDb;
+export type BackfillDb = typeof defaultDb;
 
 export async function backfillContributorImageForUri(
   uri: string,
   log: Logger,
-  db: Db = defaultDb,
+  db: BackfillDb = defaultDb,
+  resolve: ContributorImageResolver = resolveContributorImage,
 ): Promise<{ updated: boolean; reason: string }> {
   const rows = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
   const row = rows[0];
@@ -33,11 +39,25 @@ export async function backfillContributorImageForUri(
   if (row.imageCheckedAt !== null) return { updated: false, reason: 'already_checked' };
   if (row.imageUrl) return { updated: false, reason: 'already_has_image' };
 
-  const resolved = await resolveContributorImage({
-    rkey: row.rkey,
-    name: row.name,
-    log,
-  });
+  let resolved: ResolvedContributorImage | undefined;
+  try {
+    resolved = await resolve({
+      rkey: row.rkey,
+      name: row.name,
+      log,
+    });
+  } catch (err) {
+    if (err instanceof UpstreamDeferred) {
+      // The resolver never got an answer: the row stays unchecked so a later
+      // run retries it, instead of being stamped as a permanent miss.
+      log.warn(
+        { stage: 'contributor-image-backfill', uri, upstream: err.upstream, reason: err.reason },
+        'upstream deferred; leaving contributor unchecked',
+      );
+      return { updated: false, reason: 'deferred' };
+    }
+    throw err;
+  }
 
   if (!resolved) {
     await db

@@ -1,3 +1,27 @@
+bibliograph (0.1.8) unstable; urgency=medium
+
+  * Never record a deferred lookup as a permanent miss. Every backfilled
+    entity carries a "checked, nothing found" stamp (`image_checked_at`,
+    `description_checked_at`, `bio_checked_at`) so a rerun does not re-ask
+    upstream. The contributor-image resolver returned `undefined` both when an
+    author genuinely has no portrait and when its circuit breaker was open or
+    the request failed — and the backfill stamped both. A bulk run on the host
+    opened the OpenLibrary breaker after five consecutive failures, then
+    stamped 1,631 contributors as having no photo without asking upstream at
+    all; those rows would never have been retried.
+  * The image resolver now raises `UpstreamDeferred` for the breaker-open and
+    request-failed cases (OpenLibrary author doc, Wikidata search and P18,
+    Commons extmetadata). `backfillContributorImageForUri` catches it, warns,
+    and leaves the row unchecked, so a later run retries it. The resolver also
+    gained a named `ContributorImageResolver` contract and an injectable
+    parameter, which is what the new regression test drives: deferral writes no
+    stamp, an authoritative miss does, and a checked row is skipped.
+  * Add `--limit` to `backfill-contributor-images`. A first fill of thousands
+    of authors fans out to three upstreams, so it is safer enqueued in bounded
+    batches with pauses between them, which the flag makes possible.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 01:25:00 +0000
+
 bibliograph (0.1.7) unstable; urgency=medium
 
   * Render images on `/search`. The results list branched on `$type` to pick a

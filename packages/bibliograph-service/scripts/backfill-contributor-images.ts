@@ -10,7 +10,13 @@
 // enqueued exactly once per run and termination never depends on a worker
 // draining rows while the scan is in flight.
 //
-// Usage: `pnpm tsx scripts/backfill-contributor-images.ts`
+// Usage:
+//   pnpm tsx scripts/backfill-contributor-images.ts
+//   pnpm tsx scripts/backfill-contributor-images.ts --limit=200   # one batch
+//
+// `--limit` exists because the resolver fans out to OpenLibrary, Wikidata and
+// Commons: a first fill of thousands of authors is better enqueued in batches
+// with pauses, so no upstream breaker opens mid-run.
 
 import { and, asc, gt, isNull, sql } from 'drizzle-orm';
 import { makeWorkerUtils } from 'graphile-worker';
@@ -40,13 +46,23 @@ async function run(): Promise<void> {
     console.error('DATABASE_URL is required');
     process.exit(1);
   }
+  const limitArg = process.argv.slice(2).find((a) => a.startsWith('--limit='))?.slice('--limit='.length);
+  const hardLimit = limitArg === undefined ? undefined : Number(limitArg);
+  if (hardLimit !== undefined && (!Number.isInteger(hardLimit) || hardLimit < 1)) {
+    console.error(`--limit must be a positive integer, got '${limitArg}'`);
+    process.exit(1);
+  }
   const utils = await makeWorkerUtils({ connectionString: url });
 
   const [counted] = await db
     .select({ count: sql<number>`count(*)` })
     .from(contributors)
     .where(ACTIONABLE);
-  const bar = new ProgressBar('[backfill-contributor-images]', Number(counted?.count ?? 0));
+  const outstanding = Number(counted?.count ?? 0);
+  const bar = new ProgressBar(
+    '[backfill-contributor-images]',
+    hardLimit === undefined ? outstanding : Math.min(outstanding, hardLimit),
+  );
 
   let cursor: string | undefined;
   for (;;) {
@@ -56,7 +72,7 @@ async function run(): Promise<void> {
       .from(contributors)
       .where(filter)
       .orderBy(asc(contributors.uri))
-      .limit(PAGE_SIZE);
+      .limit(hardLimit === undefined ? PAGE_SIZE : Math.min(PAGE_SIZE, hardLimit - bar.done));
     if (rows.length === 0) break;
 
     for (const row of rows) {
@@ -67,6 +83,7 @@ async function run(): Promise<void> {
       bar.advance();
     }
 
+    if (hardLimit !== undefined && bar.done >= hardLimit) break;
     const last = rows[rows.length - 1];
     if (!last) break;
     cursor = last.uri;

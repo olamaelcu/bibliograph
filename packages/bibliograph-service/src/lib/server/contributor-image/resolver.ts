@@ -4,6 +4,7 @@ import {
   openLibraryBreaker,
   wikidataBreaker,
 } from '../api/breakers';
+import { UpstreamDeferred } from '../api/deferred';
 import { fetchJson } from '../api/open-library';
 import { withRetry } from '../api/retry';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
@@ -56,6 +57,14 @@ export interface ResolveOptions {
   signal?: AbortSignal;
 }
 
+/**
+ * The resolver's contract. Named here so callers inject a stub without
+ * referencing the implementation's inferred type.
+ */
+export type ContributorImageResolver = (
+  opts: ResolveOptions,
+) => Promise<ResolvedContributorImage | undefined>;
+
 const s = (signal?: AbortSignal) => signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
 
 function isOpenLibraryRkey(rkey: string): boolean {
@@ -83,9 +92,9 @@ async function resolveOpenLibraryImage(
   if (!openLibraryBreaker.canCall()) {
     opts.log.warn(
       { breaker: openLibraryBreaker.getState(), rkey: opts.rkey },
-      'openlibrary breaker open; skipping contributor image lookup',
+      'openlibrary breaker open; deferring contributor image lookup',
     );
-    return undefined;
+    throw new UpstreamDeferred('openlibrary', 'breaker-open');
   }
   const url = `https://openlibrary.org/authors/${olid}.json`;
   interface OlAuthorWithPhotos {
@@ -95,7 +104,7 @@ async function resolveOpenLibraryImage(
   const raw = await fetchJson<OlAuthorWithPhotos>(url, opts.log, s(opts.signal));
   if (!raw) {
     openLibraryBreaker.recordFailure();
-    return undefined;
+    throw new UpstreamDeferred('openlibrary', 'request-failed');
   }
   openLibraryBreaker.recordSuccess();
   const photoId = raw.photos?.find((p: number) => typeof p === 'number' && p > 0);
@@ -185,15 +194,15 @@ async function findAuthorQid(
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (!wikidataBreaker.canCall()) {
-    log.warn({ breaker: wikidataBreaker.getState() }, 'wikidata breaker open; skipping contributor image lookup');
-    return undefined;
+    log.warn({ breaker: wikidataBreaker.getState() }, 'wikidata breaker open; deferring contributor image lookup');
+    throw new UpstreamDeferred('wikidata', 'breaker-open');
   }
   const url = `${WIKIDATA_API}?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&type=item&limit=5&format=json`;
   type SearchResponse = { search?: WikidataSearchHit[] };
   const raw = await fetchJson<SearchResponse>(url, log, s(signal));
   if (!raw) {
     wikidataBreaker.recordFailure();
-    return undefined;
+    throw new UpstreamDeferred('wikidata', 'request-failed');
   }
   wikidataBreaker.recordSuccess();
   const target = normalizeName(name);
@@ -211,14 +220,14 @@ async function fetchPhotoFilename(
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (!wikidataBreaker.canCall()) {
-    log.warn({ breaker: wikidataBreaker.getState(), qid }, 'wikidata breaker open; skipping P18 lookup');
-    return undefined;
+    log.warn({ breaker: wikidataBreaker.getState(), qid }, 'wikidata breaker open; deferring P18 lookup');
+    throw new UpstreamDeferred('wikidata', 'breaker-open');
   }
   const url = `https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`;
   const raw = await fetchJson<WikidataEntity>(url, log, s(signal));
   if (!raw) {
     wikidataBreaker.recordFailure();
-    return undefined;
+    throw new UpstreamDeferred('wikidata', 'request-failed');
   }
   const entity = raw.entities?.[qid];
   if (!entity) return undefined;
@@ -261,8 +270,8 @@ async function fetchCommonsExtMetadata(
   attributionRequired: boolean;
 } | undefined> {
   if (!commonsBreaker.canCall()) {
-    log.warn({ breaker: commonsBreaker.getState(), filename }, 'commons breaker open; skipping extmetadata');
-    return undefined;
+    log.warn({ breaker: commonsBreaker.getState(), filename }, 'commons breaker open; deferring extmetadata');
+    throw new UpstreamDeferred('commons', 'breaker-open');
   }
   const url = `${COMMONS_API}?action=query&titles=${encodeURIComponent(`File:${filename}`)}&prop=imageinfo&iiprop=extmetadata&format=json`;
   type QueryResponse = { query?: { pages?: Record<string, { imageinfo?: Array<{ extmetadata?: CommonsExtMetadata }> }> } };
@@ -272,7 +281,7 @@ async function fetchCommonsExtMetadata(
   );
   if (!raw) {
     commonsBreaker.recordFailure();
-    return undefined;
+    throw new UpstreamDeferred('commons', 'request-failed');
   }
   commonsBreaker.recordSuccess();
   const pages = raw.query?.pages ?? {};
