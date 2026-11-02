@@ -28,6 +28,10 @@ import {
   NetOlamaelcuLivtetBiblioListBooksOnShelf,
   NetOlamaelcuLivtetBiblioGetShelvingOfBook,
   NetOlamaelcuLivtetBiblioGetShelversOfBook,
+  NetOlamaelcuLivtetBiblioGetEditionsByContributor,
+  NetOlamaelcuLivtetBiblioGetBooks,
+  NetOlamaelcuLivtetBiblioListRecentShelving,
+  NetOlamaelcuLivtetBiblioListReviewsByActor,
   NetOlamaelcuLivtetBiblioListShelvesWithBooks,
   NetOlamaelcuLivtetBiblioGetImageForBook,
   NetOlamaelcuLivtetBiblioGetImageForContributor,
@@ -81,6 +85,8 @@ import {
   SHELVING_COLLECTION,
   shelvingRkeyFor,
 } from './shelving/shelvers';
+import { decodeRecentCursor, encodeRecentCursor } from './shelving/cursor';
+import { compareShelfBooks } from './shelving/order';
 import {
   hydrateShelvesByUri,
   hydrateBooksByUri,
@@ -1326,6 +1332,281 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
     }
   },
 });
+const SHELF_COLLECTION = 'net.olamaelcu.livtet.biblio.shelf';
+const CONTRIBUTOR_COLLECTION = 'community.lexicon.book.contributor';
+
+/** One review row → the lexicon's `reviewView`, whatever collection it came from. */
+function reviewViewOf(row: typeof records.$inferSelect): BookReviewView {
+  const bookUri = bookUriForRow(row) ?? '';
+  return row.collection === BOOKHIVE_BOOK_COLLECTION
+    ? reviewViewFromBookhiveRow(row, bookUri)
+    : reviewViewFromRow(row, bookUri);
+}
+
+/**
+ * `getEditionsByContributor` is the ID-based counterpart to contributor-name
+ * search: it matches the `contributors` ref each edition already carries, so a
+ * page can say "more by this author" without guessing at spellings.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioGetEditionsByContributor.mainSchema, {
+  async handler({ params }) {
+    const contributor = params.contributor as string;
+    const limit = params.limit ?? 20;
+    // The lexicon declares this error so a caller passing an author *name* by
+    // mistake gets a clear answer instead of a silently empty list.
+    if (!contributor.startsWith('at://') || !contributor.includes(`/${CONTRIBUTOR_COLLECTION}/`)) {
+      return Response.json(
+        { error: 'InvalidContributor', message: `not a ${CONTRIBUTOR_COLLECTION} at-uri: ${contributor}` },
+        { status: 400 },
+      );
+    }
+    try {
+      const rows = await db
+        .select({ uri: editions.uri })
+        .from(editions)
+        .where(
+          sql`EXISTS (
+            SELECT 1 FROM jsonb_array_elements(${editions.contributors}) AS c
+            WHERE c->'subject'->>'uri' = ${contributor}
+          )`,
+        )
+        .orderBy(sql`${editions.indexedAt} DESC`, editions.uri)
+        .limit(limit);
+      return json({
+        uris: rows.map((row) => row.uri),
+      } as unknown as NetOlamaelcuLivtetBiblioGetEditionsByContributor.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, contributor }, 'getEditionsByContributor: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+/**
+ * Batch book hydration for a screenful of references. Unknown URIs are dropped
+ * rather than reported: a caller maps the answer by `uri`, and one edition
+ * missing from the catalog should not fail the other ninety-nine.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioGetBooks.mainSchema, {
+  async handler({ params }) {
+    const requested = params.uris as string[];
+    const uris: string[] = [];
+    const seen = new Set<string>();
+    for (const uri of requested) {
+      if (seen.has(uri)) continue;
+      seen.add(uri);
+      uris.push(uri);
+    }
+    try {
+      const books = await hydrateBooksByUri(uris);
+      return json({
+        books: uris
+          .map((uri) => books.get(uri))
+          .filter((view): view is NetOlamaelcuLivtetBiblioDefs.BookView => !!view),
+      } as NetOlamaelcuLivtetBiblioGetBooks.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, count: uris.length }, 'getBooks: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+/**
+ * Shelves plus their books, one query instead of "list shelves, then N×
+ * listBooksOnShelf". Paged by shelf URI: a shelf is a record with a stable uri,
+ * so offset paging over that order is repeatable.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
+  async handler({ params }) {
+    const { limit = 50 } = params;
+    const resume = parseCursor(params.cursor);
+    const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
+    try {
+      const shelfRows = await db
+        .select()
+        .from(records)
+        .where(eq(records.collection, SHELF_COLLECTION))
+        .orderBy(records.uri)
+        .limit(limit + 1)
+        .offset(offset);
+      const hasMore = shelfRows.length > limit;
+      const page = hasMore ? shelfRows.slice(0, limit) : shelfRows;
+      if (page.length === 0) {
+        return json({ shelves: [], cursor: undefined } as unknown as NetOlamaelcuLivtetBiblioListShelvesWithBooks.$output);
+      }
+
+      const shelfUris = page.map((row) => row.uri);
+      const bookRows = await db
+        .select()
+        .from(records)
+        .where(
+          and(
+            eq(records.collection, SHELVING_COLLECTION),
+            inArray(sql`${records.value}->>'shelf'`, shelfUris),
+          ),
+        );
+      const shelfMap = await hydrateShelvesByUri(shelfUris);
+      const bookMap = await hydrateBooksByUri(
+        Array.from(new Set(bookRows.map((row) => bookUriForRow(row)).filter((uri): uri is string => !!uri))),
+      );
+
+      const byShelf = new Map<string, Array<typeof records.$inferSelect>>();
+      for (const row of bookRows) {
+        const shelfUri = shelfUriForRow(row);
+        if (!shelfUri) continue;
+        const existing = byShelf.get(shelfUri);
+        if (existing) existing.push(row);
+        else byShelf.set(shelfUri, [row]);
+      }
+
+      const shelves = page.map((row) => {
+        const value = asRecord(row.value);
+        const shelf = shelfMap.get(row.uri) ?? {
+          // jsonb text → the branded at-uri the view publishes; the row's own
+          // uri is what a shelf is addressed by, so no re-derivation.
+          uri: row.uri as NetOlamaelcuLivtetBiblioDefs.ShelfView['uri'],
+          name: typeof value.name === 'string' ? value.name : '',
+          $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
+        };
+        const books = (byShelf.get(row.uri) ?? [])
+          .map((bookRow) => resolveBookShelf(bookRow, bookMap, shelfMap))
+          .filter((resolved) => resolved.ok && resolved.view)
+          .map((resolved) => resolved.view!)
+          .sort(compareShelfBooks);
+        return { shelf, books, $type: 'net.olamaelcu.livtet.biblio.defs#shelfWithBooksView' as const };
+      });
+
+      return json({
+        shelves,
+        cursor: hasMore ? `tap:${offset + limit}` : undefined,
+      } as unknown as NetOlamaelcuLivtetBiblioListShelvesWithBooks.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err }, 'listShelvesWithBooks: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+/**
+ * The author-keyed twin of `getReviewsByBook`. Reviews live in three
+ * collections — our two review lexicons and Bookhive's book records, which carry
+ * a review inline — so the mirror is filtered across all three, and the first
+ * page falls back to the actor's own repo for anything TAP has not indexed yet.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
+  async handler({ params }) {
+    const did = params.did as string;
+    const { limit = 25 } = params;
+    const resume = parseCursor(params.cursor);
+    const sources = [...FEED_REVIEW_COLLECTIONS, BOOKHIVE_BOOK_COLLECTION];
+    try {
+      const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
+      const rows = await db
+        .select()
+        .from(records)
+        .where(and(eq(records.did, did), inArray(records.collection, sources)))
+        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .limit(limit + 1)
+        .offset(offset);
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const reviews: BookReviewView[] = page.map(reviewViewOf);
+      const cursor = hasMore ? String(offset + limit) : undefined;
+
+      if (!resume && reviews.length < limit) {
+        const seen = new Set(page.map((row) => row.uri));
+        try {
+          const { client } = await pdsClient(did, { signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS) });
+          for (const collection of sources) {
+            if (reviews.length >= limit) break;
+            const raw = await client.get('com.atproto.repo.listRecords', {
+              params: {
+                repo: did as `did:${string}:${string}`,
+                collection: collection as `${string}.${string}.${string}`,
+                limit: limit - reviews.length,
+              },
+              signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+            });
+            const parsed = safeParseListRecords(raw);
+            if (!parsed.ok) {
+              log.warn({ stage: 'listReviewsByActor.parse', did, collection }, 'listRecords response did not match schema');
+              continue;
+            }
+            for (const record of parsed.data.records) {
+              if (seen.has(record.uri) || reviews.length >= limit) continue;
+              seen.add(record.uri);
+              reviews.push(reviewViewOf({
+                uri: record.uri,
+                cid: 'bafyplaceholder',
+                did,
+                rkey: record.uri.split('/').pop() ?? '',
+                collection,
+                value: record.value as (typeof records.$inferSelect)['value'],
+                createdAt: new Date(),
+                indexedAt: new Date(),
+              }));
+            }
+          }
+        } catch (err: unknown) {
+          log.warn({ err, did }, 'listReviewsByActor: PDS scan failed (mirror-only result returned)');
+        }
+      }
+
+      return json({ reviews, cursor } as unknown as NetOlamaelcuLivtetBiblioListReviewsByActor.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, did }, 'listReviewsByActor: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+/**
+ * Network-wide activity: the newest bookShelving records from every account.
+ *
+ * Recency is paged by key set (`indexed_at`, `uri`) rather than by offset,
+ * because rows keep arriving at the head of the order — an offset page two would
+ * repeat whatever a new shelving pushed down. The cursor is taken from the last
+ * *scanned* row, not the last emitted view: hydration drops rows whose book is
+ * missing from the catalog, and anchoring on those would skip real shelving.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioListRecentShelving.mainSchema, {
+  async handler({ params }) {
+    const { limit = 50 } = params;
+    const resume = decodeRecentCursor(params.cursor);
+    try {
+      const rows = await db
+        .select()
+        .from(records)
+        .where(
+          and(
+            eq(records.collection, SHELVING_COLLECTION),
+            resume
+              ? sql`(${records.indexedAt}, ${records.uri}) < (${resume.indexedAt}::timestamptz, ${resume.uri}::text)`
+              : undefined,
+          ),
+        )
+        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .limit(limit + 1);
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const last = page[page.length - 1];
+      const bookShelves = await hydrateBookShelves(page);
+      return json({
+        bookShelves,
+        cursor: hasMore && last ? encodeRecentCursor(last.indexedAt, last.uri) : undefined,
+      } as NetOlamaelcuLivtetBiblioListRecentShelving.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err }, 'listRecentShelving: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
 router.addQuery(NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
   async handler({ params }) {
     const uri = params.uri as string;

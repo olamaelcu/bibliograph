@@ -1,3 +1,31 @@
+bibliograph (0.1.14) unstable; urgency=medium
+
+  * Serve the two lexicons that were published but had no handler.
+    `getEditionsByContributor` matches the `contributors` ref each edition
+    carries, so "more by this author" no longer needs a fuzzy name search, and
+    `listShelvesWithBooks` pages shelves with their books hydrated, replacing
+    the list-then-N-times-reads pattern the UI was doing by hand. A client that
+    validated our schemas against the published repo used to find two methods
+    that answered 404.
+  * Add `getBooks`: batch book views for up to 100 references in one request,
+    returned in the order asked for, with URIs the catalog does not hold simply
+    omitted so one missing edition cannot fail the other ninety-nine.
+  * Add `listReviewsByActor`: the author-keyed twin of `getReviewsByBook`,
+    filtered across our two review collections and Bookhive's book records, with
+    the first page falling back to the actor's own repo for anything the tap
+    mirror has not indexed yet.
+  * Add `listRecentShelving`: network-wide activity, newest first. This is the
+    read that did not exist — what is being shelved right now, across every
+    account we index, instead of one shelf or one book at a time.
+  * Page the recency read by key set (`indexed_at`, `uri`) rather than by
+    offset: rows arrive at the head of that order, so an offset page two would
+    repeat whatever a new shelving pushed down. The cursor is taken from the
+    last scanned row, not the last emitted view, because hydration drops rows
+    whose book is missing from the catalog. Shelf books are ordered by
+    `metadata.position`, then URI, so a shelf reads the same way twice.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 11:09:24 -0500
+
 bibliograph (0.1.13) unstable; urgency=medium
 
   * Implement `com.atproto.lexicon.resolveLexicon`, so a client can fetch one
