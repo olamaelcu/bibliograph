@@ -1,3 +1,15 @@
+bibliograph (0.1.25) unstable; urgency=medium
+
+  * Index `editions.rkey`. Catalog work reaches editions by `rkey` rather than
+    by primary key, and nothing indexed that column: the Bookhive mirror audit
+    scans the catalog per mirrored record (19k × 238k rows on production), and
+    `edition-work-actions` scanned it once per call. The audit is now an index
+    only scan (61 ms locally over 7,882 probes) and the single-row lookup 0.02 ms.
+  * This also removes the way that audit could stall a deploy: its `ACCESS SHARE`
+    lock is what held the `records` migration of 0.1.24 for five minutes.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 17:52:00 -0500
+
 bibliograph (0.1.24) unstable; urgency=medium
 
   * Order feeds and listings by the record's own `createdAt`, not the mirror's
