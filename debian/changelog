@@ -1,3 +1,24 @@
+bibliograph (0.1.13) unstable; urgency=medium
+
+  * Implement `com.atproto.lexicon.resolveLexicon`, so a client can fetch one
+    of our schemas by NSID instead of walking the chain itself: resolve the DID,
+    find `#atproto_pds`, request `com.atproto.sync.getRecord`, and decode a CAR.
+    It answers with the schema document plus the at-uri and CID of the record
+    it came from.
+  * Resolve from the CAR slices the host already serves: the per-NSID slice that
+    backs `com.atproto.sync.getRecord` is decoded, so the resolved CID is the
+    block the repo's MST points at and cannot drift from what `getRecord` hands
+    out. Nothing is fetched at request time — no DNS lookup, no third-party call.
+  * Match the NSID against the record's own `id`, not the rkey it was filed
+    under; a slice holding a record that names a different lexicon resolves to
+    `LexiconNotFound` rather than being reported as proof of the requested one.
+  * Scope: NSIDs published by this host resolve here, foreign NSIDs answer
+    `LexiconNotFound`. Their authorities publish their own lexicons, and
+    proxying this endpoint to third parties would put a resolver surface on us
+    that the atproto chain does not ask us to provide.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 10:42:19 -0500
+
 bibliograph (0.1.12) unstable; urgency=medium
 
   * Add `net.olamaelcu.livtet.biblio.getShelversOfBook`: the DIDs that put a

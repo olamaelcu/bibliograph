@@ -5,6 +5,7 @@ import {
   ComAtprotoIdentityResolveHandle,
   ComAtprotoIdentityResolveIdentity,
   ComAtprotoLabelQueryLabels,
+  ComAtprotoLexiconResolveLexicon,
   ComAtprotoRepoDescribeRepo,
   ComAtprotoRepoGetRecord,
   ComAtprotoSyncGetBlocks,
@@ -44,6 +45,7 @@ import {
   resolveDid,
   resolveHandle,
 } from './lex/publisher.js';
+import { resolvePublishedLexicon } from './lex/resolve.js';
 import { createLogger } from './logger';
 import { invalidContributorResponsesTotal } from './metrics';
 import { accessLog } from './access-log';
@@ -296,6 +298,30 @@ router.addQuery(ComAtprotoSyncGetRecord.mainSchema, {
     const file = await readPerRecordCar(params.rkey);
     if (!file) return notFoundResponse('RecordNotFound', `no CAR slice for rkey "${params.rkey}"`);
     return carResponse(file.body);
+  },
+});
+
+// Resolving an NSID is the read the slices above exist for: a client asks once
+// and gets the schema document with the record's at-uri and CID, instead of
+// resolving the DID, finding this service, and decoding a CAR by hand.
+//
+// Only NSIDs this host publishes resolve here. That is the whole point of the
+// method for us — validating *our* lexicon calls — and it keeps the handler off
+// the network: no DNS lookup, no third-party fetch, nothing to spoof.
+router.addQuery(ComAtprotoLexiconResolveLexicon.mainSchema, {
+  async handler({ params }) {
+    const resolved = await resolvePublishedLexicon(params.nsid);
+    if (!resolved) {
+      return notFoundResponse(
+        'LexiconNotFound',
+        `this host publishes no lexicon under "${params.nsid}"; its own authority publishes ${PUBLISHER_DID}`,
+      );
+    }
+    return json({
+      uri: resolved.uri,
+      cid: resolved.cid,
+      schema: resolved.schema,
+    } as unknown as ComAtprotoLexiconResolveLexicon.$output);
   },
 });
 
