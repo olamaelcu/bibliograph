@@ -3,8 +3,8 @@ import { db } from './db/index';
 import {
   editions,
   works,
-  edition_work_votes,
   labels,
+  editionWorkVotes,
 } from './db/schema';
 import { PUBLISHER_DID } from './did';
 
@@ -29,7 +29,7 @@ export async function deleteEditionAndLinkedWork(rkey: string) {
     .limit(1);
 
   // Clean up dependent rows.
-  await db.delete(edition_work_votes).where(eq(edition_work_votes.editionUri, uri));
+  await db.delete(editionWorkVotes).where(eq(editionWorkVotes.editionUri, uri));
   await db.delete(labels).where(eq(labels.uri, uri));
 
   // Delete the edition row (cascades edition_isbn_enrichment via FK).
