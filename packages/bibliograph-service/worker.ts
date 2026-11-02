@@ -31,18 +31,39 @@ const { createLogger } = await import('./src/lib/server/logger');
 const log = createLogger('worker');
 log.info('worker process started');
 
+const { runJobTasks } = await import('./src/lib/server/jobs/run-tasks');
+
 // runTapConsumer registers its own signal handlers synchronously before its
-// first await, so the flag below is only set once they are in place.
-const running = runTapConsumer(log);
+// first await. The first call happens inside runTapForever below; the flag is
+// set here because a shutdown during either startup path must not be treated as
+// a crash.
 appReady = true;
 
+// The graphile task lists (search ingest + tap records) live in this process
+// too: they were a unit of their own, and on this host every extra Node runtime
+// is memory the web app needed.
+//
+// Sharing a process must not share a fate: TAP goes away whenever its host is
+// under pressure, and a dead subscription must not stop job processing. The
+// consumer is therefore restarted on a delay while the task lists keep running.
+async function runTapForever(): Promise<void> {
+  for (;;) {
+    try {
+      await runTapConsumer(log);
+    } catch (err) {
+      log.error({ err }, 'tap consumer ended; retrying in 30s');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30_000));
+  }
+}
+
 try {
-  await running;
+  await Promise.all([runTapForever(), runJobTasks(log)]);
   // Only a signal-driven shutdown resolves; an unexpected end throws.
   log.info('worker stopped');
   process.exit(0);
 } catch (err) {
-  log.fatal({ err }, 'tap consumer crashed');
+  log.fatal({ err }, 'worker crashed');
   process.exit(1);
 }
 

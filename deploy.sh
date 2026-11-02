@@ -90,12 +90,12 @@ rm -f "$REMOTE_DEB" /etc/bibliograph/bibliograph.env.dpkg-dist
 
 # The migrator is a oneshot pulled in by Requires= from the long-running units,
 # so restarting the web unit re-runs it (that is how upgrades apply migrations).
-# The worker and jobs units hold their own handles and need their own restart;
-# they are optional so a host that does not run them still deploys.
+# The worker unit holds its own handles and needs its own restart; it is optional
+# so a host that does not run it still deploys. The graphile task lists run inside
+# it since 0.1.21, so there is no separate jobs unit to restart.
 echo "    restarting units"
 systemctl restart bibliograph.service
 systemctl restart bibliograph-worker.service >/dev/null 2>&1 || true
-systemctl restart bibliograph-jobs.service >/dev/null 2>&1 || true
 
 # The port is a debconf answer rendered into port.conf by the postinst, not a
 # constant — read it rather than assuming 5000.
@@ -117,7 +117,7 @@ INSTALLED_VERSION="$(dpkg-query -W -f='${Version}' bibliograph 2>/dev/null || ec
 echo "INSTALLED_VERSION: $INSTALLED_VERSION"
 
 fail=0
-for unit in bibliograph bibliograph-worker bibliograph-jobs; do
+for unit in bibliograph bibliograph-worker; do
   state="$(systemctl is-active "$unit" 2>&1 || true)"
   printf 'SERVICE_STATE: %-24s %s\n' "$unit" "$state"
   [ "$state" = active ] || fail=1

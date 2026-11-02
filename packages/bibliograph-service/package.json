@@ -16,7 +16,6 @@
     "verify:publishers": "tsx --test scripts/verify-publishers.ts",
     "verify:server": "tsx --test scripts/verify-server.ts",
     "verify:tap-jobs": "tsx --test scripts/verify-tap-jobs.ts",
-    "worker:search": "tsx src/worker-search-jobs.ts",
     "seed:publishers": "tsx scripts/seed-publishers.ts",
     "backfill:works": "tsx scripts/backfill-works.ts",
     "backfill:covers": "tsx scripts/backfill-covers.ts",

@@ -21,14 +21,12 @@
 // an LRU with a longer TTL.
 
 import {
-  CompositeDidDocumentResolver,
-  PlcDidDocumentResolver,
-  WebDidDocumentResolver,
   LocalActorResolver,
   WellKnownHandleResolver,
   XrpcHandleResolver,
 } from '@atcute/identity-resolver';
 import { Client, simpleFetchHandler } from '@atcute/client';
+import { didDocumentResolver } from '../did-document-resolver';
 
 const CACHE_TTL_MS = 60_000;
 
@@ -39,19 +37,12 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-const didResolver = new CompositeDidDocumentResolver({
-  methods: {
-    plc: new PlcDidDocumentResolver(),
-    web: new WebDidDocumentResolver(),
-  },
-});
-
 const handleResolver = new WellKnownHandleResolver();
 // Fallback to the bsky.app XRPC handle resolver when well-known isn't available.
 const fallbackHandleResolver = new XrpcHandleResolver({ serviceUrl: 'https://public.api.bsky.app' });
 
 const actorResolver = new LocalActorResolver({
-  didDocumentResolver: didResolver,
+  didDocumentResolver,
   handleResolver: {
     async resolve(handle, opts) {
       try {

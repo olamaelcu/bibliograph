@@ -62,7 +62,8 @@ is picked by `ls -1 dist/bibliograph_*.deb | sort -V | tail -1`.
    -o Dpkg::Options::=--force-confold`, removes
    `/etc/bibliograph/bibliograph.env.dpkg-dist`, restarts `bibliograph.service`
    (the migrator re-runs through `Requires=bibliograph-migrate.service`) and
-   `bibliograph-worker.service` / `bibliograph-jobs.service` when present, then
+   `bibliograph-worker.service` when present (it also runs the graphile task
+   lists since 0.1.21), then
    polls the debconf-rendered port from `/etc/bibliograph/port.conf` for up to
    30 s.
 6. Reports `INSTALLED_VERSION` (from `dpkg-query`), `SERVICE_STATE:` per unit
@@ -76,7 +77,7 @@ After deploy, check the remote host:
 
 ```bash
 ssh veve@lescayes 'dpkg-query -W -f="${Version}\n" bibliograph'
-ssh veve@lescayes 'systemctl is-active bibliograph bibliograph-worker bibliograph-jobs'
+ssh veve@lescayes 'systemctl is-active bibliograph bibliograph-worker'
 ssh veve@lescayes 'systemctl status bibliograph-migrate --no-pager'
 ssh veve@lescayes 'cat /etc/bibliograph/port.conf'
 ssh veve@lescayes 'curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/'
@@ -130,11 +131,11 @@ directives.
   attempts. Intentional: an unconfigured tap consumer would restart-loop.
 - **Index-backed reads answer empty while the PDS has the records** — the
   Postgres `records` cache (behind `listShelves`, `listBooksOnShelf`,
-  `getShelvingOfBook`) fills from the tap consumer, run by
-  `bibliograph-jobs.service`. Queries fall back to per-request PDS scans, so an
-  empty cache degrades latency and cursor behaviour, not correctness. Check
-  `systemctl is-active bibliograph-jobs` and
-  `journalctl -u bibliograph-jobs -n 50` before blaming the package.
+  `getShelvingOfBook`) fills from the tap consumer, and the graphile tasks that
+  write it run in the same process, `bibliograph-worker.service`. Queries fall
+  back to per-request PDS scans, so an empty cache degrades latency and cursor
+  behaviour, not correctness. Check `systemctl is-active bibliograph-worker` and
+  `journalctl -u bibliograph-worker -n 50` before blaming the package.
 - **`No space left on device` while packaging** — the payload is staged twice
   (build output plus `packaging/payload/app`) and `dist/` keeps every package.
   Prune `dist/bibliograph_*.deb` and `packaging/payload` before rebuilding.

@@ -38,6 +38,7 @@ import {
   NetOlamaelcuLivtetBiblioGetReviewsByBook,
   NetOlamaelcuLivtetBiblioShelf,
   NetOlamaelcuLivtetBiblioBookShelving,
+  NetOlamaelcuLivtetBiblioGraphFollow,
   NetOlamaelcuLivtetBiblioDefs,
 } from './lexicons/index.js';
 import {
@@ -74,6 +75,7 @@ import { eq, inArray, and, gt, sql } from 'drizzle-orm';
 import { db } from './db';
 import { editions, works, contributors, publishers, records, follows, webSessions } from './db/schema';
 import * as v from '@atcute/lexicons/validations';
+import type { Nsid } from '@atcute/lexicons';
 import { allowRequest } from './rate-limit';
 import { fetchEditionForUri } from './shelving/edition-fetch';
 import { ingestEditionBatch } from './jobs/handlers';
@@ -173,17 +175,22 @@ function rateLimitMiddleware(log: Logger) {
 }
 
 
-// ─── Viewer identity from the storefront session cookie ───────────────────
-// XRPC routes are same-origin with the SPA, so the browser sends `bib_session`.
+// ─── Viewer identity ──────────────────────────────────────────────────────
+// Two ways to name a viewer, both proof rather than assertion:
+//   * a service JWT in `Authorization: Bearer` (foreign callers such as
+//     livtet-service mint one with `com.atproto.server.getServiceAuth`);
+//   * the storefront's `bib_session` cookie, for same-origin browser calls.
 // The cookie holds an opaque id; the DID lives in `web_sessions`.
+//
+// A bare `x-viewer-did` header used to be honoured here. It went away: nothing
+// verified it, so any caller could read, follow and unfollow as any DID.
 
-async function viewerDidFromRequest(request: Request): Promise<string | null> {
-	// First-party services (livtet-service) present the viewer explicitly.
-	// Follow records are public ATProto data, so naming a viewer here exposes
-	// nothing a repo sync would not; the storefront cookie stays the fallback
-	// for same-origin browser calls.
-	const viewerHeader = request.headers.get('x-viewer-did');
-	if (viewerHeader?.startsWith('did:')) return viewerHeader;
+async function viewerDidFromRequest(
+	request: Request,
+	lxm: Nsid,
+): Promise<string | null> {
+	const verifiedDid = await verifyFeedAuth(request, lxm);
+	if (verifiedDid) return verifiedDid;
 
 	const cookieHeader = request.headers.get('cookie');
 	if (!cookieHeader) return null;
@@ -2106,7 +2113,7 @@ router.addQuery(getFeedSkeletonSchema, {
     // at://<did>/net.olamaelcu.livtet.biblio.feed.generator/{public|following|extended}
     if (feedType === 'public' || feedType === 'static' || feedType === 'following' || feedType === 'extended') {
       const request = ctx.request;
-      const viewerDid = await viewerDidFromRequest(request);
+      const viewerDid = await viewerDidFromRequest(request, 'com.atproto.feed.getFeedSkeleton');
       let feed: Array<{ post: string; reason?: string }> = [];
       let outCursor: string | undefined;
       if (viewerDid && (feedType === 'following' || feedType === 'extended')) {
@@ -2138,21 +2145,25 @@ router.addQuery(getFeedSkeletonSchema, {
       const request = ctx.request;
       const userDid = await requireFeedAuth(request);
 
-      // Personalize by querying reviews from authors the user follows.
-      // Falls back to general feed if social graph is unavailable.
+      // An authenticated request costs a DID resolution plus a DB query, so it
+      // gets its own bucket: the anonymous limiter keys on client IP, and one
+      // account must not be able to outrun it.
+      if (!allowRequest(`did:${userDid}`, 'com.atproto.feed.getFeedSkeleton')) {
+        log.warn({ userDid }, 'rate limited (authenticated feed)');
+        return new Response(JSON.stringify({ error: 'RateLimited', message: 'Too many requests' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '60' },
+        });
+      }
+
+      // Personalize by the *viewer's* follow graph — the same source the
+      // `following`/`extended` feeds read. Falls back to the general feed when
+      // the viewer follows nobody or has no reviews to show.
       let followingDids: string[] = [];
       try {
-        const following = await getBacklinks({
-          subject: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.social/following`,
-          source: 'net.olamaelcu.livtet.biblio.social:follow',
-          limit: 100,
-          cursor,
-        });
-        followingDids = (following.records || [])
-          .map((r) => (r as { value?: Record<string, unknown> }).value?.target?.did)
-          .filter((d): d is string => !!d);
+        followingDids = await feedAuthorDids(userDid, 'following');
       } catch (err) {
-        log.warn({ err, userDid }, 'feed: could not fetch following list for dynamic feed');
+        log.warn({ err, userDid }, 'feed: could not read follow graph for dynamic feed');
       }
 
       let feed: Array<{ post: string; reason?: string }> = [];
@@ -2160,14 +2171,13 @@ router.addQuery(getFeedSkeletonSchema, {
 
       if (followingDids.length > 0) {
         // Filter DB records to those authored by followed users
-        const inClause = followingDids.map((d) => `'${d}'`).join(', ');
         const rows = await db
           .select()
           .from(records)
           .where(
             and(
               inArray(records.collection, FEED_COLLECTIONS),
-              sql`${records.did} IN (${sql.raw(inClause)})`,
+              inArray(records.did, followingDids),
             ),
           )
           .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
@@ -2253,28 +2263,20 @@ router.addQuery(getFeedSkeletonSchema, {
 });
 
 // ─── Social graph follow/unfollow (DB-authoritative) ─────────────────────
-// Viewer DID comes from the JWT (requireFeedAuth, lxm com.atproto.feed.getFeedSkeleton).
-const followUnfollowSchema = /*#__PURE__*/ v.query('net.olamaelcu.livtet.biblio.follow', {
-  params: /*#__PURE__*/ v.object({
-    followed: /*#__PURE__*/ v.didString(),
-    action: /*#__PURE__*/ v.optional(v.literalEnum(['follow', 'unfollow']), 'follow'),
-  }),
-  output: {
-    type: 'lex',
-    schema: /*#__PURE__*/ v.object({ ok: /*#__PURE__*/ v.boolean() }),
-  },
-});
-
-router.addQuery(followUnfollowSchema, {
-  async handler({ params, request }) {
-    const followed = params.followed as string;
-    const action = (params.action as string | undefined) || 'follow';
-    const viewerDid = await viewerDidFromRequest(request);
+// A procedure, not a query: it writes the caller's follow edge, so it must not
+// be cached or prefetched. Viewer DID comes from the service JWT (lxm
+// net.olamaelcu.livtet.biblio.graph.follow) or the storefront cookie.
+router.addProcedure(NetOlamaelcuLivtetBiblioGraphFollow.mainSchema, {
+  async handler({ input, request }) {
+    const followed = input.followed;
+    const action = input.action ?? 'follow';
+    const viewerDid = await viewerDidFromRequest(request, 'net.olamaelcu.livtet.biblio.graph.follow');
     if (!viewerDid) {
       throw new AuthRequiredError({
         status: 401,
         error: 'AuthenticationRequired',
-        message: 'follow/unfollow requires a Bibliograph session cookie',
+        message:
+          'follow/unfollow requires a service JWT (lxm net.olamaelcu.livtet.biblio.graph.follow) or a Bibliograph session cookie',
         wwwAuthenticate: { scheme: 'Bearer' },
       });
     }
@@ -2285,6 +2287,6 @@ router.addQuery(followUnfollowSchema, {
     } else {
       await db.insert(follows).values({ followerDid: viewerDid, followedDid: followed }).onConflictDoNothing();
     }
-    return json({ ok: true } as unknown as typeof followUnfollowSchema.output);
+    return json({ ok: true } as unknown as NetOlamaelcuLivtetBiblioGraphFollow.$output);
   },
 });

@@ -1,5 +1,5 @@
 [Unit]
-Description=Bibliograph TAP consumer
+Description=Bibliograph worker (TAP consumer + graphile task lists)
 Documentation=https://github.com/olamaelcu/bibliograph
 After=network-online.target bibliograph-migrate.service
 Wants=network-online.target

@@ -327,7 +327,7 @@ rationale for what replaced it.
 | Container deploy (before) | Debian package (now) |
 | --- | --- |
 | `ENTRYPOINT` ran the migrator then exec'd the web process | dedicated oneshot unit, `Requires=`d by both long-running units |
-| process types declared in a `Procfile` | `bibliograph-worker.service`, `bibliograph-jobs.service` |
+| process types declared in a `Procfile` | `bibliograph-worker.service` (TAP consumer + graphile task lists) |
 | environment baked into the image | `/etc/bibliograph/bibliograph.env` conffile, 0640 root:root, read by PID 1 |
 | `EXPOSE 5000`, `HOST=0.0.0.0` behind the platform proxy | unit binds `127.0.0.1`; the package ships the nginx site that proxies to it |
 | `docker save` + `rsync` + `docker load` | `apt install`, previous version kept in the apt cache |

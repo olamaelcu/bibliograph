@@ -16,12 +16,9 @@ run = ["pnpm run dev --host"]
 [tasks.worker-dev]
 run = ["pnpm run worker"]
 
-[tasks.worker-search-dev]
-run = ["pnpm run worker:search"]
-
 [tasks.dev]
 depends = ["containers"]
-run = ["mise run worker-dev ::: web-dev ::: worker-search-dev"]
+run = ["mise run worker-dev ::: web-dev"]
 
 [tasks.sql]
 description = "Open a psql shell against the local bibliograph database"

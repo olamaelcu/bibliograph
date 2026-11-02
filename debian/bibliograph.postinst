@@ -90,6 +90,15 @@ if [ "$1" = "configure" ]; then
     if [ -n "$previous" ] && [ "$previous" != "$port" ] && [ -d /run/systemd/system ]; then
         deb-systemd-invoke restart bibliograph >/dev/null 2>&1 || true
     fi
+
+    # The graphile task lists moved into bibliograph-worker.service, so
+    # bibliograph-jobs.service is no longer shipped. dpkg drops the unit file;
+    # this stops a still-running copy and clears the enable symlink it left.
+    if [ -d /run/systemd/system ]; then
+        deb-systemd-invoke stop bibliograph-jobs >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/multi-user.target.wants/bibliograph-jobs.service
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
 fi
 
 #DEBHELPER#

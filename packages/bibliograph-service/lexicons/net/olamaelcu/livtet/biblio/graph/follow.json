@@ -1,0 +1,47 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.graph.follow",
+  "description": "Follow or unfollow a reader. A procedure, not a query: it writes the caller's follow edge, so it must never be cached, prefetched or replayed as an idempotent read.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "The viewer is identified by a service JWT (lxm net.olamaelcu.livtet.biblio.graph.follow, aud did:web:biblio.livtet.olamaelcu.net#atproto_feed) or by the storefront session cookie. A request header is not accepted as identity.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["followed"],
+          "properties": {
+            "followed": {
+              "type": "string",
+              "format": "did",
+              "description": "DID of the reader being followed or unfollowed."
+            },
+            "action": {
+              "type": "string",
+              "enum": ["follow", "unfollow"],
+              "default": "follow",
+              "description": "Defaults to follow."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["ok"],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "errors": [
+        { "name": "AuthenticationRequired" },
+        { "name": "InvalidRequest" }
+      ]
+    }
+  }
+}

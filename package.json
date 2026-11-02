@@ -9,7 +9,6 @@
     "build": "pnpm --filter bibliograph-service build",
     "start": "pnpm --filter bibliograph-service start",
     "worker": "pnpm --filter bibliograph-service worker",
-    "worker:search": "pnpm --filter bibliograph-service worker:search",
     "check": "pnpm --filter bibliograph-service check",
     "lex:gen": "pnpm --filter bibliograph-service lex:gen",
     "verify:lex": "pnpm --filter bibliograph-service verify:lex",

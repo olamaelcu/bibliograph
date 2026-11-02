@@ -46,7 +46,6 @@ override_dh_auto_install:
 	# here is enough to get the enable/start/stop/restart blocks generated.
 	install -d debian/bibliograph/usr/lib/systemd/system
 	install -m 0644 debian/bibliograph-worker.service \
-		debian/bibliograph-jobs.service \
 		debian/bibliograph-migrate.service \
 		debian/bibliograph-isbn-backfill.service \
 		debian/bibliograph-isbn-backfill.timer \
