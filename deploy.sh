@@ -108,10 +108,6 @@ echo "    restarting units"
 systemctl restart bibliograph.service
 systemctl restart bibliograph-worker.service >/dev/null 2>&1 || true
 
-if [ "$tap_was_running" = "1" ]; then
-  echo "    resuming tap.service"
-  systemctl start tap.service >/dev/null 2>&1 || true
-fi
 
 # The port is a debconf answer rendered into port.conf by the postinst, not a
 # constant — read it rather than assuming 5000.
@@ -128,6 +124,11 @@ for _ in $(seq 1 30); do
   [ "$code" != "000" ] && break
   sleep 1
 done
+
+if [ "$tap_was_running" = "1" ]; then
+  echo "    resuming tap.service"
+  systemctl start tap.service >/dev/null 2>&1 || true
+fi
 
 INSTALLED_VERSION="$(dpkg-query -W -f='${Version}' bibliograph 2>/dev/null || echo 'not installed')"
 echo "INSTALLED_VERSION: $INSTALLED_VERSION"
