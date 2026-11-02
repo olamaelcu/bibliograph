@@ -1,3 +1,14 @@
+bibliograph (0.1.15) unstable; urgency=medium
+
+  * `listReviewsByActor` drops review records that name no book. Production
+    surfaced one: a mirrored `bookReview` whose value is `{}` rendered as
+    `book: ""`, and `reviewView.record` is declared as a `bookReview` whose
+    `book` is a required at-uri — so the answer carried an invalid record in a
+    typed field. `getReviewsByBook` never meets these rows because it selects
+    by book; an author-keyed read sees whatever is in an actor's repo.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 11:20:41 -0500
+
 bibliograph (0.1.14) unstable; urgency=medium
 
   * Serve the two lexicons that were published but had no handler.

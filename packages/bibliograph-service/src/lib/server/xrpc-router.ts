@@ -1335,9 +1335,18 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
 const SHELF_COLLECTION = 'net.olamaelcu.livtet.biblio.shelf';
 const CONTRIBUTOR_COLLECTION = 'community.lexicon.book.contributor';
 
-/** One review row → the lexicon's `reviewView`, whatever collection it came from. */
-function reviewViewOf(row: typeof records.$inferSelect): BookReviewView {
-  const bookUri = bookUriForRow(row) ?? '';
+/**
+ * One review row → the lexicon's `reviewView`, whatever collection it came from.
+ *
+ * `null` when the record names no book: `reviewView.record` is declared as a
+ * `bookReview`, whose `book` is a required at-uri, so a record that carries no
+ * book ref (an empty value, or a legacy shape) cannot be rendered as a review.
+ * `getReviewsByBook` never meets these — it selects rows by book — but an
+ * author-keyed read sees whatever is in an actor's repo.
+ */
+function reviewViewOf(row: typeof records.$inferSelect): BookReviewView | null {
+  const bookUri = bookUriForRow(row);
+  if (!bookUri) return null;
   return row.collection === BOOKHIVE_BOOK_COLLECTION
     ? reviewViewFromBookhiveRow(row, bookUri)
     : reviewViewFromRow(row, bookUri);
@@ -1513,7 +1522,9 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
         .offset(offset);
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
-      const reviews: BookReviewView[] = page.map(reviewViewOf);
+      const reviews: BookReviewView[] = page
+        .map(reviewViewOf)
+        .filter((view): view is BookReviewView => !!view);
       const cursor = hasMore ? String(offset + limit) : undefined;
 
       if (!resume && reviews.length < limit) {
@@ -1538,7 +1549,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
             for (const record of parsed.data.records) {
               if (seen.has(record.uri) || reviews.length >= limit) continue;
               seen.add(record.uri);
-              reviews.push(reviewViewOf({
+              const view = reviewViewOf({
                 uri: record.uri,
                 cid: 'bafyplaceholder',
                 did,
@@ -1547,7 +1558,8 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
                 value: record.value as (typeof records.$inferSelect)['value'],
                 createdAt: new Date(),
                 indexedAt: new Date(),
-              }));
+              });
+              if (view) reviews.push(view);
             }
           }
         } catch (err: unknown) {
