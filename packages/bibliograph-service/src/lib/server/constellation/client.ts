@@ -8,11 +8,11 @@ export const CONSTELLATION_TIMEOUT_MS = 5_000;
 export const CONSTELLATION_USER_AGENT = 'bibliograph/0.1.0 (+https://biblio.livtet.olamaelcu.net)';
 
 export type ShelvingSource =
-  | 'net.olamaelcu.livtet.biblio.bookShelving:book.ref'
+  | 'net.olamaelcu.livtet.biblio.bookShelving:book.uri'
   | 'net.olamaelcu.livtet.biblio.bookShelving:shelf';
 /** `buzz.bookhive.book` records ref their catalog record through `hiveBookUri`. */
 export type BookhiveSource = typeof BOOKHIVE_BACKLINK_SOURCE;
-export type ReviewSource = 'net.olamaelcu.livtet.bookReview:book' | BookhiveSource;
+export type ReviewSource = 'net.olamaelcu.livtet.bookReview:book.uri' | BookhiveSource;
 export type SocialSource = 'net.olamaelcu.livtet.biblio.social:follow';
 export type BacklinkSource = ShelvingSource | ReviewSource | SocialSource;
 

@@ -873,7 +873,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
       if (merged.length < limit && !cursor) {
         const backlinks = await getBacklinks({
           subject: bookUri,
-          source: 'net.olamaelcu.livtet.biblio.bookShelving:book.ref',
+          source: 'net.olamaelcu.livtet.biblio.bookShelving:book.uri',
           did: did as string,
           limit,
         });
@@ -1775,7 +1775,7 @@ router.addQuery(getFeedSkeletonSchema, {
       try {
         const backlinks = await getBacklinks({
           subject: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.edition/${rkey}`,
-          source: 'net.olamaelcu.livtet.bookReview:book',
+          source: 'net.olamaelcu.livtet.bookReview:book.uri',
           limit,
           cursor,
         });

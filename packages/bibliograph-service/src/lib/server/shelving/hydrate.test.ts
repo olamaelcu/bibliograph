@@ -103,7 +103,7 @@ test('displayNameForShelfRkey returns null for custom rkeys', () => {
 
 // ─── resolveBookShelf: strongRef populated ─────────────────────────────────
 
-test('resolveBookShelf: explicit book.ref.uri resolves when in bookMap', () => {
+test('resolveBookShelf: explicit book.uri resolves when in bookMap', () => {
   const row = makeShelvingRow({
     rkey: 'gb.qzybEQAAQBAJ',
     bookRef: { uri: EDITION_URI_GB },
@@ -117,7 +117,7 @@ test('resolveBookShelf: explicit book.ref.uri resolves when in bookMap', () => {
   assert.equal(result.view!.book.title, 'Test GB');
 });
 
-test('resolveBookShelf: empty book.ref falls back to rkey-derived URI', () => {
+test('resolveBookShelf: empty book.uri falls back to rkey-derived URI', () => {
   const row = makeShelvingRow({
     rkey: 'gb.qzybEQAAQBAJ',
     bookRef: { uri: '' },
@@ -131,7 +131,7 @@ test('resolveBookShelf: empty book.ref falls back to rkey-derived URI', () => {
   assert.equal(result.view!.book.title, 'Fallback Title');
 });
 
-test('resolveBookShelf: empty book.ref with ol. rkey falls back', () => {
+test('resolveBookShelf: empty book.uri with ol. rkey falls back', () => {
   const row = makeShelvingRow({
     rkey: 'ol.OL32984650M',
     bookRef: { uri: '' },
