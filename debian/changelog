@@ -1,3 +1,41 @@
+bibliograph (0.1.7) unstable; urgency=medium
+
+  * Render images on `/search`. The results list branched on `$type` to pick a
+    thumbnail, but the loader returned the search-source items verbatim and no
+    source carries one, so no row ever painted an image. The loader now stamps
+    `$type` per kind and each row shows a fixed-size thumbnail: the edition
+    cover, or the contributor portrait from the local `contributors.image_url`
+    cache (filled by `backfill-contributor-images`). Covers win over nothing and
+    OL-derived items cannot erase a cached portrait during the remote/local
+    merge, because they carry no `imageUrl` key at all.
+  * Bound every backfill scan. `backfill-descriptions` and
+    `backfill-contributor-images` re-read the same `LIMIT n` page until the
+    worker drained it, so with no worker running they never terminated. Both now
+    page by primary key with a keyset cursor: each row is enqueued exactly once
+    per run and termination no longer depends on a worker mutating rows while
+    the scan is in flight. Rows added after the cursor has passed are picked up
+    by the next run.
+  * Stop re-arming queued work. Every enqueue script now excludes rows that
+    already have a job waiting (`NOT EXISTS graphile_worker.jobs`), and the
+    description/contributor-image scans also skip their permanent-miss stamps.
+    A rerun is cheap and reports `0`, instead of re-arming every pending job.
+  * Add a progress bar to the seven backfill CLIs (`scripts/lib/progress.ts`):
+    one line on stderr with rate and ETA, degraded to periodic lines when
+    stderr is not a TTY so cron logs stay readable. stdout keeps its JSON
+    summary. `runBackfill` gained an optional `onProgress(phase, done, total)`
+    hook, sized lazily so callers that do not listen still see one query per
+    page.
+  * Add the record and admin surfaces from the working tree: edition merge,
+    edition votes with a librarian-request path, a shared record hero/body,
+    catalog delete, and the contributor-bio and work-description backfills with
+    their `checked_at` bookkeeping (migration 0013).
+  * Run the search task list under `mise run dev`. `mise run dev` started the
+    TAP consumer and the web server but not `src/worker-search-jobs.ts`, the
+    only process that drains the `ingest-*` and `backfill-*` queues, so those
+    jobs piled up untouched on a developer machine.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 01:10:00 +0000
+
 bibliograph (0.1.6) unstable; urgency=medium
 
   * Attach Wikidata identity links to editions, works and contributors. A new
