@@ -1,3 +1,27 @@
+bibliograph (0.1.24) unstable; urgency=medium
+
+  * Order feeds and listings by the record's own `createdAt`, not the mirror's
+    `indexed_at`. Indexing time is when TAP reached us, so a replay or a backfill
+    pushed year-old records to the head of the feed; production's public feed
+    opened on July-2025 Bookhive imports. Affects `getFeedSkeleton`
+    (public/static, following/extended, dynamic), `listShelves`,
+    `listBooksOnShelf`, `getReviewsByBook`, `listReviewsByActor`,
+    `listRecentShelving` and `getEditionsByContributor`.
+  * Sort on a generated column instead of a jsonb expression. The timestamp cast
+    is STABLE, so Postgres allows it in neither a generated column nor an index
+    expression, and reading `value->>'createdAt'` per row turned every feed
+    request into a scan and sort of the whole table: 45-50 ms locally, 2.0-4.2 s
+    on production, against 0.4 ms now that the key is indexed. `records`
+    migrates to a `record_created_at` text column; `editions` gains an index on
+    its `created_at`, which already holds the catalog record's stamp.
+  * Carry the record's own stamp in the recency cursor. `RecentCursor` holds the
+    raw text rather than a `Date`, because re-serialising would truncate the
+    microseconds some records write and the resumed page would compare unlike
+    keys. A record without a `createdAt` gets a blank key, which sorts last and
+    stays reachable by keyset paging.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 17:26:26 -0500
+
 bibliograph (0.1.23) unstable; urgency=medium
 
   * Bound `listShelvesWithBooks`. It hydrated every book of every shelf it
