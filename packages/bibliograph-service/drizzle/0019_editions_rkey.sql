@@ -1,0 +1,15 @@
+-- Equality lookups on `editions.rkey` had no index.
+--
+-- `rkey` is the last segment of the edition URI, and catalog work reaches rows by
+-- it rather than through the primary key: the Bookhive mirror audit matches
+-- `exists (select 1 from editions e where e.rkey = 'bh.' || <hive id from the
+-- record>)`, which without an index is a sequential scan of the whole catalog for
+-- *every* mirrored record — one such audit query ran for over two hours on
+-- production, and it was holding the `ACCESS SHARE` lock that blocked an
+-- `ALTER TABLE records` migration.
+--
+-- Application code reads by it too: `edition-work-actions.ts` resolves the edition
+-- with `where editions.rkey = $1`, which was a full scan of the catalog per call.
+--
+-- Plain btree on the column: the only shape needed is equality.
+CREATE INDEX IF NOT EXISTS "editions_rkey_idx" ON "editions" USING btree ("rkey");

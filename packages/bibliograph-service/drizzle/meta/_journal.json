@@ -120,6 +120,13 @@
       "when": 1793800000000,
       "tag": "0018_editions_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793900000000,
+      "tag": "0019_editions_rkey",
+      "breakpoints": true
     }
   ]
 }

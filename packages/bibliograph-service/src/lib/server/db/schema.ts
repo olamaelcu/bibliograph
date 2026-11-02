@@ -43,6 +43,10 @@ export const editions = pgTable(
     // stopping once `limit` rows have been handed out.
     createdAtIdx: index('editions_created_at_idx').on(t.createdAt.desc(), t.uri),
     didIdx: index('editions_did_idx').on(t.did),
+    // Catalog lookups reach rows by `rkey` — the Bookhive mirror audit's
+    // `EXISTS`, and `edition-work-actions` resolving an edition — which without
+    // this index is a sequential scan of the whole catalog per lookup.
+    rkeyIdx: index('editions_rkey_idx').on(t.rkey),
     // editions.work_uri / editions.publisher_uri FKs are declared in the
     // initial migration (kept out of the schema to avoid the self-reference
     // cycle through publishers.imprint_of_uri).
