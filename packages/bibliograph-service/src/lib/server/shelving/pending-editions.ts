@@ -30,10 +30,12 @@ function asObject(value: unknown): Record<string, unknown> {
 function bookRefUri(record: Record<string, unknown>): string | null {
   const book = record.book;
   if (typeof book === 'string' && book.startsWith('at://')) return book;
-  if (book !== null && typeof book === 'object' && 'uri' in book) {
-    const uri = book.uri;
-    if (typeof uri === 'string' && uri.startsWith('at://')) return uri;
-  }
+  if (book === null || typeof book !== 'object') return null;
+  // `uri` is what the lexicon declares; `ref` is the expanded-ref shape older
+  // writers left behind — production still holds thousands of those records,
+  // and the review mapper reads both for the same reason.
+  if ('uri' in book && typeof book.uri === 'string' && book.uri.startsWith('at://')) return book.uri;
+  if ('ref' in book && typeof book.ref === 'string' && book.ref.startsWith('at://')) return book.ref;
   return null;
 }
 

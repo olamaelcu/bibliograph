@@ -180,6 +180,7 @@ export const records = pgTable(
   },
   (t) => ({
     collectionIdx: index('records_collection_idx').on(t.collection),
+    didCollectionIdx: index('records_did_collection_idx').on(t.did, t.collection),
     indexedAtIdx: index('records_indexed_at_idx').on(t.indexedAt),
   }),
 );

@@ -1,13 +1,18 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.listShelvesWithBooks",
-  "description": "List shelf records, each hydrated with the books on it.",
+  "description": "List shelf records, each hydrated with the books on it. Pass `did` to read one account's shelves; omit it to page every account's shelves together.",
   "defs": {
     "main": {
       "type": "query",
       "parameters": {
         "type": "params",
         "properties": {
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "Scope the read to one account's shelves. Omitted, the read is network-wide across every account."
+          },
           "limit": {
             "type": "integer",
             "minimum": 1,

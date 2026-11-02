@@ -1,3 +1,14 @@
+bibliograph (0.1.17) unstable; urgency=medium
+
+  * Read the legacy expanded-ref shelving shape when deciding what to fill.
+    Production still holds `bookShelving` records written as
+    `book: { ref, title }`, and one of them names an edition that differs from
+    the one its rkey derives — so the fill job would have asked for the wrong
+    edition (or none) and left the shelf empty. `uri`, `ref`, and a bare string
+    are now all read, matching what the review mapper already does.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 11:41:52 -0500
+
 bibliograph (0.1.16) unstable; urgency=medium
 
   * Fill the catalog from the shelf records that need it. A `bookShelving`

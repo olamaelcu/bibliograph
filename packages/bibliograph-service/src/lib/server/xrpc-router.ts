@@ -1429,17 +1429,37 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetBooks.mainSchema, {
  */
 router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
   async handler({ params }) {
-    const { limit = 50 } = params;
+    const { limit = 50, did } = params;
     const resume = parseCursor(params.cursor);
-    const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
+    // `tap` carries the last shelf uri, not an offset: a shelf created while a
+    // caller walks the pages shifts every offset after it, which repeats or
+    // skips a shelf. The tier tag stays so a cursor from another read is
+    // rejected here rather than silently restarting the page.
+    if (resume && resume.tier !== 'tap') {
+      return Response.json(
+        { error: 'InvalidRequest', message: `unknown cursor tier: ${resume.tier}` },
+        { status: 400 },
+      );
+    }
+    if (resume && !resume.value.startsWith('at://')) {
+      return Response.json(
+        { error: 'InvalidRequest', message: 'cursor was not issued by this query' },
+        { status: 400 },
+      );
+    }
     try {
       const shelfRows = await db
         .select()
         .from(records)
-        .where(eq(records.collection, SHELF_COLLECTION))
+        .where(
+          and(
+            eq(records.collection, SHELF_COLLECTION),
+            did ? eq(records.did, did) : undefined,
+            resume ? gt(records.uri, resume.value) : undefined,
+          ),
+        )
         .orderBy(records.uri)
-        .limit(limit + 1)
-        .offset(offset);
+        .limit(limit + 1);
       const hasMore = shelfRows.length > limit;
       const page = hasMore ? shelfRows.slice(0, limit) : shelfRows;
       if (page.length === 0) {
@@ -1489,7 +1509,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
 
       return json({
         shelves,
-        cursor: hasMore ? `tap:${offset + limit}` : undefined,
+        cursor: hasMore && page.length > 0 ? `tap:${page[page.length - 1]!.uri}` : undefined,
       } as unknown as NetOlamaelcuLivtetBiblioListShelvesWithBooks.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

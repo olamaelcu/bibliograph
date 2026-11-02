@@ -21,6 +21,14 @@ test('a bare string book is read the same as a strongRef', () => {
   assert.equal(uri, EDITION);
 });
 
+test('the legacy expanded-ref book shape is read too', () => {
+  // Production still holds bookShelving records written as `book: { ref, title }`.
+  const uri = catalogUriForMirroredRecord(SHELVING_COLLECTION, 'isbndb.9780241364901', {
+    book: { ref: EDITION, title: 'Girl, Woman, Other' },
+  });
+  assert.equal(uri, EDITION);
+});
+
 test('a record that predates the book ref falls back to its rkey', () => {
   const uri = catalogUriForMirroredRecord(SHELVING_COLLECTION, 'ol.OL9M', { shelf: 'at://did:plc:user/x/read' });
   assert.equal(uri, 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL9M');
