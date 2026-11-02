@@ -86,7 +86,6 @@ import {
   shelvingRkeyFor,
 } from './shelving/shelvers';
 import { decodeRecentCursor, encodeRecentCursor } from './shelving/cursor';
-import { bookUriFromValue } from './shelving/book-ref';
 import { compareShelfBooks } from './shelving/order';
 import {
   hydrateShelvesByUri,
@@ -902,14 +901,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
           and(
             eq(records.did, did as string),
             eq(records.collection, 'net.olamaelcu.livtet.biblio.bookShelving'),
-            // `book` is a strongRef in the lexicon but `ref` (and a bare string)
-            // is what older writers left, so all three are matched here — the
-            // same shapes `bookUriFromValue` reads on the rows it hydrates.
-            sql`(
-              ${records.value}->'book'->>'uri' = ${bookUri}
-              OR ${records.value}->'book'->>'ref' = ${bookUri}
-              OR ${records.value}->>'book' = ${bookUri}
-            )`,
+            sql`${records.value}->'book'->>'uri' = ${bookUri}`,
           ),
         )
         .limit(limit + 1);
@@ -961,7 +953,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
             const recs = parsed.data.records;
             cur = parsed.data.cursor;
             for (const r of recs) {
-              const bookRef = bookUriFromValue(r.value);
+              const bookRef = (r.value.book as { uri?: string } | undefined)?.uri;
               if (bookRef === bookUri) {
                 fetched.push({
                   uri: r.uri,
@@ -1057,11 +1049,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelversOfBook.mainSchema, {
           and(
             eq(records.collection, SHELVING_COLLECTION),
             eq(records.rkey, shelvingRkey),
-            sql`(
-              ${records.value}->'book'->>'uri' = ${bookUri}
-              OR ${records.value}->'book'->>'ref' = ${bookUri}
-              OR ${records.value}->>'book' = ${bookUri}
-            )`,
+            sql`${records.value}->'book'->>'uri' = ${bookUri}`,
           ),
         )
         .orderBy(records.uri)

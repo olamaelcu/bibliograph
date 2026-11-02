@@ -14,8 +14,30 @@
 import { BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
 import { normalizeBookhiveBook } from '../bookhive/records';
 import { catalogEditionUriFromRkey } from './catalog-uri';
-import { bookUriFromValue } from './book-ref';
 import { SHELVING_COLLECTION } from './shelvers';
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * `book` is a strongRef in the lexicon, but writers have stored a bare at-uri
+ * too, so both shapes are read. The ref wins over the rkey: it names the edition
+ * the record actually points at.
+ */
+function bookRefUri(record: Record<string, unknown>): string | null {
+  const book = record.book;
+  if (typeof book === 'string' && book.startsWith('at://')) return book;
+  if (book === null || typeof book !== 'object') return null;
+  // `uri` is what the lexicon declares; `ref` is the expanded-ref shape older
+  // writers left behind — production still holds thousands of those records,
+  // and the review mapper reads both for the same reason.
+  if ('uri' in book && typeof book.uri === 'string' && book.uri.startsWith('at://')) return book.uri;
+  if ('ref' in book && typeof book.ref === 'string' && book.ref.startsWith('at://')) return book.ref;
+  return null;
+}
 
 /**
  * Catalog edition URI a mirrored record implies, or `null` when the record does
@@ -29,7 +51,7 @@ export function catalogUriForMirroredRecord(
   if (collection === SHELVING_COLLECTION) {
     // Older bookShelving records predate the `book` ref; their rkey is the
     // edition rkey, which is what `bookUriForRow` falls back to as well.
-    return bookUriFromValue(value) ?? catalogEditionUriFromRkey(rkey);
+    return bookRefUri(asObject(value)) ?? catalogEditionUriFromRkey(rkey);
   }
   if (collection === BOOKHIVE_BOOK_COLLECTION) {
     // Bookhive keeps the reading status inline. A record that only rates a book

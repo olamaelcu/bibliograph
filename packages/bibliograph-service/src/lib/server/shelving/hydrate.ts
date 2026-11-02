@@ -8,7 +8,6 @@ import { createLogger } from '../logger';
 import { BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
 import { normalizeBookhiveBook } from '../bookhive/records';
 import { catalogEditionUriFromRkey } from './catalog-uri';
-import { bookUriFromValue } from './book-ref';
 
 const log = createLogger('web');
 
@@ -109,14 +108,21 @@ export interface ResolvedBookShelf {
 }
 
 /**
- * Catalog URI a shelving row points at: the record's own `book` ref — `uri`,
- * legacy `ref`, or a bare string — or the edition URI derived from its rkey when
- * the record names nothing usable. Single definition so `resolveBookShelf`, the
- * hydration pass and the shelf backfill script can never disagree about which
- * edition a row needs.
+ * Catalog URI a shelving row points at: the record's own `book.uri`, or the
+ * edition URI derived from its rkey when the record predates the field. Single
+ * definition so `resolveBookShelf`, the hydration pass and the shelf backfill
+ * script can never disagree about which edition a row needs.
  */
 export function bookUriForRow(row: RecordRow): string | null {
-  return bookUriFromValue(row.value) ?? catalogEditionUriFromRkey(row.rkey);
+  const value = row.value;
+  if (value && typeof value === 'object' && 'book' in value) {
+    const book = value.book;
+    if (book && typeof book === 'object' && 'uri' in book) {
+      const uri = book.uri;
+      if (typeof uri === 'string' && uri) return uri;
+    }
+  }
+  return catalogEditionUriFromRkey(row.rkey);
 }
 
 /** Shelf URI a shelving row points at, or null when the record omits it. */
