@@ -1,3 +1,23 @@
+bibliograph (0.1.23) unstable; urgency=medium
+
+  * Bound `listShelvesWithBooks`. It hydrated every book of every shelf it
+    returned, and one production shelf holds 2,573 books: a single call pinned
+    the one core for 682 s while every other XRPC call, cheap ones included,
+    queued behind it. The query is now a preview - at most `booksPerShelf` books
+    per shelf (new parameter, 1-100, default 25) - and the full listing stays on
+    `listBooksOnShelf`.
+  * Cut the preview at a deadline. Shelves are fetched one indexed query at a
+    time, the loop stops at 5 s, and Postgres cancels the statement at 4 s, so a
+    slow shelf truncates the preview instead of holding the request open. The
+    shelves and the cursor are still returned, which is the useful part.
+  * Per-shelf queries also narrow to the shelf's own DID, so a Bookhive reader's
+    status-matched books can no longer be filed onto every shelf with that rkey.
+  * Verified against a 300-book shelf: 25 books by default, 5 with
+    `booksPerShelf=5`, an out-of-range value rejected by lexicon validation, and
+    a page under 100 ms.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 16:47:03 -0500
+
 bibliograph (0.1.22) unstable; urgency=medium
 
   * Shelf reads now include Bookhive shelving. A `buzz.bookhive.book` record is

@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.listShelvesWithBooks",
-  "description": "List shelf records, each hydrated with the books on it. Pass `did` to read one account's shelves; omit it to page every account's shelves together.",
+  "description": "List shelf records, each hydrated with a preview of the books on it. At most `booksPerShelf` books are returned per shelf; read a full shelf with `listBooksOnShelf`. Answers are cut at a fixed deadline rather than holding the request open, so a shelf under load may come back with fewer books than asked for.",
   "defs": {
     "main": {
       "type": "query",
@@ -23,6 +23,13 @@
           "cursor": {
             "type": "string",
             "description": "Opaque pagination cursor."
+          },
+          "booksPerShelf": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "Maximum number of books to hydrate per shelf. This query is a preview: `listBooksOnShelf` is the complete, paginated listing for one shelf."
           }
         }
       },
@@ -30,7 +37,9 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["shelves"],
+          "required": [
+            "shelves"
+          ],
           "properties": {
             "shelves": {
               "type": "array",

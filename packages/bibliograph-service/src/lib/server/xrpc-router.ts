@@ -99,7 +99,7 @@ import {
   bookUriForRow,
   shelfUriForRow,
 } from './shelving/hydrate';
-import { shelfEntryConditions, shelfRkeyForBookhiveStatus } from './shelving/shelf-rows';
+import { shelfEntryConditions } from './shelving/shelf-rows';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import {
@@ -1484,6 +1484,19 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetBooks.mainSchema, {
  * listBooksOnShelf". Paged by shelf URI: a shelf is a record with a stable uri,
  * so offset paging over that order is repeatable.
  */
+/**
+ * Budget for the book preview in `listShelvesWithBooks`.
+ *
+ * The query used to hydrate every book of every shelf it returned. One
+ * production shelf holds 2,573 books, so a single call pinned the single core for
+ * 682 s and every other XRPC call queued behind it (the cheap ones included).
+ * The preview is capped per shelf by `booksPerShelf` (at most 100) and cut at this
+ * deadline; the statement timeout sits just inside it so Postgres cancels a slow
+ * query rather than leaving the JS side waiting on it.
+ */
+const LIST_SHELVES_BOOKS_DEADLINE_MS = 5_000;
+const LIST_SHELVES_BOOKS_STATEMENT_TIMEOUT_MS = 4_000;
+
 router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
   async handler({ params }) {
     const { limit = 50, did } = params;
@@ -1524,30 +1537,56 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
       }
 
       const shelfUris = page.map((row) => row.uri);
-      const bookRows = await db
-        .select()
-        .from(records)
-        .where(
-          shelfEntryConditions({ shelfUris }),
-        );
       const shelfMap = await hydrateShelvesByUri(shelfUris);
+
+      // A shelf is unbounded in principle: one production shelf holds 2,573
+      // books, and hydrating all of them per call pinned the single core for
+      // 682 s while every other XRPC call queued behind it. This query is
+      // therefore a *preview*: `booksPerShelf` books per shelf, fetched with one
+      // indexed query per shelf so no shelf can crowd out the others, under a
+      // hard deadline. `listBooksOnShelf` remains the complete listing.
+      const booksPerShelf = Math.min(Math.max(params.booksPerShelf ?? 25, 1), 100);
+      const deadline = Date.now() + LIST_SHELVES_BOOKS_DEADLINE_MS;
+      const rowsByShelf = new Map<string, Array<typeof records.$inferSelect>>();
+      try {
+        await db.transaction(async (tx) => {
+          // The deadline is enforced in Postgres too, so a query that is slow
+          // for reasons the JS side cannot see is still cancelled rather than
+          // holding the request open.
+          // `SET` takes no bind parameters, so the value is inlined from a
+          // module constant (a number, never caller input).
+          await tx.execute(sql`set local statement_timeout = ${sql.raw(String(LIST_SHELVES_BOOKS_STATEMENT_TIMEOUT_MS))}`);
+          for (const [index, shelfRow] of page.entries()) {
+            if (Date.now() >= deadline) {
+              log.warn(
+                { stage: 'listShelvesWithBooks.deadline', shelves: page.length, hydrated: index },
+                'deadline reached; returning the shelves with the books gathered so far',
+              );
+              break;
+            }
+            const rows = await tx
+              .select()
+              .from(records)
+              .where(shelfEntryConditions({ shelfUris: [shelfRow.uri], did: shelfRow.did }))
+              .orderBy(records.uri)
+              .limit(booksPerShelf);
+            rowsByShelf.set(shelfRow.uri, rows);
+          }
+        });
+      } catch (err: unknown) {
+        // A statement timeout or a dropped connection truncates the preview; the
+        // shelves and the cursor are still the useful part of the answer.
+        log.warn({ stage: 'listShelvesWithBooks.books', err }, 'book preview cut short');
+      }
+
+      const bookRows = [...rowsByShelf.values()].flat();
       const bookMap = await hydrateBooksByUri(
         Array.from(new Set(bookRows.map((row) => bookUriForRow(row)).filter((uri): uri is string => !!uri))),
       );
 
-      const byShelf = new Map<string, Array<typeof records.$inferSelect>>();
-      // A Bookhive row names no shelf record, so it is filed under the shelf of
-      // this page whose rkey its status maps to.
-      const shelfUriByRkey = new Map(page.map((row) => [row.rkey, row.uri]));
-      for (const row of bookRows) {
-        const shelfUri = shelfUriForRow(row)
-          ?? shelfUriByRkey.get(shelfRkeyForBookhiveStatus(asRecord(row.value).status) ?? '')
-          ?? null;
-        if (!shelfUri) continue;
-        const existing = byShelf.get(shelfUri);
-        if (existing) existing.push(row);
-        else byShelf.set(shelfUri, [row]);
-      }
+      // Each shelf was queried with its own predicate, so the grouping is the
+      // map key rather than a second pass over mixed rows.
+      const byShelf = rowsByShelf;
 
       const shelves = page.map((row) => {
         const value = asRecord(row.value);
