@@ -1,3 +1,23 @@
+bibliograph (0.1.11) unstable; urgency=medium
+
+  * Point both Constellation backlink reads at the field the records actually
+    carry. A `source` is `<collection>:<field path>`, and both `bookShelving`
+    and `bookReview` hold the book as the strongRef the lexicons declare —
+    `book: { uri, cid }` — so the path is `book.uri`. The shelving read asked
+    for `book.ref`, a key no record has, which left `getShelvingOfBook`'s
+    discovery tier unable to match anything while its database tier read
+    `records.value->'book'->>'uri'`; the two halves of the same merge
+    disagreed about the shape. Reviews had the same fault one level up: the
+    edition feed asked for `bookReview:book` and matched nothing, so the
+    review side of that feed returned empty for every edition.
+  * Type the two filters as `ShelvingSource` / `ReviewSource` unions, which is
+    what let the wrong path stay invisible: the strings were untyped at both
+    call sites. The shelving hydration tests now name the field they build.
+  * No behaviour change for records already indexed correctly, and no
+    migration: the index is rebuilt by the upstream Constellation instance.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 00:23:14 -0500
+
 bibliograph (0.1.10) unstable; urgency=medium
 
   * Cache Google Books responses in Postgres for 24 hours. The GB quota is
