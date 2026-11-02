@@ -93,9 +93,25 @@ rm -f "$REMOTE_DEB" /etc/bibliograph/bibliograph.env.dpkg-dist
 # The worker unit holds its own handles and needs its own restart; it is optional
 # so a host that does not run it still deploys. The graphile task lists run inside
 # it since 0.1.21, so there is no separate jobs unit to restart.
+# On lescayes, TAP's resync and the appview share one vCPU: restarting the web
+# unit while TAP is crawling leaves the new process swapped out in `epoll_wait`,
+# never binding its port (observed 502s for minutes, three releases in a row).
+# Pausing TAP for the restart window is seconds and makes the start deterministic.
+tap_was_running=0
+if systemctl is-active --quiet tap.service 2>/dev/null; then
+  tap_was_running=1
+  echo "    pausing tap.service for the restart window"
+  systemctl stop tap.service >/dev/null 2>&1 || true
+fi
+
 echo "    restarting units"
 systemctl restart bibliograph.service
 systemctl restart bibliograph-worker.service >/dev/null 2>&1 || true
+
+if [ "$tap_was_running" = "1" ]; then
+  echo "    resuming tap.service"
+  systemctl start tap.service >/dev/null 2>&1 || true
+fi
 
 # The port is a debconf answer rendered into port.conf by the postinst, not a
 # constant — read it rather than assuming 5000.
