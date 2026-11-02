@@ -1,14 +1,38 @@
 #!/usr/bin/env tsx
-// Backfill every contributor with `imageCheckedAt IS NULL` through the
-// resolver. Mirrors `scripts/backfill-covers.ts` in shape: enqueue via
-// graphile-worker so the actual work runs in the worker process, not
-// in this script. Use after deploying the 0007 migration to populate
-// the image_url column on existing contributors.
+// Backfill every contributor that has no cached portrait and has never been
+// checked through the resolver.
+//
+// Mirrors `scripts/backfill-descriptions.ts` in shape: this script only scans
+// and enqueues — the worker does the fetching and stamps `image_checked_at`,
+// which is what keeps a rerun from asking upstream about the same author twice.
+//
+// The scan pages by primary key with a keyset cursor, so every actionable row is
+// enqueued exactly once per run and termination never depends on a worker
+// draining rows while the scan is in flight.
 //
 // Usage: `pnpm tsx scripts/backfill-contributor-images.ts`
 
+import { and, asc, gt, isNull, sql } from 'drizzle-orm';
 import { makeWorkerUtils } from 'graphile-worker';
-import { findUncheckedContributorUris } from '../src/lib/server/jobs/contributor-image-backfill';
+import { db } from '../src/lib/server/db';
+import { contributors } from '../src/lib/server/db/schema';
+import { ProgressBar } from './lib/progress';
+
+const PAGE_SIZE = 200;
+
+/**
+ * Contributor needs a portrait, has never been checked, and has no job waiting.
+ * `backfillContributorImageForUri` stamps `image_checked_at` on a miss, so the
+ * second condition keeps a rerun from repeating those lookups.
+ */
+const ACTIONABLE = and(
+  isNull(contributors.imageUrl),
+  isNull(contributors.imageCheckedAt),
+  sql`NOT EXISTS (
+    SELECT 1 FROM graphile_worker.jobs j
+     WHERE j.key = 'backfill-contributor-image:' || ${contributors.uri}
+  )`,
+)!;
 
 async function run(): Promise<void> {
   const url = process.env.DATABASE_URL;
@@ -18,30 +42,38 @@ async function run(): Promise<void> {
   }
   const utils = await makeWorkerUtils({ connectionString: url });
 
-  let totalEnqueued = 0;
-  // `findUncheckedContributorUris` does NOT include an offset, so each pass
-  // re-reads the same `LIMIT 200` rows. The loop relies on the worker
-  // setting `imageCheckedAt` after each job so the next pass sees a fresh
-  // batch. Two consecutive empty pages means we're done.
-  let emptyPasses = 0;
-  while (emptyPasses < 2) {
-    const uris = await findUncheckedContributorUris(undefined, 200);
-    if (uris.length === 0) {
-      emptyPasses++;
-      await new Promise((r) => setTimeout(r, 500));
-      continue;
-    }
-    emptyPasses = 0;
-    for (const uri of uris) {
-      await utils.addJob('backfill-contributor-image', { uri }, {
-        jobKey: `backfill-contributor-image:${uri}`,
+  const [counted] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(contributors)
+    .where(ACTIONABLE);
+  const bar = new ProgressBar('[backfill-contributor-images]', Number(counted?.count ?? 0));
+
+  let cursor: string | undefined;
+  for (;;) {
+    const filter = cursor === undefined ? ACTIONABLE : and(ACTIONABLE, gt(contributors.uri, cursor))!;
+    const rows = await db
+      .select({ uri: contributors.uri })
+      .from(contributors)
+      .where(filter)
+      .orderBy(asc(contributors.uri))
+      .limit(PAGE_SIZE);
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      await utils.addJob('backfill-contributor-image', { uri: row.uri }, {
+        jobKey: `backfill-contributor-image:${row.uri}`,
         maxAttempts: 5,
       });
-      totalEnqueued++;
+      bar.advance();
     }
+
+    const last = rows[rows.length - 1];
+    if (!last) break;
+    cursor = last.uri;
   }
 
-  console.log(`[backfill-contributor-images] enqueued ${totalEnqueued} jobs`);
+  bar.finish();
+  console.log(`[backfill-contributor-images] enqueued ${bar.done} jobs`);
 }
 
 run().catch((err) => {

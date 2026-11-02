@@ -41,6 +41,7 @@ import {
   fetchEditionForUri,
   providerForEditionUri,
 } from '../src/lib/server/shelving/edition-fetch';
+import { ProgressBar } from './lib/progress';
 import { editionUriFor, ingestEditionBatch } from '../src/lib/server/jobs/handlers';
 
 const SHELVING_COLLECTION = 'net.olamaelcu.livtet.biblio.bookShelving';
@@ -222,17 +223,15 @@ async function main(): Promise<void> {
     console.log(`==> Fetching from providers (concurrency ${args.concurrency})${args.dry ? ' (dry run)' : ''}`);
   }
 
+  const bar = new ProgressBar('[backfill-shelving-editions]', toFetch.length);
   let index = 0;
-  let done = 0;
   const workers = Array.from({ length: Math.min(args.concurrency, toFetch.length) }, async () => {
     for (;;) {
       const current = index++;
       const uri = toFetch[current];
       if (uri === undefined) return;
-      const provider = providerForEditionUri(uri) ?? 'unknown';
       if (args.dry) {
-        done++;
-        if (done % 50 === 0) console.log(`    (dry) ${done}/${toFetch.length}`);
+        bar.advance();
         continue;
       }
       const item = await fetchEditionForUri(uri, log);
@@ -247,11 +246,10 @@ async function main(): Promise<void> {
         await ingestEditionBatch([item], log, 1);
         counts.fetched++;
       }
-      done++;
-      if (done % 50 === 0) console.log(`    ${done}/${toFetch.length} (${provider})`);
     }
   });
   await Promise.all(workers);
+  bar.finish();
 
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log('==> Done');

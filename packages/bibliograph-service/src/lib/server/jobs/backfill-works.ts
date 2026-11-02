@@ -21,6 +21,7 @@
 // CID actually drifts.
 
 import type { Logger } from 'pino';
+import type { SQL } from 'drizzle-orm';
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
@@ -37,6 +38,12 @@ type Db = DbExecutor;
 const YEAR_TOLERANCE = 2;
 const OL_WORK_PREFIX = '/works/';
 const PAGE_SIZE = 100;
+
+/** Size a phase up front so the caller's progress bar is real, not a spinner. */
+async function countEditions(db: Db, where: SQL): Promise<number> {
+  const [row] = await db.select({ c: sql<number>`count(*)` }).from(editions).where(where);
+  return Number(row?.c ?? 0);
+}
 
 // Editions whose link was decided by user votes are off limits: an automated
 // pass must never silently re-link something people voted to unlink, nor
@@ -60,6 +67,11 @@ export interface BackfillOpts {
   log: Logger;
   pageSize?: number;
   now?: () => Date;
+  /**
+   * Called once with `done: 0` when a phase starts (so a caller can size its
+   * progress bar from the real total), then after each row.
+   */
+  onProgress?: (phase: 'orphans' | 'cids', done: number, total: number) => void;
 }
 
 export function isbnFromIdentifiers(idents: ReadonlyArray<Identifier>): string | undefined {
@@ -343,6 +355,13 @@ export async function runBackfill(opts: BackfillOpts): Promise<BackfillSummary> 
     durationMs: 0,
   };
 
+  // Only counted when someone is listening: the scan otherwise keeps exactly
+  // one query per page (which its callers' harnesses assume).
+  let orphanTotal = 0;
+  if (opts.onProgress) {
+    orphanTotal = await countEditions(db, and(isNull(editions.workUri), notConsensusManaged)!);
+    opts.onProgress('orphans', 0, orphanTotal);
+  }
   log.info({ stage: 'backfill-works', pageSize }, 'phase 1: reconcile orphans');
   let cursor: string | null = null;
   for (;;) {
@@ -363,11 +382,17 @@ export async function runBackfill(opts: BackfillOpts): Promise<BackfillSummary> 
         log.error({ stage: 'backfill-works', err, editionUri: edition.uri }, 'reconcile failed');
         summary.failed++;
       }
+      opts.onProgress?.('orphans', summary.orphansFound, orphanTotal);
     }
   }
 
   log.info({ stage: 'backfill-works' }, 'phase 2: re-verify work CIDs');
   cursor = null;
+  let cidTotal = 0;
+  if (opts.onProgress) {
+    cidTotal = await countEditions(db, and(isNotNull(editions.workUri))!);
+    opts.onProgress('cids', 0, cidTotal);
+  }
   for (;;) {
     const conds: ReturnType<typeof sql>[] = [isNotNull(editions.workUri)];
     if (cursor) conds.push(sql`${editions.uri} > ${cursor}`);
@@ -385,6 +410,7 @@ export async function runBackfill(opts: BackfillOpts): Promise<BackfillSummary> 
         log.error({ stage: 'backfill-works', err, editionUri: edition.uri }, 'CID re-verify failed');
         summary.failed++;
       }
+      opts.onProgress?.('cids', summary.cidsChecked, cidTotal);
     }
   }
 

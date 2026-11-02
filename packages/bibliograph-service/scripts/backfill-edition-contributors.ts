@@ -18,8 +18,11 @@ import { editions } from '../src/lib/server/db/schema';
 import { getEditionByRkey } from '../src/lib/server/api/open-library';
 import { enqueueIngest } from '../src/lib/server/jobs/enqueue';
 import { createLogger } from '../src/lib/server/logger';
+import { ProgressBar } from './lib/progress';
 
 const PAGE_SIZE = 50;
+
+const EMPTY_CONTRIBUTORS = sql`${editions.contributors} = '[]'::jsonb`;
 
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
@@ -34,6 +37,16 @@ async function main(): Promise<void> {
 
   const log = createLogger('worker');
 
+  const [counted] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(editions)
+    .where(rkeyArg === undefined ? EMPTY_CONTRIBUTORS : and(EMPTY_CONTRIBUTORS, eq(editions.rkey, rkeyArg))!);
+  const outstanding = Number(counted?.count ?? 0);
+  const bar = new ProgressBar(
+    '[backfill-edition-contributors]',
+    hardLimit === undefined ? outstanding : Math.min(outstanding, hardLimit),
+  );
+
   let scanned = 0;
   let enqueued = 0;
   let skipped = 0;
@@ -45,13 +58,10 @@ async function main(): Promise<void> {
     const pageSize = hardLimit !== undefined ? Math.min(PAGE_SIZE, hardLimit - scanned) : PAGE_SIZE;
     const filter: SQL | undefined =
       rkeyArg !== undefined
-        ? eq(editions.rkey, rkeyArg)
+        ? and(EMPTY_CONTRIBUTORS, eq(editions.rkey, rkeyArg))!
         : cursor
-          ? and(
-              sql`${editions.contributors} = '[]'::jsonb`,
-              sql`${editions.uri} > ${cursor}`,
-            )
-          : sql`${editions.contributors} = '[]'::jsonb`;
+          ? and(EMPTY_CONTRIBUTORS, sql`${editions.uri} > ${cursor}`)!
+          : EMPTY_CONTRIBUTORS;
 
     const rows = await db
       .select({ uri: editions.uri, rkey: editions.rkey })
@@ -67,25 +77,24 @@ async function main(): Promise<void> {
         const item = await getEditionByRkey(row.rkey, log as never);
         if (!item) {
           skipped++;
-          continue;
-        }
-        if (dry) {
+        } else if (dry) {
           log.info({ stage: 'backfill-edition-contributors', uri: row.uri, contributors: item.contributors.length, dry: true }, 'dry run; would enqueue');
-          continue;
+        } else {
+          await enqueueIngest('edition', item);
+          enqueued++;
         }
-        await enqueueIngest('edition', item);
-        enqueued++;
-        log.info({ stage: 'backfill-edition-contributors', uri: row.uri, rkey: row.rkey, contributors: item.contributors.length, payload: JSON.stringify(item.contributors) }, 'enqueued');
       } catch (err) {
         failed++;
         log.error({ stage: 'backfill-edition-contributors', uri: row.uri, err: String(err) }, 'enqueue failed');
       }
+      bar.advance();
     }
 
     if (rkeyArg !== undefined) break;
     cursor = rows[rows.length - 1]?.uri ?? null;
   }
 
+  bar.finish();
   const summary = { scanned, enqueued, skipped, failed };
   console.log(JSON.stringify({ stage: 'backfill-edition-contributors:summary', ...summary }));
   process.exit(failed > 0 ? 1 : 0);

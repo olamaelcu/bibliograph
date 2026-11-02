@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { eq, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db as defaultDb } from '../db/index';
 import { contributors } from '../db/schema';
 import { resolveContributorImage } from '../contributor-image/resolver';
@@ -65,16 +65,4 @@ export async function backfillContributorImageForUri(
     'contributor image backfilled',
   );
   return { updated: true, reason: 'ok' };
-}
-
-export async function findUncheckedContributorUris(
-  db: Db = defaultDb,
-  limit = 200,
-): Promise<string[]> {
-  const rows = await db
-    .select({ uri: contributors.uri })
-    .from(contributors)
-    .where(isNull(contributors.imageCheckedAt))
-    .limit(limit);
-  return rows.map((r) => r.uri);
 }

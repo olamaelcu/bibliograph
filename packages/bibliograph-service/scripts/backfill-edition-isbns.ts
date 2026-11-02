@@ -17,6 +17,7 @@
 import { sql } from 'drizzle-orm';
 import { makeWorkerUtils } from 'graphile-worker';
 import { db } from '../src/lib/server/db';
+import { ProgressBar } from './lib/progress';
 import { editions } from '../src/lib/server/db/schema';
 
 /**
@@ -93,7 +94,7 @@ async function run(): Promise<void> {
   }
   const utils = await makeWorkerUtils({ connectionString: url });
 
-  let enqueued = 0;
+  const bar = new ProgressBar('[backfill-edition-isbns]', rows.length);
   try {
     for (const row of rows) {
       await utils.addJob(
@@ -101,13 +102,14 @@ async function run(): Promise<void> {
         { uri: row.uri, rkey: row.rkey },
         { jobKey: `backfill-isbn:${row.uri}`, maxAttempts: 5 },
       );
-      enqueued++;
+      bar.advance();
     }
   } finally {
     await utils.release();
   }
 
-  console.log(`[backfill-edition-isbns] enqueued ${enqueued} job(s)`);
+  bar.finish();
+  console.log(`[backfill-edition-isbns] enqueued ${bar.done} job(s)`);
 }
 
 run().catch((err) => {
