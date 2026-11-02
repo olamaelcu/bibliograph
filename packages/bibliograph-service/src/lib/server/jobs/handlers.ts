@@ -18,6 +18,14 @@ import { backfillIsbnForEdition } from './isbn-backfill';
 import { fetchEditionForUri } from '../shelving/edition-fetch';
 import { catalogUriForMirroredRecord } from '../shelving/pending-editions';
 import { enqueueShelvingEditionBackfill } from './enqueue';
+import { pdsClient } from '../pds/resolve';
+import {
+  dedupeByUri,
+  parseRecordUri,
+  uniqueUris,
+  type MirrorRowInput,
+  type RecordUriParts,
+} from './tap-batch';
 import {
   EDITION_WORK_LINK_COLLECTION,
   applyConsensus,
@@ -602,27 +610,103 @@ export const tapRecordDeleteTask: Task = async (payload, helpers) => {
   }
 };
 
+/** Timeout for the confirmation read a delete makes against the record's repo. */
+const DELETE_CONFIRM_TIMEOUT_MS = 10_000;
+
+/** The branded did type the atproto client accepts on `repo`. */
+type Did = `did:${string}:${string}`;
+
+/** How many delete confirmations to ask the repos for at once. */
+const DELETE_CONFIRM_CONCURRENCY = 8;
+
+/**
+ * One `records` row per uri, written idempotently.
+ *
+ * Shared by the TAP upsert and the delete path that revives a record the repo
+ * still has, so both go through the same dedupe and the same conflict clause.
+ */
+async function upsertMirrorRows(items: readonly MirrorRowInput[]): Promise<void> {
+  const rows = dedupeByUri(items).map((it) => ({
+    uri: it.uri,
+    cid: 'bafyplaceholder',
+    did: it.did,
+    rkey: it.rkey,
+    collection: it.uri.split('/').slice(-2, -1)[0] ?? '',
+    value: it.value as never,
+    createdAt: new Date(),
+  }));
+  if (rows.length === 0) return;
+  await db.insert(records).values(rows as never).onConflictDoUpdate({
+    target: records.uri,
+    set: { value: sql`excluded.value`, indexedAt: new Date() },
+  });
+}
+
+/** Whether an atcute client error is the repo saying "no such record". */
+function isRecordNotFound(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { status?: number; error?: string; description?: string; message?: string };
+  const text = `${e.error ?? ''} ${e.description ?? e.message ?? ''}`;
+  if (e.status !== undefined && e.status !== 400) return false;
+  return /RecordNotFound|could not locate record|record not found/i.test(text);
+}
+
+/**
+ * What the record's own repo says about a uri we were told was deleted.
+ *
+ * `null` means the repo confirmed it is gone; `undefined` means the repo could
+ * not be asked (timeout, 5xx, unresolvable DID) and the caller must retry rather
+ * than guess — a wrong guess either resurrects a row or drops a live one.
+ */
+async function readRepoRecord(
+  parts: RecordUriParts,
+): Promise<{ value: Record<string, unknown> } | null | undefined> {
+  let client;
+  try {
+    ({ client } = await pdsClient(parts.did, {
+      signal: AbortSignal.timeout(DELETE_CONFIRM_TIMEOUT_MS),
+    }));
+  } catch {
+    // A repo that no longer resolves cannot be serving the record, so the mirror
+    // row is stale. Retrying would dead-letter a delete that can never succeed.
+    return null;
+  }
+  try {
+    const raw = await client.get('com.atproto.repo.getRecord', {
+      params: {
+        repo: parts.did as Did,
+        collection: parts.collection as `${string}.${string}.${string}`,
+        rkey: parts.rkey,
+      },
+      signal: AbortSignal.timeout(DELETE_CONFIRM_TIMEOUT_MS),
+    });
+    // atcute returns the payload directly; tolerate a `{ ok, data }` wrapper the
+    // same way the shelving hydration does.
+    const wrapper = raw as {
+      ok?: boolean;
+      data?: { value?: Record<string, unknown> };
+      value?: Record<string, unknown>;
+    };
+    const value = wrapper.ok === true && wrapper.data ? wrapper.data.value : wrapper.value;
+    return value ? { value } : undefined;
+  } catch (err) {
+    return isRecordNotFound(err) ? null : undefined;
+  }
+}
+
 export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
   const items = payload as Array<{ uri: string; did: string; rkey: string; value: Record<string, unknown> }>;
   const log = helpers.logger as unknown as Logger;
   try {
     if (items.length === 0) return;
-    const rows = items.map((it) => ({
-      uri: it.uri,
-      cid: 'bafyplaceholder',
-      did: it.did,
-      rkey: it.rkey,
-      collection: it.uri.split('/').slice(-2, -1)[0] ?? '',
-      value: it.value as never,
-      createdAt: new Date(),
-    }));
-    await db.insert(records).values(rows as never).onConflictDoUpdate({
-      target: records.uri,
-      set: { value: sql`excluded.value`, indexedAt: new Date() },
-    });
+    // One row per uri: a batch that names the same uri twice fails the whole
+    // statement (`ON CONFLICT DO UPDATE command cannot affect row a second
+    // time`), which used to dead-letter every record in it.
+    const unique = dedupeByUri(items);
+    await upsertMirrorRows(unique);
 
     const candidates = new Set<string>();
-    for (const it of items) {
+    for (const it of unique) {
       const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
       const uri = catalogUriForMirroredRecord(collection, it.rkey, it.value);
       if (uri) candidates.add(uri);
@@ -633,7 +717,7 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
     // generic `records` mirror, so materialize them and let consensus decide
     // whether the catalog changes.
     const voteEditions = new Set<string>();
-    for (const it of items) {
+    for (const it of unique) {
       const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
       if (collection !== EDITION_WORK_LINK_COLLECTION) continue;
       const editionUri = await ingestVoteRecord(it.uri, it.did, it.value);
@@ -644,7 +728,12 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
     }
 
     log.info(
-      { stage: 'tap-record-upsert-batch', count: items.length, voteEditions: voteEditions.size },
+      {
+        stage: 'tap-record-upsert-batch',
+        count: unique.length,
+        received: items.length,
+        voteEditions: voteEditions.size,
+      },
       'batch upsert ok',
     );
   } catch (err) {
@@ -666,13 +755,68 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
 };
 
 export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
-  const uris = payload as string[];
+  const uris = uniqueUris(payload as string[]);
   const log = helpers.logger as unknown as Logger;
   try {
     if (uris.length === 0) return;
-    await db.delete(records).where(inArray(records.uri, uris));
+
+    // A delete and an earlier upsert for the same record are separate jobs on
+    // separate workers, so acting on the event alone lets a late upsert
+    // resurrect a deleted row. The repo is the authority: confirm each
+    // deletion against the owner's PDS and mirror the record instead when it is
+    // still there. The mirror drifted exactly this way (2845 shelving rows
+    // against 2839 in the repo).
+    const confirmed: string[] = [];
+    const revived: MirrorRowInput[] = [];
+    // Bounded concurrency: one PDS read per uri, eight in flight. Sequential
+    // reads turned a 100-record batch into tens of seconds of job time, which
+    // is exactly the backlog this has to drain.
+    for (let start = 0; start < uris.length; start += DELETE_CONFIRM_CONCURRENCY) {
+      const chunk = uris.slice(start, start + DELETE_CONFIRM_CONCURRENCY);
+      const answers = await Promise.all(
+        chunk.map(async (uri) => {
+          const parts = parseRecordUri(uri);
+          return { uri, parts, answer: parts ? await readRepoRecord(parts) : null };
+        }),
+      );
+      for (const { uri, parts, answer } of answers) {
+        if (!parts) {
+          // Not addressable, so nothing better to do than drop the row.
+          confirmed.push(uri);
+          log.warn({ stage: 'tap-record-delete-batch', uri }, 'unparseable record uri; deleting the mirror row as-is');
+          continue;
+        }
+        if (answer === null) {
+          confirmed.push(uri);
+          continue;
+        }
+        if (answer === undefined) {
+          // The repo could not be asked. Retrying is the only safe answer: an
+          // unconfirmed delete either resurrects a row or drops a live one.
+          throw new Error(`could not confirm deletion of ${uri}`);
+        }
+        revived.push({ uri, did: parts.did, rkey: parts.rkey, value: answer.value });
+      }
+    }
+
+    if (revived.length > 0) {
+      await upsertMirrorRows(revived);
+      log.warn(
+        {
+          stage: 'tap-record-delete-batch',
+          count: revived.length,
+          uris: revived.map((row) => row.uri),
+        },
+        'delete arrived for records the repo still has; mirrored them instead',
+      );
+    }
+
+    if (confirmed.length > 0) {
+      await db.delete(records).where(inArray(records.uri, confirmed));
+    }
+
     const voteEditions = new Set<string>();
-    for (const uri of uris) {
+    for (const uri of confirmed) {
       if ((uri.split('/').slice(-2, -1)[0] ?? '') !== EDITION_WORK_LINK_COLLECTION) continue;
       const editionUri = await forgetVoteByRecordUri(uri);
       if (editionUri) voteEditions.add(editionUri);
@@ -681,7 +825,12 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
       await applyConsensus(editionUri, consensusThreshold());
     }
     log.info(
-      { stage: 'tap-record-delete-batch', count: uris.length, voteEditions: voteEditions.size },
+      {
+        stage: 'tap-record-delete-batch',
+        count: confirmed.length,
+        revived: revived.length,
+        voteEditions: voteEditions.size,
+      },
       'batch delete ok',
     );
   } catch (err) {

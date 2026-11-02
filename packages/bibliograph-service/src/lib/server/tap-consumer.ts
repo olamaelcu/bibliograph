@@ -2,14 +2,21 @@ import { TapClient, type TapEvent } from '@atcute/tap';
 import { Client, simpleFetchHandler } from '@atcute/client';
 import type { Logger } from 'pino';
 import {
-  enqueueRecordUpsert,
-  enqueueRecordDelete,
   enqueueRecordUpsertBatch,
   enqueueRecordDeleteBatch,
   type TapRecordUpsertItem,
 } from './jobs/enqueue';
 import { BOOKHIVE_BOOK_COLLECTION } from './bookhive/keys';
 import { getTapQueueDepth } from './jobs/depth';
+import { uniqueUris } from './jobs/tap-batch';
+import {
+  tapAckFailuresTotal,
+  tapDuplicateEventsTotal,
+  tapEnqueueFailuresTotal,
+  tapOutboxBuffer,
+  tapResyncBuffer,
+} from './metrics';
+import { fetchTapStats } from './tap-stats';
 
 const TAP_URL = process.env.TAP_URL ?? 'http://localhost:2480';
 // TAP's /channel requires basic auth; without this the socket is rejected 401.
@@ -54,9 +61,28 @@ function isRecordEvent(e: TapEvent): e is Extract<TapEvent, { type: 'record' }> 
 function ackEvents(batch: Array<{ ack: () => Promise<void> }>, log: Logger): void {
   for (const item of batch) {
     void item.ack().catch((err: unknown) => {
+      tapAckFailuresTotal.inc(1);
       log.warn({ err }, 'ack failed; TAP will redeliver the event');
     });
   }
+}
+
+/**
+ * How far behind we are, as the larger of TAP's outbox and our own job queue.
+ *
+ * TAP's `/stats/outbox-buffer` is the honest number — an unacked event waits
+ * there, and `/channel` has no cursor to resume from. The job table is the
+ * fallback for a TAP build that does not publish stats, so an unavailable
+ * reading never reads as "no backlog".
+ */
+async function tapBacklog(): Promise<number> {
+  const stats = await fetchTapStats(TAP_URL);
+  if (stats) {
+    tapOutboxBuffer.set(stats.outboxBuffer);
+    tapResyncBuffer.set(stats.resyncBuffer);
+  }
+  const jobs = await getTapQueueDepth().catch(() => 0);
+  return Math.max(stats?.outboxBuffer ?? 0, jobs);
 }
 
 export async function runTapConsumer(log: Logger): Promise<void> {
@@ -74,13 +100,25 @@ export async function runTapConsumer(log: Logger): Promise<void> {
     try {
       if (upsertBuffer.length > 0) {
         const batch = upsertBuffer.splice(0, upsertBuffer.length);
-        const items = batch.map(({ uri, did, rkey, value }) => ({ uri, did, rkey, value }));
+        // One payload per uri before it reaches a job. The acks stay one per
+        // event: TAP still has to forget the duplicates we collapsed, and the
+        // task dedupes again so a redelivery landing in a later batch is safe
+        // too.
+        const latest = new Map<string, TapRecordUpsertItem>();
+        for (const { uri, did, rkey, value } of batch) {
+          latest.set(uri, { uri, did, rkey, value });
+        }
+        const items = [...latest.values()];
+        if (items.length < batch.length) {
+          tapDuplicateEventsTotal.inc({ stage: 'upsert' }, batch.length - items.length);
+        }
         try {
           await enqueueRecordUpsertBatch(items);
         } catch (err) {
           // No ack on failure: the events stay TAP's responsibility and its outbox
           // redelivers them. Dropping them from the buffer keeps memory bounded,
           // and acking here — which this used to do — lost the records outright.
+          tapEnqueueFailuresTotal.inc({ task: 'tap-record-upsert-batch' });
           log.error({ stage: 'tap-consumer', err, count: items.length }, 'batch upsert enqueue failed; leaving events unacked for redelivery');
           return;
         }
@@ -88,10 +126,14 @@ export async function runTapConsumer(log: Logger): Promise<void> {
       }
       if (deleteBuffer.length > 0) {
         const batch = deleteBuffer.splice(0, deleteBuffer.length);
-        const uris = batch.map(({ uri }) => uri);
+        const uris = uniqueUris(batch.map(({ uri }) => uri));
+        if (uris.length < batch.length) {
+          tapDuplicateEventsTotal.inc({ stage: 'delete' }, batch.length - uris.length);
+        }
         try {
           await enqueueRecordDeleteBatch(uris);
         } catch (err) {
+          tapEnqueueFailuresTotal.inc({ task: 'tap-record-delete-batch' });
           log.error({ stage: 'tap-consumer', err, count: uris.length }, 'batch delete enqueue failed; leaving events unacked for redelivery');
           return;
         }
@@ -158,11 +200,14 @@ export async function runTapConsumer(log: Logger): Promise<void> {
         ackEvents([{ ack }], log);
         continue;
       }
-      // Conditional ack safety net: if the TAP queue is over the threshold, skip
-      // both enqueue and ack so TAP redelivers later when workers drain.
-      const depth = await getTapQueueDepth();
-      if (depth > TAP_QUEUE_DEPTH_THRESHOLD) {
-        log.warn({ stage: 'tap-consumer', depth, threshold: TAP_QUEUE_DEPTH_THRESHOLD }, 'queue depth too high; skipping event (TAP will redeliver)');
+      // Backpressure check: skip both enqueue and ack so TAP redelivers later,
+      // when the queue has drained. TAP's own outbox is the number that says we
+      // are behind — `/channel` has no cursor, so an unacked event is precisely
+      // what waits — and our job table is the backstop for a build that does not
+      // publish stats.
+      const backlog = await tapBacklog();
+      if (backlog > TAP_QUEUE_DEPTH_THRESHOLD) {
+        log.warn({ stage: 'tap-consumer', backlog, threshold: TAP_QUEUE_DEPTH_THRESHOLD }, 'backlog over threshold; skipping event (TAP will redeliver)');
         continue;
       }
       const uri = `at://${event.did}/${event.collection}/${event.rkey}`;

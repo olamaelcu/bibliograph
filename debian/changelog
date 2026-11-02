@@ -18,6 +18,36 @@ bibliograph (0.1.20) unstable; urgency=medium
     last events buffered until TAP's outbox timed out, which turned a one-event
     trickle into a permanent two-minute retry loop.
 
+  * Batches no longer dead-letter on a repeated uri. One `INSERT … ON CONFLICT
+    DO UPDATE` that names the same uri twice is rejected for the whole
+    statement (`cannot affect row a second time`), which is what the 778 rows in
+    `tap_dead_letter` were — a single redelivered event took every record in its
+    batch with it. The consumer's buffer and the upsert task now collapse to one
+    write per uri, last event wins, and every collapsed event is still acked.
+  * A delete is confirmed against the record's own repo before the mirror row
+    goes. Deletes and upserts for the same record are separate jobs on separate
+    workers, so a late upsert could resurrect a removed row — the mirror held
+    2,845 `bookShelving` rows against 2,839 in the repo. When the repo still
+    serves the record, the row is mirrored instead of deleted; when the repo
+    cannot be asked, the job retries rather than guess.
+  * Ingestion health is visible on `/metrics`: `tap_ack_failures_total`,
+    `tap_enqueue_failures_total`, `tap_duplicate_events_total`. Failing acks were
+    the symptom of the stall and left no trace anywhere.
+  * The queue-depth check reuses one Postgres pool instead of opening and
+    closing one per read, from inside the read loop it is measuring.
+
+  * Backpressure is measured where events actually wait. The consumer now reads
+    TAP's `/stats/outbox-buffer` (exported as `tap_outbox_buffer` and
+    `tap_resync_buffer`) and gates on the larger of that and our own job
+    count; the outbox held 2,863 events through the stall and nothing surfaced
+    it. The job-count read stays as the fallback for a TAP build without stats,
+    so an unavailable reading never reads as "no backlog".
+  * Note for the next attempt at resuming: this TAP build has no cursor. Its
+    `/channel` handler reads no query parameters at all — a bogus `cursor` on
+    the websocket URL connects happily — and the routes are health, channel,
+    repos, resolve, info and stats. Resume is the outbox plus unacknowledged
+    events, which is what the ack-after-durable-enqueue rule already relies on.
+
  -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 12:34:58 -0500
 
 bibliograph (0.1.19) unstable; urgency=medium
