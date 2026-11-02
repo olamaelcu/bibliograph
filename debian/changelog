@@ -1,3 +1,25 @@
+bibliograph (0.1.19) unstable; urgency=medium
+
+  * Repair the legacy `bookShelving` rows instead of teaching readers a second
+    shape. 2,822 mirrored rows carry `book: { ref, title }` where the lexicon
+    declares `book: { uri, cid }`, and the mirror predicates
+    (`value->'book'->>'uri'`) cannot see them — so `getShelvingOfBook` and
+    `getShelversOfBook` answered empty for books those rows shelve. The readers
+    go back to the declared shape; `scripts/normalize-legacy-shelving.ts`
+    rewrites the mirrored values, taking each `cid` from the catalog row the
+    record points at. Idempotent, `--dry`, `--limit`, and it reports rows whose
+    edition is not in the catalog so `backfill:shelving-editions` can run first.
+  * Revert the shape-tolerant reader added in 0.1.18 — with the rows repaired,
+    an accessor that accepts `ref` would only hide the next divergence.
+  * Drop the same tolerance from the fill job, for the same reason: it now
+    resolves the declared `uri` (or the rkey fallback), and the repair script is
+    what makes legacy rows visible to it.
+  * The records on their authors' PDSes are untouched: this service is read-only
+    and those repos are not ours. What is repaired is our copy — the mirror every
+    query and hydrator reads.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 12:14:37 -0500
+
 bibliograph (0.1.17) unstable; urgency=medium
 
   * Read the legacy expanded-ref shelving shape when deciding what to fill.
