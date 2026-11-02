@@ -60,7 +60,9 @@ Information is sourced from a few places:
 
 - Book information is sourced from OpenLibrary (works + editions APIs) with
   optional Google Books enrichment for descriptions and covers (requires
-  `GOOGLE_BOOKS_API_KEY`)
+  `GOOGLE_BOOKS_API_KEY`). Google Books answers are cached in Postgres for 24
+  hours — hits and "no such volume" misses alike — because the quota is charged
+  per request against that one key, which the web and worker processes share.
 - Author information is _gleamed_ from Wikipedia and OpenLibrary
 
 ## Catalog curation

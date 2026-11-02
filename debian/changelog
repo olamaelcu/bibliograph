@@ -1,3 +1,38 @@
+bibliograph (0.1.10) unstable; urgency=medium
+
+  * Cache Google Books responses in Postgres for 24 hours. The GB quota is
+    charged per request against one API key that the web server and both
+    workers share, and the same questions get asked over and over: the search
+    box query that was just run, the shelf hydration of the same volume id,
+    and — far more than either — the same `q=isbn:` lookup for every edition an
+    ISBN backfill touches. Every GB call already funnelled through `gbFetch`,
+    so the cache lives there: one entry serves every process and survives a
+    restart or a deploy, which a process-local Map (as used for Wikidata)
+    cannot.
+  * Cache misses as well as hits. The quota is spent by asking, not by the
+    answer, so a remembered "no such volume" (the 404 from `volumes/{id}`)
+    saves exactly as much as a hit and is stored with the same 24-hour TTL; a
+    NULL body is what distinguishes it from "nothing cached". Transient
+    outcomes — 429, 5xx, timeouts, aborts — are deliberately never stored, or
+    one bad minute upstream would be replayed all day.
+  * Route ISBN enrichment through `gbFetch`. `enrichEditions` was the only GB
+    caller still using raw `fetch`, which left it the one path the cache would
+    not have covered — and it is the heaviest consumer of the quota, running
+    eight lookups at a time across a whole backfill page. It now shares the
+    cache, retry, breaker and metric accounting every other GB call has.
+  * Key entries on the request URL with the API key dropped and the parameters
+    sorted, so key rotation, keyless volume lookups and an equivalent query
+    built in a different order all reuse one entry, and the credential is never
+    written to the database. Expired rows are swept in bounded batches by the
+    cache writer, because the table has no other reaper.
+  * Add `google_books_cache_total{result}`: `hit` and `negative` are requests
+    served without touching upstream, `store` counts the writes that make that
+    possible, and `error` is a cache failure that was swallowed so the request
+    fell through to upstream. A broken cache degrades to the previous
+    behaviour, never to a failed search.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 02:30:00 +0000
+
 bibliograph (0.1.9) unstable; urgency=medium
 
   * Give each upstream its own breaker again. `fetchJson` — the shared HTTP

@@ -1,11 +1,12 @@
 import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
-import { searchProviderRequestsTotal } from '../metrics';
+import { searchProviderRequestsTotal, googleBooksCacheTotal } from '../metrics';
 import { googleBooksBreaker } from './breakers';
 import type { EditionItem, WorkItem, SearchQuery, SearchResult, Identifier } from '../search/types';
 import { toGbLangRestrict } from '../search/language';
 import { gbEditionUri, gbWorkUri } from '../gb/keys';
+import { gbCacheEntry, gbCacheGet, gbCachePut } from '../gb/cache';
 import { resolveContributorsByName } from './contributor-name-resolver';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
@@ -184,7 +185,30 @@ function decodeGbCursor(cursor: string | undefined): number {
   return 0;
 }
 
+/** The HTTP status carried by the errors thrown inside `gbFetch`, if any. */
+function upstreamStatus(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null || !('status' in err)) return undefined;
+  const { status } = err;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * Single choke point for Google Books HTTP.
+ *
+ * Every caller (search, work search, ISBN enrichment, single-volume hydration)
+ * goes through here so that they all share one cache entry per URL, one breaker,
+ * and one metric. The cache is consulted before the breaker: a remembered answer
+ * costs nothing upstream, so there is no reason to withhold it while the breaker
+ * is open.
+ */
 async function gbFetch<T>(url: string, log: Logger, signal: AbortSignal): Promise<T | null> {
+  const entry = gbCacheEntry(url);
+  const cached = await gbCacheGet<T>(entry.key, log);
+  if (cached.found) {
+    googleBooksCacheTotal.inc({ result: cached.body === null ? 'negative' : 'hit' });
+    log.debug({ stage: 'google-books-source', url: entry.url, negative: cached.body === null }, 'googlebooks cache hit');
+    return cached.body;
+  }
   if (!googleBooksBreaker.canCall()) {
     log.warn({ stage: 'google-books-source', breaker: googleBooksBreaker.getState() }, 'breaker open; skipping fetch');
     return null;
@@ -203,9 +227,17 @@ async function gbFetch<T>(url: string, log: Logger, signal: AbortSignal): Promis
     }, log);
     googleBooksBreaker.recordSuccess();
     searchProviderRequestsTotal.inc({ provider: 'googlebooks', status: 'success' });
+    await gbCachePut(entry, body, log);
     return body;
   } catch (err) {
     googleBooksBreaker.recordFailure();
+    // A 404 is an answer, not an outage: the volume does not exist. Remember it
+    // so hydration of a delisted edition stops re-asking for a day. Everything
+    // else (429, 5xx, timeouts, aborts) is transient and must stay uncached, or
+    // one bad minute upstream would be replayed all day.
+    if (upstreamStatus(err) === 404) {
+      await gbCachePut(entry, null, log);
+    }
     log.error({ stage: 'google-books-source', err, url }, 'googlebooks fetch failed');
     searchProviderRequestsTotal.inc({ provider: 'googlebooks', status: 'failure' });
     return null;
@@ -326,31 +358,30 @@ export async function enrichEditions(
       }
       const url = `${BASE}?q=isbn:${encodeURIComponent(isbn)}&key=${encodeURIComponent(key ?? '')}`;
       let enriched = item;
-      try {
-        const start = performance.now();
-        const res = await fetch(url, { signal });
-        const durationMs = Math.round((performance.now() - start) * 100) / 100;
-        if (res.ok) {
-          const data = (await res.json()) as GbSearchResponse;
-          const info = data.items?.[0]?.volumeInfo;
-          if (info) {
-            if (!enriched.description && info.description) enriched = { ...enriched, description: stripHtml(info.description) };
-            const cover = coverFromLinks(info.imageLinks);
-            if (!enriched.coverImageUrl && cover) enriched = { ...enriched, coverImageUrl: cover };
-            if (enriched.coverImageUrl) {
-              enriched.coverImageUrl = enriched.coverImageUrl.replace("&edge=curl", "");
-            }
-            matched++;
-          } else {
-            missing++;
+      // Through gbFetch, not fetch: the ISBN lookup is the heaviest consumer of
+      // the quota (one request per edition, 8 at a time), so this is the path the
+      // cache exists for. It also inherits the retry/breaker/metric behavior that
+      // every other GB call already has.
+      const start = performance.now();
+      const data = await gbFetch<GbSearchResponse>(url, log, signal);
+      const durationMs = Math.round((performance.now() - start) * 100) / 100;
+      if (data) {
+        const info = data.items?.[0]?.volumeInfo;
+        if (info) {
+          if (!enriched.description && info.description) enriched = { ...enriched, description: stripHtml(info.description) };
+          const cover = coverFromLinks(info.imageLinks);
+          if (!enriched.coverImageUrl && cover) enriched = { ...enriched, coverImageUrl: cover };
+          if (enriched.coverImageUrl) {
+            enriched.coverImageUrl = enriched.coverImageUrl.replace("&edge=curl", "");
           }
-          log.info({ stage: 'google-books-enricher', isbn, matched, missing, durationMs }, 'googlebooks ok');
+          matched++;
         } else {
-          log.warn({ stage: 'google-books-enricher', status: res.status }, 'googlebooks non-2xx');
           missing++;
         }
-      } catch (err) {
-        log.error({ stage: 'google-books-enricher', err, isbn }, 'googlebooks fetch failed');
+        log.info({ stage: 'google-books-enricher', isbn, matched, missing, durationMs }, 'googlebooks ok');
+      } else {
+        // gbFetch already logged the failure; a failed or negative lookup is the
+        // same outcome here — nothing to enrich.
         missing++;
       }
       out[i] = enriched;

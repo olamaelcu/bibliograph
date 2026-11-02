@@ -346,3 +346,32 @@ export const follows = pgTable('follows', {
 
 export type FollowRow = typeof follows.$inferSelect;
 export type LibrarianApplicationRow = typeof librarianApplications.$inferSelect;
+
+// ─── Google Books response cache ─────────────────────────────────────────────
+// The GB quota is charged per request against one API key, and both the web and
+// the worker processes share that key, so the cache has to be shared too — a
+// process-local Map would let each process burn its own quota on the same query.
+//
+// `body` is the verbatim upstream JSON, replayed through the same mappers as a
+// fresh response, so a cache hit cannot produce a different edition shape than a
+// live call. A NULL body is a negative entry: upstream answered "no such volume",
+// which is worth remembering for the same TTL because a delisted volume would
+// otherwise be re-queried on every hydration and every backfill run.
+
+export const googleBooksCache = pgTable(
+  'google_books_cache',
+  {
+    /** sha256 of the cache-normalized request URL (see gbCacheEntry). */
+    key: text('key').primaryKey(),
+    /** The normalized URL, for audit. Never carries the API key. */
+    url: text('url').notNull(),
+    body: jsonb('body'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    expiresAtIdx: index('google_books_cache_expires_at_idx').on(t.expiresAt),
+  }),
+);
+
+export type GoogleBooksCacheRow = typeof googleBooksCache.$inferSelect;

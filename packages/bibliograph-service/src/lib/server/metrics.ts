@@ -33,6 +33,17 @@ export const searchProviderRequestsTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+// Google Books response cache. `hit`/`negative` are requests served without
+// touching upstream (negative = a remembered "no such volume"); `store` counts
+// the writes that make those possible; `error` is a cache failure that was
+// swallowed so the request fell through to upstream.
+export const googleBooksCacheTotal = new Counter({
+  name: 'google_books_cache_total',
+  help: 'Google Books response cache lookups and stores',
+  labelNames: ['result'] as const,
+  registers: [metricsRegistry],
+});
+
 export const searchLatencyMs = new Histogram({
   name: 'search_latency_ms',
   help: 'Search XRPC handler latency in ms',
