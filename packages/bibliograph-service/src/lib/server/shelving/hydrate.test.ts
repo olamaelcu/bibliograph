@@ -53,6 +53,7 @@ function makeShelvingRow(opts: {
       updatedAt: '2026-08-26T00:00:00.000Z',
       // eslint-disable-next-line @typescript-eslint/no-restricted-types
     } as never,
+    recordCreatedAt: '2026-08-26T00:00:00.000Z',
     createdAt: new Date('2026-08-26T00:00:00Z'),
     indexedAt: new Date('2026-08-26T00:00:00Z'),
   };
@@ -247,6 +248,7 @@ function makeBookhiveRow(opts: { status?: string; hiveBookUri?: string | null } 
       createdAt: '2026-08-26T00:00:00.000Z',
       // eslint-disable-next-line @typescript-eslint/no-restricted-types
     } as never,
+    recordCreatedAt: '2026-08-26T00:00:00.000Z',
     createdAt: new Date('2026-08-26T00:00:00Z'),
     indexedAt: new Date('2026-08-26T00:00:00Z'),
   };

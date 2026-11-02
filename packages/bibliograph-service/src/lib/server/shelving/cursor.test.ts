@@ -9,10 +9,22 @@ const USER = 'did:plc:user' as const;
 const SHELF_URI = `at://${USER}/net.olamaelcu.livtet.biblio.shelf/read`;
 
 test('a recency cursor round-trips its exact instant and uri', () => {
-  const at = new Date('2026-11-02T15:04:05.123Z');
   const uri = `at://${USER}/${SHELVING_COLLECTION}/ol.OL1M`;
-  const decoded = decodeRecentCursor(encodeRecentCursor(at, uri));
-  assert.deepEqual(decoded, { indexedAt: at, uri });
+  const sortKey = '2026-11-02T15:04:05.123Z';
+  assert.deepEqual(decodeRecentCursor(encodeRecentCursor(sortKey, uri)), { sortKey, uri });
+});
+
+test('the sort key is carried verbatim, including a fraction the column stores', () => {
+  const uri = `at://${USER}/${SHELVING_COLLECTION}/ol.OL1M`;
+  // Re-serialising through `Date` would drop the microseconds and the resumed
+  // page would compare keys that are not the column's.
+  const sortKey = '2026-11-02T15:04:05.123456Z';
+  assert.deepEqual(decodeRecentCursor(encodeRecentCursor(sortKey, uri)), { sortKey, uri });
+});
+
+test('a blank sort key is a real cursor for the undated tail', () => {
+  const uri = `at://${USER}/${SHELVING_COLLECTION}/ol.OL1M`;
+  assert.deepEqual(decodeRecentCursor(encodeRecentCursor('', uri)), { sortKey: '', uri });
 });
 
 test('cursors that are not ours are ignored rather than half-read', () => {
@@ -21,7 +33,7 @@ test('cursors that are not ours are ignored rather than half-read', () => {
   assert.equal(decodeRecentCursor('42'), undefined);
   assert.equal(decodeRecentCursor('con:abc'), undefined);
   assert.equal(decodeRecentCursor(Buffer.from('{"t":"2026-11-02T00:00:00Z"}').toString('base64url')), undefined);
-  assert.equal(decodeRecentCursor(Buffer.from('{"t":"not-a-date","u":"at://x"}').toString('base64url')), undefined);
+  assert.equal(decodeRecentCursor(Buffer.from('{"t":7,"u":"at://x"}').toString('base64url')), undefined);
   assert.equal(decodeRecentCursor(Buffer.from('{"t":"2026-11-02T00:00:00Z","u":""}').toString('base64url')), undefined);
 });
 

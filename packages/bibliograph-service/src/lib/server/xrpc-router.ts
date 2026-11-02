@@ -87,6 +87,7 @@ import {
   SHELVING_COLLECTION,
   shelvingRkeyFor,
 } from './shelving/shelvers';
+import { newestRecordFirst, recordSortKeyOf } from './db/record-recency';
 import { decodeRecentCursor, encodeRecentCursor } from './shelving/cursor';
 import { compareShelfBooks } from './shelving/order';
 import {
@@ -785,6 +786,29 @@ function parseCursor(cursor: string | undefined): { tier: string; value: string 
   return { tier: /^\d+$/.test(cursor) ? 'tap' : 'con', value: cursor };
 }
 
+/**
+ * A record read straight from a PDS, in the row shape the read paths share.
+ * `recordCreatedAt` mirrors the generated column, so a row from this path can
+ * still anchor a recency cursor.
+ */
+function pdsRecordRow(
+  did: string,
+  collection: string,
+  record: { uri: string; value: unknown },
+): typeof records.$inferSelect {
+  return {
+    uri: record.uri,
+    cid: 'bafyplaceholder',
+    did,
+    rkey: record.uri.split('/').pop() ?? '',
+    collection,
+    value: record.value as never,
+    createdAt: new Date(),
+    indexedAt: new Date(),
+    recordCreatedAt: recordSortKeyOf({ value: record.value }),
+  };
+}
+
 function shelfViewOf(r: typeof records.$inferSelect) {
   return {
     uri: r.uri as `${string}:${string}`,
@@ -811,16 +835,8 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
           log.warn({ stage: 'listShelves.parse', did, issues: parsed.issues }, 'listRecords response did not match schema');
           return { rows: [] as Array<typeof records.$inferSelect>, cursor: undefined };
         }
-        const rows = parsed.data.records.map((r) => ({
-          uri: r.uri,
-          cid: 'bafyplaceholder',
-          did: did as string,
-          rkey: r.uri.split('/').pop() ?? '',
-          collection: 'net.olamaelcu.livtet.biblio.shelf',
-          value: r.value as never,
-          createdAt: new Date(),
-          indexedAt: new Date(),
-        }));
+        const rows = parsed.data.records.map((r) =>
+          pdsRecordRow(did as string, 'net.olamaelcu.livtet.biblio.shelf', r));
         return { rows, cursor: parsed.data.cursor };
       };
 
@@ -846,7 +862,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
           ),
         )
         // Offset paging needs a total order to be stable across requests.
-        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .orderBy(newestRecordFirst())
         .limit(limit + 1)
         .offset(offset);
       const hasMore = cacheRows.length > limit;
@@ -994,16 +1010,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
             for (const r of recs) {
               const bookRef = (r.value.book as { uri?: string } | undefined)?.uri;
               if (bookRef === bookUri) {
-                fetched.push({
-                  uri: r.uri,
-                  cid: 'bafyplaceholder',
-                  did: did as string,
-                  rkey: r.uri.split('/').pop() ?? '',
-                  collection: 'net.olamaelcu.livtet.biblio.bookShelving',
-                  value: r.value as never,
-                  createdAt: new Date(),
-                  indexedAt: new Date(),
-                });
+                fetched.push(pdsRecordRow(did as string, 'net.olamaelcu.livtet.biblio.bookShelving', r));
               }
               if (fetched.length >= limit) break;
             }
@@ -1233,16 +1240,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
           for (const r of recs) {
             const shelfRef = (r.value.shelf as string | undefined);
             if (shelfRef === shelfUri) {
-              fetched.push({
-                uri: r.uri,
-                cid: 'bafyplaceholder',
-                did,
-                rkey: r.uri.split('/').pop() ?? '',
-                collection: 'net.olamaelcu.livtet.biblio.bookShelving',
-                value: r.value as never,
-                createdAt: new Date(),
-                indexedAt: new Date(),
-              });
+              fetched.push(pdsRecordRow(did, 'net.olamaelcu.livtet.biblio.bookShelving', r));
             }
           }
           if (!cur) break;
@@ -1281,7 +1279,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
         )
         // An offset page needs a total order, otherwise Postgres may answer the
         // same offset with a different slice and records repeat or vanish.
-        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .orderBy(newestRecordFirst())
         .limit(limit + 1)
         .offset(offset);
       const hasMore = cacheRows.length > limit;
@@ -1355,7 +1353,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
             AND coalesce(${records.value}->>'review', '') <> ''
           )`,
         )
-        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .orderBy(newestRecordFirst())
         .limit(limit + 1)
         .offset(offset);
 
@@ -1436,7 +1434,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetEditionsByContributor.mainSchema, {
             WHERE c->'subject'->>'uri' = ${contributor}
           )`,
         )
-        .orderBy(sql`${editions.indexedAt} DESC`, editions.uri)
+        // `created_at` is the catalog record's own stamp (ingest writes
+        // `item.createdAt` into it), so this is the same recency the feeds sort
+        // by — not the batch-import time `indexed_at` holds.
+        .orderBy(sql`${editions.createdAt} desc`, editions.uri)
         .limit(limit);
       return json({
         uris: rows.map((row) => row.uri),
@@ -1635,7 +1636,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
         .select()
         .from(records)
         .where(and(eq(records.did, did), inArray(records.collection, sources)))
-        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .orderBy(newestRecordFirst())
         .limit(limit + 1)
         .offset(offset);
       const hasMore = rows.length > limit;
@@ -1667,16 +1668,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
             for (const record of parsed.data.records) {
               if (seen.has(record.uri) || reviews.length >= limit) continue;
               seen.add(record.uri);
-              const view = reviewViewOf({
-                uri: record.uri,
-                cid: 'bafyplaceholder',
-                did,
-                rkey: record.uri.split('/').pop() ?? '',
-                collection,
-                value: record.value as (typeof records.$inferSelect)['value'],
-                createdAt: new Date(),
-                indexedAt: new Date(),
-              });
+              const view = reviewViewOf(pdsRecordRow(did, collection, record));
               if (view) reviews.push(view);
             }
           }
@@ -1697,11 +1689,13 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
 /**
  * Network-wide activity: the newest bookShelving records from every account.
  *
- * Recency is paged by key set (`indexed_at`, `uri`) rather than by offset,
+ * Recency is paged by key set (`createdAt`, `uri`) rather than by offset,
  * because rows keep arriving at the head of the order — an offset page two would
- * repeat whatever a new shelving pushed down. The cursor is taken from the last
- * *scanned* row, not the last emitted view: hydration drops rows whose book is
- * missing from the catalog, and anchoring on those would skip real shelving.
+ * repeat whatever a new shelving pushed down. `createdAt` is the record's own
+ * claim, not the mirror's indexing time, so a replay does not reshuffle the
+ * feed. The cursor is taken from the last *scanned* row, not the last emitted
+ * view: hydration drops rows whose book is missing from the catalog, and
+ * anchoring on those would skip real shelving.
  */
 router.addQuery(NetOlamaelcuLivtetBiblioListRecentShelving.mainSchema, {
   async handler({ params }) {
@@ -1718,11 +1712,11 @@ router.addQuery(NetOlamaelcuLivtetBiblioListRecentShelving.mainSchema, {
             // the network's newest shelving depend on which app wrote it.
             shelfEntryConditions(),
             resume
-              ? sql`(${records.indexedAt}, ${records.uri}) < (${resume.indexedAt}::timestamptz, ${resume.uri}::text)`
+              ? sql`(${records.recordCreatedAt}, ${records.uri}) < (${resume.sortKey}::text, ${resume.uri}::text)`
               : undefined,
           ),
         )
-        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .orderBy(newestRecordFirst())
         .limit(limit + 1);
       const hasMore = rows.length > limit;
       const page = hasMore ? rows.slice(0, limit) : rows;
@@ -1730,7 +1724,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListRecentShelving.mainSchema, {
       const bookShelves = await hydrateBookShelves(page);
       return json({
         bookShelves,
-        cursor: hasMore && last ? encodeRecentCursor(last.indexedAt, last.uri) : undefined,
+        cursor: hasMore && last ? encodeRecentCursor(recordSortKeyOf(last), last.uri) : undefined,
       } as NetOlamaelcuLivtetBiblioListRecentShelving.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -2189,7 +2183,7 @@ router.addQuery(getFeedSkeletonSchema, {
         .select()
         .from(records)
         .where(inArray(records.collection, FEED_COLLECTIONS))
-        .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+        .orderBy(newestRecordFirst())
         .limit(limitNum + 1)
         .offset(offsetNum);
 
@@ -2214,7 +2208,7 @@ router.addQuery(getFeedSkeletonSchema, {
               inArray(records.collection, FEED_COLLECTIONS),
               inArray(records.did, ids),
             )
-          ).orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`).limit(limit + 1).offset(offset);
+          ).orderBy(newestRecordFirst()).limit(limit + 1).offset(offset);
           const hasMore = reviewRows.length > limit;
           const page = hasMore ? reviewRows.slice(0, limit) : reviewRows;
           outCursor = hasMore ? String(offset + limit) : undefined;
@@ -2270,7 +2264,7 @@ router.addQuery(getFeedSkeletonSchema, {
               inArray(records.did, followingDids),
             ),
           )
-          .orderBy(sql`${records.indexedAt} DESC`, sql`${records.uri} DESC`)
+          .orderBy(newestRecordFirst())
           .limit(limit + 1)
           .offset(offset);
 

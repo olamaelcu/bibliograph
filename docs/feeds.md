@@ -72,6 +72,32 @@ edition through Constellation source `buzz.bookhive.book:hiveBookUri`, resolving
 the edition's `bookhive` identifier to the catalog record that is the backlink
 subject.
 
+## Ordering
+
+Feed and listing queries sort by the record's own `value.createdAt`, newest
+first, with the record `uri` breaking ties. Ordering by the mirror's
+`records.indexed_at` ordered by *when TAP reached us*, so a replay or a backfill
+pushed year-old records to the head of the feed; the writer's stamp is the order
+a feed claims to have.
+
+The key is the `records.record_created_at` **generated column** (`coalesce(value->>'createdAt', '')`),
+shared by `getFeedSkeleton`, `listRecentShelving`, `listBooksOnShelf`, `listShelves`,
+`getReviewsByBook` and `listReviewsByActor` through
+`src/lib/server/db/record-recency.ts`. `getEditionsByContributor` sorts on
+`editions.created_at`, which ingest already writes from the catalog record, with
+its own index. The key is a column rather than an expression
+because sorting on `value->>'createdAt'` cannot use an index: the cast to
+`timestamptz` is STABLE, so Postgres accepts it in neither a generated column nor
+an index expression, and the guard that made casting safe turned every request
+into a scan and sort of the whole table (45-50 ms locally, 2-4 s on a loaded
+host) against 0.4 ms for the index scan.
+
+Canonical atproto `datetime` values are UTC ISO-8601, whose lexicographic order is
+chronological order — the column stores that text for exactly this reason. A
+record without a `createdAt` gets a blank key, which sorts after every dated one
+under `desc`, so the order stays total and `listRecentShelving` can always take
+its keyset cursor from the last row.
+
 ## Technical Details
 
 ### Schema Definitions

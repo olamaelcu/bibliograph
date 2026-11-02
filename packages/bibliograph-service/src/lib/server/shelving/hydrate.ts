@@ -1,6 +1,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { editions, records } from '../db/schema';
+import { recordSortKeyOf } from '../db/record-recency';
 import type { RecordRow } from '../db/schema';
 import { pdsClient } from '../pds/resolve';
 import { NetOlamaelcuLivtetBiblioDefs } from '../lexicons/index.js';
@@ -244,6 +245,7 @@ async function fetchPdsRecord(
       rkey: r.uri.split('/').pop() ?? '',
       collection,
       value: r.value as never,
+      recordCreatedAt: recordSortKeyOf({ value: r.value }),
       createdAt: new Date(),
       indexedAt: new Date(),
     };
