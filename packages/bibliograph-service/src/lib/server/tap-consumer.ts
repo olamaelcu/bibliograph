@@ -32,7 +32,13 @@ const NET_PREFIX = 'net.olamaelcu.livtet.biblio.';
 const REVIEW_COLLECTION = 'net.olamaelcu.livtet.bookReview';
 // Bookhive users' own book records carry their reviews and reading status, so
 // mirroring them is what lets those reviews show up in Bibliograph feeds.
-const MIRRORED_COLLECTIONS = new Set([REVIEW_COLLECTION, BOOKHIVE_BOOK_COLLECTION]);
+// The review collection moved under `biblio.`; the old name stays mirrored so
+// records written before the move keep appearing in feeds and actor listings.
+const MIRRORED_COLLECTIONS = new Set([
+  'net.olamaelcu.livtet.biblio.bookReview',
+  REVIEW_COLLECTION,
+  BOOKHIVE_BOOK_COLLECTION,
+]);
 
 type UpsertBufferItem = TapRecordUpsertItem & { ack: () => Promise<void> };
 type DeleteBufferItem = { uri: string; ack: () => Promise<void> };
