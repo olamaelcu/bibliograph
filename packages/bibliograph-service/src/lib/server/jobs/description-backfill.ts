@@ -5,7 +5,7 @@ import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
-import { googleBooksBreaker, isbndbBreaker } from '../api/breakers';
+import { googleBooksBreaker, isbndbBreaker, openLibraryBreaker } from '../api/breakers';
 import { withRetry } from '../api/retry';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
@@ -188,8 +188,17 @@ export async function backfillDescriptionForEdition(
   if (!row) return { updated: false, reason: 'not_found' };
   if (row.description) return { updated: false, reason: 'already_has_description' };
 
+  // A negative result is only trustworthy when every upstream we would consult
+  // was actually reachable; otherwise the row stays unchecked for a later run.
+  const deferrable = () => [googleBooksBreaker, isbndbBreaker, openLibraryBreaker]
+    .some((b) => !b.canCall());
+  const wasDeferred = deferrable();
   const description = await resolveDescription(row, log, signal);
   if (!description) {
+    if (wasDeferred || deferrable()) {
+      log.warn({ stage: 'description-backfill', uri }, 'an upstream breaker is open; leaving description unchecked');
+      return { updated: false, reason: 'deferred' };
+    }
     await db.update(editions).set({ descriptionCheckedAt: new Date() }).where(eq(editions.uri, uri));
     return { updated: false, reason: 'no_description_found' };
   }

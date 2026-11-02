@@ -2,6 +2,7 @@ import type { Logger } from 'pino';
 import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { searchProviderRequestsTotal } from '../metrics';
+import type { CircuitBreaker } from './breaker';
 import { openLibraryBreaker } from './breakers';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionUri, workUri, contributorUri, publisherUri, olidFromEditionRkey, olidFromWorkRkey, olidFromContributorRkey, olidFromPublisherRkey } from '../ol/keys';
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
@@ -28,9 +29,24 @@ function buildUrl(q: string | undefined, type: 'edition' | 'work' | 'author', li
   return u.toString();
 }
 
-export async function fetchJson<T>(url: string, log: Logger, signal: AbortSignal): Promise<T | null> {
-  if (!openLibraryBreaker.canCall()) {
-    log.warn({ stage: 'open-library-source', breaker: openLibraryBreaker.getState() }, 'breaker open; skipping fetch');
+/** The upstream a request belongs to: its own breaker, metric label and log stage. */
+export interface FetchJsonOptions {
+  breaker?: CircuitBreaker;
+  provider?: string;
+  stage?: string;
+}
+
+export async function fetchJson<T>(
+  url: string,
+  log: Logger,
+  signal: AbortSignal,
+  opts: FetchJsonOptions = {},
+): Promise<T | null> {
+  const breaker = opts.breaker ?? openLibraryBreaker;
+  const provider = opts.provider ?? 'openlibrary';
+  const stage = opts.stage ?? 'open-library-source';
+  if (!breaker.canCall()) {
+    log.warn({ stage, breaker: breaker.getState() }, 'breaker open; skipping fetch');
     return null;
   }
   const start = performance.now();
@@ -40,20 +56,20 @@ export async function fetchJson<T>(url: string, log: Logger, signal: AbortSignal
       const durationMs = Math.round((performance.now() - start) * 100) / 100;
       if (!res.ok) {
         const text = await res.text();
-        const err = new Error(`openlibrary ${res.status}: ${text.slice(0, 200)}`) as Error & { status: number };
+        const err = new Error(`${provider} ${res.status}: ${text.slice(0, 200)}`) as Error & { status: number };
         (err as Error & { status: number }).status = res.status;
         throw err;
       }
-      log.info({ stage: 'open-library-source', url, durationMs }, 'openlibrary ok');
+      log.info({ stage, url, durationMs }, `${provider} ok`);
       return res.json() as Promise<T>;
     }, log);
-    openLibraryBreaker.recordSuccess();
-    searchProviderRequestsTotal.inc({ provider: 'openlibrary', status: 'success' });
+    breaker.recordSuccess();
+    searchProviderRequestsTotal.inc({ provider, status: 'success' });
     return body;
   } catch (err) {
-    openLibraryBreaker.recordFailure();
-    log.error({ stage: 'open-library-source', err, url }, 'openlibrary fetch failed');
-    searchProviderRequestsTotal.inc({ provider: 'openlibrary', status: 'failure' });
+    breaker.recordFailure();
+    log.error({ stage, err, url }, `${provider} fetch failed`);
+    searchProviderRequestsTotal.inc({ provider, status: 'failure' });
     return null;
   }
 }

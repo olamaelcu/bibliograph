@@ -1,3 +1,27 @@
+bibliograph (0.1.9) unstable; urgency=medium
+
+  * Give each upstream its own breaker again. `fetchJson` — the shared HTTP
+    helper in `api/open-library.ts` — guarded and recorded every request against
+    the **OpenLibrary** breaker, whatever host it was calling, and labelled the
+    metric `openlibrary` in both directions. The contributor-image resolver uses
+    it for Wikidata and Commons too, so an OpenLibrary outage tripped lookups it
+    had nothing to do with, and one provider's failures closed the others out.
+    It now takes the breaker, metric label and log stage from the caller, and
+    the resolver passes `wikidataBreaker` / `commonsBreaker` for its own calls.
+  * Stop the description backfills recording a negative they never asked for.
+    `resolveDescription` / `resolveWorkDescription` return `undefined` when a
+    breaker is open or a request fails, exactly as they do when a book genuinely
+    has no description, and the callers stamped `description_checked_at`. Both
+    now record the stamp only when every upstream they would consult was
+    reachable; otherwise the row stays unchecked and a later run retries it.
+    Found in production: twelve editions were stamped while the OpenLibrary
+    breaker was open from an unrelated backfill, and those stamps are being
+    cleared.
+  * Remove the duplicate breaker accounting the resolver did around `fetchJson`
+    (each miss was counted twice, tripping a five-failure threshold in three).
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 01:35:00 +0000
+
 bibliograph (0.1.8) unstable; urgency=medium
 
   * Never record a deferred lookup as a permanent miss. Every backfilled

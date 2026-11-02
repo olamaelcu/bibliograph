@@ -38,6 +38,9 @@ const AUTHOR_OCCUPATIONS = new Set([
   'Q333634', // translator
 ]);
 
+const WIKIDATA_FETCH = { breaker: wikidataBreaker, provider: 'wikidata', stage: 'wikidata-image' };
+const COMMONS_FETCH = { breaker: commonsBreaker, provider: 'commons', stage: 'commons-image' };
+
 const WIKIDATA_API = 'https://www.wikidata.org/w/api.php';
 const COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
 
@@ -101,12 +104,10 @@ async function resolveOpenLibraryImage(
     photos?: number[];
     remote_ids?: { wikid?: string };
   };
+  // `fetchJson` records success/failure on the breaker it is given, so this
+  // path only decides what a null answer means.
   const raw = await fetchJson<OlAuthorWithPhotos>(url, opts.log, s(opts.signal));
-  if (!raw) {
-    openLibraryBreaker.recordFailure();
-    throw new UpstreamDeferred('openlibrary', 'request-failed');
-  }
-  openLibraryBreaker.recordSuccess();
+  if (!raw) throw new UpstreamDeferred('openlibrary', 'request-failed');
   const photoId = raw.photos?.find((p: number) => typeof p === 'number' && p > 0);
   if (photoId === undefined) return undefined;
 
@@ -199,12 +200,8 @@ async function findAuthorQid(
   }
   const url = `${WIKIDATA_API}?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&type=item&limit=5&format=json`;
   type SearchResponse = { search?: WikidataSearchHit[] };
-  const raw = await fetchJson<SearchResponse>(url, log, s(signal));
-  if (!raw) {
-    wikidataBreaker.recordFailure();
-    throw new UpstreamDeferred('wikidata', 'request-failed');
-  }
-  wikidataBreaker.recordSuccess();
+  const raw = await fetchJson<SearchResponse>(url, log, s(signal), WIKIDATA_FETCH);
+  if (!raw) throw new UpstreamDeferred('wikidata', 'request-failed');
   const target = normalizeName(name);
   for (const hit of raw.search ?? []) {
     if (hit.label && normalizeName(hit.label) === target) {
@@ -224,11 +221,8 @@ async function fetchPhotoFilename(
     throw new UpstreamDeferred('wikidata', 'breaker-open');
   }
   const url = `https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`;
-  const raw = await fetchJson<WikidataEntity>(url, log, s(signal));
-  if (!raw) {
-    wikidataBreaker.recordFailure();
-    throw new UpstreamDeferred('wikidata', 'request-failed');
-  }
+  const raw = await fetchJson<WikidataEntity>(url, log, s(signal), WIKIDATA_FETCH);
+  if (!raw) throw new UpstreamDeferred('wikidata', 'request-failed');
   const entity = raw.entities?.[qid];
   if (!entity) return undefined;
 
@@ -251,7 +245,6 @@ async function fetchPhotoFilename(
   const hasAuthorOccupation = [...AUTHOR_OCCUPATIONS].some((q) => occupations.has(q));
   if (!hasAuthorOccupation) return undefined;
 
-  wikidataBreaker.recordSuccess();
   // P18 = image (Commons filename, e.g. "Frank Herbert 1984 (square).jpg").
   const p18 = entity.claims?.P18?.[0];
   const filename = p18?.mainsnak?.datavalue?.value as string | undefined;
@@ -276,14 +269,10 @@ async function fetchCommonsExtMetadata(
   const url = `${COMMONS_API}?action=query&titles=${encodeURIComponent(`File:${filename}`)}&prop=imageinfo&iiprop=extmetadata&format=json`;
   type QueryResponse = { query?: { pages?: Record<string, { imageinfo?: Array<{ extmetadata?: CommonsExtMetadata }> }> } };
   const raw = await withRetry<QueryResponse | null>(
-    () => fetchJson<QueryResponse>(url, log, s(signal)),
+    () => fetchJson<QueryResponse>(url, log, s(signal), COMMONS_FETCH),
     log,
   );
-  if (!raw) {
-    commonsBreaker.recordFailure();
-    throw new UpstreamDeferred('commons', 'request-failed');
-  }
-  commonsBreaker.recordSuccess();
+  if (!raw) throw new UpstreamDeferred('commons', 'request-failed');
   const pages = raw.query?.pages ?? {};
   for (const key of Object.keys(pages)) {
     const page = pages[key];
