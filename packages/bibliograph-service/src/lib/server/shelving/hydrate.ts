@@ -5,47 +5,17 @@ import type { RecordRow } from '../db/schema';
 import { pdsClient } from '../pds/resolve';
 import { NetOlamaelcuLivtetBiblioDefs } from '../lexicons/index.js';
 import { createLogger } from '../logger';
-import { gbEditionUri, isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
-import { editionUri, olidFromEditionRkey } from '../ol/keys';
-import { bhEditionUri, isBhRkey, hiveIdFromBhRkey, BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
+import { BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
 import { normalizeBookhiveBook } from '../bookhive/records';
-import { isIsbndbRkey, isbnFromIsbndbRkey, isbndbEditionUri } from '../isbndb/keys';
+import { catalogEditionUriFromRkey } from './catalog-uri';
 
 const log = createLogger('web');
 
 type Did = `did:${string}:${string}`;
 
-export function catalogEditionUriFromRkey(rkey: string): string | null {
-  if (isBhRkey(rkey)) {
-    try {
-      return bhEditionUri(hiveIdFromBhRkey(rkey));
-    } catch {
-      return null;
-    }
-  }
-  if (isGbRkey(rkey)) {
-    try {
-      return gbEditionUri(volumeIdFromGbRkey(rkey));
-    } catch {
-      return null;
-    }
-  }
-  if (isIsbndbRkey(rkey)) {
-    try {
-      return isbndbEditionUri(isbnFromIsbndbRkey(rkey));
-    } catch {
-      return null;
-    }
-  }
-  if (rkey.startsWith('ol.')) {
-    try {
-      return editionUri(olidFromEditionRkey(rkey));
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
+// The derivation moved to `catalog-uri.ts` so job handlers can use it without
+// pulling in this module's `db` import. Re-exported here for existing callers.
+export { catalogEditionUriFromRkey };
 
 const SHELF_DISPLAY_NAMES: Record<string, string> = {
   'reading': 'Currently Reading',

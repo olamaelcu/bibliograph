@@ -1,3 +1,27 @@
+bibliograph (0.1.16) unstable; urgency=medium
+
+  * Fill the catalog from the shelf records that need it. A `bookShelving`
+    record (or a Bookhive book record with a reading status) that names an
+    edition the catalog has never ingested used to leave the reader's shelf
+    looking empty until someone ran `backfill:shelving-editions` by hand. The
+    tap upsert now asks for the missing edition, and a `backfill-shelving-edition`
+    job fetches it from the provider that owns the rkey prefix and ingests it
+    through the same path a search result takes.
+  * Ask once per tap page rather than once per event: the batch upsert collects
+    the editions its records imply and checks them with one `in` query, so a
+    page of shelf writes costs one lookup. Reviews and rating-only Bookhive
+    records are not shelf decisions and ask for nothing.
+  * A provider miss is a normal outcome, not a failure — `bh.*` editions have no
+    by-id provider and an id can be absent upstream — so the job ends quietly
+    instead of burning attempts, and the next shelving event for that edition
+    asks again. The row is re-checked on entry, so a search ingest or an earlier
+    job winning the race is not an error.
+  * Move the rkey→catalog-URI derivation into `shelving/catalog-uri.ts`, out of
+    `hydrate.ts`'s `db` import, so job handlers can use it and it is testable
+    without a database. `hydrate.ts` re-exports it, so callers are unchanged.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 11:34:13 -0500
+
 bibliograph (0.1.15) unstable; urgency=medium
 
   * `listReviewsByActor` drops review records that name no book. Production

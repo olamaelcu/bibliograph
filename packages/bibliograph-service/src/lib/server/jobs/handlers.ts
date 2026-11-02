@@ -15,6 +15,9 @@ import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
 import { backfillIsbnForEdition } from './isbn-backfill';
+import { fetchEditionForUri } from '../shelving/edition-fetch';
+import { catalogUriForMirroredRecord } from '../shelving/pending-editions';
+import { enqueueShelvingEditionBackfill } from './enqueue';
 import {
   EDITION_WORK_LINK_COLLECTION,
   applyConsensus,
@@ -495,7 +498,59 @@ export async function syncIngestPublishers(items: PublisherItem[], log: Logger):
   await ingestPublisherBatch(items, log, 1);
 }
 
-// -- TAP record handlers (unchanged) --
+// -- TAP record handlers --
+// Mirroring a record comes first; anything derived from it (catalog fills,
+// edition→work votes) runs after the write and never fails it.
+
+/**
+ * Fill one catalog edition that a shelf record points at.
+ *
+ * The ingest path enqueues this when a mirrored record names an edition the
+ * `editions` table does not hold; the manual `backfill:shelving-editions` script
+ * reaches the same rows, but only when someone runs it. The row is re-checked
+ * here because a search ingest or an earlier job may have filled it first.
+ *
+ * A provider miss is a normal outcome, not a failure: `bh.*` editions have no
+ * by-id provider, and an id can be genuinely absent upstream. Retrying would
+ * only burn the attempt budget, so the job ends quietly and the next shelving
+ * event for that edition asks again.
+ */
+export const backfillShelvingEditionTask: Task = async (payload, helpers) => {
+  const { uri } = payload as { uri: string };
+  const log = helpers.logger as unknown as Logger;
+  const [existing] = await db.select({ uri: editions.uri }).from(editions).where(eq(editions.uri, uri)).limit(1);
+  if (existing) return;
+
+  const item = await fetchEditionForUri(uri, log, AbortSignal.timeout(15_000));
+  if (!item) {
+    log.info({ stage: 'backfill-shelving-edition', uri }, 'no provider record for edition; leaving catalog as is');
+    return;
+  }
+  log.info({ stage: 'backfill-shelving-edition', uri }, 'filling catalog edition from its provider');
+  await ingestEditionBatch([item], log, helpers.job.attempts);
+};
+
+/**
+ * Enqueue a fill for every candidate the catalog is missing. Batched so a tap
+ * page costs one existence query instead of one per event; failures are logged
+ * and swallowed because mirroring the record matters more than filling behind it.
+ */
+async function enqueueMissingEditions(candidates: Set<string>, log: Logger): Promise<void> {
+  if (candidates.size === 0) return;
+  try {
+    const uris = [...candidates];
+    const known = new Set(
+      (await db.select({ uri: editions.uri }).from(editions).where(inArray(editions.uri, uris))).map((row) => row.uri),
+    );
+    const missing = uris.filter((uri) => !known.has(uri));
+    for (const uri of missing) await enqueueShelvingEditionBackfill(uri);
+    if (missing.length > 0) {
+      log.info({ stage: 'enqueue-missing-editions', missing: missing.length, seen: uris.length }, 'queued catalog fills');
+    }
+  } catch (err: unknown) {
+    log.warn({ err, count: candidates.size }, 'enqueue-missing-editions failed; mirror left as is');
+  }
+}
 
 export const tapRecordUpsertTask: Task = async (payload, helpers) => {
   const { uri, did, rkey, value } = payload as { uri: string; did: string; rkey: string; value: Record<string, unknown> };
@@ -514,6 +569,11 @@ export const tapRecordUpsertTask: Task = async (payload, helpers) => {
       target: records.uri,
       set: { value: value as never, indexedAt: new Date() },
     });
+
+    // A shelf record for an edition the catalog has never ingested renders as
+    // an empty shelf, so the fill has to start here rather than in a report.
+    const candidate = catalogUriForMirroredRecord(collection, rkey, value);
+    if (candidate) await enqueueMissingEditions(new Set([candidate]), log);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-upsert', err, uri }, 'tap upsert failed; writing to DLQ');
@@ -560,6 +620,14 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
       target: records.uri,
       set: { value: sql`excluded.value`, indexedAt: new Date() },
     });
+
+    const candidates = new Set<string>();
+    for (const it of items) {
+      const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
+      const uri = catalogUriForMirroredRecord(collection, it.rkey, it.value);
+      if (uri) candidates.add(uri);
+    }
+    await enqueueMissingEditions(candidates, log);
 
     // Edition→work votes are only useful in `edition_work_votes`, not in the
     // generic `records` mirror, so materialize them and let consensus decide
@@ -686,6 +754,7 @@ export const tapTaskList: TaskList = {
   'tap-record-delete': tapRecordDeleteTask,
   'tap-record-upsert-batch': tapRecordUpsertBatchTask,
   'tap-record-delete-batch': tapRecordDeleteBatchTask,
+  'backfill-shelving-edition': backfillShelvingEditionTask,
 };
 
 export const allTaskList: TaskList = {

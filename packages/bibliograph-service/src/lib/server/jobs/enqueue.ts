@@ -89,3 +89,17 @@ export async function enqueueIsbnBackfill(uri: string, rkey: string): Promise<vo
     maxAttempts: 5,
   });
 }
+
+/**
+ * Ask for a catalog edition a shelf record references but the catalog lacks.
+ * The jobKey keeps a relaunch from stacking duplicates while one is still
+ * pending, and the task itself re-checks the row, so a later ingest winning the
+ * race is not an error.
+ */
+export async function enqueueShelvingEditionBackfill(uri: string): Promise<void> {
+  const utils = await getUtils();
+  await utils.addJob('backfill-shelving-edition', { uri }, {
+    jobKey: `backfill-shelving-edition:${uri}`,
+    maxAttempts: 3,
+  });
+}
