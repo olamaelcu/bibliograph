@@ -1,3 +1,32 @@
+bibliograph (0.1.12) unstable; urgency=medium
+
+  * Add `net.olamaelcu.livtet.biblio.getShelversOfBook`: the DIDs that put a
+    catalog book on a shelf, without reading a single shelving record. A
+    `bookShelving` record's rkey is derived from the book URI, so the record
+    URI alone names both the shelver (its authority) and the book (its rkey) —
+    which is why `getShelvingOfBook` needs a `did` and this one does not.
+  * Answer it from the local mirror first and Constellation once the mirror
+    runs dry, the same cascade the other shelving reads use. A short mirror
+    page finishes from Constellation in the same response because the mirror
+    is legitimately empty while the index holds every record; the returned
+    cursor names its tier (`tap:` offset, `con:` opaque) so a continuation
+    resumes where the page it follows left off.
+  * Re-check every record in the shared derivation (`shelving/shelvers.ts`)
+    instead of trusting the caller: the DID comes from the record URI, and the
+    collection and rkey are matched again, so a mirror row selected on a jsonb
+    path or a backlink from another book cannot be reported as a shelver.
+  * Ship the schema with this release so the resolved chain
+    (`did:web` -> `#atproto_pds` -> `com.atproto.sync.getRecord`) serves
+    `com.atproto.lexicon.schema/net.olamaelcu.livtet.biblio.getShelversOfBook`
+    once the lexicon repo is republished, and the query appears on `/queries`
+    through the registry the router maintains.
+  * Drop the duplicate `SHELVING_COLLECTION` literal and the hand-written
+    `bookShelving:book.uri` source string from the router; both now come from
+    `shelving/shelvers.ts`, so the string a backlink is queried with and the
+    collection rows are matched against cannot drift apart.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 02 Nov 2026 10:09:11 -0500
+
 bibliograph (0.1.11) unstable; urgency=medium
 
   * Point both Constellation backlink reads at the field the records actually

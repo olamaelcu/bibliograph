@@ -26,6 +26,7 @@ import {
   NetOlamaelcuLivtetBiblioListShelves,
   NetOlamaelcuLivtetBiblioListBooksOnShelf,
   NetOlamaelcuLivtetBiblioGetShelvingOfBook,
+  NetOlamaelcuLivtetBiblioGetShelversOfBook,
   NetOlamaelcuLivtetBiblioListShelvesWithBooks,
   NetOlamaelcuLivtetBiblioGetImageForBook,
   NetOlamaelcuLivtetBiblioGetImageForContributor,
@@ -71,7 +72,13 @@ import { allowRequest } from './rate-limit';
 import { fetchEditionForUri } from './shelving/edition-fetch';
 import { ingestEditionBatch } from './jobs/handlers';
 import type { EditionItem } from './search/types';
-import { getBacklinks } from './constellation/client';
+import { getBacklinks, type BacklinkPage } from './constellation/client';
+import {
+  collectShelverDids,
+  SHELVING_BACKLINK_SOURCE,
+  SHELVING_COLLECTION,
+  shelvingRkeyFor,
+} from './shelving/shelvers';
 import {
   hydrateShelvesByUri,
   hydrateBooksByUri,
@@ -873,7 +880,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
       if (merged.length < limit && !cursor) {
         const backlinks = await getBacklinks({
           subject: bookUri,
-          source: 'net.olamaelcu.livtet.biblio.bookShelving:book.uri',
+          source: SHELVING_BACKLINK_SOURCE,
           did: did as string,
           limit,
         });
@@ -964,6 +971,81 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ err, did, bookUri }, 'getShelvingOfBook: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+/**
+ * `getShelversOfBook` answers "who put this book on a shelf" without reading a
+ * single shelving record: the bookShelving rkey is derived from the book URI,
+ * so the record URI alone names both the shelver (its authority) and the book
+ * (its rkey).
+ *
+ * The tiers mirror `getShelvingOfBook` — local mirror first, Constellation once
+ * it runs dry — but the mirror cannot be paged into on its own: it is legitimately
+ * empty while Constellation holds every record. A short mirror page therefore
+ * finishes from Constellation in the same response, and only the cursor of the
+ * tier that is still holding records is returned.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioGetShelversOfBook.mainSchema, {
+  async handler({ params }) {
+    const bookUri = params.bookUri as string;
+    const { limit = 50 } = params;
+    const shelvingRkey = (params.shelvingRkey as string | undefined) ?? shelvingRkeyFor(bookUri);
+    try {
+      const resume = parseCursor(params.cursor);
+      if (resume?.tier === 'con') {
+        const page = await getBacklinks({
+          subject: bookUri,
+          source: SHELVING_BACKLINK_SOURCE,
+          limit,
+          cursor: resume.value,
+        });
+        return json({
+          bookUri,
+          dids: collectShelverDids(shelvingRkey, page.records),
+          cursor: page.cursor ? `con:${page.cursor}` : undefined,
+        } as NetOlamaelcuLivtetBiblioGetShelversOfBook.$output);
+      }
+
+      const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
+      const mirror = await db
+        .select({ uri: records.uri })
+        .from(records)
+        .where(
+          and(
+            eq(records.collection, SHELVING_COLLECTION),
+            eq(records.rkey, shelvingRkey),
+            sql`${records.value}->'book'->>'uri' = ${bookUri}`,
+          ),
+        )
+        .orderBy(records.uri)
+        .offset(offset)
+        .limit(limit + 1);
+
+      // One row past the limit means the mirror alone can fill this page; a
+      // short page means it is exhausted and Constellation carries the rest.
+      if (mirror.length > limit) {
+        return json({
+          bookUri,
+          dids: collectShelverDids(shelvingRkey, mirror.slice(0, limit)),
+          cursor: `tap:${offset + limit}`,
+        } as NetOlamaelcuLivtetBiblioGetShelversOfBook.$output);
+      }
+
+      const remaining = limit - mirror.length;
+      const page: BacklinkPage = remaining > 0
+        ? await getBacklinks({ subject: bookUri, source: SHELVING_BACKLINK_SOURCE, limit: remaining })
+        : { records: [] };
+      return json({
+        bookUri,
+        dids: collectShelverDids(shelvingRkey, [...mirror, ...page.records]),
+        cursor: page.cursor ? `con:${page.cursor}` : undefined,
+      } as NetOlamaelcuLivtetBiblioGetShelversOfBook.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, bookUri, shelvingRkey }, 'getShelversOfBook: failed');
       return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
     }
   },
@@ -1467,7 +1549,6 @@ const FEED_REVIEW_COLLECTIONS = [
 	'net.olamaelcu.livtet.bookReview',
 	'net.olamaelcu.livtet.biblio.bookReview',
 ];
-const SHELVING_COLLECTION = 'net.olamaelcu.livtet.biblio.bookShelving';
 // Bookhive's per-user book records carry both a review and a reading status, so
 // they read as either kind of activity depending on the record.
 const FEED_COLLECTIONS = [...FEED_REVIEW_COLLECTIONS, SHELVING_COLLECTION, BOOKHIVE_BOOK_COLLECTION];
