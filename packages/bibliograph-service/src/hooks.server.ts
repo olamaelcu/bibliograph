@@ -24,7 +24,7 @@ function needsViewer(pathname: string): boolean {
   );
 }
 
-export const handle: import('@sveltejs/kit').Handle = async ({ event, resolve }) => {
+export const handle: import('@sveltejs/kit/hooks').Handle = async ({ event, resolve }) => {
   const labels = {
     method: event.request.method,
     path: normalizePath(event.url.pathname),
