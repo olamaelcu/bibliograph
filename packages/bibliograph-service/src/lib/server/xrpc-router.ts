@@ -204,7 +204,16 @@ async function viewerDidFromRequest(request: Request): Promise<string | null> {
 }
 
 export const router = new XRPCRouter({
-  middlewares: [accessLog(log), cors(), rateLimitMiddleware(log)],
+  // `user-agent` is a forbidden header name for the browser's own fetch, but
+  // the landing's XRPC client sets it explicitly, so the browser lists it in
+  // `Access-Control-Request-Headers` and refuses the response when the
+  // preflight does not echo it back. The library's default allowlist carries
+  // only the atproto headers, hence the explicit addition here.
+  middlewares: [
+    accessLog(log),
+    cors({ allowedHeaders: ['user-agent'] }),
+    rateLimitMiddleware(log),
+  ],
   handleHealthCheck: async () => json({ status: 'ok' }),
 });
 
