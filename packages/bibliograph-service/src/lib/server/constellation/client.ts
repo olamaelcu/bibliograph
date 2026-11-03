@@ -12,7 +12,7 @@ export type ShelvingSource =
   | 'net.olamaelcu.livtet.biblio.bookShelving:shelf';
 /** `buzz.bookhive.book` records ref their catalog record through `hiveBookUri`. */
 export type BookhiveSource = typeof BOOKHIVE_BACKLINK_SOURCE;
-export type ReviewSource = 'net.olamaelcu.livtet.bookReview:book.uri' | BookhiveSource;
+export type ReviewSource = 'net.olamaelcu.livtet.biblio.bookReview:book.uri' | BookhiveSource;
 export type SocialSource = 'net.olamaelcu.livtet.biblio.social:follow';
 export type BacklinkSource = ShelvingSource | ReviewSource | SocialSource;
 

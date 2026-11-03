@@ -1,3 +1,30 @@
+bibliograph (0.2.3) unstable; urgency=medium
+
+  * Reviews are read from `net.olamaelcu.livtet.biblio.bookReview` only. The
+    pre-`biblio` collection is gone from `listReviewsByActor`,
+    `getReviewsByBook`, the feed backlink source and the TAP mirror filter, and
+    its stale generated lexicon type is deleted: Livtet's sign-in migration
+    rewrites those records and deletes the old copies, so a legacy row still in
+    the mirror is a backlog item, not a second source of truth. Every review
+    was previously listed twice — once per collection — which doubled a
+    profile and every book page.
+  * A Bookhive-derived review view always carries `createdAt`. The field is
+    required by the lexicon, and a client that parses a review list as one
+    object lost the whole list over the single view that omitted it. A Bookhive
+    book record with neither review text nor a rating is no longer listed as a
+    blank review: it is a shelving entry.
+  * An author-keyed read no longer skips a record the mirror stored without its
+    body. A TAP create/update event can arrive with a cid and no decoded
+    record, which was mirrored as `{}`; the row rendered as nothing *and* its
+    uri counted as already seen, so the PDS fallback never re-read the live
+    record. The fallback is now keyed on what actually rendered and refills the
+    empty row it heals.
+  * The TAP upsert paths recover a missing record body from the owner's repo
+    instead of writing `{}`, capped per batch, and leave the existing row
+    untouched when the repo cannot supply one.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 03 Nov 2026 18:02:00 -0500
+
 bibliograph (0.2.2) unstable; urgency=medium
 
   * `getImageForBook` resolves the uri before validating its rkey. Validation

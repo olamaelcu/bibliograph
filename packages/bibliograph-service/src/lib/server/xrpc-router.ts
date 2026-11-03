@@ -1352,7 +1352,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
         .from(records)
         .where(
           sql`(
-            ${records.collection} IN ('net.olamaelcu.livtet.bookReview', 'net.olamaelcu.livtet.biblio.bookReview')
+            ${records.collection} = ${REVIEW_COLLECTION}
             AND (${records.value}->>'book' = ${bookUri} OR ${records.value}->'book'->>'uri' = ${bookUri} OR ${records.value}->'book'->>'ref' = ${bookUri})
           ) OR (
             ${records.collection} = ${BOOKHIVE_BOOK_COLLECTION}
@@ -1375,7 +1375,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
       // Mirrored reviews are what TAP has seen; the network tier catches reviews
       // written since (or by repos no TAP instance follows) on the first page.
       if (subject && reviews.length < limit && offset === 0) {
-        const known = new Set(reviews.map((r) => r.uri));
+        const known = new Set(reviews.map((review) => review.uri));
         const external = await collectBookhiveReviews({ subject, bookUri, limit: limit - reviews.length });
         for (const view of external.reviews) {
           if (known.has(view.uri) || reviews.length >= limit) continue;
@@ -1412,6 +1412,26 @@ function reviewViewOf(row: typeof records.$inferSelect): BookReviewView | null {
   return row.collection === BOOKHIVE_BOOK_COLLECTION
     ? reviewViewFromBookhiveRow(row, bookUri)
     : reviewViewFromRow(row, bookUri);
+}
+
+/**
+ * Refill a mirror row TAP wrote without a body.
+ *
+ * A create/update event whose record failed to decode arrives with a cid and no
+ * `record`, and the consumer stored `{}` for it. That row renders as nothing, so
+ * every listing dropped the review — and because the author-keyed read treats a
+ * uri it has already seen as data, the PDS fallback skipped it too. A guarded
+ * UPDATE costs nothing when the row is fine and heals it for every read path.
+ */
+async function fillEmptyMirrorRow(row: typeof records.$inferSelect): Promise<void> {
+  try {
+    await db
+      .update(records)
+      .set({ value: row.value as never, indexedAt: new Date() })
+      .where(and(eq(records.uri, row.uri), sql`${records.value} = '{}'::jsonb`));
+  } catch (err: unknown) {
+    log.warn({ err, uri: row.uri }, 'could not refill an empty mirror row');
+  }
 }
 
 /**
@@ -1660,7 +1680,11 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
       const cursor = hasMore ? String(offset + limit) : undefined;
 
       if (!resume && reviews.length < limit) {
-        const seen = new Set(page.map((row) => row.uri));
+        // Seeded from what actually rendered, not from every row scanned. A row
+        // TAP stored without a body (`{}`) renders nothing, and keying `seen`
+        // on its uri let the fallback skip the live record the repo still
+        // serves — the review stayed invisible even though this scan read it.
+        const seen = new Set(reviews.map((view) => view.uri));
         try {
           const { client } = await pdsClient(did, { signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS) });
           for (const collection of sources) {
@@ -1681,8 +1705,13 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
             for (const record of parsed.data.records) {
               if (seen.has(record.uri) || reviews.length >= limit) continue;
               seen.add(record.uri);
-              const view = reviewViewOf(pdsRecordRow(did, collection, record));
-              if (view) reviews.push(view);
+              const row = pdsRecordRow(did, collection, record);
+              const view = reviewViewOf(row);
+              if (!view) continue;
+              reviews.push(view);
+              // The mirror copy of this uri has no body, or it would have
+              // rendered above; write what the repo just gave us back.
+              await fillEmptyMirrorRow(row);
             }
           }
         } catch (err: unknown) {
@@ -1690,7 +1719,16 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
         }
       }
 
-      return json({ reviews, cursor } as unknown as NetOlamaelcuLivtetBiblioListReviewsByActor.$output);
+      return json({
+        // A Bookhive book record is mirrored because it carries the review and
+        // rating inline; one with neither is a shelving entry, and listing it
+        // here put a blank review card on the author's profile. Native review
+        // records need no check — their collection only holds reviews.
+        reviews: reviews.filter(
+          (view) => view.record.text !== '' || typeof view.record.rating === 'number',
+        ),
+        cursor,
+      } as unknown as NetOlamaelcuLivtetBiblioListReviewsByActor.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ err, did }, 'listReviewsByActor: failed');
@@ -1829,8 +1867,12 @@ function reviewViewFromBookhiveRow(row: typeof records.$inferSelect, bookUri: st
     $type: 'net.olamaelcu.livtet.biblio.bookReview',
     text: review?.text ?? '',
     book: bookUri,
+    // `createdAt` is required by the lexicon, and a client that parses the list
+    // as one object loses every review over the single record that omits it.
+    // Bookhive keeps the review as a plain string, so the book record's own
+    // `createdAt` is the honest stand-in — never the mirror's index time.
+    createdAt: review?.createdAt ?? (row.recordCreatedAt || row.createdAt.toISOString()),
   };
-  if (review?.createdAt) record.createdAt = review.createdAt;
   if (review?.rating !== undefined) record.rating = review.rating;
   return { uri: row.uri, did: row.did, record };
 }
@@ -1995,10 +2037,12 @@ async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, book
 // Collection sets used by the feed skeletons. Reviews are the primary feed
 // content; shelving records are interleaved so followers see what people are
 // reading (and on which shelf), not only what they finished and reviewed.
-const FEED_REVIEW_COLLECTIONS = [
-	'net.olamaelcu.livtet.bookReview',
-	'net.olamaelcu.livtet.biblio.bookReview',
-];
+// The one review collection. The pre-`biblio` namespace is not read here any
+// more: Livtet's sign-in migration rewrites those records onto this collection
+// and deletes the old copies, so a legacy row still in the mirror is a backlog
+// item, not a second source of truth.
+const REVIEW_COLLECTION = 'net.olamaelcu.livtet.biblio.bookReview';
+const FEED_REVIEW_COLLECTIONS = [REVIEW_COLLECTION];
 // Bookhive's per-user book records carry both a review and a reading status, so
 // they read as either kind of activity depending on the record.
 const FEED_COLLECTIONS = [...FEED_REVIEW_COLLECTIONS, SHELVING_COLLECTION, BOOKHIVE_BOOK_COLLECTION];
@@ -2309,7 +2353,7 @@ router.addQuery(getFeedSkeletonSchema, {
       try {
         const backlinks = await getBacklinks({
           subject: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.edition/${rkey}`,
-          source: 'net.olamaelcu.livtet.bookReview:book.uri',
+          source: 'net.olamaelcu.livtet.biblio.bookReview:book.uri',
           limit,
           cursor,
         });

@@ -48,7 +48,7 @@ test('a Bookhive record that only rates a book is not shelving', () => {
 
 test('reviews and unknown collections ask for nothing', () => {
   assert.equal(
-    catalogUriForMirroredRecord('net.olamaelcu.livtet.bookReview', 'rev', { book: EDITION }),
+    catalogUriForMirroredRecord('net.olamaelcu.livtet.biblio.bookReview', 'rev', { book: EDITION }),
     null,
   );
   assert.equal(catalogUriForMirroredRecord('net.olamaelcu.livtet.biblio.shelf', 'read', { name: 'Read' }), null);

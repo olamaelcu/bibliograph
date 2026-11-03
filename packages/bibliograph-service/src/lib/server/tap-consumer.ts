@@ -36,10 +36,12 @@ const tap = new TapClient({
 });
 
 const NET_PREFIX = 'net.olamaelcu.livtet.biblio.';
-const REVIEW_COLLECTION = 'net.olamaelcu.livtet.bookReview';
 // Bookhive users' own book records carry their reviews and reading status, so
 // mirroring them is what lets those reviews show up in Bibliograph feeds.
-const MIRRORED_COLLECTIONS = new Set([REVIEW_COLLECTION, BOOKHIVE_BOOK_COLLECTION]);
+// Reviews need no entry here: the current collection lives under `NET_PREFIX`.
+// The pre-`biblio` one is not mirrored at all — Livtet's sign-in migration owns
+// moving those records forward, and the AppView stopped reading them.
+const MIRRORED_COLLECTIONS = new Set([BOOKHIVE_BOOK_COLLECTION]);
 
 type UpsertBufferItem = TapRecordUpsertItem & { ack: () => Promise<void> };
 type DeleteBufferItem = { uri: string; ack: () => Promise<void> };

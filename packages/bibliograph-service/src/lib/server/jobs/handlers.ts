@@ -575,27 +575,63 @@ async function enqueueMissingEditions(candidates: Set<string>, log: Logger): Pro
   }
 }
 
+/**
+ * The record body for a TAP event, asked of the repo when the event has none.
+ *
+ * A create/update event may arrive with a cid and no decoded record (the
+ * indexer documents that), and this pipeline used to mirror `{}` for it. An
+ * empty row is worse than a missing one: every listing renders nothing from it,
+ * and the author-keyed read treats a uri it has already seen as data, so the
+ * live record never reached the response. Missing bodies are therefore fetched
+ * from the owner's repo, and an unrecoverable one is left unwritten — a
+ * redelivery or the next update fills it.
+ */
+async function withRecordBody(item: MirrorRowInput): Promise<MirrorRowInput | null> {
+  if (Object.keys(item.value).length > 0) return item;
+  const parts = parseRecordUri(item.uri);
+  if (!parts) return null;
+  const fetched = await readRepoRecord(parts);
+  return fetched ? { ...item, value: fetched.value } : null;
+}
+
+/**
+ * How many missing bodies one batch reads back from repos.
+ *
+ * A TAP instance that stops decoding bodies would otherwise turn every batch
+ * into `TAP_BATCH_SIZE` sequential PDS round trips; the rest of such a batch is
+ * skipped and reported instead.
+ */
+const MAX_BODY_RECOVERIES_PER_BATCH = 8;
+
 export const tapRecordUpsertTask: Task = async (payload, helpers) => {
   const { uri, did, rkey, value } = payload as { uri: string; did: string; rkey: string; value: Record<string, unknown> };
   const collection = uri.split('/').slice(-2, -1)[0] ?? '';
   const log = helpers.logger as unknown as Logger;
   try {
+    const row = await withRecordBody({ uri, did, rkey, value });
+    if (!row) {
+      log.warn(
+        { stage: 'tap-record-upsert', uri },
+        'event carried no record body and the repo could not supply one; leaving the mirror alone',
+      );
+      return;
+    }
     await db.insert(records).values({
       uri,
       cid: 'bafyplaceholder',
       did,
       rkey,
       collection,
-      value: value as never,
+      value: row.value as never,
       createdAt: new Date(),
     }).onConflictDoUpdate({
       target: records.uri,
-      set: { value: value as never, indexedAt: new Date() },
+      set: { value: row.value as never, indexedAt: new Date() },
     });
 
     // A shelf record for an edition the catalog has never ingested renders as
     // an empty shelf, so the fill has to start here rather than in a report.
-    const candidate = catalogUriForMirroredRecord(collection, rkey, value);
+    const candidate = catalogUriForMirroredRecord(collection, rkey, row.value);
     if (candidate) await enqueueMissingEditions(new Set([candidate]), log);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
