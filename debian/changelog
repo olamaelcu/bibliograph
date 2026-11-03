@@ -1,3 +1,26 @@
+bibliograph (0.2.0) unstable; urgency=medium
+
+  * Canonical book identity. Edition uris are provider namespaces (`ol.`,
+    `gb.`, `bh.`, `isbndb.`), so one book arrives as several rows, and a
+    librarian merge deletes the losers — which left every shelving row, review
+    and cached client link pointing at a uri that no longer existed, and let the
+    next ingest of that provider recreate the duplicate as a new row.
+  * `editions.tid` is the platform-unique key for a book: an ATProto TID minted
+    by the `editions_next_tid()` column default, so every insert path gets one
+    without knowing about it. `UNIQUE`, so "one record per book" is enforced by
+    the database rather than assumed.
+  * `edition_aliases` keeps the uris a merge retired, pointing at the surviving
+    book's tid and cascading away with it. `edition-lookup.ts` is the single
+    resolver every reader now uses: hydration, `getBooks` (one `bookView` per
+    book instead of one per uri), `getImageForBook`, the Bookhive-subject
+    lookup and the edition page all answer a retired uri with its book.
+  * The merge writes aliases inside its transaction before deleting the losers,
+    and `ingestEditionBatch` skips aliased uris, so a re-ingest cannot undo a
+    merge. Migration 0020 backfills existing rows in (indexed_at, uri) order and
+    is safe to re-run.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 03 Nov 2026 12:43:31 -0500
+
 bibliograph (0.1.26) unstable; urgency=medium
 
   * Emit Google Books covers on the publisher path. `/books/content` answers 403
