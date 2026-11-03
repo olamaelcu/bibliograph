@@ -1,3 +1,18 @@
+bibliograph (0.1.26) unstable; urgency=medium
+
+  * Emit Google Books covers on the publisher path. `/books/content` answers 403
+    to datacenter IPs while `/books/publisher/content` serves the same image,
+    and both this host and the Livtet cover proxy are datacenter hosts, so
+    every Google cover URL the service handed out failed to fetch even though a
+    residential browser loaded it fine. `datacenterCoverUrl` rewrites the host
+    and path (and upgrades `http:`), passing non-Google and already-rewritten
+    URLs through untouched.
+  * Applied on the read side in `getImageForBook`, so stored rows are covered
+    without a backfill, and on every write path that produces a Google URL:
+    `enrichEditions`, the cover backfill job and `ingestEditionBatch`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 03 Nov 2026 11:53:15 -0500
+
 bibliograph (0.1.25) unstable; urgency=medium
 
   * Index `editions.rkey`. Catalog work reaches editions by `rkey` rather than
