@@ -1,7 +1,8 @@
 import { searchService } from '$lib/server/xrpc-router';
-import { fail, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import { deleteEditionAndLinkedWork } from '$lib/server/catalog-delete';
 import { isAdministrator } from '$lib/server/labeler/librarian';
+import { allowRequest } from '$lib/server/rate-limit';
 import type { PageServerLoad } from './$types';
 import { workRkey } from '$lib/edition-votes';
 
@@ -21,7 +22,22 @@ const ITEM_TYPE: Record<SearchKind, string> = {
   publishers: 'community.lexicon.book.publisher',
 };
 
-export const load: PageServerLoad = async ({ url, locals }) => {
+/** Per-IP budget for the storefront search page, in requests per minute. */
+const SEARCH_PAGE_RPM = 10;
+
+export const load: PageServerLoad = async ({
+  url,
+  locals,
+  getClientAddress,
+}) => {
+  // This page calls `searchService` directly in SSR, bypassing the XRPC
+  // middleware chain and its limiter. Without this guard the storefront is an
+  // unmetered path to the paid upstream search providers (Google Books,
+  // ISBNdb, OpenLibrary, Wikidata), so it gets a tighter budget than the
+  // XRPC default.
+  if (!allowRequest(getClientAddress(), 'page:/search', SEARCH_PAGE_RPM)) {
+    throw error(429, 'Too many searches. Try again in a minute.');
+  }
   const viewerDid = locals.viewer?.did ?? null;
   const canDelete = viewerDid ? await isAdministrator(viewerDid) : false;
   const rawKind = url.searchParams.get('kind');

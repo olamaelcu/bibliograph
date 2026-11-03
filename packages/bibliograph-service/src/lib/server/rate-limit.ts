@@ -28,9 +28,14 @@ function keyFor(ip: string, nsid: string): string {
   return `${ip}::${nsid}`;
 }
 
-function takeTokens(key: string, nsid: string, cost: number): boolean {
+function takeTokens(
+  key: string,
+  nsid: string,
+  cost: number,
+  rpmOverride?: number,
+): boolean {
   const now = Date.now();
-  const rpm = rpmFor(nsid);
+  const rpm = rpmOverride ?? rpmFor(nsid);
   const capacity = rpm;
   const refillPerMs = rpm / 60_000;
 
@@ -51,9 +56,18 @@ function takeTokens(key: string, nsid: string, cost: number): boolean {
 /**
  * Returns true if the request is allowed (and consumes a token); false if
  * rate-limited.
+ *
+ * `rpmOverride` replaces the NSID-derived budget for callers that need a
+ * tighter cap than the XRPC defaults — the storefront `/search` page uses it
+ * so the page cannot become an unmetered path to the paid upstream search
+ * providers.
  */
-export function allowRequest(ip: string, nsid: string): boolean {
-  return takeTokens(keyFor(ip, nsid), nsid, 1);
+export function allowRequest(
+  ip: string,
+  nsid: string,
+  rpmOverride?: number,
+): boolean {
+  return takeTokens(keyFor(ip, nsid), nsid, 1, rpmOverride);
 }
 
 /** For tests: reset all buckets. */
