@@ -1,3 +1,15 @@
+bibliograph (0.2.2) unstable; urgency=medium
+
+  * `getImageForBook` resolves the uri before validating its rkey. Validation
+    used to run first, so a retired uri — a legacy `gb-…` key, an old
+    collection, a foreign DID, or an edition a merge deleted — was rejected as
+    an invalid rkey while the catalog could serve its book's cover perfectly
+    well. The 400 is still the answer for a rkey no provider could ever have
+    written; it is now only given once the catalog has confirmed it has no such
+    book.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 03 Nov 2026 13:12:29 -0500
+
 bibliograph (0.2.1) unstable; urgency=medium
 
   * Retire the book uris older records still name. Livtet wrote shelving and

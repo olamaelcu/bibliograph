@@ -901,31 +901,33 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
       return Response.json({ error: 'InvalidRequest', message: 'uri is required' }, { status: 400 });
     }
     const rkey = uri.split('/').pop() ?? '';
-    const isOl = rkey.startsWith('ol.');
-    const isGb = rkey.startsWith('gb.');
-    if (isOl) {
-      try { olidFromEditionRkey(rkey); } catch {
-        return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
-      }
-    } else if (isGb) {
-      if (!isGbRkey(rkey)) {
-        return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
-      }
-    } else if (isBhRkey(rkey)) {
-      // `bh.` editions are Bookhive catalog mirrors. Their cover comes from the
-      // catalog record at ingest, so the row is the whole answer: rejecting the
-      // rkey sent every Bookhive cover down the caller's own record-read
-      // fallback — one extra PDS read per tile — and the backfill below, which
-      // only knows how to ask OpenLibrary and Google Books, can never serve
-      // them.
-    } else {
-      return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
-    }
 
-    // The cover is the book's, not the uri's: a uri a merge retired answers with
-    // the surviving record's cover instead of a 404 that blanks a shelf tile.
+    // The cover is the book's, not the uri's. Resolving first is what lets a uri
+    // the catalog retired still answer — a legacy key (`gb-b9AOEAAAQBAJ`), an old
+    // collection, a foreign DID or a merged-away edition has no valid provider
+    // rkey of its own, and rejecting it before the lookup blanked the tile for a
+    // book the catalog can serve perfectly well.
     const row = (await resolveEditions([uri])).get(uri);
     if (!row) {
+      const isOl = rkey.startsWith('ol.');
+      const isGb = rkey.startsWith('gb.');
+      if (isOl) {
+        try { olidFromEditionRkey(rkey); } catch {
+          return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
+        }
+      } else if (isGb) {
+        if (!isGbRkey(rkey)) {
+          return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
+        }
+      } else if (!isBhRkey(rkey)) {
+        // `bh.` editions are Bookhive catalog mirrors. Their cover comes from the
+        // catalog record at ingest, so the row is the whole answer: rejecting the
+        // rkey sent every Bookhive cover down the caller's own record-read
+        // fallback — one extra PDS read per tile — and the backfill below, which
+        // only knows how to ask OpenLibrary and Google Books, can never serve
+        // them.
+        return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
+      }
       return Response.json({ error: 'RecordNotFound', message: `no edition at ${uri}` }, { status: 404 });
     }
     if (row.coverImageUrl) {
