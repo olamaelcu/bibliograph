@@ -41,6 +41,15 @@ export interface NormalizedBookhiveBook {
   editionUri: string | null;
   review: { text: string; rating?: number; createdAt?: string } | null;
   shelf: BookhiveShelf | null;
+  /**
+   * Book metadata the record carries inline. Used to render the shelf before
+   * ingestion has mirrored the catalog record into an edition row.
+   */
+  title: string | null;
+  authors: string | null;
+  cover: { cid: string; mimeType: string } | null;
+  startedAt?: string;
+  finishedAt?: string;
 }
 
 export function shelfForBookhiveStatus(status: unknown): BookhiveShelf | null {
@@ -57,6 +66,27 @@ function subjectFor(value: Record<string, unknown>): string | null {
     return bookhiveCatalogUri(value.hiveId);
   }
   return null;
+}
+
+/** Non-empty string, or null — Bookhive omits fields it has nothing for. */
+function textOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/**
+ * `cover` is an atproto blob, so the CID lives under `ref.$link` — the value the
+ * PDS needs to serve the image back. A blob without a media type cannot be
+ * rendered, so it normalizes to null rather than to a half-usable object.
+ */
+function coverFor(value: unknown): { cid: string; mimeType: string } | null {
+  if (!value || typeof value !== 'object') return null;
+  const blob = value as Record<string, unknown>;
+  const ref = blob.ref;
+  const cid = ref && typeof ref === 'object' ? (ref as Record<string, unknown>).$link : undefined;
+  const mimeType = blob.mimeType;
+  return typeof cid === 'string' && cid !== '' && typeof mimeType === 'string' && mimeType !== ''
+    ? { cid, mimeType }
+    : null;
 }
 
 export function normalizeBookhiveBook(value: unknown): NormalizedBookhiveBook {
@@ -78,7 +108,20 @@ export function normalizeBookhiveBook(value: unknown): NormalizedBookhiveBook {
         ...(createdAt ? { createdAt } : {}),
       };
 
-  return { subjectUri, editionUri, review, shelf: shelfForBookhiveStatus(v.status) };
+  const startedAt = textOrNull(v.startedAt);
+  const finishedAt = textOrNull(v.finishedAt);
+
+  return {
+    subjectUri,
+    editionUri,
+    review,
+    shelf: shelfForBookhiveStatus(v.status),
+    title: textOrNull(v.title),
+    authors: textOrNull(v.authors),
+    cover: coverFor(v.cover),
+    ...(startedAt ? { startedAt } : {}),
+    ...(finishedAt ? { finishedAt } : {}),
+  };
 }
 
 /**

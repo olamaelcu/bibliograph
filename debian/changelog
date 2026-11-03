@@ -1,3 +1,29 @@
+bibliograph (0.2.4) unstable; urgency=medium
+
+  * A Bookhive reader's profile now has shelves. Bookhive keeps the reading
+    status inline on the reader's copy of each book, so such a repo holds no
+    `...biblio.shelf` records and `listShelves`/`listShelvesWithBooks` answered
+    "no shelves" while the books sat on four shelves. The containers are
+    derived from the mirrored statuses at the URIs a Livtet shelf record would
+    have, so `listBooksOnShelf` pages them unchanged.
+  * `listReviewsByActor` filters the page window to records that are actually
+    reviews (review text or a star rating). The filter used to run after the
+    window, so six newest want-to-read rows hid every older review and a
+    profile reported "0 reviews" with a cursor.
+  * `bookShelfMetadata` carries `startedAt`/`finishedAt`, so goal progress and
+    streaks date a finished book by when it was read rather than when its
+    record was written.
+  * A Bookhive row whose `bh.` edition is not in the catalog no longer drops:
+    the view is built from the record's own title and `authors` (`bookView`
+    gains `authorNames`), and the catalog record is filled on demand through
+    the existing lazy-edition job instead of being declared unfetchable.
+  * `getImageForBook` falls back to the reader's inline cover blob when the
+    catalog edition has none, through a new `/image/bookhive/<did>/<cid>` route
+    that streams the blob from that reader's PDS (content-addressed, cached
+    immutably) — the bytes stay the reader's record, not a catalog copy.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 03 Nov 2026 18:34:12 -0500
+
 bibliograph (0.2.3) unstable; urgency=medium
 
   * Reviews are read from `net.olamaelcu.livtet.biblio.bookReview` only. The

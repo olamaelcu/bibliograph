@@ -262,6 +262,14 @@
           "maxGraphemes": 300,
           "description": "Title of the edition."
         },
+        "authorNames": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxGraphemes": 300
+          },
+          "description": "Author names as plain strings, for books whose contributors are not resolvable to records."
+        },
         "format": {
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#formatView",
@@ -443,6 +451,16 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#readingStatus",
           "description": "Reading status for this book."
+        },
+        "startedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "When the reader started the book, when known."
+        },
+        "finishedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "When the reader finished the book, when known."
         },
         "position": {
           "type": "integer",

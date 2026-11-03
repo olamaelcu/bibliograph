@@ -3,8 +3,10 @@
 // A shelf row (or a review, or a feed entry) carries a catalog URI like
 // `at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL123W`.
 // When that row is missing from `editions`, the only way to fill it is to ask
-// the provider that owns the rkey prefix — the catalog itself is not published
-// as an atproto repo, so there is no upstream record to copy.
+// the provider that owns the rkey prefix: the aggregator catalogs (OpenLibrary,
+// Google Books, ISBNdb) are not published as atproto repos, so there is nothing
+// local to copy. Bookhive's catalog *is* an atproto repo, so its editions are
+// simply read back by id.
 //
 // Every fetcher returns an `EditionItem` (`uri`, `identifiers`, `contributors`,
 // …) built for the `ingest-edition*` job, so persisting one goes through the
@@ -17,6 +19,8 @@ import { getEditionByRkey } from '../api/open-library';
 import { getEditionByVolumeId } from '../api/google-books';
 import { getEditionByIsbn } from '../api/isbndb';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
+import { catalogBookToEdition, fetchCatalogBook } from '../bookhive/catalog';
+import { hiveIdFromBhRkey, isBhRkey } from '../bookhive/keys';
 
 /** rkey of an edition URI (the last path segment). */
 export function editionRkeyOf(uri: string): string {
@@ -24,10 +28,30 @@ export function editionRkeyOf(uri: string): string {
 }
 
 /**
+ * Resolve one Bookhive edition on demand from Bookhive's own catalog.
+ *
+ * `ingest:bookhive` walks the whole catalog in bulk; this is the same mapping
+ * for the single hive id a shelf row happens to point at, so an edition does
+ * not wait for a full re-ingest to appear on a reader's shelf. The record's
+ * author names stay unref'd (see `catalogBookToEdition`), matching what the
+ * bulk ingest writes for authors it has no contributor record for.
+ *
+ * Null for an absent or unmappable record; transport errors are thrown and
+ * settled by {@link fetchEditionForUri}.
+ */
+export async function resolveBookhiveEdition(
+  rkey: string,
+  signal?: AbortSignal,
+): Promise<EditionItem | null> {
+  const rec = await fetchCatalogBook(hiveIdFromBhRkey(rkey), signal);
+  return rec ? (catalogBookToEdition(rec)?.item ?? null) : null;
+}
+
+/**
  * Fetch the edition a catalog URI points at, from the provider that owns its
- * rkey prefix. Returns null when the prefix has no provider wired (bookhive),
- * when the provider is disabled (missing API key), or when it has no record for
- * the id. Never throws: a provider outage must not fail a shelf page.
+ * rkey prefix. Returns null when the prefix has no provider wired, when the
+ * provider is disabled (missing API key), or when it has no record for the id.
+ * Never throws: a provider outage must not fail a shelf page.
  */
 export async function fetchEditionForUri(
   uri: string,
@@ -45,8 +69,9 @@ export async function fetchEditionForUri(
     if (isGbRkey(rkey)) {
       return await getEditionByVolumeId(volumeIdFromGbRkey(rkey), log, signal);
     }
-    // bookhive (`bh.*`) records have no by-id fetch: their catalogue is the
-    // `ingest:bookhive` import, not a queryable provider.
+    if (isBhRkey(rkey)) {
+      return await resolveBookhiveEdition(rkey, signal);
+    }
     log.debug({ stage: 'edition-fetch', uri, rkey }, 'no provider for edition rkey prefix');
     return null;
   } catch (err) {

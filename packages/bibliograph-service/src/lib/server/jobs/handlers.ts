@@ -533,10 +533,10 @@ export async function syncIngestPublishers(items: PublisherItem[], log: Logger):
  * reaches the same rows, but only when someone runs it. The row is re-checked
  * here because a search ingest or an earlier job may have filled it first.
  *
- * A provider miss is a normal outcome, not a failure: `bh.*` editions have no
- * by-id provider, and an id can be genuinely absent upstream. Retrying would
- * only burn the attempt budget, so the job ends quietly and the next shelving
- * event for that edition asks again.
+ * A provider miss is a normal outcome, not a failure: an id can be genuinely
+ * absent upstream, and `bh.*` ids only resolve while the Bookhive catalog still
+ * holds them. Retrying would only burn the attempt budget, so the job ends
+ * quietly and the next shelving event for that edition asks again.
  */
 export const backfillShelvingEditionTask: Task = async (payload, helpers) => {
   const { uri } = payload as { uri: string };

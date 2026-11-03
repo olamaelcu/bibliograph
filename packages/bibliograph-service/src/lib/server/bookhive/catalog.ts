@@ -48,6 +48,18 @@ export interface CatalogPage {
   cursor?: string;
 }
 
+/**
+ * One catalog record mapped for ingest, plus the author names it names.
+ *
+ * Bookhive publishes no contributor records, so the names cannot become
+ * `contributors` strongRefs without inventing refs. They travel beside the item
+ * instead, for callers that display them (`editions` has no author column).
+ */
+export interface CatalogEdition {
+  item: EditionItem;
+  authorNames: string[];
+}
+
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() !== '' ? v : undefined;
 }
@@ -122,6 +134,54 @@ export function catalogBookToEditionItem(
     contributors: contributions,
     createdAt: created.toISOString(),
   };
+}
+
+/**
+ * Pure end of {@link fetchCatalogBook}: one catalog record to the ingest item
+ * the `ingest:bookhive` script would write, plus its split author names.
+ * Returns null for a record that cannot produce an edition.
+ */
+export function catalogBookToEdition(
+  rec: CatalogBookRecord,
+  contributions: ContributionEntry[] = [],
+): CatalogEdition | null {
+  const item = catalogBookToEditionItem(rec, contributions);
+  if (!item) return null;
+  return { item, authorNames: splitAuthors(rec.authors) };
+}
+
+/**
+ * Fetch one `buzz.bookhive.catalogBook` by hive id. The hive id *is* the
+ * record's rkey, so a single `getRecord` answers it — no page walk.
+ *
+ * Null means "nothing to ingest": the catalog does not hold the record, or it
+ * holds a value that cannot produce an edition (both are a miss, not an
+ * outage). Transport failures are thrown so the caller can tell them apart.
+ */
+export async function fetchCatalogBook(
+  hiveId: string,
+  signal?: AbortSignal,
+): Promise<CatalogBookRecord | null> {
+  if (!isHiveId(hiveId)) return null;
+  const url = new URL(`${BOOKHIVE_PDS}/xrpc/com.atproto.repo.getRecord`);
+  url.searchParams.set('repo', BOOKHIVE_DID);
+  url.searchParams.set('collection', BOOKHIVE_CATALOG_COLLECTION);
+  url.searchParams.set('rkey', hiveId);
+
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: signal ?? AbortSignal.timeout(BOOKHIVE_TIMEOUT_MS),
+  });
+  if (res.status === 400) {
+    // `getRecord` reports an absent record as 400 RecordNotFound.
+    const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    if (body?.error === 'RecordNotFound') return null;
+  }
+  if (!res.ok) {
+    throw new Error(`bookhive getRecord failed: ${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { value?: unknown };
+  return parseCatalogBook(body.value);
 }
 
 /** Fetch one page of `buzz.bookhive.catalogBook` from Bookhive's PDS. */

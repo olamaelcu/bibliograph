@@ -231,7 +231,16 @@ test('resolveBookShelf: preserves uri, did, metadata, createdAt, updatedAt', () 
 const HIVE_ID = 'bk_Wf9C5GP9iEGH6hqNNtwW';
 const EDITION_URI_BH = `at://${PUBLISHER_DID}/community.lexicon.book.edition/bh.${HIVE_ID}`;
 
-function makeBookhiveRow(opts: { status?: string; hiveBookUri?: string | null } = {}): RecordRow {
+function makeBookhiveRow(
+  opts: {
+    status?: string;
+    hiveBookUri?: string | null;
+    title?: string;
+    authors?: string;
+    startedAt?: string;
+    finishedAt?: string;
+  } = {},
+): RecordRow {
   return {
     uri: 'at://did:plc:reader/buzz.bookhive.book/3lct6cguexs2p',
     cid: 'bafyplaceholder',
@@ -243,6 +252,10 @@ function makeBookhiveRow(opts: { status?: string; hiveBookUri?: string | null } 
       ...(opts.hiveBookUri === null
         ? {}
         : { hiveBookUri: opts.hiveBookUri ?? `at://did:plc:enu2j5xjlqsjaylv3du4myh4/buzz.bookhive.catalogBook/${HIVE_ID}` }),
+      ...(opts.title ? { title: opts.title } : {}),
+      ...(opts.authors ? { authors: opts.authors } : {}),
+      ...(opts.startedAt ? { startedAt: opts.startedAt } : {}),
+      ...(opts.finishedAt ? { finishedAt: opts.finishedAt } : {}),
       status: opts.status ?? 'buzz.bookhive.defs#finished',
       review: 'A good read',
       createdAt: '2026-08-26T00:00:00.000Z',
@@ -272,10 +285,66 @@ test('resolveBookShelf: bookhive reading status maps to its own shelf', () => {
   assert.equal(result.view!.shelf.name, 'Currently Reading');
 });
 
-test('resolveBookShelf: bookhive row is dropped when its edition is not in the catalog', () => {
+test('resolveBookShelf: bookhive row falls back to the record when its edition is not in the catalog', () => {
+  const result = resolveBookShelf(
+    makeBookhiveRow({ title: 'The Creative Act', authors: 'Rick Rubin' }),
+    new Map(),
+    new Map(),
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.view!.book.uri, EDITION_URI_BH);
+  assert.equal(result.view!.book.title, 'The Creative Act');
+  assert.deepEqual(result.view!.book.authorNames, ['Rick Rubin']);
+  assert.equal(result.view!.book.coverUrl, undefined);
+});
+
+test('resolveBookShelf: bookhive fallback titles only when the record has none', () => {
   const result = resolveBookShelf(makeBookhiveRow(), new Map(), new Map());
+  assert.equal(result.ok, true);
+  assert.equal(result.view!.book.title, 'Untitled');
+  assert.equal(result.view!.book.authorNames, undefined);
+});
+
+test('resolveBookShelf: bookhive fallback uri falls back to the record uri', () => {
+  const row = makeBookhiveRow({ hiveBookUri: null, title: 'No hive identity' });
+  (row.value as Record<string, unknown>).hiveId = undefined;
+  const result = resolveBookShelf(row, new Map(), new Map());
+  assert.equal(result.ok, true);
+  assert.equal(result.view!.book.uri, row.uri);
+});
+
+test('resolveBookShelf: a status-less bookhive record is owned, not shelved', () => {
+  const row = makeBookhiveRow({ title: 'Review only' });
+  (row.value as Record<string, unknown>).status = undefined;
+  const result = resolveBookShelf(row, new Map(), new Map());
   assert.equal(result.ok, false);
-  assert.equal(result.reason, 'book-not-found');
+  assert.equal(result.reason, 'shelf-not-found');
+});
+
+test('resolveBookShelf: bookhive reading dates travel in metadata, not createdAt', () => {
+  const bookMap = new Map([[EDITION_URI_BH, makeBookView(EDITION_URI_BH)]]);
+  const result = resolveBookShelf(
+    makeBookhiveRow({ startedAt: '2026-01-02T00:00:00.000Z', finishedAt: '2026-02-03T00:00:00.000Z' }),
+    bookMap,
+    new Map(),
+  );
+  assert.deepEqual(result.view!.metadata, {
+    status: 'read',
+    startedAt: '2026-01-02T00:00:00.000Z',
+    finishedAt: '2026-02-03T00:00:00.000Z',
+  });
+  assert.equal(result.view!.createdAt, '2026-08-26T00:00:00.000Z');
+});
+
+test('resolveBookShelf: a hydrated bookhive edition wins on title and gains the record author only when empty', () => {
+  const bookMap = new Map([[EDITION_URI_BH, makeBookView(EDITION_URI_BH, 'Catalog Title')]]);
+  const result = resolveBookShelf(
+    makeBookhiveRow({ title: 'Record Title', authors: 'Rick Rubin' }),
+    bookMap,
+    new Map(),
+  );
+  assert.equal(result.view!.book.title, 'Catalog Title');
+  assert.deepEqual(result.view!.book.authorNames, ['Rick Rubin']);
 });
 
 test('resolveBookShelf: bookhive row without hiveBookUri still resolves through hiveId', () => {

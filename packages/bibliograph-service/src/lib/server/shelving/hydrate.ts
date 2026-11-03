@@ -192,27 +192,54 @@ export function resolveBookShelf(
  * `metadata.status` — that is the field clients should read. The record uri is
  * the user's own book record, which is what actually places the book on their
  * shelf, so it is used as the view uri.
+ *
+ * A record whose catalog book ingestion has not mirrored yet still resolves:
+ * the book view is synthesized from the record's own title and author instead
+ * of dropping the row as `book-not-found`.
+ *
+ * A record with no status is owned, not shelved (the same rule
+ * `shelfEntryConditions` applies), and `bookShelfMetadata` requires a status, so
+ * such a record has no shelving view to answer with.
  */
 function resolveBookhiveShelf(
   row: RecordRow,
   bookMap: Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>,
 ): ResolvedBookShelf {
   const normalized = normalizeBookhiveBook(row.value);
-  const bookView = normalized.editionUri ? bookMap.get(normalized.editionUri) : undefined;
-  if (!bookView) return { ok: false, reason: 'book-not-found' };
   const shelf = normalized.shelf;
+  if (!shelf) return { ok: false, reason: 'shelf-not-found' };
+  const hydrated = normalized.editionUri ? bookMap.get(normalized.editionUri) : undefined;
+  let bookView: NetOlamaelcuLivtetBiblioDefs.BookView;
+  if (hydrated) {
+    bookView = hydrated;
+    if (!hydrated.authorNames?.length && normalized.authors) {
+      bookView = { ...hydrated, authorNames: [normalized.authors] };
+    }
+  } else {
+    // The record carries its own title and author, so the shelf renders while
+    // ingestion has yet to mirror the catalog record into an edition row.
+    // Dropping the row instead would hide the book for the whole ingest lag.
+    bookView = {
+      uri: (normalized.editionUri ?? normalized.subjectUri ?? row.uri) as never,
+      title: normalized.title ?? 'Untitled',
+      ...(normalized.authors ? { authorNames: [normalized.authors] } : {}),
+      $type: 'net.olamaelcu.livtet.biblio.defs#bookView' as const,
+    };
+  }
   const raw = row.value;
   const createdAt = raw && typeof raw === 'object' && 'createdAt' in raw && typeof raw.createdAt === 'string'
     ? raw.createdAt
     : undefined;
   const shelfView: NetOlamaelcuLivtetBiblioDefs.ShelfView = {
     uri: '' as never,
-    name: shelf?.name ?? '',
+    name: shelf.name,
     $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
   };
-  const metadata = shelf
-    ? ({ status: shelf.status } as NetOlamaelcuLivtetBiblioDefs.BookShelfMetadata)
-    : ({} as NetOlamaelcuLivtetBiblioDefs.BookShelfMetadata);
+  const metadata: NetOlamaelcuLivtetBiblioDefs.BookShelfMetadata = {
+    status: shelf.status,
+    ...(normalized.startedAt ? { startedAt: normalized.startedAt } : {}),
+    ...(normalized.finishedAt ? { finishedAt: normalized.finishedAt } : {}),
+  };
   return {
     ok: true,
     view: {

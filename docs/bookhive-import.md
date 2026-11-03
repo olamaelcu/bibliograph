@@ -100,10 +100,12 @@ rewrites it and derives both views at read time in `bookhive/records.ts`.
 | `stars` (1–10) | `bookReview.rating` (1–10) | mapped (`records.ts:76`), range-checked | same scale; only the display conversion is missing |
 | `review` | `bookReview.text` | mapped, empty string → no review | `bookReview` also requires `book` and `createdAt`, which the router fills when it builds the `reviewView` |
 | `createdAt` | `bookReview.createdAt` | mapped (`records.ts:70`) | a review is dated by *record creation*, not `finishedAt`; a book finished months after being added shows the wrong date |
-| `startedAt`, `finishedAt` | — | dropped | no date fields on `bookReview` beyond `createdAt` |
+| `startedAt`, `finishedAt` | `bookShelfMetadata.startedAt` / `.finishedAt` | mapped onto the shelving view | a review is still dated by `createdAt`; the reading dates travel on the shelf metadata so goal progress and streaks use the day the book was actually read |
 | `bookProgress` | — | dropped | no progress surface in the appview |
 | `previousReads` | — | dropped | decision below |
-| `identifiers`, `owned`, `cover`, `title`, `authors` | — | dropped | the edition and its identifiers come from `catalogBook`; the denormalised copies are only a fallback when `hiveBookUri` is absent |
+| `title`, `authors` | `bookView.title`, `bookView.authorNames` | mapped as a fallback | used when the `bh.` edition is not in the catalog yet, so a shelving row is never dropped for a catalog gap; a hydrated edition wins on both |
+| `cover` (blob) | `getImageForBook` proxy URL | proxy when the catalog has no cover | the blob belongs to the reader's repo, so `getImageForBook` answers with `/image/bookhive/<did>/<cid>` and that route streams the bytes; it is never copied into the catalog |
+| `identifiers`, `owned` | — | dropped | the edition and its identifiers come from `catalogBook`; `owned` has no surface in the appview |
 
 
 ## Bugs found while mapping

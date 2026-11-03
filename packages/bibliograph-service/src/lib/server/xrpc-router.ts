@@ -101,7 +101,7 @@ import {
   shelfUriForRow,
 } from './shelving/hydrate';
 import { resolveEditions } from './edition-lookup';
-import { shelfEntryConditions } from './shelving/shelf-rows';
+import { shelfEntryConditions, shelfRkeyForBookhiveStatus } from './shelving/shelf-rows';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import { datacenterCoverUrl } from './gb/cover-url';
@@ -113,12 +113,13 @@ import {
   hiveIdFromCatalogUri,
   isBhRkey,
 } from './bookhive/keys';
-import { BOOKHIVE_BACKLINK_SOURCE, normalizeBookhiveBook } from './bookhive/records';
+import { BOOKHIVE_BACKLINK_SOURCE, normalizeBookhiveBook, shelfForBookhiveStatus } from './bookhive/records';
 import { enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
 import { buildBookContributorViews } from './book-contributor-view';
 import { registerBookQueries } from '../../routes/xrpc/book-queries';
 import { queryLabels, labelToJson } from './labeler/labels';
 import { verifyFeedAuth, requireFeedAuth } from './auth/feed-auth';
+import { publicOrigin } from './auth/oauth';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -819,6 +820,45 @@ function shelfViewOf(r: typeof records.$inferSelect) {
   };
 }
 
+const SHELF_COLLECTION = 'net.olamaelcu.livtet.biblio.shelf';
+
+/**
+ * Shelf containers for a reader whose books live in `buzz.bookhive.book`.
+ *
+ * Bookhive keeps the reading status inline on the reader's copy of each book, so
+ * such a repo holds no `...biblio.shelf` records: every shelf listing answered
+ * "no shelves" while the books sat on four shelves. The containers are derived
+ * from the statuses the mirror holds, at the URIs a Livtet shelf record would
+ * have, so `listBooksOnShelf` (which keys on the rkey alone) pages them
+ * unchanged.
+ */
+async function bookhiveShelfContainers(did: string): Promise<NetOlamaelcuLivtetBiblioDefs.ShelfView[]> {
+  const rows = await db
+    .selectDistinct({ status: sql<string>`${records.value}->>'status'` })
+    .from(records)
+    .where(
+      and(
+        eq(records.did, did),
+        eq(records.collection, BOOKHIVE_BOOK_COLLECTION),
+        sql`${records.value}->>'status' IS NOT NULL`,
+      ),
+    );
+  const shelves: NetOlamaelcuLivtetBiblioDefs.ShelfView[] = [];
+  for (const { status } of rows) {
+    const rkey = shelfRkeyForBookhiveStatus(status);
+    const name = shelfForBookhiveStatus(status)?.name;
+    if (!rkey || !name) continue;
+    shelves.push({
+      uri: `at://${did}/${SHELF_COLLECTION}/${rkey}` as NetOlamaelcuLivtetBiblioDefs.ShelfView['uri'],
+      name,
+      $type: 'net.olamaelcu.livtet.biblio.defs#shelfView',
+    });
+  }
+  // Same order as the real shelf page (`uri` ascending), so a reader with both
+  // kinds of record sees one stable list.
+  return shelves.sort((a, b) => (a.uri < b.uri ? -1 : a.uri > b.uri ? 1 : 0));
+}
+
 router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
   async handler({ params }) {
     const { did, limit = 50, cursor } = params;
@@ -886,13 +926,87 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
         }
       }
 
-      return json({ shelves: merged.map(shelfViewOf), cursor: nextCursor } as NetOlamaelcuLivtetBiblioListShelves.$output);
+      const shelves: NetOlamaelcuLivtetBiblioDefs.ShelfView[] = merged.map((row) => ({
+        ...shelfViewOf(row),
+        uri: row.uri as NetOlamaelcuLivtetBiblioDefs.ShelfView['uri'],
+      }));
+
+      // The derived containers are constant, so they belong on the first page
+      // only; paging continues on the real records. A real shelf record of the
+      // same uri keeps its own name and wins over its derived twin.
+      if (!resume) {
+        try {
+          const seen = new Set(shelves.map((shelf) => shelf.uri));
+          for (const shelf of await bookhiveShelfContainers(did)) {
+            if (seen.has(shelf.uri)) continue;
+            seen.add(shelf.uri);
+            shelves.push(shelf);
+          }
+        } catch (err: unknown) {
+          log.warn({ err, did }, 'listShelves: bookhive shelf derivation failed');
+        }
+      }
+
+      return json({ shelves, cursor: nextCursor } as NetOlamaelcuLivtetBiblioListShelves.$output);
     } catch (err: unknown) {
       log.warn({ err, did }, 'listShelves: failed');
       return json({ shelves: [], cursor: undefined } as NetOlamaelcuLivtetBiblioListShelves.$output);
     }
   },
 });
+
+/**
+ * Cover URL for a `bh.` edition whose catalog record carries none.
+ *
+ * Bookhive's catalog record points at a cover as a URL, and a catalog entry can
+ * have none while every reader who shelved the book uploaded one — the blob is
+ * per reader, so the catalog cannot name it. Any writer whose copy points at
+ * this hive id supplies the bytes; they are streamed back through the image
+ * route rather than copied into the catalog, because the blob stays the
+ * reader's record. `undefined` when no mirrored copy has one, which keeps the
+ * answer a plain "no cover" instead of a URL that 404s.
+ */
+async function bookhiveCoverProxyUrl(editionRkey: string): Promise<string | undefined> {
+  let hiveId: string;
+  try {
+    hiveId = hiveIdFromBhRkey(editionRkey);
+  } catch {
+    return undefined;
+  }
+  const withCover = and(
+    eq(records.collection, BOOKHIVE_BOOK_COLLECTION),
+    sql`jsonb_typeof(${records.value}->'cover') = 'object'`,
+  );
+  // Two reads, not one fold: `hiveBookUri` has an expression index (the current
+  // write shape) while `hiveId` does not, and a `coalesce` across both matched
+  // neither. This runs per cover tile, so the indexed form is tried first.
+  const byUri = await db
+    .select({ did: records.did, value: records.value })
+    .from(records)
+    .where(and(withCover, sql`${records.value}->>'hiveBookUri' = ${bookhiveCatalogUri(hiveId)}`))
+    .orderBy(records.uri)
+    // A few, not one: a copy whose blob ref cannot be read is not an answer
+    // when another reader's copy carries a usable one.
+    .limit(3);
+  const indexed = coverUrlFrom(byUri);
+  if (indexed) return indexed;
+  const byId = await db
+    .select({ did: records.did, value: records.value })
+    .from(records)
+    .where(and(withCover, sql`${records.value}->>'hiveId' = ${hiveId}`))
+    .orderBy(records.uri)
+    .limit(3);
+  return coverUrlFrom(byId);
+}
+
+/** First candidate whose `cover` blob ref is readable, as a proxied URL. */
+function coverUrlFrom(candidates: Array<{ did: string; value: unknown }>): string | undefined {
+  for (const candidate of candidates) {
+    const cover = normalizeBookhiveBook(candidate.value).cover;
+    if (cover) return `${publicOrigin()}/image/bookhive/${candidate.did}/${cover.cid}`;
+  }
+  return undefined;
+}
 
 router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
   async handler({ params }) {
@@ -934,7 +1048,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
       return json({ url: datacenterCoverUrl(row.coverImageUrl) } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
     if (isBhRkey(row.rkey)) {
-      return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
+      return json({ url: await bookhiveCoverProxyUrl(row.rkey) } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
     // Backfill the book the uri resolves to: enqueueing the retired rkey would
     // re-ingest a row the merge deliberately removed.
@@ -1394,7 +1508,6 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
     }
   },
 });
-const SHELF_COLLECTION = 'net.olamaelcu.livtet.biblio.shelf';
 const CONTRIBUTOR_COLLECTION = 'community.lexicon.book.contributor';
 
 /**
@@ -1412,6 +1525,20 @@ function reviewViewOf(row: typeof records.$inferSelect): BookReviewView | null {
   return row.collection === BOOKHIVE_BOOK_COLLECTION
     ? reviewViewFromBookhiveRow(row, bookUri)
     : reviewViewFromRow(row, bookUri);
+}
+
+/**
+ * A `buzz.bookhive.book` value that says more than which shelf it is on: review
+ * text, or a star rating.
+ *
+ * The same predicate is written as SQL in `listReviewsByActor`'s page query.
+ * Two sources feed that listing (the mirror and the actor's PDS), and the two
+ * forms must agree: a record one admits and the other refuses is a review that
+ * appears or vanishes depending on whether TAP indexed it.
+ */
+function bookhiveRecordHasReview(value: unknown): boolean {
+  const record = asRecord(value);
+  return (typeof record.review === 'string' && record.review !== '') || 'stars' in record;
 }
 
 /**
@@ -1566,12 +1693,48 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
         .limit(limit + 1);
       const hasMore = shelfRows.length > limit;
       const page = hasMore ? shelfRows.slice(0, limit) : shelfRows;
-      if (page.length === 0) {
+      // A Bookhive-only reader has no shelf records at all — the status rides on
+      // the copy of each book — so their containers are derived from those
+      // statuses instead. Constant, hence first-page-only, like `listShelves`.
+      const derived = did && !resume
+        ? await bookhiveShelfContainers(did).catch((err: unknown) => {
+            log.warn({ err, did }, 'listShelvesWithBooks: bookhive shelf derivation failed');
+            return [] as NetOlamaelcuLivtetBiblioDefs.ShelfView[];
+          })
+        : [];
+      if (page.length === 0 && derived.length === 0) {
         return json({ shelves: [], cursor: undefined } as unknown as NetOlamaelcuLivtetBiblioListShelvesWithBooks.$output);
       }
 
       const shelfUris = page.map((row) => row.uri);
       const shelfMap = await hydrateShelvesByUri(shelfUris);
+      for (const shelf of derived) shelfMap.set(shelf.uri, shelf);
+
+      // Real records first, in cursor order; a derived container only fills a
+      // shelf the reader has no record for, so no uri appears twice.
+      const containers: Array<{ uri: string; did: string; shelf: NetOlamaelcuLivtetBiblioDefs.ShelfView }> =
+        page.map((row) => {
+          const value = asRecord(row.value);
+          return {
+            uri: row.uri,
+            did: row.did,
+            shelf: shelfMap.get(row.uri) ?? {
+              // jsonb text → the branded at-uri the view publishes; the row's own
+              // uri is what a shelf is addressed by, so no re-derivation.
+              uri: row.uri as NetOlamaelcuLivtetBiblioDefs.ShelfView['uri'],
+              name: typeof value.name === 'string' ? value.name : '',
+              $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
+            },
+          };
+        });
+      if (did) {
+        const realUris = new Set(containers.map((container) => container.uri));
+        for (const shelf of derived) {
+          if (realUris.has(shelf.uri)) continue;
+          realUris.add(shelf.uri);
+          containers.push({ uri: shelf.uri, did, shelf });
+        }
+      }
 
       // A shelf is unbounded in principle: one production shelf holds 2,573
       // books, and hydrating all of them per call pinned the single core for
@@ -1590,10 +1753,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
           // `SET` takes no bind parameters, so the value is inlined from a
           // module constant (a number, never caller input).
           await tx.execute(sql`set local statement_timeout = ${sql.raw(String(LIST_SHELVES_BOOKS_STATEMENT_TIMEOUT_MS))}`);
-          for (const [index, shelfRow] of page.entries()) {
+          for (const [index, container] of containers.entries()) {
             if (Date.now() >= deadline) {
               log.warn(
-                { stage: 'listShelvesWithBooks.deadline', shelves: page.length, hydrated: index },
+                { stage: 'listShelvesWithBooks.deadline', shelves: containers.length, hydrated: index },
                 'deadline reached; returning the shelves with the books gathered so far',
               );
               break;
@@ -1601,10 +1764,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
             const rows = await tx
               .select()
               .from(records)
-              .where(shelfEntryConditions({ shelfUris: [shelfRow.uri], did: shelfRow.did }))
+              .where(shelfEntryConditions({ shelfUris: [container.uri], did: container.did }))
               .orderBy(records.uri)
               .limit(booksPerShelf);
-            rowsByShelf.set(shelfRow.uri, rows);
+            rowsByShelf.set(container.uri, rows);
           }
         });
       } catch (err: unknown) {
@@ -1620,24 +1783,15 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
 
       // Each shelf was queried with its own predicate, so the grouping is the
       // map key rather than a second pass over mixed rows.
-      const byShelf = rowsByShelf;
-
-      const shelves = page.map((row) => {
-        const value = asRecord(row.value);
-        const shelf = shelfMap.get(row.uri) ?? {
-          // jsonb text → the branded at-uri the view publishes; the row's own
-          // uri is what a shelf is addressed by, so no re-derivation.
-          uri: row.uri as NetOlamaelcuLivtetBiblioDefs.ShelfView['uri'],
-          name: typeof value.name === 'string' ? value.name : '',
-          $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
-        };
-        const books = (byShelf.get(row.uri) ?? [])
+      const shelves = containers.map(({ uri, shelf }) => ({
+        shelf,
+        books: (rowsByShelf.get(uri) ?? [])
           .map((bookRow) => resolveBookShelf(bookRow, bookMap, shelfMap))
           .filter((resolved) => resolved.ok && resolved.view)
           .map((resolved) => resolved.view!)
-          .sort(compareShelfBooks);
-        return { shelf, books, $type: 'net.olamaelcu.livtet.biblio.defs#shelfWithBooksView' as const };
-      });
+          .sort(compareShelfBooks),
+        $type: 'net.olamaelcu.livtet.biblio.defs#shelfWithBooksView' as const,
+      }));
 
       return json({
         shelves,
@@ -1668,7 +1822,20 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
       const rows = await db
         .select()
         .from(records)
-        .where(and(eq(records.did, did), inArray(records.collection, sources)))
+        .where(
+          and(
+            eq(records.did, did),
+            inArray(records.collection, sources),
+            // A Bookhive copy record is shelving, not a review, unless it says
+            // something about the book. Filtering that after the page window
+            // let a run of newest status-only rows fill page 1 and hide every
+            // older review; the predicate belongs in SQL so the window is a
+            // window over reviews. Native review records need no check.
+            sql`(${records.collection} <> ${BOOKHIVE_BOOK_COLLECTION}
+              OR coalesce(${records.value}->>'review', '') <> ''
+              OR ${records.value} ? 'stars')`,
+          ),
+        )
         .orderBy(newestRecordFirst())
         .limit(limit + 1)
         .offset(offset);
@@ -1704,6 +1871,9 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
             }
             for (const record of parsed.data.records) {
               if (seen.has(record.uri) || reviews.length >= limit) continue;
+              // The same predicate as the page query: the fallback must not
+              // reintroduce the blank cards the SQL window excluded.
+              if (collection === BOOKHIVE_BOOK_COLLECTION && !bookhiveRecordHasReview(record.value)) continue;
               seen.add(record.uri);
               const row = pdsRecordRow(did, collection, record);
               const view = reviewViewOf(row);
@@ -1720,13 +1890,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListReviewsByActor.mainSchema, {
       }
 
       return json({
-        // A Bookhive book record is mirrored because it carries the review and
-        // rating inline; one with neither is a shelving entry, and listing it
-        // here put a blank review card on the author's profile. Native review
-        // records need no check — their collection only holds reviews.
-        reviews: reviews.filter(
-          (view) => view.record.text !== '' || typeof view.record.rating === 'number',
-        ),
+        reviews,
         cursor,
       } as unknown as NetOlamaelcuLivtetBiblioListReviewsByActor.$output);
     } catch (err: unknown) {
@@ -1803,6 +1967,14 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetBookOnShelf.mainSchema, {
         : await fetchBookShelvingRecord(uri, did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
       if (!row) {
         return Response.json({ error: 'RecordNotFound', message: `no shelving record at ${uri}` }, { status: 404 });
+      }
+      // A Bookhive copy without a status is owned, not shelved: hydrating it
+      // answers "no shelf", which is a different miss from a catalog gap.
+      if (row.collection === BOOKHIVE_BOOK_COLLECTION && !normalizeBookhiveBook(row.value).shelf) {
+        return Response.json(
+          { error: 'RecordNotFound', message: `bookhive record carries no reading status: ${uri}` },
+          { status: 404 },
+        );
       }
       const [view] = await hydrateBookShelves([row]);
       if (!view) {
@@ -2000,7 +2172,12 @@ async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, book
   const [shelfMap, bookMap] = await Promise.all([hydrateShelvesByUri(shelfUris), hydrateBooksByUri(bookUris)]);
 
   const firstPass = rows.map((row) => ({ row, resolved: resolveBookShelf(row, bookMap, shelfMap) }));
-  const missing = firstPass.filter((entry) => !entry.resolved.ok).map((entry) => bookUriForRow(entry.row));
+  // Only a book the catalog lacks is worth fetching. A row that resolved to no
+  // shelf has nothing to hydrate, and asking a provider for its edition is a
+  // guaranteed miss that also writes a negative-cache entry.
+  const missing = firstPass
+    .filter((entry) => !entry.resolved.ok && entry.resolved.reason === 'book-not-found')
+    .map((entry) => bookUriForRow(entry.row));
   if (missing.length > 0) {
     const resolvedUris = await resolveMissingEditions(missing);
     if (resolvedUris.length > 0) {
@@ -2025,7 +2202,7 @@ async function hydrateBookShelves(rows: Array<typeof records.$inferSelect>, book
           did: entry.row.did,
           reason: resolved.reason,
         },
-        'dropping bookShelving row: book not resolvable in catalog',
+        'dropping bookShelving row: shelf or book not resolvable',
       );
       continue;
     }

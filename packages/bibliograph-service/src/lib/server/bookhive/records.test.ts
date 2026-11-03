@@ -91,8 +91,42 @@ test('normalizeBookhiveBook clamps out-of-range stars instead of passing them th
 
 test('normalizeBookhiveBook tolerates junk input', () => {
   const empty = normalizeBookhiveBook(null);
-  assert.deepEqual(empty, { subjectUri: null, editionUri: null, review: null, shelf: null });
+  assert.deepEqual(empty, {
+    subjectUri: null,
+    editionUri: null,
+    review: null,
+    shelf: null,
+    title: null,
+    authors: null,
+    cover: null,
+  });
   assert.deepEqual(normalizeBookhiveBook({ hiveId: 'nope' }).editionUri, null);
+});
+
+test('normalizeBookhiveBook carries the book metadata the record holds inline', () => {
+  const norm = normalizeBookhiveBook({
+    ...RECORD,
+    cover: { $type: 'blob', ref: { $link: 'bafkreicover' }, mimeType: 'image/jpeg', size: 1234 },
+    startedAt: '2024-12-01T00:00:00.000Z',
+    finishedAt: '2024-12-08T00:00:00.000Z',
+  });
+  assert.equal(norm.title, RECORD.title);
+  assert.equal(norm.authors, RECORD.authors);
+  assert.deepEqual(norm.cover, { cid: 'bafkreicover', mimeType: 'image/jpeg' });
+  assert.equal(norm.startedAt, '2024-12-01T00:00:00.000Z');
+  assert.equal(norm.finishedAt, '2024-12-08T00:00:00.000Z');
+});
+
+test('normalizeBookhiveBook omits a cover it cannot serve back from a PDS', () => {
+  assert.equal(normalizeBookhiveBook({ ...RECORD, cover: { ref: {} } }).cover, null);
+  assert.equal(normalizeBookhiveBook({ ...RECORD, cover: 'https://example.com/c.jpg' }).cover, null);
+});
+
+test('normalizeBookhiveBook leaves reading dates absent when the record omits them', () => {
+  const norm = normalizeBookhiveBook(RECORD);
+  assert.equal(norm.startedAt, undefined);
+  assert.equal(norm.finishedAt, undefined);
+  assert.equal(norm.cover, null);
 });
 
 test('backlink source is the hiveBookUri path Constellation indexes', () => {
