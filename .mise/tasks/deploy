@@ -5,7 +5,7 @@
 # deploy-host pair uses.
 #
 # Usage:
-#   mise run deploy                    newest dist/bibliograph_*.deb -> veve@lescayes
+#   mise run deploy                    newest dist/bibliograph_*.deb -> veve@lescayes.ts.olamaelcu.net
 #   mise run deploy -- alice@server    another host
 #   DEPLOY_HOST=alice@server mise run deploy
 #   PKG=dist/bibliograph_0.1.3_amd64.deb mise run deploy

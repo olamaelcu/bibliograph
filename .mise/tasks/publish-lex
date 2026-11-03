@@ -27,7 +27,7 @@ set -euo pipefail
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
-HOST="${DEPLOY_HOST:-veve@lescayes}"
+HOST="${DEPLOY_HOST:-veve@lescayes.ts.olamaelcu.net}"
 
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }

@@ -38,11 +38,17 @@ version and service state.
 ## Usage
 
 ```bash
-mise run deploy                                  # newest dist/*.deb -> veve@lescayes
+mise run deploy                                  # newest dist/*.deb -> veve@lescayes.ts.olamaelcu.net
 ./deploy.sh alice@server                         # another host
 PKG=dist/bibliograph_0.1.3_amd64.deb ./deploy.sh # pin an exact package
 DEPLOY_HOST=alice@server mise run deploy         # env form
 ```
+
+The default host is the FQDN, not the bare machine name: `lescayes` does not
+resolve here (no `HostName` in `~/.ssh/config`, not on the tailnet), while
+`lescayes.ts.olamaelcu.net` matches the `*.olamaelcu.net` `Host` block and
+resolves. `DEPLOY_HOST` (or a positional host) overrides it everywhere:
+`deploy.sh`, `deploy-deb`, `enable-tls` and `publish-lex` all read it.
 
 `.mise/tasks/deploy` only `exec`s `deploy.sh`, so both entry points share one
 implementation and one verification, and neither names a version: the package
@@ -76,12 +82,12 @@ is picked by `ls -1 dist/bibliograph_*.deb | sort -V | tail -1`.
 After deploy, check the remote host:
 
 ```bash
-ssh veve@lescayes 'dpkg-query -W -f="${Version}\n" bibliograph'
-ssh veve@lescayes 'systemctl is-active bibliograph bibliograph-worker'
-ssh veve@lescayes 'systemctl status bibliograph-migrate --no-pager'
-ssh veve@lescayes 'cat /etc/bibliograph/port.conf'
-ssh veve@lescayes 'curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/'
-ssh veve@lescayes 'journalctl -u bibliograph -n 30 --no-pager'
+ssh veve@lescayes.ts.olamaelcu.net 'dpkg-query -W bibliograph'
+ssh veve@lescayes.ts.olamaelcu.net 'systemctl is-active bibliograph bibliograph-worker'
+ssh veve@lescayes.ts.olamaelcu.net 'systemctl status bibliograph-migrate --no-pager'
+ssh veve@lescayes.ts.olamaelcu.net 'cat /etc/bibliograph/port.conf'
+ssh veve@lescayes.ts.olamaelcu.net 'curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/'
+ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u bibliograph -n 30 --no-pager'
 curl -s -o /dev/null -w '%{http_code}\n' https://biblio.livtet.olamaelcu.net/
 ```
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Install the built .deb on a remote host over ssh (default veve@lescayes)"
+#MISE description="Install the built .deb on a remote host over ssh (default veve@lescayes.ts.olamaelcu.net)"
 #MISE depends=["package-deb"]
 #
 # Installs dist/bibliograph_*.deb on DEPLOY_HOST and provisions what the package
@@ -12,7 +12,7 @@
 # (--force-confold), which silently discards the shipped defaults.
 #
 # Overridable:
-#   DEPLOY_HOST   ssh destination              (default veve@lescayes)
+#   DEPLOY_HOST   ssh destination              (default veve@lescayes.ts.olamaelcu.net)
 #   DEPLOY_PORT   application port for debconf (default 5000)
 #   DEPLOY_DB     database name                (default bibliograph)
 
@@ -21,7 +21,7 @@ set -euo pipefail
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
-HOST="${DEPLOY_HOST:-veve@lescayes}"
+HOST="${DEPLOY_HOST:-veve@lescayes.ts.olamaelcu.net}"
 PORT_ANSWER="${DEPLOY_PORT:-5000}"
 DB_NAME="${DEPLOY_DB:-bibliograph}"
 

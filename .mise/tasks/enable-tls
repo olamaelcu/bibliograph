@@ -18,7 +18,7 @@
 # name only, which is created, validated and removed here.
 #
 # Overridable:
-#   DEPLOY_HOST      ssh destination        (default veve@lescayes)
+#   DEPLOY_HOST      ssh destination        (default veve@lescayes.ts.olamaelcu.net)
 #   DEPLOY_HOSTNAME  public hostname        (default biblio.livtet.olamaelcu.net)
 #   DEPLOY_PACKAGE   package to reconfigure (default bibliograph)
 
@@ -27,7 +27,7 @@ set -euo pipefail
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
-HOST="${DEPLOY_HOST:-veve@lescayes}"
+HOST="${DEPLOY_HOST:-veve@lescayes.ts.olamaelcu.net}"
 NAME="${DEPLOY_HOSTNAME:-biblio.livtet.olamaelcu.net}"
 PKG="${DEPLOY_PACKAGE:-bibliograph}"
 WEBROOT=/var/lib/certbot

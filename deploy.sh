@@ -2,7 +2,7 @@
 # Deploy the newest built bibliograph .deb to a host and verify it.
 #
 # Usage:
-#   ./deploy.sh                             newest dist/bibliograph_*.deb -> veve@lescayes
+#   ./deploy.sh                             newest dist/bibliograph_*.deb -> veve@lescayes.ts.olamaelcu.net
 #   ./deploy.sh alice@server                another host
 #   PKG=dist/bibliograph_0.1.3_amd64.deb ./deploy.sh
 #   DEPLOY_HOST=alice@server ./deploy.sh    same as the positional argument
@@ -24,7 +24,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-HOST="${1:-${DEPLOY_HOST:-veve@lescayes}}"
+HOST="${1:-${DEPLOY_HOST:-veve@lescayes.ts.olamaelcu.net}}"
 
 say() { printf '==> %s\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
