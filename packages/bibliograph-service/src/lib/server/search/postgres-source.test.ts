@@ -47,6 +47,7 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     cid: 'bafytest',
     did: 'did:web:biblio.livtet.olamaelcu.net',
     rkey: 'r1',
+    tid: '3mzktest00002',
     title: 'Test Edition',
     subtitle: null,
     workUri: null,

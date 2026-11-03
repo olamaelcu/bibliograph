@@ -8,6 +8,14 @@ export const editions = pgTable(
     cid: text('cid').notNull(),
     did: text('did').notNull(),
     rkey: text('rkey').notNull(),
+    // Canonical book identity. rkeys are provider namespaces (`ol.*`, `gb.*`,
+    // `bh.*`, `isbndb.*`), so one book can arrive under several uris and a
+    // librarian merge can retire the losers; `tid` is the platform-wide key
+    // saying "these uris describe one book". ATProto TID format (13-char
+    // lowercase base32, top bit clear) because that is the identifier shape the
+    // protocol already defines for records — minted by `editions_next_tid()`
+    // (migration 0020) so every insert path, scripts included, gets one.
+    tid: text('tid').notNull().unique().default(sql`editions_next_tid()`),
     title: text('title').notNull(),
     subtitle: text('subtitle'),
     workUri: text('work_uri'),
@@ -50,6 +58,31 @@ export const editions = pgTable(
     // editions.work_uri / editions.publisher_uri FKs are declared in the
     // initial migration (kept out of the schema to avoid the self-reference
     // cycle through publishers.imprint_of_uri).
+  }),
+);
+
+/**
+ * Retired catalog uris → the book they meant (migration 0020).
+ *
+ * A librarian merge deletes the losing rows, but shelving rows, reviews and
+ * clients keep pointing at those uris, and a re-ingest would otherwise recreate
+ * the duplicate under a fresh `tid`. Every reader handed an edition uri resolves
+ * it through here (`edition-lookup.ts`), so all of a book's uris answer with the
+ * one surviving record. `ON DELETE CASCADE` keeps the table honest when the
+ * canonical row is deleted (catalog takedown).
+ */
+export const editionAliases = pgTable(
+  'edition_aliases',
+  {
+    uri: text('uri').primaryKey(),
+    tid: text('tid')
+      .notNull()
+      .references(() => editions.tid, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Reverse lookup ("which uris did this book absorb") and the cascade delete.
+    tidIdx: index('edition_aliases_tid_idx').on(t.tid),
   }),
 );
 

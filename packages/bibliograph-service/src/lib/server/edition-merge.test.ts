@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { computeMergedEdition, mergeEditionsInDb, type MergeEditionsResult } from './edition-merge';
-import { editions, type EditionRow } from './db/schema';
+import { editions, editionAliases, type EditionRow } from './db/schema';
 import type { DbExecutor } from './stats';
 
 const PRIMARY = 'at://did:web:biblio.test/community.lexicon.book.edition/primary';
@@ -21,6 +21,7 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     did: 'did:web:biblio.test',
     rkey: 'primary',
     title: 'Test Edition',
+    tid: '3mzkprimaryaa',
     subtitle: null,
     workUri: null,
     workCid: null,
@@ -46,6 +47,7 @@ function primaryFixture(overrides: Partial<EditionRow> = {}): EditionRow {
     uri: PRIMARY,
     rkey: 'primary',
     description: 'Primary description',
+    tid: '3mzkprimaryaa',
     coverImageUrl: 'https://covers.test/primary.jpg',
     identifiers: [{ uri: 'isbn:111', resource: 'isbn' }],
     contributors: [{ subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' }],
@@ -59,6 +61,7 @@ function sourceFixture(overrides: Partial<EditionRow> = {}): EditionRow {
     cid: 'bafysource',
     rkey: 'source',
     title: 'Source Edition',
+    tid: '3mzksourceaaa',
     description: 'Source description',
     coverImageUrl: 'https://covers.test/source.jpg',
     identifiers: [
@@ -157,6 +160,9 @@ interface MergeCallCapture {
   updateTable?: unknown;
   updateSet?: Record<string, unknown>;
   updateWhere?: unknown;
+  aliasTable?: unknown;
+  aliasRows?: Array<{ uri: string; tid: string }>;
+  aliasConflictTarget?: unknown;
   deleteTable?: unknown;
   deleteWhere?: unknown;
   deleteCount: number;
@@ -166,6 +172,11 @@ interface FakeTx {
   select(): { from(table: unknown): { where(condition: unknown): Promise<EditionRow[]> } };
   update(table: unknown): {
     set(values: Record<string, unknown>): { where(condition: unknown): Promise<void> };
+  };
+  insert(table: unknown): {
+    values(rows: Array<{ uri: string; tid: string }>): {
+      onConflictDoUpdate(config: { target: unknown }): Promise<void>;
+    };
   };
   delete(table: unknown): { where(condition: unknown): Promise<void> };
 }
@@ -188,6 +199,19 @@ function createFakeDb(rows: EditionRow[], capture: MergeCallCapture): DbExecutor
           return {
             where: async (condition: unknown) => {
               capture.updateWhere = condition;
+            },
+          };
+        },
+      };
+    },
+    insert(table: unknown) {
+      capture.aliasTable = table;
+      return {
+        values(rows: Array<{ uri: string; tid: string }>) {
+          capture.aliasRows = rows;
+          return {
+            onConflictDoUpdate: async (config: { target: unknown }) => {
+              capture.aliasConflictTarget = config.target;
             },
           };
         },
@@ -309,6 +333,27 @@ test('mergeEditionsInDb of a single edition updates it in place and deletes noth
   assert.equal(capture.deleteCount, 0);
   assert.deepEqual(result.deleted, []);
   assert.deepEqual(result.merged.identifiers, [{ uri: 'isbn:111', resource: 'isbn' }]);
+  // Nothing was retired, so nothing is aliased either.
+  assert.equal(capture.aliasRows, undefined);
+});
+
+test('mergeEditionsInDb retires every losing uri against the winner\'s tid before deleting it', async () => {
+  const capture: MergeCallCapture = { deleteCount: 0 };
+  const third = makeEditionRow({ uri: THIRD, rkey: 'third', tid: '3mzkthirdaaaa' });
+  const db = createFakeDb([primaryFixture(), sourceFixture(), third], capture);
+
+  const result = await mergeEditionsInDb(db, [PRIMARY, SOURCE, THIRD], PRIMARY);
+
+  // The winner keeps its own tid: it is the book's identity, not the row's.
+  assert.equal(result.merged.tid, '3mzkprimaryaa');
+  assert.equal(capture.aliasTable, editionAliases);
+  assert.deepEqual(capture.aliasRows, [
+    { uri: SOURCE, tid: '3mzkprimaryaa' },
+    { uri: THIRD, tid: '3mzkprimaryaa' },
+  ]);
+  // Re-merging the same book repoints an existing alias rather than failing on
+  // the primary key.
+  assert.equal(capture.aliasConflictTarget, editionAliases.uri);
 });
 
 test('mergeEditionsInDb rejects a primary outside the selection before touching the database', async () => {

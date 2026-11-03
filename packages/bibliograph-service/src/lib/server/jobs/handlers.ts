@@ -17,6 +17,7 @@ import { backfillDescriptionForEdition } from './description-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
 import { backfillIsbnForEdition } from './isbn-backfill';
 import { fetchEditionForUri } from '../shelving/edition-fetch';
+import { aliasedEditionUris } from '../edition-lookup';
 import { catalogUriForMirroredRecord } from '../shelving/pending-editions';
 import { enqueueShelvingEditionBackfill } from './enqueue';
 import { pdsClient } from '../pds/resolve';
@@ -246,7 +247,19 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
       });
     }
     if (allRows.length === 0) return;
-    await db.insert(editions).values(allRows as never).onConflictDoUpdate({
+    // A record whose edition uri a librarian merge retired must not come back as
+    // a fresh row with a fresh `tid`: that would resurrect the duplicate the
+    // merge removed on the next ingest of the same provider. The uri still
+    // resolves — through `edition_aliases` — to the book that absorbed it.
+    const aliased = await aliasedEditionUris(
+      (allRows as Array<{ uri: string }>).map((row) => row.uri),
+    );
+    const rows = (allRows as Array<{ uri: string }>).filter((row) => !aliased.has(row.uri));
+    if (aliased.size > 0) {
+      log.debug({ stage: 'ingest-edition-batch', skipped: aliased.size }, 'skipped uris retired by a merge');
+    }
+    if (rows.length === 0) return;
+    await db.insert(editions).values(rows as never).onConflictDoUpdate({
       target: editions.uri,
       set: {
         title: sql`excluded.title`,

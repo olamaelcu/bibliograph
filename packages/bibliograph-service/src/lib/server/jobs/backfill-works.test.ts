@@ -31,6 +31,7 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     cid: 'bafye1',
     did: 'did:plc:user',
     rkey: 'rec1',
+    tid: '3mzktest00001',
     title: 'Test Edition',
     subtitle: null,
     workUri: null,

@@ -74,3 +74,31 @@ a field added to `editions` (say `pages`, which the lexicon already has — see
 
 Steps 1–2 are refactors with tests already in place (`record-detail.test.ts`,
 `book-contributor-view.test.ts`, `shelving/hydrate.test.ts`); step 3 changes import paths only.
+
+## Book identity: `editions.tid` and `edition_aliases`
+
+An edition uri is a provider namespace (`ol.*`, `gb.*`, `bh.*`, `isbndb.*`, all under
+`PUBLISHER_DID`), so one book can be known by several uris — and a librarian merge
+(`edition-merge.ts`) retires the losers by deleting their rows.
+
+`editions.tid` is the book's canonical identity (migration `0020`): an ATProto TID,
+13 lowercase base32 chars, minted by the `editions_next_tid()` column default so
+every insert path — jobs, admin import, scripts, psql — gets one without the caller
+knowing. It is `UNIQUE`, which is what makes "one record per book" enforceable rather
+than hoped for.
+
+`edition_aliases` holds the uris a merge retired, each pointing at the surviving
+book's `tid` (`ON DELETE CASCADE`, so a catalog takedown takes its aliases with it).
+Every reader handed an edition uri goes through `edition-lookup.ts`:
+
+| Caller | Why it resolves instead of selecting by uri |
+| --- | --- |
+| `shelving/hydrate.ts` | shelving rows, reviews and shelf listings carry whatever uri the user's record named |
+| `xrpc-router.ts` `getBooks` | collapses two requested uris of one book to a single `bookView` |
+| `getImageForBook`, `bookhiveSubjectForEdition` | a retired uri still finds the survivor's cover / Bookhive backlinks |
+| `record-detail.ts` | the edition page opens the surviving record instead of asking a provider to rebuild a duplicate |
+
+Two write paths keep the invariant from decaying: `mergeEditionsInDb` records the
+losing uris before deleting them (inside the transaction), and `ingestEditionBatch`
+skips uris that are aliases, so re-ingesting a merged-away provider record cannot
+resurrect the duplicate under a fresh `tid`.

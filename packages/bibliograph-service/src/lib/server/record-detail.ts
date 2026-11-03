@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { db } from './db';
-import { editions, works, contributors, publishers } from './db/schema';
+import { works, contributors, publishers } from './db/schema';
 import { PUBLISHER_DID } from './did';
+import { resolveEditions } from './edition-lookup';
 import { getEditionByRkey, getWorkByRkey, getContributorByRkey } from './api/open-library.js';
 import { enqueueIngest } from './jobs/enqueue.js';
 import pino from 'pino';
@@ -41,7 +42,10 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
   const uri = `at://${PUBLISHER_DID}/${collection}/${rkey}`;
 
   if (kind === 'editions') {
-    const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
+    // A merged-away uri still opens: `resolveEditions` answers with the book
+    // that absorbed it, and the page shows that record rather than asking a
+    // provider to rebuild a duplicate.
+    const row = (await resolveEditions([uri])).get(uri);
     if (!row) {
       const item = await getEditionByRkey(rkey, log).catch(() => null);
       if (item) {

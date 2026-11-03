@@ -100,6 +100,7 @@ import {
   bookUriForRow,
   shelfUriForRow,
 } from './shelving/hydrate';
+import { resolveEditions } from './edition-lookup';
 import { shelfEntryConditions } from './shelving/shelf-rows';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
@@ -920,20 +921,23 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
     } else {
       return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
     }
-    const isBh = isBhRkey(rkey);
 
-    const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
+    // The cover is the book's, not the uri's: a uri a merge retired answers with
+    // the surviving record's cover instead of a 404 that blanks a shelf tile.
+    const row = (await resolveEditions([uri])).get(uri);
     if (!row) {
       return Response.json({ error: 'RecordNotFound', message: `no edition at ${uri}` }, { status: 404 });
     }
     if (row.coverImageUrl) {
       return json({ url: datacenterCoverUrl(row.coverImageUrl) } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
-    if (isBh) {
+    if (isBhRkey(row.rkey)) {
       return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
-    void enqueueCoverBackfill(uri, rkey).catch((err) => {
-      log.warn({ err, uri, rkey, stage: 'getImageForBook.enqueue' }, 'cover backfill enqueue failed');
+    // Backfill the book the uri resolves to: enqueueing the retired rkey would
+    // re-ingest a row the merge deliberately removed.
+    void enqueueCoverBackfill(row.uri, row.rkey).catch((err) => {
+      log.warn({ err, uri: row.uri, rkey: row.rkey, stage: 'getImageForBook.enqueue' }, 'cover backfill enqueue failed');
     });
     return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
   },
@@ -1469,9 +1473,15 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetBooks.mainSchema, {
     try {
       const books = await hydrateBooksByUri(uris);
       return json({
-        books: uris
-          .map((uri) => books.get(uri))
-          .filter((view): view is NetOlamaelcuLivtetBiblioDefs.BookView => !!view),
+        // One view per book: two requested uris that name the same book resolve
+        // to the same row, and answering with it twice would be a duplicate row
+        // in every client's list.
+        books: [...new Map(
+          uris
+            .map((uri) => books.get(uri))
+            .filter((view): view is NetOlamaelcuLivtetBiblioDefs.BookView => !!view)
+            .map((view) => [view.uri, view] as const),
+        ).values()],
       } as NetOlamaelcuLivtetBiblioGetBooks.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1837,11 +1847,9 @@ async function bookhiveSubjectForEdition(editionUri: string): Promise<string | n
       return null;
     }
   }
-  const [row] = await db
-    .select({ identifiers: editions.identifiers })
-    .from(editions)
-    .where(eq(editions.uri, editionUri))
-    .limit(1);
+  // Resolved through the canonical book, so a caller that still names a uri the
+  // catalog retired keeps seeing that book's Bookhive reviews and shelvers.
+  const row = (await resolveEditions([editionUri])).get(editionUri);
   for (const identifier of row?.identifiers ?? []) {
     if (identifier.resource !== 'bookhive') continue;
     if (hiveIdFromCatalogUri(identifier.uri)) return identifier.uri;

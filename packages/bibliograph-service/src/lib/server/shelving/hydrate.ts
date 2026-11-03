@@ -1,6 +1,7 @@
 import { eq, inArray } from 'drizzle-orm';
 import { db } from '../db';
 import { editions, records } from '../db/schema';
+import { resolveEditions } from '../edition-lookup';
 import { recordSortKeyOf } from '../db/record-recency';
 import type { RecordRow } from '../db/schema';
 import { pdsClient } from '../pds/resolve';
@@ -49,18 +50,28 @@ export async function hydrateShelvesByUri(
 export async function hydrateBookByUri(
   uri: string,
 ): Promise<NetOlamaelcuLivtetBiblioDefs.BookView | null> {
-  const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
-  if (!row) return null;
-  return makeBookView(row);
+  // `resolveEditions` folds a uri retired by a merge onto the book that absorbed
+  // it, so a shelving row written before the merge still hydrates.
+  const row = (await resolveEditions([uri])).get(uri);
+  return row ? makeBookView(row) : null;
 }
 
 export async function hydrateBooksByUri(
   uris: string[],
 ): Promise<Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>> {
-  if (uris.length === 0) return new Map();
-  const rows = await db.select().from(editions).where(inArray(editions.uri, uris));
   const map = new Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>();
-  for (const row of rows) map.set(row.uri, makeBookView(row));
+  if (uris.length === 0) return map;
+  // Keyed by every requested uri *and* the canonical uri of the row it resolved
+  // to, so two uris naming the same book answer with one book view.
+  const views = new Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>();
+  for (const [uri, row] of await resolveEditions(uris)) {
+    let view = views.get(row.tid);
+    if (!view) {
+      view = makeBookView(row);
+      views.set(row.tid, view);
+    }
+    map.set(uri, view);
+  }
   return map;
 }
 

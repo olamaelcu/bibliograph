@@ -11,10 +11,15 @@
 // the rows in the database rather than from the request body — the caller only
 // picks the winner and which cover/description to keep.
 
+// The winner's `tid` is the book's canonical identity, and the losers' uris are
+// recorded against it (`edition_aliases`) before their rows go, so every uri the
+// book was ever known by keeps resolving to it — see `edition-lookup.ts`.
+
 import { eq, inArray } from 'drizzle-orm';
 import { db as defaultDb } from './db';
 import { editions, type EditionRow } from './db/schema';
 import type { DbExecutor } from './stats';
+import { recordEditionAliases } from './edition-lookup';
 
 export type EditionIdentifier = EditionRow['identifiers'][number];
 export type EditionContributor = EditionRow['contributors'][number];
@@ -137,6 +142,9 @@ export async function mergeEditionsInDb(
       .where(eq(editions.uri, primaryUri));
 
     if (doomed.length > 0) {
+      // Before the rows go, so a crash cannot leave a uri pointing at a deleted
+      // row with no redirect behind it.
+      await recordEditionAliases(tx, doomed, merged.tid);
       await tx.delete(editions).where(inArray(editions.uri, doomed));
     }
 

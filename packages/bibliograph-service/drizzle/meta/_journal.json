@@ -127,6 +127,13 @@
       "when": 1793900000000,
       "tag": "0019_editions_rkey",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0020_edition_tid",
+      "breakpoints": true
     }
   ]
 }
