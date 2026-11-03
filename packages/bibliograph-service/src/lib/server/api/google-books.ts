@@ -6,6 +6,7 @@ import { googleBooksBreaker } from './breakers';
 import type { EditionItem, WorkItem, SearchQuery, SearchResult, Identifier } from '../search/types';
 import { toGbLangRestrict } from '../search/language';
 import { gbEditionUri, gbWorkUri } from '../gb/keys';
+import { datacenterCoverUrl } from '../gb/cover-url';
 import { gbCacheEntry, gbCacheGet, gbCachePut } from '../gb/cache';
 import { resolveContributorsByName } from './contributor-name-resolver';
 
@@ -65,7 +66,7 @@ function yearFromGbPublishedDate(s: string | undefined): number | undefined {
 
 function coverFromLinks(il: GbImageLinks | undefined): string | undefined {
   const link = il?.large ?? il?.medium ?? il?.thumbnail ?? il?.smallThumbnail ?? il?.small;
-  return link ? link.replace(/^http:/, 'https:').replace('&edge=curl', '') : undefined;
+  return link ? datacenterCoverUrl(link.replace(/^http:/, 'https:').replace('&edge=curl', '')) : undefined;
 }
 
 function stripHtml(s: string | undefined): string | undefined {
@@ -372,7 +373,7 @@ export async function enrichEditions(
           const cover = coverFromLinks(info.imageLinks);
           if (!enriched.coverImageUrl && cover) enriched = { ...enriched, coverImageUrl: cover };
           if (enriched.coverImageUrl) {
-            enriched.coverImageUrl = enriched.coverImageUrl.replace("&edge=curl", "");
+            enriched.coverImageUrl = datacenterCoverUrl(enriched.coverImageUrl.replace("&edge=curl", ""));
           }
           matched++;
         } else {

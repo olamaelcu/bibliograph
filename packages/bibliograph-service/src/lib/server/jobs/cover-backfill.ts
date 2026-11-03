@@ -10,6 +10,7 @@ import { googleBooksBreaker } from '../api/breakers';
 import { withRetry } from '../api/retry';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
+import { datacenterCoverUrl } from '../gb/cover-url';
 import { getBookByIsbn } from '../api/isbndb';
 
 type Db = typeof defaultDb;
@@ -28,7 +29,7 @@ export function isbnFromIdentifiers(identifiers: ReadonlyArray<{ uri: string; re
 function gbCoverFromLinks(links: Record<string, string> | undefined): string | undefined {
   if (!links) return undefined;
   const large = links.large ?? links.medium ?? links.thumbnail ?? links.smallThumbnail ?? links.small;
-  return large ? large.replace(/^http:/, 'https:') : undefined;
+  return large ? datacenterCoverUrl(large.replace(/^http:/, 'https:')) : undefined;
 }
 
 async function fetchGbByIsbn(isbn: string, log: Logger, signal: AbortSignal): Promise<string | undefined> {

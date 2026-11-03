@@ -103,6 +103,7 @@ import {
 import { shelfEntryConditions } from './shelving/shelf-rows';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
+import { datacenterCoverUrl } from './gb/cover-url';
 import {
   BOOKHIVE_BOOK_COLLECTION,
   bhEditionUri,
@@ -926,7 +927,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
       return Response.json({ error: 'RecordNotFound', message: `no edition at ${uri}` }, { status: 404 });
     }
     if (row.coverImageUrl) {
-      return json({ url: row.coverImageUrl } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
+      return json({ url: datacenterCoverUrl(row.coverImageUrl) } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
     if (isBh) {
       return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);

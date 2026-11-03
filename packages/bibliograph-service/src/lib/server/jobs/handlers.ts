@@ -9,6 +9,7 @@ import type { EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier 
 import { PUBLISHER_DID } from '../did';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionRkey, workRkey, contributorRkey, publisherRkey } from '../ol/keys';
 import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from '../gb/keys';
+import { datacenterCoverUrl } from '../gb/cover-url';
 import { bhEditionRkey, hiveIdFromCatalogUri, isHiveId } from '../bookhive/keys';
 import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
 import { backfillCoverForEdition } from './cover-backfill';
@@ -212,6 +213,7 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
       const uri = editionUriFor(item.identifiers);
       if (!uri) continue;
       const rkey = uri.slice(uri.lastIndexOf('/') + 1);
+      const coverImageUrl = item.coverImageUrl ? datacenterCoverUrl(item.coverImageUrl) : undefined;
       const value = {
         $type: 'community.lexicon.book.edition' as const,
         title: item.title,
@@ -219,7 +221,7 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
         place: item.place ?? undefined,
         publishedYear: item.publishedYear ?? undefined,
         language: item.language ?? undefined,
-        coverImageUrl: item.coverImageUrl ?? undefined,
+        coverImageUrl,
         contributors: item.contributors,
         identifiers: item.identifiers,
         description: item.description ?? undefined,
@@ -237,7 +239,7 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
         publishedYear: item.publishedYear ?? null,
         language: item.language ?? null,
         description: item.description ?? null,
-        coverImageUrl: item.coverImageUrl ?? null,
+        coverImageUrl: coverImageUrl ?? null,
         contributors: item.contributors,
         identifiers: item.identifiers,
         createdAt: new Date(item.createdAt),
