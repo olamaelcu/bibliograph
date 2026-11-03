@@ -61,7 +61,7 @@ say "Installing production dependencies"
 # 5. Fail closed on a payload that would install but not run.
 for required in \
   "$SERVICE/build/handler.js" \
-  "$SERVICE/build/env.js" \
+  "$SERVICE/build/server/env.js" \
   "$SERVICE/server.ts" \
   "$SERVICE/worker.ts" \
   "$SERVICE/src/lib/server/db/migrate.ts" \
