@@ -1,3 +1,24 @@
+bibliograph (0.2.5) unstable; urgency=medium
+
+  * The `following` and `extended` feed skeletons read the follow graph from
+    the reader's own repo (`net.olamaelcu.livtet.biblio.follow`) instead of the
+    local `follows` table. That table is not the graph anyone maintains: TAP
+    mirrors bookhive books only, and its sole writer is the platform's follow
+    route, which calls `graph.follow` after the repo record is written and
+    ignores the result. An unreadable repo now yields an empty follow set and
+    the feed degrades to the general one, rather than erroring.
+  * `extended` adds 2 hops from the hop-1 members' repos, batched eight at a
+    time and capped at 500 candidates. Successful follow-set reads are memoised
+    for 60 s behind a 512-entry cap, since one request can touch hundreds of
+    repos.
+  * `0021_follows` creates the `follows` table, which no environment had: its
+    DDL was written as `0011_follows.sql` but never entered
+    `meta/_journal.json`, and the migrator plans from the journal. Every
+    `graph.follow` call had therefore been failing with `42P01`, invisibly,
+    because the platform treats the mirror as best-effort.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 04 Nov 2026 13:16:07 -0500
+
 bibliograph (0.2.4) unstable; urgency=medium
 
   * A Bookhive reader's profile now has shelves. Bookhive keeps the reading
