@@ -2224,6 +2224,50 @@ const FEED_REVIEW_COLLECTIONS = [REVIEW_COLLECTION];
 // they read as either kind of activity depending on the record.
 const FEED_COLLECTIONS = [...FEED_REVIEW_COLLECTIONS, SHELVING_COLLECTION, BOOKHIVE_BOOK_COLLECTION];
 
+// Follow edges are written to each reader's own repo by livtet-service. TAP
+// mirrors bookhive books only, so there is no local mirror of this collection:
+// the feed reads it straight from the reader's PDS.
+const FOLLOW_COLLECTION = 'net.olamaelcu.livtet.biblio.follow';
+/** Pages of 100 records. A bound keeps a pathological repo cheap to scan. */
+const FOLLOW_SCAN_PAGES = 20;
+/** Hop caps for the social skeletons: a bounded candidate set per page. */
+const MAX_FEED_HOP1 = 200;
+const MAX_FEED_HOP2 = 500;
+/** How many hop-1 repos `extended` reads at once. */
+const HOP2_FANOUT = 8;
+/** `extended` reads one follow set per hop-1 member, so they are memoised. */
+const FOLLOW_SET_TTL_MS = 60_000;
+const FOLLOW_SET_CACHE_MAX = 512;
+const followSetCache = new Map<string, { dids: string[]; expiresAt: number }>();
+
+/** Same contract as `listFollowRecords`: `subject` is the followed actor's at-uri. */
+function didFromFollowSubject(subject: unknown): string | null {
+  if (typeof subject !== 'string') return null;
+  const rest = subject.startsWith('at://') ? subject.slice('at://'.length) : subject;
+  const did = rest.split('/')[0] ?? '';
+  return did.startsWith('did:') ? did : null;
+}
+
+function cachedFollowSet(did: string): string[] | null {
+  const hit = followSetCache.get(did);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    followSetCache.delete(did);
+    return null;
+  }
+  return hit.dids;
+}
+
+function rememberFollowSet(did: string, dids: string[]): void {
+  // Insertion-ordered: drop the oldest entry at the cap, so a spike in distinct
+  // viewers cannot grow the map without bound.
+  if (followSetCache.size >= FOLLOW_SET_CACHE_MAX) {
+    const oldest = followSetCache.keys().next();
+    if (!oldest.done) followSetCache.delete(oldest.value);
+  }
+  followSetCache.set(did, { dids, expiresAt: Date.now() + FOLLOW_SET_TTL_MS });
+}
+
 /**
  * Reason string for a shelving entry: `shelving:<shelf-rkey>|<book-uri>`.
  * Shelf rkey comes from the parent shelf AT-URI (`.../biblio.shelf/reading`),
@@ -2387,22 +2431,91 @@ router.addQuery(getFeedSkeletonSchema, {
      * needs a bounded candidate set per page.
      */
     async function feedAuthorDids(viewerDid: string, kind: string): Promise<string[]> {
-      const MAX_HOP1 = 200;
-      const MAX_HOP2 = 500;
-      const hop1Rows = await db
-        .select({ did: follows.followedDid })
-        .from(follows)
-        .where(eq(follows.followerDid, viewerDid))
-        .limit(MAX_HOP1);
-      const hop1 = [...new Set(hop1Rows.map((r) => r.did).filter(Boolean))];
+      const hop1 = ((await followedDidsFromPds(viewerDid)) ?? []).slice(0, MAX_FEED_HOP1);
       if (kind === 'following' || hop1.length === 0) return kind === 'following' ? hop1 : [];
-      const hop2Rows = await db
-        .select({ did: follows.followedDid })
-        .from(follows)
-        .where(inArray(follows.followerDid, hop1))
-        .limit(MAX_HOP2);
+      // 2 hops, all of it read from the hop-1 members' own repos.
+      const hop2 = await followSetsOf(hop1, MAX_FEED_HOP2);
       const exclude = new Set<string>([viewerDid, ...hop1]);
-      return [...new Set(hop2Rows.map((r) => r.did).filter(Boolean))].filter((d) => !exclude.has(d));
+      const out = new Set<string>();
+      for (const did of hop2) {
+        if (!did || exclude.has(did) || out.size >= MAX_FEED_HOP2) continue;
+        out.add(did);
+      }
+      return [...out];
+    }
+
+    /**
+     * Every DID `did` follows, read from their PDS. `null` on any failure, so a
+     * caller can tell an unreadable repo from one that follows nobody — and so a
+     * failed read is never memoised as an empty follow set.
+     *
+     * This is the only source of the follow graph. TAP mirrors no
+     * `…biblio.follow` records, and the local `follows` table is a best-effort
+     * copy the platform's follow route writes *after* the repo record lands: it
+     * can never hold a follow the repo lacks, and in production it was never
+     * populated at all (see `drizzle/0021_follows.sql`). Reading it therefore
+     * bought nothing and risked resurrecting an edge the reader had removed in
+     * another client.
+     */
+    async function followedDidsFromPds(did: string): Promise<string[] | null> {
+      const cached = cachedFollowSet(did);
+      if (cached) return cached;
+      try {
+        const { client } = await pdsClient(did);
+        const out = new Set<string>();
+        let complete = true;
+        let cursor: string | undefined;
+        for (let page = 0; page < FOLLOW_SCAN_PAGES; page += 1) {
+          const raw = await client.get('com.atproto.repo.listRecords', {
+            params: {
+              repo: did as `did:${string}:${string}`,
+              collection: FOLLOW_COLLECTION,
+              limit: 100,
+              cursor,
+            },
+            signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+          });
+          const parsed = safeParseListRecords(raw);
+          if (!parsed.ok) {
+            log.warn({ did, issues: parsed.issues }, 'feed: follow record page did not match schema');
+            complete = false;
+            break;
+          }
+          for (const record of parsed.data.records) {
+            const followed = didFromFollowSubject(record.value.subject);
+            if (followed) out.add(followed);
+          }
+          if (!parsed.data.cursor) break;
+          cursor = parsed.data.cursor;
+        }
+        const dids = [...out];
+        if (complete) rememberFollowSet(did, dids);
+        return dids;
+      } catch (err: unknown) {
+        log.warn({ err, did }, 'feed: PDS follow read failed');
+        return null;
+      }
+    }
+
+    /**
+     * Union of the follow sets of `dids`, gathered in bounded batches and cut
+     * off at `wanted`. Unreachable repos are skipped: a 2-hop expansion is a
+     * discovery heuristic, and one reader's broken PDS must not blank the feed.
+     */
+    async function followSetsOf(dids: string[], wanted: number): Promise<string[]> {
+      const out = new Set<string>();
+      for (let i = 0; i < dids.length && out.size < wanted; i += HOP2_FANOUT) {
+        const sets = await Promise.all(
+          dids.slice(i, i + HOP2_FANOUT).map((did) => followedDidsFromPds(did)),
+        );
+        for (const set of sets) {
+          for (const did of set ?? []) {
+            if (out.size >= wanted) break;
+            out.add(did);
+          }
+        }
+      }
+      return [...out];
     }
 
     function dbToFeedPaginated(offset: number, limit: number) {

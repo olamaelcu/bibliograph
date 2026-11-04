@@ -134,6 +134,13 @@
       "when": 1794800000000,
       "tag": "0020_edition_tid",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794900000000,
+      "tag": "0021_follows",
+      "breakpoints": true
     }
   ]
 }

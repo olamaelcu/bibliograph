@@ -109,11 +109,68 @@ its keyset cursor from the last row.
 1. **Database**: Direct queries to `records` table for book reviews
 2. **Constellation**: Backlink queries for edition-specific reviews
 3. **Fallback**: DB-only pagination ensures reliability
+4. **Reader PDS**: the follow graph behind `following` and `extended` (below)
+
+## Social feeds and the follow graph
+
+`at://…/feed.generator/{following,extended}` are filtered by who the viewer
+follows, so they need the follow graph the reader actually maintains. Those
+edges are `net.olamaelcu.livtet.biblio.follow` records in the **reader's own
+repo** — livtet-service's FollowButton writes them there — and nothing mirrors
+them into `records`: TAP subscribes to `net.olamaelcu.livtet.biblio.*` but the
+consumer only persists `buzz.bookhive.book`.
+
+The feed therefore reads them from the viewer's PDS:
+`com.atproto.repo.listRecords` on `net.olamaelcu.livtet.biblio.follow`, up to
+20 pages of 100, anonymously (the collection is public). `subject` is the
+followed actor's at-uri; the DID is the first path segment.
+
+The PDS read is the **only** source of the follow graph. The local `follows`
+table is a best-effort mirror written by this service's
+`net.olamaelcu.livtet.biblio.graph.follow` procedure, which livtet-service calls
+*after* `writeFollowRecord` returns — so it can never hold a follow the repo
+lacks, and reading it risked resurrecting an edge the reader had removed in
+another client. The feed does not consult it at all: an unreadable repo yields
+an empty follow set and the feed degrades to the general one.
+
+That table is also why this release exists: its migration was written as
+`0011_follows.sql` but never entered `meta/_journal.json`, so the migrator —
+which plans from the journal — never ran it, in any environment. Production had
+no `follows` table at all and every `graph.follow` call failed with `42P01`,
+invisibly, because the platform treats the mirror as best-effort. Migration
+`0021_follows` re-issues the DDL and is the version the journal now carries.
+
+## How a caller names the viewer
+
+`following` and `extended` need a DID, and two proofs supply one
+(`viewerDidFromRequest`):
+
+| Caller | Mechanism |
+| --- | --- |
+| livtet-service (server-to-server) | `Authorization: Bearer <service JWT>` |
+| Bibliograph storefront (same origin) | `bib_session` cookie set by `/oauth/callback` |
+
+livtet-service holds no Bibliograph cookie. It mints a service auth token on the
+**reader's own PDS** with `com.atproto.server.getServiceAuth`
+(`aud=<publisher>#atproto_feed`, `lxm=com.atproto.feed.getFeedSkeleton`), which
+requires the `rpc:com.atproto.feed.getFeedSkeleton?aud=<publisher>#atproto_feed`
+OAuth grant, and attaches it as a bearer token in `graph-client.ts`
+`upstreamRequest`. Both paths converge on the same DID before any feed query
+runs.
+
+`extended` adds 2 hops: the follow sets of the hop-1 members, read from their
+own PDSes in batches of 8 and cut off at 500 candidates, unioned with any
+hop-1 edges in the local table and minus the viewer and hop-1 members.
+Successful reads are memoised for 60 s (capped at 512 DIDs) because one
+request can touch hundreds of repos; a failed read is never memoised as an
+empty follow set.
 
 ### Error Handling
 - Constellation backlink errors are logged but don't break the feed
 - Database queries handle missing or malformed review data gracefully
 - Pagination continues working even with partial data sources
+- An unreadable or unresolvable PDS degrades the social feeds to the general
+  feed — never to an error
 
 ## Future Considerations
 
