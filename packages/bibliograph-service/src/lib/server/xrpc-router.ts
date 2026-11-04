@@ -1,4 +1,4 @@
-import { XRPCRouter, json, AuthRequiredError } from '@atcute/xrpc-server';
+import { XRPCRouter, json } from '@atcute/xrpc-server';
 import { cors } from '@atcute/xrpc-server/middlewares/cors';
 import {
   ComAtprotoIdentityResolveDid,
@@ -38,7 +38,6 @@ import {
   NetOlamaelcuLivtetBiblioGetReviewsByBook,
   NetOlamaelcuLivtetBiblioShelf,
   NetOlamaelcuLivtetBiblioBookShelving,
-  NetOlamaelcuLivtetBiblioGraphFollow,
   NetOlamaelcuLivtetBiblioDefs,
 } from './lexicons/index.js';
 import {
@@ -73,7 +72,7 @@ import * as openLibraryApi from './api/open-library';
 import { SearchService } from './search/service';
 import { eq, inArray, and, gt, sql } from 'drizzle-orm';
 import { db } from './db';
-import { editions, works, contributors, publishers, records, follows, webSessions } from './db/schema';
+import { editions, works, contributors, publishers, records, webSessions } from './db/schema';
 import * as v from '@atcute/lexicons/validations';
 import type { Nsid } from '@atcute/lexicons';
 import { allowRequest } from './rate-limit';
@@ -2691,31 +2690,8 @@ router.addQuery(getFeedSkeletonSchema, {
   },
 });
 
-// ─── Social graph follow/unfollow (DB-authoritative) ─────────────────────
-// A procedure, not a query: it writes the caller's follow edge, so it must not
-// be cached or prefetched. Viewer DID comes from the service JWT (lxm
-// net.olamaelcu.livtet.biblio.graph.follow) or the storefront cookie.
-router.addProcedure(NetOlamaelcuLivtetBiblioGraphFollow.mainSchema, {
-  async handler({ input, request }) {
-    const followed = input.followed;
-    const action = input.action ?? 'follow';
-    const viewerDid = await viewerDidFromRequest(request, 'net.olamaelcu.livtet.biblio.graph.follow');
-    if (!viewerDid) {
-      throw new AuthRequiredError({
-        status: 401,
-        error: 'AuthenticationRequired',
-        message:
-          'follow/unfollow requires a service JWT (lxm net.olamaelcu.livtet.biblio.graph.follow) or a Bibliograph session cookie',
-        wwwAuthenticate: { scheme: 'Bearer' },
-      });
-    }
-    if (action === 'unfollow') {
-      await db.delete(follows).where(
-        and(eq(follows.followerDid, viewerDid), eq(follows.followedDid, followed)),
-      );
-    } else {
-      await db.insert(follows).values({ followerDid: viewerDid, followedDid: followed }).onConflictDoNothing();
-    }
-    return json({ ok: true } as unknown as NetOlamaelcuLivtetBiblioGraphFollow.$output);
-  },
-});
+// No follow/unfollow procedure lives here. Follow edges are
+// `net.olamaelcu.livtet.biblio.follow` records in the reader's own repo, written
+// by livtet-service; the social feeds read them straight from there
+// (`feedAuthorDids`), so a second, hand-maintained copy in this database had no
+// readers to serve.

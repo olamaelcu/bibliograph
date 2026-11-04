@@ -141,6 +141,13 @@
       "when": 1794900000000,
       "tag": "0021_follows",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794900000001,
+      "tag": "0022_drop_follows",
+      "breakpoints": true
     }
   ]
 }
