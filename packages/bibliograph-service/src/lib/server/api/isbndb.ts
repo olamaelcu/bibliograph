@@ -6,6 +6,7 @@ import { isbndbBreaker } from './breakers';
 import type { EditionItem, WorkItem, Identifier, SearchQuery, SearchResult } from '../search/types';
 import { isbndbEditionUri, isbndbWorkUri } from '../isbndb/keys';
 import { resolveContributorsByName } from './contributor-name-resolver';
+import { normalizeBookFormat } from '../format-view';
 
 const BASE = 'https://api2.isbndb.com';
 
@@ -106,6 +107,8 @@ async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, log: Logger)
     language: b.language ?? undefined,
     description: descriptionFromIsbndb(b),
     coverImageUrl: coverFromImage(b.image),
+    pages: b.pages ?? undefined,
+    format: normalizeBookFormat(b.binding),
     identifiers: makeIdentifiers(b, primary),
     contributors,
     createdAt,
@@ -317,6 +320,12 @@ async function enrichEditionsInternal(
     }
     if (!enriched.language && book.language) {
       enriched = { ...enriched, language: book.language };
+    }
+    if (enriched.pages === undefined && book.pages) {
+      enriched = { ...enriched, pages: book.pages };
+    }
+    if (!enriched.format && normalizeBookFormat(book.binding)) {
+      enriched = { ...enriched, format: normalizeBookFormat(book.binding) };
     }
     return enriched;
   });

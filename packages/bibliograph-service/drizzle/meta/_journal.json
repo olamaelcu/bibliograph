@@ -148,6 +148,20 @@
       "when": 1794900000001,
       "tag": "0022_drop_follows",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0023_edition_format_pages",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795000000001,
+      "tag": "0024_edition_goodreads_backfill",
+      "breakpoints": true
     }
   ]
 }

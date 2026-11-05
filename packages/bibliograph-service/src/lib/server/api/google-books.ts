@@ -22,6 +22,7 @@ export interface GbVolumeInfo {
   publisher?: string;
   publishedDate?: string;
   description?: string;
+  pageCount?: number;
   industryIdentifiers?: { type?: string; identifier?: string }[];
   categories?: string[];
   language?: string;
@@ -112,6 +113,7 @@ export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger
     language: info.language,
     description: descriptionFromGb(info, v.searchInfo?.textSnippet),
     coverImageUrl: coverFromLinks(info.imageLinks),
+    pages: info.pageCount,
     identifiers: ids,
     contributors,
     createdAt,
@@ -370,6 +372,7 @@ export async function enrichEditions(
         const info = data.items?.[0]?.volumeInfo;
         if (info) {
           if (!enriched.description && info.description) enriched = { ...enriched, description: stripHtml(info.description) };
+          if (enriched.pages === undefined && info.pageCount) enriched = { ...enriched, pages: info.pageCount };
           const cover = coverFromLinks(info.imageLinks);
           if (!enriched.coverImageUrl && cover) enriched = { ...enriched, coverImageUrl: cover };
           if (enriched.coverImageUrl) {

@@ -77,6 +77,7 @@ export function registerBookQueries(
         }),
         identifiers: r.identifiers,
         description: r.description,
+        pages: r.pages,
         createdAt: r.createdAt,
       }));
       return json({ items, cursor: result.cursor, total: result.total } as unknown as CommunityLexiconBookSearchEditions.$output);

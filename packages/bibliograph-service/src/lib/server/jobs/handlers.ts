@@ -12,6 +12,7 @@ import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from 
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { bhEditionRkey, hiveIdFromCatalogUri, isHiveId } from '../bookhive/keys';
 import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
+import { grEditionRkey, grIdFromIdentifier } from '../gr/keys';
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
@@ -38,7 +39,7 @@ import {
 
 const db: typeof defaultDb = defaultDb;
 
-type SourceKind = 'ol' | 'gb' | 'isbndb' | 'bh';
+type SourceKind = 'ol' | 'gb' | 'isbndb' | 'bh' | 'gr';
 
 function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   const i = idents.find((i) => i.resource === 'openlibrary');
@@ -75,6 +76,12 @@ function isbndbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
  * Hive id carried by a `bookhive` identifier — the catalog record's at-uri
  * (`at://…/buzz.bookhive.catalogBook/{hiveId}`), or the bare hive id.
  */
+function grIdFromIdentifiers(idents: Identifier[]): string | undefined {
+  const goodreads = idents.find((x) => x.resource === 'goodreads');
+  if (!goodreads) return undefined;
+  return grIdFromIdentifier(goodreads.uri) ?? undefined;
+}
+
 function bhHiveIdFromIdentifiers(idents: Identifier[]): string | undefined {
   const bookhive = idents.find((x) => x.resource === 'bookhive');
   if (!bookhive) return undefined;
@@ -86,15 +93,24 @@ function bhHiveIdFromIdentifiers(idents: Identifier[]): string | undefined {
 /** Determine which synthesis path applies for an item, returning OL key, GB volume id, ISBNDb isbn, or nothing. */
 function identifySource(
   idents: Identifier[],
-): { kind: SourceKind; olKey: string; gbId: string; isbndbIsbn: string; hiveId: string } | null {
+): {
+  kind: SourceKind;
+  olKey: string;
+  gbId: string;
+  isbndbIsbn: string;
+  hiveId: string;
+  grId: string;
+} | null {
   const olKey = olKeyFromIdentifiers(idents);
-  if (olKey) return { kind: 'ol', olKey, gbId: '', isbndbIsbn: '', hiveId: '' };
+  if (olKey) return { kind: 'ol', olKey, gbId: '', isbndbIsbn: '', hiveId: '', grId: '' };
   const gbId = gbKeyFromIdentifiers(idents);
-  if (gbId) return { kind: 'gb', olKey: '', gbId, isbndbIsbn: '', hiveId: '' };
+  if (gbId) return { kind: 'gb', olKey: '', gbId, isbndbIsbn: '', hiveId: '', grId: '' };
   const isbndbIsbn = isbndbKeyFromIdentifiers(idents);
-  if (isbndbIsbn) return { kind: 'isbndb', olKey: '', gbId: '', isbndbIsbn, hiveId: '' };
+  if (isbndbIsbn) return { kind: 'isbndb', olKey: '', gbId: '', isbndbIsbn, hiveId: '', grId: '' };
   const hiveId = bhHiveIdFromIdentifiers(idents);
-  if (hiveId) return { kind: 'bh', olKey: '', gbId: '', isbndbIsbn: '', hiveId };
+  if (hiveId) return { kind: 'bh', olKey: '', gbId: '', isbndbIsbn: '', hiveId, grId: '' };
+  const grId = grIdFromIdentifiers(idents);
+  if (grId) return { kind: 'gr', olKey: '', gbId: '', isbndbIsbn: '', hiveId: '', grId };
   return null;
 }
 
@@ -111,6 +127,7 @@ export function editionUriFor(idents: Identifier[]): string | undefined {
     if (source.kind === 'ol') return `${base}${editionRkey(parseEditionKey(source.olKey))}`;
     if (source.kind === 'gb') return `${base}${gbEditionRkey(source.gbId)}`;
     if (source.kind === 'isbndb') return `${base}${isbndbEditionRkey(source.isbndbIsbn)}`;
+    if (source.kind === 'gr') return `${base}${grEditionRkey(source.grId)}`;
     return `${base}${bhEditionRkey(source.hiveId)}`;
   } catch {
     return undefined;
@@ -226,6 +243,7 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
         contributors: item.contributors,
         identifiers: item.identifiers,
         description: item.description ?? undefined,
+        pages: item.pages,
         createdAt: item.createdAt,
       };
       const cid = await cidForLex(value as unknown as LexMap);
@@ -241,6 +259,8 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
         language: item.language ?? null,
         description: item.description ?? null,
         coverImageUrl: coverImageUrl ?? null,
+        format: item.format ?? null,
+        pages: item.pages ?? null,
         contributors: item.contributors,
         identifiers: item.identifiers,
         createdAt: new Date(item.createdAt),

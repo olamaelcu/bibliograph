@@ -21,6 +21,8 @@ import { getEditionByIsbn } from '../api/isbndb';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { catalogBookToEdition, fetchCatalogBook } from '../bookhive/catalog';
 import { hiveIdFromBhRkey, isBhRkey } from '../bookhive/keys';
+import { grIdFromRkey, isGrRkey } from '../gr/keys';
+import { fetchGoodreadsEdition } from '../search/goodreads-source';
 
 /** rkey of an edition URI (the last path segment). */
 export function editionRkeyOf(uri: string): string {
@@ -72,6 +74,9 @@ export async function fetchEditionForUri(
     if (isBhRkey(rkey)) {
       return await resolveBookhiveEdition(rkey, signal);
     }
+    if (isGrRkey(rkey)) {
+      return await fetchGoodreadsEdition(grIdFromRkey(rkey), log, signal);
+    }
     log.debug({ stage: 'edition-fetch', uri, rkey }, 'no provider for edition rkey prefix');
     return null;
   } catch (err) {
@@ -81,11 +86,12 @@ export async function fetchEditionForUri(
 }
 
 /** Provider name for an edition URI, for reporting. `null` when unmapped. */
-export function providerForEditionUri(uri: string): 'ol' | 'isbndb' | 'gb' | 'bh' | null {
+export function providerForEditionUri(uri: string): 'ol' | 'isbndb' | 'gb' | 'bh' | 'gr' | null {
   const rkey = editionRkeyOf(uri);
   if (rkey.startsWith('ol.')) return 'ol';
   if (rkey.startsWith('isbndb.')) return 'isbndb';
   if (isGbRkey(rkey)) return 'gb';
   if (rkey.startsWith('bh.')) return 'bh';
+  if (isGrRkey(rkey)) return 'gr';
   return null;
 }

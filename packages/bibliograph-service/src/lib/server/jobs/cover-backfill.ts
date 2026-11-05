@@ -142,6 +142,7 @@ function editionValueForCid(row: EditionRow, coverImageUrl: string): Record<stri
     contributors: row.contributors,
     identifiers: row.identifiers,
     description: row.description ?? undefined,
+    pages: row.pages ?? undefined,
     createdAt: row.createdAt.toISOString(),
   };
 }

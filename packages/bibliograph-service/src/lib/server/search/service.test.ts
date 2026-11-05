@@ -7,6 +7,7 @@ import type { PostgresSource } from './postgres-source';
 import type { OpenLibrarySource } from './open-library-source';
 import type { IsbndbSource } from './isbndb-source';
 import type { GoogleBooksEnricher } from './google-books-enricher';
+import type { GoodreadsSource } from './goodreads-source';
 import type { WikidataContributorEnricher, WikidataEditionEnricher } from './wikidata-enricher';
 import type { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
 import type {
@@ -126,6 +127,14 @@ function makeFakeGoogleBooksSource() {
   } as unknown as import('./google-books-source').GoogleBooksSource;
 }
 
+function makeFakeGoodreadsSource(
+  result: SearchResult<EditionItem> = { items: [], total: 0 },
+): GoodreadsSource {
+  return {
+    searchEditions: async () => result,
+  } as unknown as GoodreadsSource;
+}
+
 function makeFakeOpenLibraryEnricher() {
   return {
     enrich: async <T>(items: T[]) => items,
@@ -176,6 +185,7 @@ function buildDeps(
     ol: OpenLibrarySource;
     gb: import('./google-books-source').GoogleBooksSource;
     ib: { source: IsbndbSource; calls: SearchQuery[] };
+    gr: GoodreadsSource;
   }>,
 ) {
   return {
@@ -183,6 +193,7 @@ function buildDeps(
     openLibrary: fakes.ol ?? makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [], total: 0 }),
     publisherSource: makeFakePublisherSource(),
     googleBooksSource: fakes.gb ?? makeFakeGoogleBooksSource(),
+    goodreadsSource: fakes.gr ?? makeFakeGoodreadsSource(),
     isbndbSource: (fakes.ib ? mergeFakes(fakes.ib) : makeFakeIsbndbSource().source) as IsbndbSource,
     googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
     openLibraryEnricher: makeFakeOpenLibraryEnricher(),
@@ -194,6 +205,41 @@ function buildDeps(
     wikidataContributor: makeFakeWikidataContributor() as unknown as WikidataContributorEnricher,
   };
 }
+
+test('searchEditions: Goodreads fills the result set after primary sources', async () => {
+  const grEdition: EditionItem = {
+    ...baseEdition,
+    uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/gr.23692271',
+    title: 'Sapiens',
+    identifiers: [
+      { uri: 'https://www.goodreads.com/book/show/23692271', resource: 'goodreads' },
+    ],
+  };
+  const svc = new SearchService(
+    buildDeps({ gr: makeFakeGoodreadsSource({ items: [grEdition], total: 6749 }) }),
+    log,
+  );
+  const r = await svc.searchEditions({ q: 'sapiens', limit: 10 });
+  assert.equal(r.items.length, 1);
+  assert.equal(r.items[0]?.uri, grEdition.uri);
+  assert.equal(r.total, 6749);
+});
+
+test('searchEditions: a blocked Goodreads source degrades instead of failing', async () => {
+  const svc = new SearchService(
+    buildDeps({
+      gr: makeFakeGoodreadsSource({
+        items: [],
+        total: 0,
+        degraded: { upstream: 'goodreads', reason: 'blocked' },
+      }),
+    }),
+    log,
+  );
+  const r = await svc.searchEditions({ q: 'sapiens', limit: 10 });
+  assert.equal(r.items.length, 0);
+  assert.deepEqual(r.degraded, { upstream: 'goodreads', reason: 'blocked' });
+});
 
 test('searchEditions: postgres hit short-circuits OL', async () => {
   const emptyOl = makeFakeOpenLibrary({ items: [], total: 0 }, { items: [], total: 0 }, { items: [], total: 0 });

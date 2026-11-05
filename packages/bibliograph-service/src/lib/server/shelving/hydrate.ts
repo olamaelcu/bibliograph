@@ -10,6 +10,7 @@ import { createLogger } from '../logger';
 import { BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
 import { normalizeBookhiveBook } from '../bookhive/records';
 import { catalogEditionUriFromRkey } from './catalog-uri';
+import { formatViewFor } from '../format-view';
 
 const log = createLogger('web');
 
@@ -81,6 +82,8 @@ function makeBookView(row: typeof editions.$inferSelect): NetOlamaelcuLivtetBibl
     title: row.title,
     coverUrl: (row.coverImageUrl ?? undefined) as never,
     publishDate: row.publishedYear ? `${row.publishedYear}` : undefined,
+    format: formatViewFor(row.format) as never,
+    pages: row.pages ?? undefined,
     contributors: (row.contributors ?? []).map((c) => ({
       bookUri: row.uri as never,
       contributor: {

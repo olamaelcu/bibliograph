@@ -3,7 +3,8 @@ import { db } from './db';
 import { works, contributors, publishers } from './db/schema';
 import { PUBLISHER_DID } from './did';
 import { resolveEditions } from './edition-lookup';
-import { getEditionByRkey, getWorkByRkey, getContributorByRkey } from './api/open-library.js';
+import { getWorkByRkey, getContributorByRkey } from './api/open-library.js';
+import { fetchEditionForUri } from './shelving/edition-fetch';
 import { enqueueIngest } from './jobs/enqueue.js';
 import pino from 'pino';
 import type { Logger } from 'pino';
@@ -47,7 +48,7 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
     // provider to rebuild a duplicate.
     const row = (await resolveEditions([uri])).get(uri);
     if (!row) {
-      const item = await getEditionByRkey(rkey, log).catch(() => null);
+      const item = await fetchEditionForUri(uri, log).catch(() => null);
       if (item) {
         enqueueIngest('edition', item).catch(() => {});
         const value: EditionValue = {

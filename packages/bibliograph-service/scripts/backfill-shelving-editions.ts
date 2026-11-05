@@ -49,7 +49,7 @@ const SHELF_COLLECTION = 'net.olamaelcu.livtet.biblio.shelf';
 const PAGE_SIZE = 500;
 const DEFAULT_CONCURRENCY = 3;
 
-type Provider = 'ol' | 'gb' | 'isbndb' | 'bh';
+type Provider = 'ol' | 'gb' | 'isbndb' | 'bh' | 'gr';
 
 const ALL_PROVIDERS: Provider[] = ['ol', 'gb', 'isbndb', 'bh'];
 

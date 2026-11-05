@@ -1,3 +1,43 @@
+bibliograph (0.3.1) unstable; urgency=medium
+
+  * Raise the Goodreads metadata backfill failure guard from 20% to 80%,
+    keeping the 20-fresh-attempt minimum and the immediate stop on an
+    anti-bot response. Known misses remain recorded and skipped.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 15:30:00 -0500
+
+bibliograph (0.3.0) unstable; urgency=medium
+
+  * The Goodreads metadata backfill records known misses in
+    `edition_goodreads_backfill`, so a rerun does not keep retrying the same
+    missing books or trip the 20% failure guard on them. The guard still
+    measures fresh attempts, with a 20-row minimum sample.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 13:30:00 -0500
+
+bibliograph (0.2.9) unstable; urgency=medium
+
+  * The Goodreads metadata backfill stops when the failure rate reaches 20%
+    of attempted rows (not-found plus hard failures, after at least five
+    attempts) and records the stop reason in its summary. A Goodreads
+    anti-bot response still stops the run immediately.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 13:10:00 -0500
+
+bibliograph (0.2.8) unstable; urgency=medium
+
+  * Goodreads is now a general-search source: title/author results are
+    synthesized as `gr.<bookId>` editions, contributors are resolved by name,
+    and provider blocks degrade the response instead of failing it.
+  * Edition metadata backfill from Goodreads fills format, pages, ISBN/ASIN,
+    publication year, and language; it logs `goodreads-book-not-found`,
+    counts blocked responses separately, and stops on an anti-bot response.
+  * The Goodreads scraper extracts genres, ISBN/ASIN, publication date,
+    publisher, language, and contributor portraits; author pages are the
+    portrait fallback.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 12:00:00 -0500
+
 bibliograph (0.2.7) unstable; urgency=medium
 
   * Cover bytes from Google Books and Open Library are cached on disk. The

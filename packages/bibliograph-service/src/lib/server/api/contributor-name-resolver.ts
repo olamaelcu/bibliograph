@@ -8,10 +8,11 @@ import { PUBLISHER_DID } from '../did';
 import { enqueueIngest } from '../jobs/enqueue';
 import type { ContributionEntry, Identifier, ContributorItem } from '../search/types';
 
-export type ContributorSource = 'googlebooks' | 'isbndb';
+export type ContributorSource = 'googlebooks' | 'isbndb' | 'goodreads';
 
 const GB_PREFIX = 'gb.a-';
 const ISBNDB_PREFIX = 'isbndb.a-';
+const GR_PREFIX = 'gr.a-';
 
 function slugify(name: string): string {
   return name
@@ -26,7 +27,9 @@ function slugify(name: string): string {
 
 function rkeyFor(name: string, source: ContributorSource): string {
   const slug = slugify(name);
-  return source === 'googlebooks' ? `${GB_PREFIX}${slug}` : `${ISBNDB_PREFIX}${slug}`;
+  if (source === 'googlebooks') return `${GB_PREFIX}${slug}`;
+  if (source === 'isbndb') return `${ISBNDB_PREFIX}${slug}`;
+  return `${GR_PREFIX}${slug}`;
 }
 
 function uriFor(rkey: string): string {

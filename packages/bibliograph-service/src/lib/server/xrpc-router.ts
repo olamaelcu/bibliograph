@@ -65,6 +65,7 @@ import { GoogleBooksEnricher } from './search/google-books-enricher';
 import { OpenLibraryEnricher } from './search/open-library-enricher';
 import { GoogleBooksSource } from './search/google-books-source';
 import { IsbndbSource } from './search/isbndb-source';
+import { GoodreadsSource } from './search/goodreads-source';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './search/isbndb-enricher';
 import { WikidataContributorEnricher, WikidataEditionEnricher } from './search/wikidata-enricher';
 import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
@@ -128,6 +129,7 @@ const postgresSource = new PostgresSource(log);
 const openLibrarySource = new OpenLibrarySource(log);
 const googleBooksSource = new GoogleBooksSource(log);
 const isbndbSource = new IsbndbSource(log);
+const goodreadsSource = new GoodreadsSource(log);
 const googleBooksEnricher = new GoogleBooksEnricher();
 const openLibraryEnricher = new OpenLibraryEnricher();
 const isbndbEnricher = new IsbndbEnricher();
@@ -143,6 +145,7 @@ const searchService = new SearchService(
     publisherSource: openLibraryApi,
     googleBooksSource,
     isbndbSource,
+    goodreadsSource,
     googleBooks: googleBooksEnricher,
     openLibraryEnricher,
     isbndbEnricher,

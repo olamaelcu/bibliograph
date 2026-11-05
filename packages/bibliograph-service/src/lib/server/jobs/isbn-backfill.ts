@@ -165,6 +165,7 @@ function editionValueForCid(row: EditionRow, identifiers: Identifier[]): Record<
     contributors: row.contributors,
     identifiers,
     description: row.description ?? undefined,
+    pages: row.pages ?? undefined,
     createdAt: row.createdAt.toISOString(),
   };
 }

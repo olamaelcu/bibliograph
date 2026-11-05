@@ -5,6 +5,7 @@ export type EditionValue = {
   $type: 'community.lexicon.book.edition';
   title: string; subtitle?: string; place?: string; publishedYear?: number;
   language?: string; coverImageUrl?: string; description?: string;
+  pages?: number;
   contributors: Contribution[]; identifiers: Identifier[]; createdAt: string;
 };
 export type WorkValue = {

@@ -19,6 +19,7 @@
     "seed:publishers": "tsx scripts/seed-publishers.ts",
     "backfill:works": "tsx scripts/backfill-works.ts",
     "backfill:covers": "tsx scripts/backfill-covers.ts",
+    "backfill:formats": "tsx scripts/backfill-formats.ts",
     "backfill:edition-contributors": "tsx scripts/backfill-edition-contributors.ts",
     "backfill:contributor-images": "tsx scripts/backfill-contributor-images.ts",
     "backfill:shelving-editions": "tsx scripts/backfill-shelving-editions.ts",
@@ -31,7 +32,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "label-keygen": "tsx scripts/gen-label-key.ts",
-    "labels:seniority": "tsx scripts/issue-tenure-labels.ts"
+    "labels:seniority": "tsx scripts/issue-tenure-labels.ts",
+    "goodreads:book": "tsx scripts/goodreads-book.ts"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.4",

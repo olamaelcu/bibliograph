@@ -8,6 +8,7 @@ import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editi
 import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, Identifier } from '../search/types';
 import { translateOlLanguages } from '../search/language';
 import { resolveOlContributors } from './open-library-contributors';
+import { normalizeBookFormat } from '../format-view';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
@@ -98,6 +99,8 @@ interface OlEditionDoc {
   cover_i?: number;
   covers?: number[];
   description?: string | { value: string };
+  number_of_pages?: number;
+  physical_format?: string;
   authors?: OlAuthorRef[];
 }
 
@@ -335,6 +338,8 @@ export async function searchEditions(
         language: d.language?.[0] as string | undefined,
         description: extractDescription(d.description),
         coverImageUrl: coverUrl(d.cover_i),
+        pages: d.number_of_pages,
+        format: normalizeBookFormat(d.physical_format),
         identifiers,
         contributors,
         createdAt,
@@ -457,6 +462,8 @@ async function getEditionByOlid(olid: string, log: Logger, signal?: AbortSignal)
     language: raw.language?.[0] as string | undefined,
     description: extractDescription(raw.description),
     coverImageUrl: coverUrl(raw.cover_i) ?? coverUrlFromCovers(raw.covers),
+    pages: raw.number_of_pages,
+    format: normalizeBookFormat(raw.physical_format),
     identifiers,
     contributors,
     createdAt: new Date().toISOString(),

@@ -66,6 +66,29 @@ Information is sourced from a few places:
 - Cover bytes are cached on disk under `COVER_CACHE_DIR` the first time
   `getImageForBook` serves them, so Google Books and Open Library are only
   contacted on a miss. The cache survives restarts and package upgrades.
+- Edition display metadata — the normalized format (`hardcover`, `paperback`,
+  `ebook`, `audiobook`) and page count — is stored on `editions` and returned
+  by the AppView's `getBooks` query. The common format slugs are declared as
+  `knownValues` in `net.olamaelcu.livtet.biblio.defs#bookFormat`; clients still
+  accept a newer slug rather than rejecting the edition.
+- `pnpm --filter bibliograph-service backfill:formats` fills missing
+  `format`, `pages`, ISBN-10/13 and ASIN identifiers, `publishedYear`, and
+  `language` from Goodreads. Genres, publisher, publication date, and
+  contributor portraits are parsed and logged but not stored yet. A missing
+  book emits `goodreads-book-not-found`, is recorded in
+  `edition_goodreads_backfill`, and is counted as `notFound` in the run summary.
+  Known misses are skipped on later runs. The run stops when the failure rate
+  reaches 80% after at least 20 fresh attempts, and stops immediately on a
+  Goodreads anti-bot response. It is an operator-run, rate-limited script, not
+  a request-path scrape; prefer the provider APIs when they carry the binding.
+- `pnpm --filter bibliograph-service goodreads:book -- <isbn>` prints the full
+  Goodreads payload for one ISBN: pages, binding, ISBN/ASIN, publication date,
+  publisher, language, genres, and contributors with portrait URLs. Author
+  pages are used as a portrait fallback via their OpenGraph `og:image`.
+- General `searchEditions` queries also merge Goodreads results as
+  `gr.<bookId>` editions. They are deduped by normalized title against the
+  primary sources; a blocked or failed Goodreads call is returned as a
+  `degraded: { upstream: 'goodreads' }` result rather than failing the search.
 - Author information is _gleamed_ from Wikipedia and OpenLibrary
 
 ## Catalog curation

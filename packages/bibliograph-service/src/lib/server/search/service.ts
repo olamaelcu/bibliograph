@@ -4,6 +4,7 @@ import { PostgresSource } from './postgres-source';
 import { OpenLibrarySource } from './open-library-source';
 import { GoogleBooksSource } from './google-books-source';
 import { IsbndbSource } from './isbndb-source';
+import { GoodreadsSource } from './goodreads-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
 import { OpenLibraryEnricher } from './open-library-enricher';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './isbndb-enricher';
@@ -21,6 +22,7 @@ export interface SearchServiceDeps {
   publisherSource: Pick<typeof openLibraryApi, 'searchPublishers'>;
   googleBooksSource: GoogleBooksSource;
   isbndbSource: IsbndbSource;
+  goodreadsSource?: GoodreadsSource;
   googleBooks: GoogleBooksEnricher;
   openLibraryEnricher: OpenLibraryEnricher;
   isbndbEnricher: IsbndbEnricher;
@@ -61,6 +63,10 @@ export class SearchService {
     return merged;
   }
 
+  private titleKey(title: string): string {
+    return title.trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
   private async runEnrichers<T extends ItemLike>(
     items: T[],
     enrichers: ReadonlyArray<Enricher<T>>,
@@ -76,9 +82,11 @@ export class SearchService {
   async searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
     const log = this.log();
 
-    const [pg, gb] = await Promise.all([
+    const [pg, gb, gr] = await Promise.all([
       this.deps.postgres.searchEditions(query),
       this.deps.googleBooksSource.searchEditions(query, AbortSignal.timeout(15_000)),
+      this.deps.goodreadsSource?.searchEditions(query, AbortSignal.timeout(15_000)) ??
+        Promise.resolve({ items: [], total: 0 } as SearchResult<EditionItem>),
     ]);
 
     const editionEnrichers: ReadonlyArray<Enricher<EditionItem>> = [
@@ -90,13 +98,21 @@ export class SearchService {
     ];
 
     const remote = await this.resolveRemoteEditions(query, gb, log, editionEnrichers);
-    const merged = this.mergeItems(remote.items, pg.items);
+    let grItems = gr.items;
+    if (grItems.length > 0) {
+      grItems = await this.runEnrichers(grItems, editionEnrichers, log);
+      const seenTitles = new Set(remote.items.map((item) => this.titleKey(item.title)));
+      grItems = grItems.filter((item) => !seenTitles.has(this.titleKey(item.title)));
+    }
+    const remoteItems = [...remote.items, ...grItems].slice(0, query.limit);
+    const merged = this.mergeItems(remoteItems, pg.items);
     const cursor = remote.cursor ?? pg.cursor;
-    const total = remote.total ?? pg.total ?? 0;
+    const total = Math.max(remote.total ?? 0, gr.total, remoteItems.length, pg.total ?? 0);
+    const degraded = remote.degraded ?? gr.degraded;
 
-    if (remote.items.length > 0) {
+    if (remoteItems.length > 0) {
       try {
-        await syncIngestEditions(remote.items, log);
+        await syncIngestEditions(remoteItems, log);
       } catch (err) {
         log.error({ stage: 'search-editions.sync-ingest', err }, 'sync ingest failed; continuing');
       }
@@ -105,14 +121,15 @@ export class SearchService {
     log.info({
       stage: 'search-editions',
       remoteCount: remote.items.length,
+      goodreadsCount: grItems.length,
       remoteSource: remote.source,
       localCount: pg.items.length,
       mergedCount: merged.length,
       total,
-      degraded: !!remote.degraded,
+      degraded: !!degraded,
     }, 'search done');
 
-    return { items: merged, cursor, total, degraded: remote.degraded };
+    return { items: merged, cursor, total, degraded };
   }
 
   async searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {

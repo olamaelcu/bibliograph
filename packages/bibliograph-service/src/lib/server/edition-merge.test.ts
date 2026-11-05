@@ -35,6 +35,8 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     identifiers: [],
     description: null,
     coverImageUrl: null,
+    format: null,
+    pages: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
     descriptionCheckedAt: null,

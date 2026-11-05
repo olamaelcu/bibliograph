@@ -39,6 +39,11 @@ export const editions = pgTable(
       .default(sql`'[]'::jsonb`),
     description: text('description'),
     coverImageUrl: text('cover_image_url'),
+    // Normalized display metadata: `hardcover` | `paperback` | `ebook` |
+    // `audiobook`, and the provider's page count. Both feed the AppView's
+    // `bookView`; `pages` is also part of the edition record lexicon.
+    format: text('format'),
+    pages: integer('pages'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     descriptionCheckedAt: timestamp('description_checked_at', { withTimezone: true }),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
@@ -85,6 +90,22 @@ export const editionAliases = pgTable(
     tidIdx: index('edition_aliases_tid_idx').on(t.tid),
   }),
 );
+
+/**
+ * Goodreads backfill bookkeeping.
+ *
+ * A book that Goodreads does not have must not be re-fetched on every run: it
+ * would trip the failure-rate guard forever and never let the scan advance.
+ * `not_found` is a terminal state here until an operator deletes the row.
+ */
+export const editionGoodreadsBackfill = pgTable('edition_goodreads_backfill', {
+  uri: text('uri')
+    .primaryKey()
+    .references(() => editions.uri, { onDelete: 'cascade' }),
+  status: text('status').notNull(),
+  reason: text('reason'),
+  checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * ISBN enrichment bookkeeping (migration 0012).

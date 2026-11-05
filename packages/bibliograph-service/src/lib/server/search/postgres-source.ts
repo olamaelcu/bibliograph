@@ -158,6 +158,8 @@ export class PostgresSource {
       language: (r.language as string | null) ?? undefined,
       description: (r.description as string | null) ?? undefined,
       coverImageUrl: (r.coverImageUrl as string | null) ?? undefined,
+      format: ((r.format as string | null) ?? undefined)?.trim().toLowerCase() || undefined,
+      pages: (r.pages as number | null) ?? undefined,
       identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
       contributors: ((r.contributors as Array<{ subject: { uri: string; cid: string }; role: string }> | null) ?? []).map(contributionFromJson),
       createdAt: (r.createdAt as Date).toISOString(),

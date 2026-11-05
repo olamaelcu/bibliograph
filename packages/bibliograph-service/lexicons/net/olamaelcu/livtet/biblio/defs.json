@@ -93,10 +93,28 @@
       ],
       "description": "The unit a progress value is measured in."
     },
+    "bookFormat": {
+      "type": "string",
+      "knownValues": [
+        "hardcover",
+        "paperback",
+        "mass_market_paperback",
+        "ebook",
+        "audiobook",
+        "board_book",
+        "spiral_bound"
+      ],
+      "description": "Normalized physical or digital format of an edition."
+    },
     "formatView": {
       "type": "object",
-      "required": ["uri", "description", "emoji", "unit"],
+      "required": ["format", "uri", "description", "emoji", "unit"],
       "properties": {
+        "format": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookFormat",
+          "description": "The normalized format value."
+        },
         "uri": {
           "type": "string",
           "format": "at-uri",
@@ -274,6 +292,11 @@
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#formatView",
           "description": "The format of this edition."
+        },
+        "pages": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Page count for this edition, when known."
         },
         "genres": {
           "type": "array",
