@@ -63,6 +63,9 @@ Information is sourced from a few places:
   `GOOGLE_BOOKS_API_KEY`). Google Books answers are cached in Postgres for 24
   hours — hits and "no such volume" misses alike — because the quota is charged
   per request against that one key, which the web and worker processes share.
+- Cover bytes are cached on disk under `COVER_CACHE_DIR` the first time
+  `getImageForBook` serves them, so Google Books and Open Library are only
+  contacted on a miss. The cache survives restarts and package upgrades.
 - Author information is _gleamed_ from Wikipedia and OpenLibrary
 
 ## Catalog curation

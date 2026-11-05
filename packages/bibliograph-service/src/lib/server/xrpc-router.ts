@@ -104,6 +104,7 @@ import { shelfEntryConditions, shelfRkeyForBookhiveStatus } from './shelving/she
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import { datacenterCoverUrl } from './gb/cover-url';
+import { coverProxyUrl, isAllowedCoverUrl } from './cover-cache';
 import {
   BOOKHIVE_BOOK_COLLECTION,
   bhEditionUri,
@@ -1044,7 +1045,11 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
       return Response.json({ error: 'RecordNotFound', message: `no edition at ${uri}` }, { status: 404 });
     }
     if (row.coverImageUrl) {
-      return json({ url: datacenterCoverUrl(row.coverImageUrl) } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
+      const source = datacenterCoverUrl(row.coverImageUrl);
+      const url = isAllowedCoverUrl(source)
+        ? coverProxyUrl(source, publicOrigin())
+        : source;
+      return json({ url } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
     if (isBhRkey(row.rkey)) {
       return json({ url: await bookhiveCoverProxyUrl(row.rkey) } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);

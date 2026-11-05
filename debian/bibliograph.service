@@ -48,7 +48,7 @@ SyslogIdentifier=bibliograph
 # Every piece of application state lives in PostgreSQL; the state directory
 # only holds the operator-published lexicon CAR files read by the XRPC lex
 # publisher. Logs are written by pino to per-process files under LOG_DIR.
-StateDirectory=bibliograph bibliograph/lex
+StateDirectory=bibliograph bibliograph/lex bibliograph/covers
 StateDirectoryMode=0750
 LogsDirectory=bibliograph
 LogsDirectoryMode=0750
