@@ -16,16 +16,17 @@ WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
 Environment=NODE_ENV=production
 EnvironmentFile=-/etc/bibliograph/bibliograph.env
 
-# One bounded batch per tick. The scan only reads unstamped rows and enqueues
 # One bounded batch per daily run. The scan only reads unstamped rows without a
 # queued job and enqueues `backfill-edition-isbn` jobs; the worker does the
 # fetching, and graphile's jobKey keeps a slow worker from being handed the same
-# row twice. 200 rows per run costs one indexed query when there is nothing left
-# to do.
-ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx scripts/backfill-edition-isbns.ts --limit 200
+# row twice. The batch is sized to clear the ~165k missing-ISBN backlog in two
+# daily ticks at the measured ~85k/day drain rate; an empty scan is one indexed
+# query.
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx scripts/backfill-edition-isbns.ts --limit 83000
 
-# A slow database should not hold the unit open for the next tick.
-TimeoutStartSec=600s
+# Enqueueing 83k jobs sequentially takes 15-25 minutes on a cold tsx start, so
+# the timeout has to cover the whole insert loop, not just a slow database.
+TimeoutStartSec=1h
 SuccessExitStatus=143 130
 SyslogIdentifier=bibliograph-isbn-backfill
 

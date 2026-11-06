@@ -8,7 +8,7 @@
 // page over rows the worker has not reached yet.
 //
 // Run from the package root (the packaged unit does):
-//   node_modules/.bin/tsx scripts/backfill-edition-isbns.ts --limit 200
+//   node_modules/.bin/tsx scripts/backfill-edition-isbns.ts --limit 83000
 //
 // Locally:
 //   pnpm tsx scripts/backfill-edition-isbns.ts --dry-run
