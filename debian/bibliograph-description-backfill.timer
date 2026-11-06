@@ -1,0 +1,23 @@
+[Unit]
+Description=Run the Bibliograph description backfill once a day
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+Requires=bibliograph-migrate.service
+
+[Timer]
+# 30 minutes after the ISBN tick, so the two oneshots never overlap: they share
+# the Google Books quota, and a simultaneous scan would just race for a 429.
+# The scan is idempotent and skips rows that already have a queued job.
+OnBootSec=35min
+OnCalendar=daily
+# Spread across hosts: a synchronised fleet would hit Google Books together.
+RandomizedDelaySec=1h
+AccuracySec=1min
+# A run missed while the host was down fires on the next boot; the bounded batch
+# and stamped rows make the catch-up harmless.
+Persistent=true
+Unit=bibliograph-description-backfill.service
+
+[Install]
+WantedBy=timers.target

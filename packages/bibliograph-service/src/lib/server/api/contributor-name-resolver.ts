@@ -5,8 +5,7 @@ import type { LexMap } from '@atproto/lex-data';
 import { db } from '../db';
 import { contributors } from '../db/schema';
 import { PUBLISHER_DID } from '../did';
-import { enqueueIngest } from '../jobs/enqueue';
-import type { ContributionEntry, Identifier, ContributorItem } from '../search/types';
+import type { ContributionEntry, Identifier } from '../search/types';
 import { providerIdentifier } from '../identifiers';
 
 export type ContributorSource = 'googlebooks' | 'isbndb' | 'goodreads' | 'openlibrary' | 'bookhive';
@@ -131,20 +130,6 @@ async function stubContributor(
     );
   }
 
-  const item: ContributorItem = {
-    uri,
-    name,
-    aliases: [],
-    identifiers: [identifier],
-    createdAt,
-  };
-  enqueueIngest('contributor', item).catch((err) => {
-    log.warn(
-      { stage: 'resolve-name-contributor', uri, err: String(err) },
-      'enqueue contributor ingest failed',
-    );
-  });
-
   return { uri, cid };
 }
 
@@ -156,8 +141,10 @@ async function stubContributor(
  *
  * Each name is looked up by deterministic slug-derived rkey, then by
  * case-insensitive `name` match across sources. On miss a stub contributor
- * record is computed (cid derived via `cidForLex`), enqueued for ingest
- * (fire-and-forget), and its uri+cid is returned immediately.
+ * row is computed (cid derived via `cidForLex`) and upserted synchronously; its
+ * uri+cid is returned. The row is what serving and matching read — the current
+ * ingest path persists records in Postgres, and no queue task publishes
+ * contributors (the OpenLibrary-fed ingest was removed in 0.4.0).
  *
  * The function never throws: malformed/empty inputs are skipped with a warn
  * log so the surrounding edition/work build can still succeed.

@@ -1,0 +1,55 @@
+[Unit]
+Description=Bibliograph description backfill (one bounded batch)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+# The bookkeeping column (`description_checked_at`) comes from migration 0013,
+# so the scan must not run against a database the migrator has not touched yet.
+Requires=bibliograph-migrate.service
+
+[Service]
+Type=oneshot
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/bibliograph/bibliograph.env
+
+# One bounded batch per daily run: 20k rows of the 171,934-row backlog, sized to
+# ~20% of the shared Google Books daily quota (measured: ~72k ISBN lookups
+# exhausted it on 2026-11-06) so the ISBN backfill keeps the larger share.
+# The scan only reads unstamped rows without a queued job and enqueues
+# `backfill-edition-description` jobs; the worker does the fetching, and
+# graphile's jobKey keeps a slow worker from being handed the same row twice.
+# Rows whose upstream call failed stay actionable, so the next tick retries them.
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx scripts/backfill-descriptions.ts --limit 20000
+
+# Enqueueing 20k jobs sequentially takes several minutes on a cold tsx start, so
+# the timeout has to cover the whole insert loop, not just a slow database.
+TimeoutStartSec=1h
+SuccessExitStatus=143 130
+SyslogIdentifier=bibliograph-description-backfill
+
+StateDirectory=bibliograph
+StateDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+MemoryDenyWriteExecute=no

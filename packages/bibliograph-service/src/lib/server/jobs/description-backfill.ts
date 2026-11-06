@@ -146,6 +146,19 @@ export async function resolveDescription(
   return undefined;
 }
 
+/**
+ * A negative is only trustworthy when nothing was asked, or everything asked
+ * answered. Any recorded upstream failure means the row may still have a
+ * description, so the stamp has to wait for a later run.
+ */
+export function canStampPermanentMiss(
+  failuresBefore: number,
+  failuresAfter: number,
+  breakerOpenBefore: boolean,
+): boolean {
+  return !breakerOpenBefore && failuresAfter === failuresBefore;
+}
+
 export async function backfillDescriptionForEdition(
   uri: string,
   log: Logger,
@@ -159,13 +172,18 @@ export async function backfillDescriptionForEdition(
 
   // A negative result is only trustworthy when every upstream we would consult
   // was actually reachable; otherwise the row stays unchecked for a later run.
-  const deferrable = () => [googleBooksBreaker, isbndbBreaker]
-    .some((b) => !b.canCall());
-  const wasDeferred = deferrable();
+  // An open breaker only tells us the upstream *was* failing, so the call-time
+  // failure count is what decides: a 429 recorded mid-call is invisible to
+  // `canCall()` alone.
+  const breakerOpenBefore = [googleBooksBreaker, isbndbBreaker].some((b) => !b.canCall());
+  const failuresBefore =
+    googleBooksBreaker.getTotalFailures() + isbndbBreaker.getTotalFailures();
   const description = await resolveDescription(row, log, signal);
   if (!description) {
-    if (wasDeferred || deferrable()) {
-      log.warn({ stage: 'description-backfill', uri }, 'an upstream breaker is open; leaving description unchecked');
+    const failuresAfter =
+      googleBooksBreaker.getTotalFailures() + isbndbBreaker.getTotalFailures();
+    if (!canStampPermanentMiss(failuresBefore, failuresAfter, breakerOpenBefore)) {
+      log.warn({ stage: 'description-backfill', uri }, 'an upstream request failed; leaving description unchecked');
       return { updated: false, reason: 'deferred' };
     }
     await db.update(editions).set({ descriptionCheckedAt: new Date() }).where(eq(editions.uri, uri));

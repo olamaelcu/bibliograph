@@ -28,6 +28,10 @@ run = ["pnpm --filter bibliograph-service run backfill:requeue-isbns"]
 description = "Fill bh.* editions from Bookhive's catalog: on-protocol ISBNs and contributor refs"
 run = ["pnpm --filter bibliograph-service run backfill:bookhive-catalog"]
 
+[tasks."backfill:descriptions"]
+description = "Run the description backfill scan once (enqueues jobs for the worker)"
+run = ["pnpm --filter bibliograph-service run backfill:descriptions"]
+
 [tasks.worker]
 description = "Run the worker (TAP consumer + graphile task lists) to drain the queue"
 run = ["pnpm --filter bibliograph-service run worker"]

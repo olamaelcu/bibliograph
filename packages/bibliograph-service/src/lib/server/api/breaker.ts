@@ -10,6 +10,9 @@ export type BreakerState = 'closed' | 'open' | 'half-open';
 
 export class CircuitBreaker {
   private failures = 0;
+  // Lifetime failures; `failures` above is the consecutive count that drives
+  // the state machine, so it resets on success. This one never does.
+  private totalFailures = 0;
   private state: BreakerState = 'closed';
   private openedAt = 0;
   private nowFn: () => number;
@@ -38,6 +41,11 @@ export class CircuitBreaker {
     return this.failures;
   }
 
+  /** Lifetime failures, never reset by a success. Deltas are safe across a call. */
+  getTotalFailures(): number {
+    return this.totalFailures;
+  }
+
   canCall(): boolean {
     const s = this.getState();
     return s === 'closed' || s === 'half-open';
@@ -50,6 +58,7 @@ export class CircuitBreaker {
 
   recordFailure(): void {
     this.failures++;
+    this.totalFailures++;
     if (this.failures >= this.threshold) {
       this.state = 'open';
       this.openedAt = this.nowFn();

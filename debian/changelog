@@ -1,3 +1,23 @@
+bibliograph (0.5.1) unstable; urgency=medium
+
+  * The description backfill is scheduled: a daily timer enqueues one bounded
+    batch (`--limit 20000`, ~20% of the shared Google Books quota) of
+    `backfill-edition-description` jobs that the existing worker drains. The
+    scan gained `--dry-run`/`--limit` and releases its pool, and rows it defers
+    stay actionable for the next tick.
+  * A 429 is no longer recorded as a permanent miss. `description_checked_at`
+    is only stamped when no upstream request failed during the lookup, decided
+    by a new lifetime-failure counter on the circuit breaker, so rows skipped
+    during a quota-exhausted day are retried instead of being lost.
+  * Contributor stubs no longer enqueue a publish job. The 0.4.0 OpenLibrary
+    removal deleted the `ingest-contributor` task, so every minted stub queued
+    a job no handler would ever pick up — one catalog pass left 21,303 inert
+    rows — and the per-name insert dominated the walk. The stub row is upserted
+    synchronously, which is what serving and matching read; ingest persists
+    records in Postgres, exactly as edition ingest already does.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 19:20:00 -0500
+
 bibliograph (0.5.0) unstable; urgency=medium
 
   * OpenLibrary returns as an ISBN-discovery source only. A title search
