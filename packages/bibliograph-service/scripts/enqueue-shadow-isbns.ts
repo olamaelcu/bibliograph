@@ -32,7 +32,7 @@ const SHADOW_PENDING = sql`
   )
   AND NOT EXISTS (
     SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) AS ident
-     WHERE ident->>'resource' IN ('isbn', 'isbn10', 'isbn13')
+     WHERE ident->>'type' = 'isbn'
   )
 `;
 

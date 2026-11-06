@@ -1,3 +1,13 @@
+bibliograph (0.4.1) unstable; urgency=medium
+
+  * The ISBN scanners (daily backfill and the shadow re-enqueue) test the
+    canonical identifier shape (`identifiers[].type = 'isbn'`). The 0.4.0
+    storage migration removed `resource`, so the previous predicate matched no
+    row and the next daily tick would have treated every edition as ISBN-less
+    and re-enqueued the catalog.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 12:45:27 -0500
+
 bibliograph (0.4.0) unstable; urgency=medium
 
   * Remove the OpenLibrary integration: its search source, enricher, HTTP
