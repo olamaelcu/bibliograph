@@ -15,11 +15,6 @@ import {
   ComAtprotoSyncGetRepoStatus,
 } from '@atcute/atproto';
 import {
-  CommunityLexiconBookCompatibility,
-  CommunityLexiconBookSearchContributors,
-  CommunityLexiconBookSearchEditions,
-  CommunityLexiconBookSearchPublishers,
-  CommunityLexiconBookSearchWorks,
   NetOlamaelcuLivtetBiblioGetActorProfile,
   NetOlamaelcuLivtetBiblioGetReadingGoal,
   NetOlamaelcuLivtetBiblioGetShelf,
@@ -129,7 +124,11 @@ import {
 } from './bookhive/keys';
 import { BOOKHIVE_BACKLINK_SOURCE, normalizeBookhiveBook, shelfForBookhiveStatus } from './bookhive/records';
 import { enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
-import { buildBookContributorViews } from './book-contributor-view';
+import { contributorRecordValue, publisherRecordValue, workRecordValue } from './book-records';
+import { contributorUrisFor, loadContributorRefs } from './contributor-refs';
+import { wireContributors } from './book-wire';
+import { PROVIDER_IDENTIFIER_DOMAINS } from './identifiers';
+import { editionRecordValue } from './edition-record';
 import { registerBookQueries } from '../../routes/xrpc/book-queries';
 import { queryLabels, labelToJson } from './labeler/labels';
 import { verifyFeedAuth, requireFeedAuth } from './auth/feed-auth';
@@ -460,21 +459,16 @@ async function serveBookRecordFromDb(
   if (collection === 'community.lexicon.book.edition') {
     const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
-    const bookContributors = await buildBookContributorViews(uri, row.contributors);
-    const value = {
-      $type: 'community.lexicon.book.edition',
-      uri,
-      title: row.title,
-      subtitle: row.subtitle ?? undefined,
-      place: row.place ?? undefined,
-      publishedYear: row.publishedYear ?? undefined,
-      language: row.language ?? undefined,
-      coverImageUrl: row.coverImageUrl ?? undefined,
-      contributors: bookContributors,
-      identifiers: row.identifiers ?? [],
-      description: row.description ?? undefined,
-      createdAt: row.createdAt.toISOString(),
-    };
+    const contributorRefs = await loadContributorRefs(contributorUrisFor(row.contributors));
+    const value = editionRecordValue(row, {
+      contributors: wireContributors(row.contributors, contributorRefs),
+    });
+    if (!value) {
+      // `defs#edition` requires at least one identifier, so a row without one
+      // has no lexicon-valid record to serve or hash.
+      log.warn({ uri }, 'edition has no identifiers; not serving a record');
+      return notFoundResponse('RecordNotFound', `edition ${uri} has no identifiers`);
+    }
     const cid = await cidForLex(value as unknown as LexMap);
     if (!row.description) {
       void enqueueDescriptionBackfill(uri).catch((err) => {
@@ -486,20 +480,8 @@ async function serveBookRecordFromDb(
   if (collection === 'community.lexicon.book.work') {
     const [row] = await db.select().from(works).where(eq(works.uri, uri)).limit(1);
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
-    const bookContributors = await buildBookContributorViews(uri, row.contributors);
-    const value = {
-      $type: 'community.lexicon.book.work',
-      uri,
-      title: row.title,
-      subtitle: row.subtitle ?? undefined,
-      originalLanguage: row.originalLanguage ?? undefined,
-      firstPublishedYear: row.firstPublishedYear ?? undefined,
-      subjects: row.subjects ?? [],
-      contributors: bookContributors,
-      identifiers: row.identifiers ?? [],
-      description: row.description ?? undefined,
-      createdAt: row.createdAt.toISOString(),
-    };
+    const contributorRefs = await loadContributorRefs(contributorUrisFor(row.contributors));
+    const value = workRecordValue(row, wireContributors(row.contributors, contributorRefs));
     const cid = await cidForLex(value as unknown as LexMap);
     return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
   }
@@ -507,37 +489,14 @@ async function serveBookRecordFromDb(
   if (collection === 'community.lexicon.book.publisher') {
     const [row] = await db.select().from(publishers).where(eq(publishers.uri, uri)).limit(1);
     if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
-    const value = {
-      $type: 'community.lexicon.book.publisher',
-      uri,
-      name: row.name,
-      imprintOf:
-        row.imprintOfUri && row.imprintOfCid
-          ? { uri: row.imprintOfUri, cid: row.imprintOfCid }
-          : undefined,
-      foundingDate: row.foundingDate ?? undefined,
-      closingDate: row.closingDate ?? undefined,
-      identifiers: row.identifiers ?? [],
-      createdAt: row.createdAt.toISOString(),
-    };
+    const value = publisherRecordValue(row);
     const cid = await cidForLex(value as unknown as LexMap);
     return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
   }
   // community.lexicon.book.contributor
   const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
   if (!row) return notFoundResponse('RecordNotFound', `no row for ${uri}`);
-  const value = {
-    $type: 'community.lexicon.book.contributor',
-    uri,
-    name: row.name,
-    aliases: row.aliases ?? [],
-    bio: row.bio ?? undefined,
-    bornYear: row.bornYear ?? undefined,
-    diedYear: row.diedYear ?? undefined,
-    linkedDid: row.linkedDid ?? undefined,
-    identifiers: row.identifiers ?? [],
-    createdAt: row.createdAt.toISOString(),
-  };
+  const value = contributorRecordValue(row);
   const cid = await cidForLex(value as unknown as LexMap);
   return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
 }
@@ -2425,8 +2384,9 @@ async function bookhiveSubjectForEdition(editionUri: string): Promise<string | n
   // catalog retired keeps seeing that book's Bookhive reviews and shelvers.
   const row = (await resolveEditions([editionUri])).get(editionUri);
   for (const identifier of row?.identifiers ?? []) {
-    if (identifier.resource !== 'bookhive') continue;
-    if (hiveIdFromCatalogUri(identifier.uri)) return identifier.uri;
+    if (identifier.type !== PROVIDER_IDENTIFIER_DOMAINS.bookhive) continue;
+    const catalogUri = identifier.url ?? '';
+    if (hiveIdFromCatalogUri(catalogUri)) return catalogUri;
   }
   return null;
 }

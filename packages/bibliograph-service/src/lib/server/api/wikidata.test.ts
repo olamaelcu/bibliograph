@@ -4,6 +4,7 @@ import { pino } from 'pino';
 import { enrichWithWikidata, olIdFromIdentifierUri } from './wikidata';
 import { wikidataBreaker } from './breakers';
 import type { EditionItem } from '../search/types';
+import { providerIdentifier } from '../identifiers';
 
 const log = pino({ level: 'silent' });
 
@@ -37,7 +38,7 @@ function edition(olid: string, uri = `https://openlibrary.org/works/${olid}`): E
   return {
     uri: `at://did:web:x/community.lexicon.book.edition/ol.${olid}`,
     title: 'Test',
-    identifiers: [{ uri, resource: 'openlibrary' }],
+    identifiers: [providerIdentifier('openlibrary', uri)],
     contributors: [],
     createdAt: '2026-01-01T00:00:00.000Z',
   };
@@ -65,8 +66,8 @@ test('the most-linked Wikidata item wins when several claim one OLID', async () 
   try {
     const [out] = await enrichWithWikidata([edition('OL1001W')], log);
     assert.deepEqual(out?.identifiers, [
-      { uri: 'https://openlibrary.org/works/OL1001W', resource: 'openlibrary' },
-      { uri: 'https://www.wikidata.org/entity/Q900002', resource: 'wikidata' },
+      providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1001W'),
+      providerIdentifier('wikidata', 'https://www.wikidata.org/entity/Q900002'),
     ]);
   } finally { restore(); }
 });
@@ -80,10 +81,10 @@ test('equal sitelink counts fall back to the lowest Q-number, deterministically'
   ]));
   try {
     const [out] = await enrichWithWikidata([edition('OL1002W')], log);
-    assert.deepEqual(out?.identifiers[1], {
-      uri: 'https://www.wikidata.org/entity/Q950010',
-      resource: 'wikidata',
-    });
+    assert.deepEqual(
+      out?.identifiers[1],
+      providerIdentifier('wikidata', 'https://www.wikidata.org/entity/Q950010'),
+    );
   } finally { restore(); }
 });
 
@@ -98,9 +99,9 @@ test('VIAF and ISNI accompany the Q-id when Wikidata holds them', async () => {
       log,
     );
     assert.deepEqual(out?.identifiers.slice(1), [
-      { uri: 'https://www.wikidata.org/entity/Q960001', resource: 'wikidata' },
-      { uri: 'https://viaf.org/viaf/116796842', resource: 'viaf' },
-      { uri: 'https://isni.org/isni/000000012148628X', resource: 'isni' },
+      providerIdentifier('wikidata', 'https://www.wikidata.org/entity/Q960001'),
+      providerIdentifier('viaf', 'https://viaf.org/viaf/116796842'),
+      providerIdentifier('isni', 'https://isni.org/isni/000000012148628X'),
     ]);
   } finally { restore(); }
 });
@@ -127,13 +128,13 @@ test('identifiers are never grown past the lexicon cap of 32', async () => {
     const input: EditionItem = {
       ...edition('OL1005W'),
       identifiers: [
-        ...Array.from({ length: 30 }, (_, i) => ({ uri: `https://example.org/${i}`, resource: 'custom' })),
-        { uri: 'https://openlibrary.org/works/OL1005W', resource: 'openlibrary' },
+        ...Array.from({ length: 30 }, (_, i) => ({ type: 'example.org', value: String(i) })),
+        providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1005W'),
       ],
     };
     const [out] = await enrichWithWikidata([input], log);
     assert.equal(out?.identifiers.length, 32);
-    assert.equal(out?.identifiers.at(-1)?.resource, 'wikidata');
+    assert.equal(out?.identifiers.at(-1)?.type, 'wikidata.org');
   } finally { restore(); }
 });
 
@@ -145,8 +146,8 @@ test('items already carrying a wikidata identifier are not looked up again', asy
     const already: EditionItem = {
       ...edition('OL1006W'),
       identifiers: [
-        { uri: 'https://openlibrary.org/works/OL1006W', resource: 'openlibrary' },
-        { uri: 'https://www.wikidata.org/entity/Q1', resource: 'wikidata' },
+        providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1006W'),
+        providerIdentifier('wikidata', 'https://www.wikidata.org/entity/Q1'),
       ],
     };
     const out = await enrichWithWikidata([already], log);

@@ -17,13 +17,14 @@ import type {
   WorkItem,
   ContributorItem,
 } from './types';
+import { providerIdentifier } from '../identifiers';
 
 const log: Logger = pino({ level: 'silent' });
 
 const baseEdition: EditionItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL1M',
   title: 'Test',
-  identifiers: [{ uri: 'https://openlibrary.org/books/OL1M', resource: 'openlibrary' }],
+  identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/books/OL1M')],
   contributors: [],
   createdAt: new Date().toISOString(),
 };
@@ -32,7 +33,7 @@ const baseWork: WorkItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.WOL1W',
   title: 'Test',
   subjects: [],
-  identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],
+  identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1W')],
   contributors: [],
   createdAt: new Date().toISOString(),
 };
@@ -41,7 +42,7 @@ const baseContributor: ContributorItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.A1A',
   name: 'Jane Doe',
   aliases: [],
-  identifiers: [{ uri: 'https://openlibrary.org/authors/OL1A', resource: 'openlibrary' }],
+  identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/authors/OL1A')],
   createdAt: new Date().toISOString(),
 };
 
@@ -212,7 +213,7 @@ test('searchEditions: Goodreads fills the result set after primary sources', asy
     uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/gr.23692271',
     title: 'Sapiens',
     identifiers: [
-      { uri: 'https://www.goodreads.com/book/show/23692271', resource: 'goodreads' },
+      providerIdentifier('goodreads', 'https://www.goodreads.com/book/show/23692271'),
     ],
   };
   const svc = new SearchService(

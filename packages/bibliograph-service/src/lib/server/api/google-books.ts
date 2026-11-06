@@ -9,6 +9,7 @@ import { gbEditionUri, gbWorkUri } from '../gb/keys';
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { gbCacheEntry, gbCacheGet, gbCachePut } from '../gb/cache';
 import { resolveContributorsByName } from './contributor-name-resolver';
+import { isbnIdentifier, isbnValueFromIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
 
@@ -39,24 +40,14 @@ interface GbSearchResponse { totalItems?: number; items?: GbVolume[]; }
 
 function isbnFromIdentifiers(item: EditionItem): string | undefined {
   for (const id of item.identifiers) {
-    if (id.resource === 'isbn13' || id.resource === 'isbn10' || id.resource === 'isbn') {
-      return id.uri.replace(/^isbn:/, '');
-    }
+    const isbn = isbnValueFromIdentifier(id);
+    if (isbn) return isbn;
   }
   return undefined;
 }
 
 function makeGbVolumeIdentifier(volumeId: string): Identifier {
-  return { uri: `https://books.google.com/books?id=${volumeId}`, resource: 'googlebooks' };
-}
-
-function gbIsbnIdentifier(type: string | undefined, raw: string): Identifier | null {
-  const clean = raw.replace(/-/g, '');
-  if (!clean) return null;
-  const resource = type === 'ISBN_13' || clean.length === 13 ? 'isbn13'
-    : type === 'ISBN_10' || clean.length === 10 ? 'isbn10'
-      : 'isbn';
-  return { uri: `isbn:${clean}`, resource };
+  return providerIdentifier('googlebooks', `https://books.google.com/books?id=${volumeId}`);
 }
 
 function yearFromGbPublishedDate(s: string | undefined): number | undefined {
@@ -98,12 +89,14 @@ export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger
   if (!info?.title || !v.id) return null;
   const ids: Identifier[] = [makeGbVolumeIdentifier(v.id)];
   for (const ii of info.industryIdentifiers ?? []) {
-    if (!ii.type || !ii.identifier) continue;
-    const ident = gbIsbnIdentifier(ii.type, ii.identifier);
+    if (!ii.identifier) continue;
+    const ident = isbnIdentifier(ii.identifier);
     if (ident) ids.push(ident);
     if (ids.length >= 6) break;
   }
-  if (info.canonicalVolumeLink) ids.push({ uri: info.canonicalVolumeLink, resource: 'googlebooks-canonical' });
+  if (info.canonicalVolumeLink) {
+    ids.push(providerIdentifier('googlebooks-canonical', info.canonicalVolumeLink));
+  }
   const contributors = await resolveContributorsByName(info.authors ?? [], 'googlebooks', log);
   return {
     uri: gbEditionUri(v.id),
@@ -114,7 +107,8 @@ export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger
     description: descriptionFromGb(info, v.searchInfo?.textSnippet),
     coverImageUrl: coverFromLinks(info.imageLinks),
     pages: info.pageCount,
-    identifiers: ids,
+    // An ISBN_10 and its ISBN_13 carry the same canonical `isbn` identifier.
+    identifiers: uniqueIdentifiers(ids),
     contributors,
     createdAt,
   };
@@ -125,8 +119,8 @@ export async function mapGbToWork(v: GbVolume, createdAt: string, log: Logger): 
   if (!info?.title || !v.id) return null;
   const ids: Identifier[] = [makeGbVolumeIdentifier(v.id)];
   for (const ii of info.industryIdentifiers ?? []) {
-    if (!ii.type || !ii.identifier) continue;
-    const ident = gbIsbnIdentifier(ii.type, ii.identifier);
+    if (!ii.identifier) continue;
+    const ident = isbnIdentifier(ii.identifier);
     if (ident) ids.push(ident);
   }
   const subjects = (info.categories ?? [])
@@ -141,7 +135,7 @@ export async function mapGbToWork(v: GbVolume, createdAt: string, log: Logger): 
     subjects,
     description: descriptionFromGb(info, v.searchInfo?.textSnippet),
     contributors,
-    identifiers: ids,
+    identifiers: uniqueIdentifiers(ids),
     createdAt,
   };
 }

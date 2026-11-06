@@ -1,5 +1,5 @@
 import type { ContributionEntry, EditionItem, Identifier } from '../search/types';
-import { isbnIdentifier } from '../isbn/merge';
+import { isbnIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
 import {
   BOOKHIVE_CATALOG_COLLECTION,
   BOOKHIVE_DID,
@@ -116,18 +116,20 @@ export function parseCatalogBook(value: unknown): CatalogBookRecord | null {
 
 function identifiersFor(rec: CatalogBookRecord): Identifier[] {
   const identifiers: Identifier[] = [
-    { uri: bookhiveCatalogUri(rec.id), resource: 'bookhive' },
+    providerIdentifier('bookhive', bookhiveCatalogUri(rec.id)),
   ];
   if (rec.sourceId && rec.source && rec.source.toLowerCase() === 'goodreads') {
-    identifiers.push({ uri: goodreadsUri(rec.sourceId), resource: 'goodreads' });
+    identifiers.push(providerIdentifier('goodreads', goodreadsUri(rec.sourceId)));
   }
   // Bookhive carries ISBNs on-protocol (99% of the catalog). ISBN-13 goes
-  // first because the reading clients take the first ISBN-resource entry.
+  // first because the reading clients take the first `isbn` entry.
   for (const raw of [rec.isbn13, rec.isbn10]) {
     const ident = raw ? isbnIdentifier(raw) : null;
     if (ident) identifiers.push(ident);
   }
-  return identifiers;
+  // `isbn10` collapses onto `isbn13` when the two name the same book, so the
+  // pair only survives as two entries when they genuinely differ.
+  return uniqueIdentifiers(identifiers);
 }
 
 /**

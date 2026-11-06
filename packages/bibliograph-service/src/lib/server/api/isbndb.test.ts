@@ -23,7 +23,7 @@ function resetBreaker() {
 const baseItem: EditionItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/isbndb.9780123456789',
   title: 'Test',
-  identifiers: [{ uri: 'isbn:9780123456789', resource: 'isbn13' }],
+  identifiers: [{ type: 'isbn', value: '9780123456789' }],
   contributors: [],
   createdAt: new Date().toISOString(),
 };
@@ -106,7 +106,7 @@ test('searchEditions fetches /book/{isbn} for ISBN q', async () => {
     assert.equal(result.items.length, 1);
     assert.equal(result.items[0]?.title, 'The Pragmatic Programmer');
     assert.equal(result.items[0]?.publishedYear, 2019);
-    assert.equal(result.items[0]?.identifiers.find((i) => i.resource === 'isbn13')?.uri, 'isbn:9780134093413');
+    assert.equal(result.items[0]?.identifiers.find((i) => i.type === 'isbn')?.value, '9780134093413');
   } finally { restore(); }
 });
 

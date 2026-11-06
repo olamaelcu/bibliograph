@@ -2,7 +2,8 @@
   type MergedRow = {
     uri: string;
     title: string;
-    identifiers: Array<{ uri: string; resource: string }>;
+    // `community.lexicon.book.defs#identifier`: `url` is display-only, never compared.
+    identifiers: Array<{ type: string; value: string; url?: string }>;
     contributors: Array<{ subject: { uri: string; cid: string }; role: string }>;
     coverImageUrl: string | null;
     description: string | null;
@@ -45,7 +46,7 @@
             <span class="muted">none</span>
           {:else}
             {#each form.merged.identifiers as identifier}
-              <code class="pill">{identifier.resource}:{identifier.uri}</code>
+              <code class="pill">{identifier.type}:{identifier.value}</code>
             {/each}
           {/if}
         </dd>

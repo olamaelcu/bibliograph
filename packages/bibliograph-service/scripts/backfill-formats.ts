@@ -27,20 +27,26 @@ import {
   editions,
 } from "../src/lib/server/db/schema";
 import { createLogger } from "../src/lib/server/logger";
-import { editionRecordCid } from "../src/lib/server/edition-record";
+import { editionRecordCid, rowIdentifiers } from "../src/lib/server/edition-record";
+import { wireContributorsFor } from "../src/lib/server/jobs/wire-contributors";
+import {
+  identifierKey,
+  isbn13FromAny,
+  isbnValueFromIdentifier,
+  providerIdentifier,
+  sameIdentifier,
+  type Identifier,
+} from "../src/lib/server/identifiers";
 import {
   GoodreadsBlockedError,
   fetchGoodreadsBook,
 } from "../src/lib/server/api/goodreads";
 import {
   MAX_IDENTIFIERS,
-  isbnFromIdentifier,
   mergeIsbnIdentifiers,
-  normaliseIsbn,
 } from "../src/lib/server/isbn/merge";
 import { ProgressBar } from "./lib/progress";
 import type { EditionRow } from "../src/lib/server/db/schema";
-import type { Identifier } from "../src/lib/server/search/types";
 
 const PAGE_SIZE = 50;
 const REQUEST_SPACING_MS = 1_000;
@@ -50,7 +56,7 @@ const MIN_FAILURE_SAMPLE = 20;
 
 const HAS_ISBN = sql`EXISTS (
   SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) elem
-   WHERE elem->>'uri' LIKE 'isbn:%'
+   WHERE elem->>'type' = 'isbn'
 )`;
 
 const NOT_KNOWN_MISSING = sql`NOT EXISTS (
@@ -109,7 +115,7 @@ function appendIdentifier(
 ): Identifier[] {
   if (
     identifiers.length >= MAX_IDENTIFIERS ||
-    identifiers.some((current) => current.uri === identifier.uri)
+    identifiers.some((current) => sameIdentifier(current, identifier))
   ) {
     return [...identifiers];
   }
@@ -122,17 +128,17 @@ function identifiersChanged(
 ): boolean {
   return (
     before.length !== after.length ||
-    before.some((identifier, index) => identifier.uri !== after[index]?.uri)
+    before.some((identifier, index) => {
+      const next = after[index];
+      return !next || identifierKey(identifier) !== identifierKey(next);
+    })
   );
 }
 
-function isbnForRow(row: EditionRow): string | undefined {
-  for (const identifier of row.identifiers ?? []) {
-    const isbn = isbnFromIdentifier(identifier);
-    if (isbn?.length === 13) return isbn;
-  }
-  for (const identifier of row.identifiers ?? []) {
-    const isbn = isbnFromIdentifier(identifier);
+/** The ISBN a row carries, as the hyphenless ISBN-13 the record stores. */
+function isbnForRow(identifiers: readonly Identifier[]): string | undefined {
+  for (const identifier of identifiers) {
+    const isbn = isbnValueFromIdentifier(identifier);
     if (isbn) return isbn;
   }
   return undefined;
@@ -152,13 +158,13 @@ async function main(): Promise<void> {
   const isbnArg = args
     .find((arg) => arg.startsWith("--isbn="))
     ?.slice("--isbn=".length);
-  const isbn = isbnArg ? normaliseIsbn(isbnArg) : undefined;
+  const isbn = isbnArg ? isbn13FromAny(isbnArg) : undefined;
   const log = createLogger("worker");
 
   const isbnFilter = isbn
     ? sql`EXISTS (
         SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) elem
-         WHERE elem->>'uri' = ${`isbn:${isbn}`}
+         WHERE elem->>'type' = 'isbn' AND elem->>'value' = ${isbn}
       )`
     : undefined;
   const filter = isbnFilter ? and(MISSING, isbnFilter)! : MISSING;
@@ -223,7 +229,10 @@ async function main(): Promise<void> {
     for (const row of rows) {
       cursor = row.uri;
       total += 1;
-      const rowIsbn = isbnForRow(row);
+      // Rows written before the identifier migration still hold the legacy
+      // `{ uri, resource }` pair, so normalise once and use that from here on.
+      const currentIdentifiers = rowIdentifiers(row.identifiers);
+      const rowIsbn = isbnForRow(currentIdentifiers);
       if (!rowIsbn) {
         skipped += 1;
         bar.advance();
@@ -268,7 +277,7 @@ async function main(): Promise<void> {
         }
 
         const isbnMerge = mergeIsbnIdentifiers(
-          row.identifiers,
+          currentIdentifiers,
           [found.isbn10, found.isbn13].filter(
             (value): value is string => value !== undefined,
           ),
@@ -276,21 +285,23 @@ async function main(): Promise<void> {
         let nextIdentifiers = isbnMerge.identifiers;
         if (found.asin) {
           nextIdentifiers = appendIdentifier(nextIdentifiers, {
-            uri: `asin:${found.asin}`,
-            resource: "asin",
+            type: "asin",
+            value: found.asin,
           });
         }
-        nextIdentifiers = appendIdentifier(nextIdentifiers, {
-          uri: found.url,
-          resource: "goodreads",
-        });
+        // `url` keeps the Goodreads page for display; the stored identity is
+        // the provider domain plus the book's own id.
+        nextIdentifiers = appendIdentifier(
+          nextIdentifiers,
+          providerIdentifier("goodreads", found.url),
+        );
 
         const nextFormat = row.format ?? found.format;
         const nextPages = row.pages ?? found.pages;
         const nextPublishedYear = row.publishedYear ?? found.publishedYear;
         const nextLanguage = row.language ?? languageTag(found.language);
         const identifiersMoved = identifiersChanged(
-          row.identifiers,
+          currentIdentifiers,
           nextIdentifiers,
         );
         const changed =
@@ -344,16 +355,25 @@ async function main(): Promise<void> {
           // a record read and the AppView cannot disagree.
           if (
             (row.pages === null && nextPages != null) ||
+            (row.format === null && nextFormat != null) ||
             identifiersMoved ||
             (row.publishedYear === null && nextPublishedYear != null) ||
             (row.language === null && nextLanguage != null)
           ) {
-            set.cid = await editionRecordCid(row, {
+            // `defs#contributor` inlines names, so the strongRefs are expanded
+            // the same way the response boundary expands them before hashing.
+            const contributors = await wireContributorsFor(db, row.contributors);
+            const cid = await editionRecordCid(row, {
               pages: row.pages === null ? nextPages : undefined,
               identifiers: nextIdentifiers,
               publishedYear: nextPublishedYear,
               language: nextLanguage,
+              format: nextFormat,
+              contributors,
             });
+            // `null` means the value is not a valid record (no identifiers),
+            // which the ISBN filter above already rules out.
+            if (cid) set.cid = cid;
           }
           await db.update(editions).set(set).where(eq(editions.uri, row.uri));
           await db

@@ -18,6 +18,9 @@ import {
   isbndbDescription,
 } from '../api/isbndb';
 import { getEditionByRkey, openLibraryDescription } from '../api/open-library';
+import { editionRecordValue, rowIdentifiers } from '../edition-record';
+import { isbnFromIdentifiers } from '../isbn/lookup';
+import { wireContributorsFor } from './wire-contributors';
 
 /**
  * Backfill missing `description` on an edition record.
@@ -132,7 +135,7 @@ export async function resolveDescription(
     if (desc) return desc;
   }
 
-  const isbn = isbnFromIdentifiers(row.identifiers);
+  const isbn = isbnFromIdentifiers(rowIdentifiers(row.identifiers));
   if (!isbn) return undefined;
 
   if (googleBooksBreaker.canCall()) {
@@ -148,34 +151,6 @@ export async function resolveDescription(
   }
 
   return undefined;
-}
-
-export function isbnFromIdentifiers(
-  identifiers: ReadonlyArray<{ uri: string; resource: string }>,
-): string | undefined {
-  for (const ident of identifiers) {
-    if (ident.resource === 'isbn13' || ident.resource === 'isbn10' || ident.resource === 'isbn') {
-      return ident.uri.replace(/^isbn:/, '');
-    }
-  }
-  return undefined;
-}
-
-function editionValueForCid(row: EditionRow, description: string): Record<string, unknown> {
-  return {
-    $type: 'community.lexicon.book.edition' as const,
-    title: row.title,
-    subtitle: row.subtitle ?? undefined,
-    place: row.place ?? undefined,
-    publishedYear: row.publishedYear ?? undefined,
-    language: row.language ?? undefined,
-    coverImageUrl: row.coverImageUrl ?? undefined,
-    contributors: row.contributors,
-    identifiers: row.identifiers,
-    description,
-    pages: row.pages ?? undefined,
-    createdAt: row.createdAt.toISOString(),
-  };
 }
 
 export async function backfillDescriptionForEdition(
@@ -204,7 +179,9 @@ export async function backfillDescriptionForEdition(
     return { updated: false, reason: 'no_description_found' };
   }
 
-  const value = editionValueForCid(row, description);
+  const contributors = await wireContributorsFor(db, row.contributors);
+  const value = editionRecordValue(row, { contributors, description });
+  if (!value) return { updated: false, reason: 'missing_identifiers' };
   const cid = (await cidForLex(value as unknown as LexMap)).toString();
 
   const updated = await db

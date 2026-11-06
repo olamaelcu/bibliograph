@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { searchEditions, searchWorks, getEditionByRkey, getWorkByRkey } from './open-library';
 import { db } from '../db';
 import { contributors } from '../db/schema';
+import { providerIdentifier } from '../identifiers';
 
 const log = pino({ level: 'silent' });
 
@@ -42,7 +43,10 @@ test('searchEditions hits OpenLibrary with type=edition', async () => {
     assert.match(captured, /q=test/);
     assert.equal(result.total, 1);
     assert.equal(result.items[0]?.title, 'Test');
-    assert.deepEqual(result.items[0]?.identifiers[0], { uri: 'https://openlibrary.org/books/OL12345M', resource: 'openlibrary' });
+    assert.deepEqual(
+      result.items[0]?.identifiers[0],
+      providerIdentifier('openlibrary', 'https://openlibrary.org/books/OL12345M'),
+    );
   } finally { restore(); }
 });
 

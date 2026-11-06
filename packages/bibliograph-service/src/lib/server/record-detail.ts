@@ -6,6 +6,7 @@ import { resolveEditions } from './edition-lookup';
 import { getWorkByRkey, getContributorByRkey } from './api/open-library.js';
 import { fetchEditionForUri } from './shelving/edition-fetch';
 import { enqueueIngest } from './jobs/enqueue.js';
+import { rowIdentifiers } from './edition-record';
 import pino from 'pino';
 import type { Logger } from 'pino';
 import type {
@@ -15,7 +16,6 @@ import type {
   WorkValue,
   ContributorValue,
   PublisherValue,
-  Identifier,
   Contribution,
   LoadResult,
 } from '$lib/types/record-detail';
@@ -35,7 +35,6 @@ export function collectionFor(kind: DetailKind): string {
   return COLLECTION[kind];
 }
 
-function identFromJson(i: Identifier): Identifier { return { uri: i.uri, resource: i.resource }; }
 function contributionFromJson(c: Contribution): Contribution { return { subject: c.subject, role: c.role }; }
 
 export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadResult> {
@@ -78,7 +77,7 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
       coverImageUrl: row.coverImageUrl ?? undefined,
       description: row.description ?? undefined,
       contributors: (row.contributors ?? []).map(contributionFromJson),
-      identifiers: (row.identifiers ?? []).map(identFromJson),
+      identifiers: rowIdentifiers(row.identifiers),
       createdAt: row.createdAt.toISOString(),
     };
     return { kind, rkey, notFound: false, value };
@@ -113,7 +112,7 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
       subjects: row.subjects ?? [],
       description: row.description ?? undefined,
       contributors: (row.contributors ?? []).map(contributionFromJson),
-      identifiers: (row.identifiers ?? []).map(identFromJson),
+      identifiers: rowIdentifiers(row.identifiers),
       createdAt: row.createdAt.toISOString(),
     };
     return { kind, rkey, notFound: false, value };
@@ -146,7 +145,7 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
       bornYear: row.bornYear ?? undefined,
       diedYear: row.diedYear ?? undefined,
       linkedDid: row.linkedDid ?? undefined,
-      identifiers: (row.identifiers ?? []).map(identFromJson),
+      identifiers: rowIdentifiers(row.identifiers),
       createdAt: row.createdAt.toISOString(),
     };
     return { kind, rkey, notFound: false, value };
@@ -162,7 +161,7 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
         : undefined,
     foundingDate: row.foundingDate ?? undefined,
     closingDate: row.closingDate ?? undefined,
-    identifiers: (row.identifiers ?? []).map(identFromJson),
+    identifiers: rowIdentifiers(row.identifiers),
     createdAt: row.createdAt.toISOString(),
   };
   return { kind, rkey, notFound: false, value };

@@ -6,6 +6,7 @@ import {
   splitAuthors,
 } from './catalog';
 import { BOOKHIVE_DID, bhEditionUri } from './keys';
+import { isbn13FromAny, providerIdentifier } from '../identifiers';
 
 const HIVE_ID = 'bk_zzpdK0fMgbLQYdzPhxwf';
 
@@ -68,8 +69,8 @@ test('catalogBookToEditionItem keys the edition bh.{hiveId} with a bookhive iden
   assert.equal(item.createdAt, RECORD.createdAt);
   assert.deepEqual(item.contributors, []);
   assert.deepEqual(item.identifiers, [
-    { uri: `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`, resource: 'bookhive' },
-    { uri: 'https://www.goodreads.com/book/show/53780375', resource: 'goodreads' },
+    providerIdentifier('bookhive', `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`),
+    providerIdentifier('goodreads', 'https://www.goodreads.com/book/show/53780375'),
   ]);
 });
 
@@ -84,7 +85,7 @@ test('catalogBookToEditionItem omits goodreads identifier for other sources', ()
   const rec = parseCatalogBook({ ...RECORD, source: 'OpenLibrary', sourceId: 'OL1W' })!;
   const item = catalogBookToEditionItem(rec)!;
   assert.deepEqual(item.identifiers, [
-    { uri: `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`, resource: 'bookhive' },
+    providerIdentifier('bookhive', `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`),
   ]);
 });
 
@@ -120,8 +121,8 @@ test('catalogBookToEditionItem carries the ISBNs, ISBN-13 first', () => {
   })!;
   const item = catalogBookToEditionItem(rec)!;
   assert.deepEqual(item.identifiers.slice(-2), [
-    { uri: 'isbn:9780307420657', resource: 'isbn13' },
-    { uri: 'isbn:1400080460', resource: 'isbn10' },
+    { type: 'isbn', value: '9780307420657' },
+    { type: 'isbn', value: isbn13FromAny('1400080460') },
   ]);
 });
 
@@ -131,5 +132,5 @@ test('catalogBookToEditionItem drops ISBNs of unusable length', () => {
     identifiers: { hiveId: HIVE_ID, isbn13: '123' },
   })!;
   const item = catalogBookToEditionItem(rec)!;
-  assert.equal(item.identifiers.some((ident) => ident.resource.startsWith('isbn')), false);
+  assert.equal(item.identifiers.some((ident) => ident.type === 'isbn'), false);
 });

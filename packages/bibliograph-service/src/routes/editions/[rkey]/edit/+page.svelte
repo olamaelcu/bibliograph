@@ -1,7 +1,10 @@
 <script lang="ts">
   // Editing is a librarian-only operation; the server load already refused
   // anonymous visitors and accounts without the "librarian" label.
-  type Identifier = { uri: string; resource: string };
+  // `community.lexicon.book.defs#identifier`: `type` is a global token (`isbn`)
+  // or a provider domain (`openlibrary.org`), `value` the namespace's own key,
+  // and `url` the provider page when one is known (display-only, never compared).
+  type Identifier = { type: string; value: string; url?: string };
 
   let {
     data,
@@ -56,17 +59,23 @@
   <section>
     <h2>Identifiers ({data.identifiers.length})</h2>
     <p class="muted">
-      One per line as <code>uri:resource</code> — for example
-      <code>isbn:9780123456789:isbn13</code>. Existing identifiers are kept and
-      duplicates ignored; the lexicon allows 32 in total.
+      One per line as <code>type:value</code>: the type is a global token
+      (<code>isbn</code>) or the provider's domain (<code>openlibrary.org</code>),
+      and the value is that namespace's own key. ISBNs are stored as hyphenless
+      ISBN-13, so an ISBN-10 is converted on write. Existing identifiers are
+      kept and duplicates ignored; the lexicon allows 32 in total.
     </p>
 
     {#if data.identifiers.length > 0}
       <ul class="pills">
-        {#each data.identifiers as identifier (identifier.uri + '|' + identifier.resource)}
+        {#each data.identifiers as identifier (identifier.type + ':' + identifier.value)}
           <li>
-            <code>{identifier.uri}</code>
-            <span class="res">{identifier.resource}</span>
+            {#if identifier.url}
+              <a href={identifier.url}><code>{identifier.value}</code></a>
+            {:else}
+              <code>{identifier.value}</code>
+            {/if}
+            <span class="res">{identifier.type}</span>
           </li>
         {/each}
       </ul>
@@ -78,8 +87,8 @@
       <wa-textarea
         name="identifiers"
         label="Identifiers to add"
-        hint="uri:resource, one per line"
-        placeholder="isbn:9780123456789:isbn13"
+        hint="type:value, one per line — e.g. isbn:9780123456789, openlibrary.org:OL45804W"
+        placeholder="isbn:9780123456789"
         rows="5"
         required
       ></wa-textarea>
@@ -113,5 +122,7 @@
   .pills { list-style: none; padding: 0; margin: 0 0 var(--wa-space-s); display: flex; flex-wrap: wrap; gap: var(--wa-space-xs); }
   .pills li { display: flex; align-items: center; gap: 0.3rem; border: 1px solid var(--wa-form-control-border-color); border-radius: 4px; padding: 0.1rem 0.35rem; }
   .pills code { font-size: var(--wa-font-size-xs); }
+  .pills a { color: var(--wa-color-text-link); text-decoration: none; }
+  .pills a:hover { text-decoration: underline; }
   .res { font-size: var(--wa-font-size-xs); color: var(--wa-color-on-quiet); }
 </style>

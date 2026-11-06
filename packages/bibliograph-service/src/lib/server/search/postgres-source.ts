@@ -5,6 +5,7 @@ import { db as defaultDb } from '../db/index';
 import { editions, works, contributors, publishers } from '../db/schema';
 import { PUBLISHER_DID } from '../did';
 import { pgLanguageVariants } from './language';
+import { identifierFromLegacy, identifierFromString, type LegacyIdentifier } from '../identifiers';
 import type {
   SearchQuery,
   SearchResult,
@@ -36,8 +37,39 @@ function contributionFromJson(c: { subject: { uri: string; cid: string }; role: 
   return { subject: c.subject, role: c.role };
 }
 
-function identFromJson(i: { uri: string; resource: string }): Identifier {
-  return { uri: i.uri, resource: i.resource };
+/**
+ * Stored identifiers are canonical after the migration; rows written before it
+ * still hold `{ uri, resource }`, so the legacy shape is converted on read
+ * rather than trusted.
+ */
+function identFromJson(i: Identifier | LegacyIdentifier): Identifier {
+  if ('type' in i && 'value' in i) {
+    return i.url === undefined ? { type: i.type, value: i.value } : { type: i.type, value: i.value, url: i.url };
+  }
+  return identifierFromLegacy(i);
+}
+
+/**
+ * Stored edition row → `EditionItem`. Exported so the XRPC handlers that query
+ * editions directly (exact-identifier resolution) map rows identically to the
+ * Postgres search source.
+ */
+export function editionItemFromRow(r: Record<string, unknown>): EditionItem {
+  return {
+    uri: r.uri as string,
+    title: r.title as string,
+    subtitle: (r.subtitle as string | null) ?? undefined,
+    publishedYear: (r.publishedYear as number | null) ?? undefined,
+    place: (r.place as string | null) ?? undefined,
+    language: (r.language as string | null) ?? undefined,
+    description: (r.description as string | null) ?? undefined,
+    coverImageUrl: (r.coverImageUrl as string | null) ?? undefined,
+    format: ((r.format as string | null) ?? undefined)?.trim().toLowerCase() || undefined,
+    pages: (r.pages as number | null) ?? undefined,
+    identifiers: ((r.identifiers as Array<Identifier | LegacyIdentifier> | null) ?? []).map(identFromJson),
+    contributors: ((r.contributors as Array<{ subject: { uri: string; cid: string }; role: string }> | null) ?? []).map(contributionFromJson),
+    createdAt: (r.createdAt as Date).toISOString(),
+  };
 }
 
 /** Columns runSearch reads off the table to compose WHERE/ORDER BY. */
@@ -103,7 +135,26 @@ export class PostgresSource {
     if (query.q) filterConds.push(sql`${qColumn} ILIKE ${'%' + query.q + '%'}`);
     if (query.id) {
       const identifiers = table.identifiers;
-      for (const id of query.id) filterConds.push(sql`${identifiers} @> ${JSON.stringify([{ uri: id }])}::jsonb`);
+      for (const id of query.id) {
+        const parsed = identifierFromString(id);
+        if (!parsed) {
+          // An identifier that names no known namespace can never match; fail
+          // closed instead of dropping the filter and returning everything.
+          filterConds.push(sql`FALSE`);
+          continue;
+        }
+        filterConds.push(sql`${identifiers} @> ${JSON.stringify([{ type: parsed.type, value: parsed.value }])}::jsonb`);
+      }
+    }
+    if (query.identifiers?.length) {
+      // `defs#identifier` comparison is exact `type`/`value` equality; the URL
+      // is display-only, so it is excluded from the containment test.
+      const identifiers = table.identifiers;
+      for (const identifier of query.identifiers) {
+        filterConds.push(
+          sql`${identifiers} @> ${JSON.stringify([{ type: identifier.type, value: identifier.value }])}::jsonb`,
+        );
+      }
     }
     if (query.lang?.length && table.language) {
       const variants = pgLanguageVariants(query.lang);
@@ -139,6 +190,7 @@ export class PostgresSource {
     const base = this.db.select().from(table as unknown as PgTable);
     const rawRows = await (where !== undefined ? base.where(where) : base)
       .orderBy(desc(indexedAt), asc(uri))
+      .offset(query.offset ?? 0)
       .limit(query.limit);
     const rows = rawRows as Array<Record<string, unknown>>;
     const items = rows.map(mapRow);
@@ -149,21 +201,7 @@ export class PostgresSource {
   }
 
   private mapEditionRow(r: Record<string, unknown>): EditionItem {
-    return {
-      uri: r.uri as string,
-      title: r.title as string,
-      subtitle: (r.subtitle as string | null) ?? undefined,
-      publishedYear: (r.publishedYear as number | null) ?? undefined,
-      place: (r.place as string | null) ?? undefined,
-      language: (r.language as string | null) ?? undefined,
-      description: (r.description as string | null) ?? undefined,
-      coverImageUrl: (r.coverImageUrl as string | null) ?? undefined,
-      format: ((r.format as string | null) ?? undefined)?.trim().toLowerCase() || undefined,
-      pages: (r.pages as number | null) ?? undefined,
-      identifiers: ((r.identifiers as Array<{ uri: string; resource: string }> | null) ?? []).map(identFromJson),
-      contributors: ((r.contributors as Array<{ subject: { uri: string; cid: string }; role: string }> | null) ?? []).map(contributionFromJson),
-      createdAt: (r.createdAt as Date).toISOString(),
-    };
+    return editionItemFromRow(r);
   }
 
   private mapWorkRow(r: Record<string, unknown>): WorkItem {

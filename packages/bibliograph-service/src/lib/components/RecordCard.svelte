@@ -60,7 +60,13 @@
       <h2>Identifiers</h2>
       <ul class="identifiers">
         {#each value.identifiers as id}
-          <li><code>{identifierLabel(id)}</code></li>
+          <li>
+            {#if id.url}
+              <a href={id.url}><code>{identifierLabel(id)}</code></a>
+            {:else}
+              <code>{identifierLabel(id)}</code>
+            {/if}
+          </li>
         {/each}
       </ul>
     {/if}
@@ -101,7 +107,13 @@
       <h2>Identifiers</h2>
       <ul class="identifiers">
         {#each value.identifiers as id}
-          <li><code>{identifierLabel(id)}</code></li>
+          <li>
+            {#if id.url}
+              <a href={id.url}><code>{identifierLabel(id)}</code></a>
+            {:else}
+              <code>{identifierLabel(id)}</code>
+            {/if}
+          </li>
         {/each}
       </ul>
     {/if}
@@ -133,7 +145,13 @@
       <h2>Identifiers</h2>
       <ul class="identifiers">
         {#each value.identifiers as id}
-          <li><code>{identifierLabel(id)}</code></li>
+          <li>
+            {#if id.url}
+              <a href={id.url}><code>{identifierLabel(id)}</code></a>
+            {:else}
+              <code>{identifierLabel(id)}</code>
+            {/if}
+          </li>
         {/each}
       </ul>
     {/if}
@@ -159,7 +177,13 @@
       <h2>Identifiers</h2>
       <ul class="identifiers">
         {#each value.identifiers as id}
-          <li><code>{identifierLabel(id)}</code></li>
+          <li>
+            {#if id.url}
+              <a href={id.url}><code>{identifierLabel(id)}</code></a>
+            {:else}
+              <code>{identifierLabel(id)}</code>
+            {/if}
+          </li>
         {/each}
       </ul>
     {/if}

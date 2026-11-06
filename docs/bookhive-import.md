@@ -37,7 +37,7 @@ percentages are how many of those 1000 values carry the field.
 | `source`, `sourceId`, `sourceUrl` | 100 % | `bookhive` + `goodreads` identifiers | mapped, but only when `source.toLowerCase() === 'goodreads'` (`catalog.ts:96`) |
 | `rating` (×1000, e.g. `3090`) | 100 % | — | deliberately dropped (documented in `catalog.ts:1-30`) |
 | `ratingsCount` | 100 % | — | ignored |
-| `identifiers` `{hiveId, isbn10, isbn13, goodreadsId}` | 99.0 % | `editions.identifiers` | mapped — `isbn13`/`isbn10` through `isbnIdentifier` (`isbn/merge.ts`), plus `bookhive`/`goodreads` |
+| `identifiers` `{hiveId, isbn10, isbn13, goodreadsId}` | 99.0 % | `editions.identifiers` | mapped to `defs#identifier` — `isbn13`/`isbn10` through `isbnIdentifier` (`identifiers.ts`, always hyphenless ISBN-13), plus `bookhive.buzz`/`goodreads.com` |
 | `description` | 95.4 % | `editions.description` | **ignored** — and the description backfill then spends upstream calls re-deriving it |
 | `thumbnailBlob` / `coverBlob` | 87.2 % / 85.4 % | — | ignored (see decision below) |
 | `genres` | 80.7 % | no edition column | ignored |
@@ -53,11 +53,12 @@ percentages are how many of those 1000 values carry the field.
 ### Free wins (field present on-protocol, dropped on ingest)
 
 1. `identifiers.isbn13` / `isbn10` → `editions.identifiers`, using the existing
-   `isbnIdentifier(raw)` (`isbn/merge.ts:40`), which already picks `isbn13` vs `isbn10` from the
-   length and produces the `{ uri: 'isbn:…', resource: 'isbn13' }` shape `edition_isbn_enrichment`
-   scans for. Implemented: `parseCatalogBook` keeps both fields, `identifiersFor` emits them
-   (ISBN-13 first), and `scripts/backfill-bookhive-isbns.ts` copies them onto editions imported
-   before the mapping changed, recomputing the record CID.
+   `isbnIdentifier(raw)` (`identifiers.ts`), which normalises either form to `{ type: 'isbn',
+   value: '<hyphenless ISBN-13>' }` — the only ISBN shape `defs#identifier` can represent, since
+   ISBN-10 is converted on write and the two forms collapse to one identifier. Implemented:
+   `parseCatalogBook` keeps both fields, `identifiersFor` emits the canonical identifier, and
+   `scripts/backfill-bookhive-isbns.ts` copies it onto editions imported before the mapping
+   changed, recomputing the record CID.
 2. `identifiers.goodreadsId` → `goodreads` identifier, replacing the `source`/`sourceId` guess
    that silently drops every non-Goodreads-sourced record.
 3. `description` → `editions.description`, which also removes those editions from

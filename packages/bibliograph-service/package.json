@@ -32,6 +32,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:run": "tsx src/lib/server/db/migrate.ts",
+    "db:migrate:identifiers": "tsx scripts/migrate-identifiers-canonical.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "label-keygen": "tsx scripts/gen-label-key.ts",

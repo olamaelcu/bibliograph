@@ -66,6 +66,43 @@ function stubFetch(impl: (url: string) => Promise<Response>): () => void {
   return () => { globalThis.fetch = original; };
 }
 
+/**
+ * `searchEditions` is a procedure: the hints arrive as a JSON body and the
+ * response is the `defs#editionResults` envelope. This harness returns the
+ * source items unchanged (so the assertions can see which provider answered)
+ * rather than mapping them to `defs#editionView`, which is the production
+ * handler's job in `routes/xrpc/book-queries.ts`.
+ */
+function registerSearchEditions(router: XRPCRouter, svc: SearchService): void {
+  router.addProcedure(CommunityLexiconBookSearchEditions.mainSchema, {
+    async handler({ input }) {
+      const limit = input.limit ?? 20;
+      const r = await svc.searchEditions({
+        q: input.q,
+        title: input.title,
+        author: input.author,
+        identifiers: input.identifiers,
+        limit,
+        offset: input.offset ?? 0,
+      });
+      return Response.json({
+        items: r.items,
+        hasMore: r.items.length >= limit,
+        ...(r.total > 0 ? { total: r.total } : {}),
+      });
+    },
+  });
+}
+
+/** `POST` a procedure with its JSON input. */
+function procedureRequest(nsid: string, input: Record<string, unknown>): Request {
+  return new Request(`http://localhost/xrpc/${nsid}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+}
+
 function buildRouter(): { router: XRPCRouter; restore: () => void } {
   const restore = stubEverything();
   const router = new XRPCRouter();
@@ -85,12 +122,7 @@ function buildRouter(): { router: XRPCRouter; restore: () => void } {
       { postgres: pg, openLibrary: ol, publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: gb, isbndbSource: ib, googleBooks: gbe, openLibraryEnricher: ole, isbndbEnricher: ibe, isbndbWorkEnricher: ibwe, authorWikipedia: aw, contributorWikipedia: cw, wikidataEdition: wde, wikidataContributor: wdc },
       log,
     );
-  router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
-    async handler({ params }: { params: { q?: string; id?: string[]; limit?: number; cursor?: string } }) {
-      const r = await svc.searchEditions({ q: params.q, id: params.id, limit: params.limit ?? 20, cursor: params.cursor });
-      return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
-    },
-  });
+  registerSearchEditions(router, svc);
   router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
     async handler({ params }: { params: { q?: string; id?: string[]; limit?: number; cursor?: string } }) {
       const r = await svc.searchWorks({ q: params.q, id: params.id, limit: params.limit ?? 20, cursor: params.cursor });
@@ -110,13 +142,18 @@ test('searchEditions returns Google Books primary results on Postgres miss', asy
   process.env.GOOGLE_BOOKS_API_KEY = 'k';
   const { router, restore } = buildRouter();
   try {
-    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchEditions?q=anything'));
+    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'anything' }));
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ title: string; uri: string; coverImageUrl?: string }>; total?: number };
+    const body = (await res.json()) as {
+      items: Array<{ title: string; uri: string; coverImageUrl?: string }>;
+      hasMore: boolean;
+      total?: number;
+    };
     assert.ok(body.items.length >= 1, 'expected Google Books primary to return at least one edition');
     assert.equal(body.items[0]?.title, 'OL Edition');
     assert.equal(body.items[0]?.coverImageUrl, 'https://x/cover.jpg');
     assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.edition\/ol\./);
+    assert.equal(body.hasMore, false, 'one hit under the page limit must not claim more pages');
   } finally { restore(); }
 });
 
@@ -140,17 +177,13 @@ test('searchEditions falls back to OpenLibrary when Google Books is empty', asyn
       { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher(), wikidataEdition: new WikidataEditionEnricher(), wikidataContributor: new WikidataContributorEnricher() },
       log,
     );
-    router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
-      async handler({ params }: { params: { q?: string } }) {
-        const r = await svc.searchEditions({ q: params.q, id: undefined, limit: 20, cursor: undefined });
-        return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
-      },
-    });
-    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchEditions?q=fallback'));
+    registerSearchEditions(router, svc);
+    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'fallback' }));
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ title: string; uri: string }> };
+    const body = (await res.json()) as { items: Array<{ title: string; uri: string }>; hasMore: boolean; total?: number };
     assert.equal(body.items[0]?.title, 'OL Fallback Edition');
     assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.edition\/ol\./);
+    assert.equal(body.hasMore, false);
   } finally { restore(); }
 });
 
@@ -181,9 +214,9 @@ test('searchEditions degrades when GOOGLE_BOOKS_API_KEY is missing', async () =>
   delete process.env.GOOGLE_BOOKS_API_KEY;
   const { router, restore } = buildRouter();
   try {
-    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchEditions?q=anything'));
+    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'anything' }));
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ coverImageUrl?: string }> };
+    const body = (await res.json()) as { items: Array<{ coverImageUrl?: string }>; hasMore: boolean };
     assert.equal(body.items[0]?.coverImageUrl, undefined);
   } finally { restore(); }
 });
@@ -245,16 +278,11 @@ test('searchEditions skips work-only docs with no cover edition (no /books/ key)
       { postgres: pg, openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher(), wikidataEdition: new WikidataEditionEnricher(), wikidataContributor: new WikidataContributorEnricher() },
     log,
   );
-  router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
-    async handler({ params }: { params: { q?: string } }) {
-      const r = await svc.searchEditions({ q: params.q, id: undefined, limit: 20, cursor: undefined });
-      return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
-    },
-  });
+  registerSearchEditions(router, svc);
   try {
-    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchEditions?q=work-unique-xyz'));
+    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'work-unique-xyz' }));
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ title: string }>; total: number };
+    const body = (await res.json()) as { items: Array<{ title: string }>; hasMore: boolean; total?: number };
     assert.equal(body.items.length, 1, 'work-only doc must be skipped, not synthesized');
     assert.equal(body.items[0]?.title, 'With Edition');
     assert.equal(body.total, 2, 'total reflects OpenLibrary numFound, not the filtered set');

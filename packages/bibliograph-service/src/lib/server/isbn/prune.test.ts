@@ -11,6 +11,7 @@ import {
   type TargetEdition,
 } from './prune';
 import type { EditionItem } from '../search/types';
+import { providerIdentifier } from '../identifiers';
 
 const TARGET: TargetEdition = {
   title: 'The Dispossessed',
@@ -146,8 +147,8 @@ test('candidateFromEditionItem reads contributors, year and ISBNs', () => {
     publishedYear: 1974,
     contributors: [{ subject: { uri: 'at://author/1', cid: 'bafy' }, role: 'author' }],
     identifiers: [
-      { uri: 'https://openlibrary.org/books/OL1M', resource: 'openlibrary' },
-      { uri: 'isbn:9780060512750', resource: 'isbn13' },
+      providerIdentifier('openlibrary', 'https://openlibrary.org/books/OL1M'),
+      { type: 'isbn', value: '9780060512750' },
     ],
     createdAt: '2026-01-01T00:00:00.000Z',
   };

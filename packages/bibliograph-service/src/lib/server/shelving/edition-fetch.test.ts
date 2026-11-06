@@ -4,6 +4,7 @@ import { pino } from 'pino';
 import { catalogBookToEdition, parseCatalogBook } from '../bookhive/catalog';
 import { BOOKHIVE_DID, bhEditionUri } from '../bookhive/keys';
 import { fetchEditionForUri, providerForEditionUri, resolveBookhiveEdition } from './edition-fetch';
+import { providerIdentifier } from '../identifiers';
 
 const log = pino({ level: 'silent' });
 
@@ -53,8 +54,8 @@ test('catalogBookToEdition maps a catalog record onto its bh.{hiveId} edition', 
   // No contributor records upstream, so no invented strongRefs.
   assert.deepEqual(resolved.item.contributors, []);
   assert.deepEqual(resolved.item.identifiers, [
-    { uri: `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`, resource: 'bookhive' },
-    { uri: 'https://www.goodreads.com/book/show/53780375', resource: 'goodreads' },
+    providerIdentifier('bookhive', `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`),
+    providerIdentifier('goodreads', 'https://www.goodreads.com/book/show/53780375'),
   ]);
   assert.deepEqual(resolved.authorNames, ['Brian Herbert', 'Kevin J. Anderson']);
 });
@@ -65,7 +66,7 @@ test('catalogBookToEdition keeps a record that carries only an id and a title', 
   assert.equal(resolved.item.uri, EDITION_URI);
   assert.equal(resolved.item.coverImageUrl, undefined);
   assert.deepEqual(resolved.item.identifiers, [
-    { uri: `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`, resource: 'bookhive' },
+    providerIdentifier('bookhive', `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`),
   ]);
   assert.deepEqual(resolved.authorNames, []);
 });

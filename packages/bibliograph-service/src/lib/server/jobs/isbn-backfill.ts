@@ -20,6 +20,8 @@ import {
 import { isIsbndbRkey, isbnFromIsbndbRkey } from '../isbndb/keys';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { editionRecordValueForCid } from '../isbn/record-value';
+import { rowIdentifiers } from '../edition-record';
+import { wireContributorsFor } from './wire-contributors';
 
 /**
  * Backfill the ISBN an edition record is missing.
@@ -85,12 +87,13 @@ export async function planIsbnEnrichment(
   row: EditionRow,
   deps: IsbnEnrichmentDeps,
 ): Promise<EnrichmentPlan> {
-  if (hasIsbn(row.identifiers)) return { action: 'already_has_isbn', result: 'already' };
+  const existing = rowIdentifiers(row.identifiers);
+  if (hasIsbn(existing)) return { action: 'already_has_isbn', result: 'already' };
 
   // An `isbndb.*` record's rkey is the ISBN; no upstream call is needed.
   if (isIsbndbRkey(row.rkey)) {
     const fromKey = isbnFromIsbndbRkey(row.rkey);
-    const merged = mergeIsbnIdentifiers(row.identifiers, [fromKey]);
+    const merged = mergeIsbnIdentifiers(existing, [fromKey]);
     if (merged.added.length > 0) {
       return { action: 'write', result: 'found', identifiers: merged.identifiers, added: merged.added };
     }
@@ -102,7 +105,7 @@ export async function planIsbnEnrichment(
     .filter((value): value is string => value !== null);
 
   if (authorityIsbns.length > 0) {
-    const merged = mergeIsbnIdentifiers(row.identifiers, authorityIsbns);
+    const merged = mergeIsbnIdentifiers(existing, authorityIsbns);
     if (merged.added.length > 0) {
       return { action: 'write', result: 'found', identifiers: merged.identifiers, added: merged.added };
     }
@@ -111,7 +114,7 @@ export async function planIsbnEnrichment(
   // ── Tier 2, shadow only ─────────────────────────────────────────────
   const authorRefs: ContributorRef[] = [
     ...(authority?.contributors ?? []),
-    ...(row.contributors ?? []),
+    ...row.contributors,
   ]
     .filter((contribution) => contribution.role === 'author')
     .map((contribution) => ({ uri: contribution.subject?.uri ?? '' }))
@@ -151,7 +154,7 @@ export async function planIsbnEnrichment(
   const pruned = pruneCandidates(target, candidates);
   const recorded = [...pruned.survivors, ...pruned.rejected];
   if (pruned.kind === 'found' && pruned.isbn) {
-    const merged = mergeIsbnIdentifiers(row.identifiers, [pruned.isbn]);
+    const merged = mergeIsbnIdentifiers(existing, [pruned.isbn]);
     return { action: 'write', result: 'found', identifiers: merged.identifiers, added: merged.added, candidates: recorded };
   }
   if (pruned.kind === 'ambiguous') return { action: 'none', result: 'ambiguous', candidates: recorded };
@@ -218,7 +221,9 @@ export async function backfillIsbnForEdition(
   if (plan.action === 'already_has_isbn') return { updated: false, reason: 'already_has_isbn' };
 
   if (plan.action === 'write' && plan.identifiers) {
-    const value = editionRecordValueForCid(row, plan.identifiers);
+    const contributors = await wireContributorsFor(db, row.contributors);
+    const value = editionRecordValueForCid(row, plan.identifiers, contributors);
+    if (!value) return { updated: false, reason: 'missing_identifiers' };
     const cid = (await cidForLex(value as unknown as LexMap)).toString();
     const updated = await db
       .update(editions)

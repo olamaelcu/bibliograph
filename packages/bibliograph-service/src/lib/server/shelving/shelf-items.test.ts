@@ -76,7 +76,7 @@ test('shelfItemConditions: reads the shelfItem collection for one shelf', () => 
 test('shelfItemConditions: scoping to a repo adds the did predicate', () => {
   const { sql, params } = compiled(shelfItemConditions({ shelfUri: SHELF_URI, did: USER }));
 
-  assert.match(sql, /"records"\.["did"] = \$\d+/);
+  assert.match(sql, /"records"\."did" = \$\d+/);
   assert.deepEqual(params, [SHELF_ITEM_COLLECTION, SHELF_URI, USER]);
 });
 

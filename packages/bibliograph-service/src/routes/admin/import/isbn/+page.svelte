@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { EditionItem } from '$lib/server/search/types';
+  import type { EditionItem, Identifier } from '$lib/server/search/types';
 
   let {
     data,
@@ -27,7 +27,7 @@
   let editSubtitle = $state(selectedItem?.subtitle ?? '');
   let editAuthors = $state((selectedItem?.contributors ?? [])
     .filter(c => c.role === 'author')
-    .map(c => { if (typeof (c.subject as any)?.name === 'string') return (c.subject as any).name; return c.subject.uri; })
+    .map(c => c.subject.uri)
     .filter(Boolean)
     .join(', '));
   let editYear = $state(String(selectedItem?.publishedYear ?? ''));
@@ -35,9 +35,19 @@
   let editPublisher = $state('');
   let editDescription = $state(selectedItem?.description ?? '');
   let editCoverUrl = $state(selectedItem?.coverImageUrl ?? '');
-  let editIdentifiers = $state((selectedItem?.identifiers ?? []).map(i => i.uri).join(', '));
+  let editIdentifiers = $state((selectedItem?.identifiers ?? []).map(identifierEntry).join(', '));
   let editIsbn = $state('');
   let coverSearchResult = $state('');
+
+  /** Canonical identifier as the editable `type:value` pair. */
+  function identifierEntry(identifier: Identifier): string {
+    return `${identifier.type}:${identifier.value}`;
+  }
+
+  /** The ISBN this item carries, as the hyphenless ISBN-13 it is stored as. */
+  function isbnOf(item: EditionItem | null): string {
+    return (item?.identifiers ?? []).find(i => i.type === 'isbn')?.value ?? '';
+  }
 
   $effect(() => {
     if (selectedItem) {
@@ -45,7 +55,7 @@
       editSubtitle = selectedItem.subtitle ?? '';
       editAuthors = (selectedItem.contributors ?? [])
         .filter(c => c.role === 'author')
-        .map(c => (c.subject as any)?.name ?? c.subject.uri)
+        .map(c => c.subject.uri)
         .filter(Boolean)
         .join(', ');
       editYear = String(selectedItem.publishedYear ?? '');
@@ -53,8 +63,8 @@
       editPublisher = '';
       editDescription = selectedItem.description ?? '';
       editCoverUrl = selectedItem.coverImageUrl ?? '';
-      editIdentifiers = (selectedItem.identifiers ?? []).map(i => i.uri).join(', ');
-      editIsbn = (selectedItem.identifiers ?? []).map(i => i.uri).find(uri => uri.includes('isbn')) ?? '';
+      editIdentifiers = (selectedItem.identifiers ?? []).map(identifierEntry).join(', ');
+      editIsbn = isbnOf(selectedItem);
     }
   });
 
@@ -124,7 +134,7 @@
                   <p class="muted small" style="margin: 0;">
                     {item.publishedYear ? item.publishedYear + ' · ' : ''}
                     {item.language ? item.language + ' · ' : ''}
-                    {item.identifiers?.map(i => i.resource).join(', ')}
+                    {item.identifiers?.map(i => i.type).join(', ')}
                   </p>
                   {#if item.description}
                     <p class="small" style="margin-top: var(--wa-space-xs); color: var(--wa-muted);">{item.description.slice(0, 200)}{item.description.length > 200 ? '…' : ''}</p>
@@ -189,7 +199,7 @@
         </label>
 
         <label>
-          Identifiers (comma-separated URIs)
+          Identifiers (comma-separated type:value)
           <input type="text" name="identifiers" bind:value={editIdentifiers} />
         </label>
 

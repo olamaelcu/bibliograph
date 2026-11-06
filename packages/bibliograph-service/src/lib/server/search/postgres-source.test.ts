@@ -9,6 +9,7 @@ interface CallCapture {
   whereCalled: boolean;
   orderByCalled: boolean;
   limit?: number;
+  offset?: number;
   table?: unknown;
   whereValue?: unknown;
 }
@@ -18,6 +19,7 @@ interface FakeSearchBuilder {
   from(table: unknown): FakeSearchBuilder;
   where(where: unknown): FakeSearchBuilder;
   orderBy(): FakeSearchBuilder;
+  offset(n: number): FakeSearchBuilder;
   limit(n: number): FakeSearchBuilder;
   then(onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown): Promise<unknown>;
 }
@@ -28,6 +30,7 @@ function createFakeDb(rows: unknown[], capture: CallCapture): DbExecutor {
     from(table: unknown) { capture.table = table; return builder; },
     where(where: unknown) { capture.whereCalled = true; capture.whereValue = where; return builder; },
     orderBy() { capture.orderByCalled = true; return builder; },
+    offset(n: number) { capture.offset = n; return builder; },
     limit(n: number) { capture.limit = n; return builder; },
     then(onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) {
       return Promise.resolve(rows).then(onFulfilled, onRejected);
@@ -59,7 +62,7 @@ function makeEditionRow(overrides: Partial<EditionRow> = {}): EditionRow {
     publishedYear: 2024,
     language: 'en',
     contributors: [],
-    identifiers: [{ uri: 'isbn:9780123456789', resource: 'isbn' }],
+    identifiers: [{ type: 'isbn', value: '9780123456789' }],
     description: null,
     coverImageUrl: null,
     format: null,
@@ -173,6 +176,26 @@ test('searchEditions applies id filter when provided', async () => {
   assert.equal(cap.whereCalled, true);
 });
 
+test('searchEditions pages by offset', async () => {
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+  const fakeDb = createFakeDb([makeEditionRow()], cap);
+  const src = new PostgresSource(silentLog, fakeDb);
+
+  await src.searchEditions({ q: 'dune', limit: 10, offset: 40 });
+
+  assert.equal(cap.offset, 40);
+});
+
+test('searchEditions constrains canonical identifiers', async () => {
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+  const fakeDb = createFakeDb([makeEditionRow()], cap);
+  const src = new PostgresSource(silentLog, fakeDb);
+
+  await src.searchEditions({ identifiers: [{ type: 'isbn', value: '9780123456789' }], limit: 10 });
+
+  assert.equal(cap.whereCalled, true);
+});
+
 test('searchEditions decodes v1 cursor (back-compat)', async () => {
   const cap: CallCapture = { whereCalled: false, orderByCalled: false };
   const rows = [makeEditionRow({ indexedAt: new Date('2024-02-01T00:00:00Z'), uri: 'at://x/edition/r2' })];
@@ -231,7 +254,7 @@ test('searchEditions maps edition rows to EditionItem', async () => {
   assert.equal(item.place, 'New York');
   assert.equal(item.language, 'en');
   assert.equal(item.coverImageUrl, undefined);
-  assert.deepEqual(item.identifiers, [{ uri: 'isbn:9780123456789', resource: 'isbn' }]);
+  assert.deepEqual(item.identifiers, [{ type: 'isbn', value: '9780123456789' }]);
   assert.deepEqual(item.contributors, [{ subject: { uri: 'at://x/c/r1', cid: 'bafyc' }, role: 'author' }]);
   assert.equal(item.createdAt, '2024-01-01T00:00:00.000Z');
 });

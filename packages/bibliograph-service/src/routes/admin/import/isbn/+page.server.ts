@@ -10,11 +10,47 @@ import { searchEditions as gbSearchEditions } from '$lib/server/api/google-books
 import { searchEditions as olSearchEditions } from '$lib/server/api/open-library';
 import { randomBytes } from 'node:crypto';
 import type { EditionItem } from '$lib/server/search/types';
+import { rowIdentifiers } from '$lib/server/edition-record';
+import {
+  GLOBAL_IDENTIFIER_TOKENS,
+  identifierFromString,
+  identifierTypeForResource,
+  isbnIdentifier,
+  providerIdentifier,
+  type Identifier,
+} from '$lib/server/identifiers';
 import { createLogger } from '$lib/server/logger';
 const log = createLogger('isbn-import');
 
 function cleanIsbn(q: string): string {
   return q.replace(/[-\s]/g, '');
+}
+
+/** `identifier.type` is a global token (`isbn`, …) or a provider domain. */
+const TYPE_PATTERN = /^[a-z0-9][a-z0-9.-]*$/;
+
+/**
+ * One form entry as a canonical identifier. A provider page URL or an
+ * `isbn:`/`urn:isbn:` string is read by the canonical helpers; anything else
+ * is taken as `type:value` (`openlibrary.org:OL45804W`), with a legacy resource
+ * token mapped onto the namespace it names.
+ */
+function parseIdentifierEntry(raw: string): Identifier | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const known = identifierFromString(trimmed);
+  if (known) return known;
+
+  const cut = trimmed.indexOf(':');
+  if (cut <= 0) return null;
+  const token = trimmed.slice(0, cut).trim().toLowerCase();
+  const value = trimmed.slice(cut + 1).trim();
+  if (!token || !value || !TYPE_PATTERN.test(token) || /\s/.test(value)) return null;
+
+  const type = identifierTypeForResource(token);
+  if (type === 'isbn') return isbnIdentifier(value);
+  if (GLOBAL_IDENTIFIER_TOKENS[type] === true) return { type, value };
+  return providerIdentifier(token, value);
 }
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -27,7 +63,12 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const q = url.searchParams.get('q') || '';
   const selectedStr = url.searchParams.get('selected');
-  const selected: EditionItem | null = selectedStr ? JSON.parse(selectedStr) : null;
+  // `selected` round-trips through the URL, so a bookmarked link can still
+  // carry the pre-migration `{ uri, resource }` pairs; normalise either shape.
+  const selectedJson: EditionItem | null = selectedStr ? JSON.parse(selectedStr) : null;
+  const selected: EditionItem | null = selectedJson
+    ? { ...selectedJson, identifiers: rowIdentifiers(selectedJson.identifiers) }
+    : null;
 
   let results: Record<string, EditionItem[]> = {};
   if (q.trim().length >= 5) {
@@ -103,7 +144,21 @@ export const actions: Actions = {
     const authors = authorsRaw ? authorsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
 
     const identifiersRaw = String(form.get('identifiers') ?? '').trim();
-    const identifiers = identifiersRaw ? identifiersRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+    // Identifiers are stored as canonical `{ type, value }` pairs, so an entry
+    // that names no namespace cannot be written at all — report it instead of
+    // silently importing the edition without it.
+    const identifiers: Identifier[] = [];
+    if (identifiersRaw) {
+      for (const entry of identifiersRaw.split(',').map((s) => s.trim()).filter(Boolean)) {
+        const identifier = parseIdentifierEntry(entry);
+        if (!identifier) {
+          return fail(400, {
+            error: `Identifier "${entry}" is not readable; use type:value, e.g. isbn:9780123456789.`,
+          });
+        }
+        identifiers.push(identifier);
+      }
+    }
 
     const rawIsbn = String(form.get('isbn') ?? '').trim();
     const isbnClean = cleanIsbn(rawIsbn);
@@ -148,7 +203,7 @@ export const actions: Actions = {
         firstPublishedYear: year,
         subjects: [],
         contributors: contributorEntries,
-        identifiers: identifiers.map(i => ({ uri: i, resource: 'isbn' as const })),
+        identifiers,
         description: description ?? null,
         createdAt: new Date(),
         indexedAt: new Date(),
@@ -170,7 +225,7 @@ export const actions: Actions = {
         publishedYear: year,
         language,
         contributors: contributorEntries,
-        identifiers: identifiers.map(i => ({ uri: i, resource: 'isbn' as const })),
+        identifiers,
         description: description ?? null,
         coverImageUrl: coverUrl,
         createdAt: new Date(),

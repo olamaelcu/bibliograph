@@ -1,4 +1,8 @@
-export type Identifier = { uri: string; resource: string };
+import type { Identifier } from '$lib/server/identifiers';
+
+/** `community.lexicon.book.defs#identifier`: `{ type, value }`, `url` is display-only. */
+export type { Identifier };
+
 export type Contribution = { subject: { uri: string; cid: string }; role: string };
 
 export type EditionValue = {

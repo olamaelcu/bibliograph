@@ -1,9 +1,8 @@
 import type { Logger } from 'pino';
 
-export interface Identifier {
-  uri: string;
-  resource: string;
-}
+export type { Identifier } from '../identifiers';
+
+import type { Identifier } from '../identifiers';
 
 export interface ContributionEntry {
   subject: { uri: string; cid: string };
@@ -72,9 +71,24 @@ export type Item = EditionItem | WorkItem | ContributorItem | PublisherItem;
 
 export interface SearchQuery {
   q?: string;
+  /**
+   * Structured identifier hints. Search matching is provider-defined, so the
+   * canonical `{ type, value }` pairs are passed through unchanged.
+   */
+  identifiers?: Identifier[];
   id?: string[];
+  /** Title relevance hint, only consulted by sources that support it. */
+  title?: string;
+  /** Author relevance hint, only consulted by sources that support it. */
+  author?: string;
   limit: number;
   cursor?: string;
+  /**
+   * Rows to skip. `community.lexicon.book.searchEditions` paginates by
+   * offset, which is what the procedures expose; `cursor` stays for the
+   * still-query-shaped contributor/publisher/work searches.
+   */
+  offset?: number;
   /**
    * BCP-47 language tags to filter results to. Editions whose
    * `language` (or `originalLanguage` for works) doesn't match any tag

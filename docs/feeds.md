@@ -139,6 +139,44 @@ environment ever created the table, every `graph.follow` call failed with
 `0021_follows` created it, then the feed moved to the repo as the sole source
 and `0022_drop_follows` removed the table and the procedure with it.
 
+## "For You" recommendations
+
+`at://…/feed.generator/recommendations` answers a different question from the
+activity feeds: which catalog books should this reader pick up next? It reads
+the reader's own shelf, ranks the catalog by shared genres, and returns books
+they have never shelved.
+
+**Reading data.** `bookShelving` (`metadata.status`, falling back to the shelf
+rkey), `shelfItem` (custom shelves, exclusion only) and `bookReview` (a review
+is proof the book was read) are read from the viewer's PDS, not the mirror —
+same reason as the follow graph above. Three bounded `listRecords` scans, 100
+per page, 10 pages each, cached per DID for 60 s (512 entries). An unreadable
+repo yields an empty feed rather than the whole catalog.
+
+**Ranking.** `works.subjects` is the genre/tag vocabulary the catalog ingests
+from OpenLibrary and Google Books. For each seed set — books in `reading`, then
+books in `read` — the query collects the seeds' subjects, scores every work that
+shares at least one by how many it shares, and joins back to that work's
+editions. Active-read matches lead the page, the past-read matches follow, and a
+book reachable from both lists appears once.
+
+Embeddings would rank better, but this service has no model runtime and no
+vector column: every embedding path would mean an in-process download plus a
+full catalog re-embed on deploy. Subject overlap is the documented fallback and
+needs only the catalog already in Postgres. The join back to editions is indexed
+by `editions_work_uri_idx` (migration `0025`); without it every "For You" read
+scanned the catalog. A work with no edition linked is skipped before the cap, so
+link-less works cannot fill the page.
+
+**Skeleton shape.** This is the one generator whose `post` is a catalog edition
+rather than a record in someone's repo — a recommendation has no author and no
+`createdAt`. `reason` is the literal `recommendation`, and the client renders a
+book card instead of hydrating a repo record. It is a single page of at most 30
+books with no cursor: the answer is a ranked set, not a stream.
+
+**Auth.** `requiresAuth: true`; `getFeedSkeleton` calls `requireFeedAuth` and
+the same per-DID rate limit as the `dynamic` generator.
+
 ## How a caller names the viewer
 
 `following` and `extended` need a DID, and two proofs supply one

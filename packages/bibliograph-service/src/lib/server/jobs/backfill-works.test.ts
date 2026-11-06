@@ -8,17 +8,17 @@ import {
   normalizeTitle,
   olKeyFromWorkIdentifiers,
   recomputeWorkCid,
-  rkeyForSyntheticWork,
   rkeyForWorkFromOlKey,
   runBackfill,
-  synthesizeWorkFromEdition,
+  shardPredicate,
   workUriForRkey,
-  workValueForCid,
 } from './backfill-works';
 import type { EditionRow, WorkRow } from '../db/schema';
-import type { WorkItem } from '../search/types';
+import type { Identifier, WorkItem } from '../search/types';
 import { OpenLibrarySource } from '../search/open-library-source';
 import { PUBLISHER_DID } from '../did';
+import { providerIdentifier } from '../identifiers';
+import { workRecordValue } from '../book-records';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -70,7 +70,7 @@ function makeWorkRow(overrides: Partial<WorkRow> = {}): WorkRow {
     firstPublishedYear: 2024,
     subjects: [],
     contributors: [],
-    identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],
+    identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1W')],
     description: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
@@ -84,7 +84,7 @@ function makeWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
     uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.WOL1W',
     title: 'Test Edition',
     subjects: [],
-    identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],
+    identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1W')],
     contributors: [],
     createdAt: new Date('2024-01-01T00:00:00Z').toISOString(),
     ...overrides,
@@ -93,26 +93,22 @@ function makeWorkItem(overrides: Partial<WorkItem> = {}): WorkItem {
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────
 
-test('isbnFromIdentifiers prefers isbn13 over isbn10 over isbn', () => {
-  const idents = [
-    { uri: 'isbn:9780123456789', resource: 'isbn13' as const },
-    { uri: 'isbn:0123456789', resource: 'isbn10' as const },
-    { uri: 'isbn:012345678X', resource: 'isbn' as const },
+test('isbnFromIdentifiers picks the ISBN-13 out of a mixed identifier list', () => {
+  const idents: Identifier[] = [
+    providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1W'),
+    { type: 'isbn', value: '9780123456789' },
   ];
   assert.equal(isbnFromIdentifiers(idents), '9780123456789');
 });
 
 test('isbnFromIdentifiers returns undefined when no ISBN present', () => {
   assert.equal(isbnFromIdentifiers([]), undefined);
-  assert.equal(
-    isbnFromIdentifiers([{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }]),
-    undefined,
-  );
+  assert.equal(isbnFromIdentifiers([providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1W')]), undefined);
 });
 
 test('editionSearchQuery uses ISBN when present, else title', () => {
   const withIsbn = makeEditionRow({
-    identifiers: [{ uri: 'isbn:9780123456789', resource: 'isbn13' }],
+    identifiers: [{ type: 'isbn', value: '9780123456789' }],
     title: 'Should Not Be Used',
   });
   const withoutIsbn = makeEditionRow({ identifiers: [], title: 'Title Only' });
@@ -133,7 +129,10 @@ test('matchWorkCandidate accepts title-equal within year±2', () => {
     makeWorkItem({ title: 'Foo', firstPublishedYear: 2000 }), // 20y off → no
     makeWorkItem({ title: 'Bar', firstPublishedYear: 2020 }),
   ];
-  assert.equal(matchWorkCandidate(candidates, edition)?.identifiers[0]?.uri, 'https://openlibrary.org/works/OL1W');
+  assert.equal(
+    matchWorkCandidate(candidates, edition)?.identifiers[0]?.url,
+    'https://openlibrary.org/works/OL1W',
+  );
 });
 
 test('matchWorkCandidate tolerates ±2 boundary exactly', () => {
@@ -162,7 +161,7 @@ test('matchWorkCandidate returns null when no candidate has matching title', () 
 
 test('olKeyFromWorkIdentifiers strips scheme/host, keeps path', () => {
   assert.equal(
-    olKeyFromWorkIdentifiers([{ uri: 'https://openlibrary.org/works/OL66554W', resource: 'openlibrary' }]),
+    olKeyFromWorkIdentifiers([providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL66554W')]),
     '/works/OL66554W',
   );
 });
@@ -170,8 +169,8 @@ test('olKeyFromWorkIdentifiers strips scheme/host, keeps path', () => {
 test('olKeyFromWorkIdentifiers ignores non-OL identifiers', () => {
   assert.equal(
     olKeyFromWorkIdentifiers([
-      { uri: 'isbn:9780123456789', resource: 'isbn13' },
-      { uri: 'https://example.com/works/OL1W', resource: 'openlibrary' }, // wrong host
+      { type: 'isbn', value: '9780123456789' },
+      { type: 'example.org', value: 'OL1W' }, // not an Open Library namespace
     ]),
     undefined,
   );
@@ -181,12 +180,6 @@ test('rkeyForWorkFromOlKey transforms OL key to rkey', () => {
   assert.equal(rkeyForWorkFromOlKey('/works/OL66554W'), 'ol.W66554W');
 });
 
-test('rkeyForSyntheticWork is deterministic from edition URI', () => {
-  const uri = 'at://did:plc:user/community.lexicon.book.edition/ol.OL123M';
-  assert.equal(rkeyForSyntheticWork(uri), 'ol.OL123MS');
-  assert.notEqual(rkeyForSyntheticWork(uri), rkeyForWorkFromOlKey('/works/OL1W'));
-});
-
 test('workUriForRkey uses PUBLISHER_DID', () => {
   assert.equal(
     workUriForRkey('ol.W66554W'),
@@ -194,31 +187,20 @@ test('workUriForRkey uses PUBLISHER_DID', () => {
   );
 });
 
-test('synthesizeWorkFromEdition maps edition fields to WorkItem', () => {
-  const edition = makeEditionRow({
-    title: 'X',
-    subtitle: 'Y',
-    language: 'en',
-    publishedYear: 1999,
-    description: 'A book.',
-  });
-  const now = new Date('2025-01-01T00:00:00Z');
-  const work = synthesizeWorkFromEdition(edition, now);
-  assert.equal(work.title, 'X');
-  assert.equal(work.subtitle, 'Y');
-  assert.equal(work.originalLanguage, 'en');
-  assert.equal(work.firstPublishedYear, 1999);
-  assert.equal(work.description, 'A book.');
-  assert.deepEqual(work.subjects, []);
-  assert.equal(work.contributors.length, 0);
-  assert.equal(work.createdAt, '2025-01-01T00:00:00.000Z');
-  assert.equal(work.identifiers.length, 1);
-  assert.equal(work.identifiers[0]?.resource, 'synthesized');
+test('shardPredicate rejects a shard plan it cannot honour', () => {
+  // One shard is the whole catalog — no predicate at all.
+  assert.ok(shardPredicate(0, 1));
+  assert.throws(() => shardPredicate(4, 4), /shardIndex/);
+  assert.throws(() => shardPredicate(-1, 4), /shardIndex/);
+  assert.throws(() => shardPredicate(0, 0), /shardCount/);
+  // The first digest byte has 256 buckets, so more shards would be empty.
+  assert.throws(() => shardPredicate(0, 300), /shardCount/);
+  assert.throws(() => shardPredicate(1.5, 4), /shardIndex/);
 });
 
 // ─── CID recompute ────────────────────────────────────────────────────────
 
-test('workValueForCid round-trips all stored columns', () => {
+test('workRecordValue round-trips all stored columns', () => {
   const row = makeWorkRow({
     title: 'Round Trip',
     subtitle: 'Sub',
@@ -228,20 +210,21 @@ test('workValueForCid round-trips all stored columns', () => {
     contributors: [{ subject: { uri: 'at://x', cid: 'c' }, role: 'author' }],
     description: 'desc',
   });
-  const value = workValueForCid(row);
+  const value = workRecordValue(row, [{ name: 'Ada Lovelace', role: 'author' }]);
   assert.equal(value.title, 'Round Trip');
   assert.equal(value.subtitle, 'Sub');
   assert.equal(value.originalLanguage, 'fr');
   assert.equal(value.firstPublishedYear, 1850);
   assert.deepEqual(value.subjects, ['fiction']);
+  assert.deepEqual(value.contributors, [{ name: 'Ada Lovelace', role: 'author' }]);
   assert.equal(value.description, 'desc');
   assert.equal(value.$type, 'community.lexicon.book.work');
 });
 
 test('recomputeWorkCid produces a deterministic CID for the same row data', async () => {
   const row = makeWorkRow();
-  const cid1 = await recomputeWorkCid(row);
-  const cid2 = await recomputeWorkCid(row);
+  const cid1 = await recomputeWorkCid(row, []);
+  const cid2 = await recomputeWorkCid(row, []);
   assert.equal(cid1, cid2);
   assert.match(cid1, /^bafy/);
 });
@@ -249,8 +232,8 @@ test('recomputeWorkCid produces a deterministic CID for the same row data', asyn
 test('recomputeWorkCid produces a different CID when row data changes', async () => {
   const a = makeWorkRow();
   const b = makeWorkRow({ title: 'Different Title' });
-  const cidA = await recomputeWorkCid(a);
-  const cidB = await recomputeWorkCid(b);
+  const cidA = await recomputeWorkCid(a, []);
+  const cidB = await recomputeWorkCid(b, []);
   assert.notEqual(cidA, cidB);
 });
 
@@ -263,6 +246,9 @@ interface CallCapture {
   rows: unknown[][];
   updateCalls: number;
   insertCalls: number;
+  /** Every row handed to `.values()`, in order. */
+  inserted: Record<string, unknown>[];
+  deleteCalls: number;
 }
 
 interface FakeChain {
@@ -317,10 +303,26 @@ function makeUpdateBuilder(capture: CallCapture): FakeChain {
 
 function makeInsertBuilder(capture: CallCapture): FakeChain {
   const builder: Record<string, unknown> = {};
-  builder.values = () => builder;
+  builder.values = (row: unknown) => {
+    capture.inserted.push(row as Record<string, unknown>);
+    return builder;
+  };
   builder.onConflictDoUpdate = () => builder;
+  // The upsert asks Postgres whether it inserted or updated (`xmax = 0`); a
+  // first write is the case under test.
+  builder.returning = () => builder;
   builder.then = (onFulfilled?: ((v: unknown) => unknown) | null, onRejected?: ((e: unknown) => unknown) | null) => {
     capture.insertCalls++;
+    return Promise.resolve([{ inserted: true }] as unknown[]).then(onFulfilled, onRejected);
+  };
+  return builder as unknown as FakeChain;
+}
+
+function makeDeleteBuilder(capture: CallCapture): FakeChain {
+  const builder: Record<string, unknown> = {};
+  builder.where = () => builder;
+  builder.then = (onFulfilled?: ((v: unknown) => unknown) | null, onRejected?: ((e: unknown) => unknown) | null) => {
+    capture.deleteCalls++;
     return Promise.resolve(undefined).then(onFulfilled, onRejected);
   };
   return builder as unknown as FakeChain;
@@ -330,18 +332,37 @@ function createFakeDb(_opts: {
   editions: EditionRow[];
   works: Map<string, WorkRow>;
 }): { db: unknown; capture: CallCapture } {
-  const capture: CallCapture = { whereValues: [], rows: [], updateCalls: 0, insertCalls: 0 };
+  const capture: CallCapture = {
+    whereValues: [],
+    rows: [],
+    updateCalls: 0,
+    insertCalls: 0,
+    inserted: [],
+    deleteCalls: 0,
+  };
   const dbProxy = {
     select: () => makeSelectBuilder(capture),
     update: () => makeUpdateBuilder(capture),
     insert: () => makeInsertBuilder(capture),
+    delete: () => makeDeleteBuilder(capture),
   };
   return { db: dbProxy, capture };
 }
 
 class FakeOpenLibrarySource {
+  private degraded = false;
   constructor(private readonly responses: Map<string, WorkItem[]>) {}
-  async searchWorks({ q }: { q: string }): Promise<{ items: WorkItem[] }> {
+  /** Simulate an unreachable upstream: `degraded` rather than an empty answer. */
+  goDown(): void {
+    this.degraded = true;
+  }
+  async searchWorks({ q }: { q: string }): Promise<{
+    items: WorkItem[];
+    degraded?: { upstream: 'openlibrary'; reason: string };
+  }> {
+    if (this.degraded) {
+      return { items: [], degraded: { upstream: 'openlibrary', reason: 'fetch_failed' } };
+    }
     const items = this.responses.get(q) ?? [];
     return { items };
   }
@@ -355,7 +376,7 @@ test('runBackfill Phase 1 reconciles orphan via OL ISBN match and links edition'
     uri: 'at://did:plc:user/community.lexicon.book.edition/orphan-1',
     rkey: 'orphan-1',
     title: 'Some Book',
-    identifiers: [{ uri: 'isbn:9780123456789', resource: 'isbn13' }],
+    identifiers: [{ type: 'isbn', value: '9780123456789' }],
     publishedYear: 2020,
   });
   const workRow = makeWorkRow({
@@ -363,7 +384,7 @@ test('runBackfill Phase 1 reconciles orphan via OL ISBN match and links edition'
     rkey: 'ol-work-OL66554W',
     title: 'Some Book',
     firstPublishedYear: 2020,
-    identifiers: [{ uri: 'https://openlibrary.org/works/OL66554W', resource: 'openlibrary' }],
+    identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL66554W')],
   });
   const { db, capture } = createFakeDb({ editions: [edition], works: new Map([[workRow.uri, workRow]]) });
   // Queue order: phase-1 iter 1, work-row read-back inside reconcile, phase-1 iter 2,
@@ -379,7 +400,7 @@ test('runBackfill Phase 1 reconciles orphan via OL ISBN match and links edition'
     ['9780123456789', [makeWorkItem({
       title: 'Some Book',
       firstPublishedYear: 2020,
-      identifiers: [{ uri: 'https://openlibrary.org/works/OL66554W', resource: 'openlibrary' }],
+      identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL66554W')],
     })]],
   ])) as unknown as OpenLibrarySource;
   const summary = await runBackfill({ db: db as unknown as Parameters<typeof runBackfill>[0]['db'], openLibrary: ol as unknown as Parameters<typeof runBackfill>[0]['openLibrary'], log: silentLog });
@@ -389,9 +410,11 @@ test('runBackfill Phase 1 reconciles orphan via OL ISBN match and links edition'
   assert.equal(summary.skipped, 0);
   assert.equal(summary.failed, 0);
   assert.equal(summary.cidsChecked, 0, 'no linked editions in phase 2');
+  // A stale "no match" marker would suppress a future lookup of this edition.
+  assert.equal(capture.deleteCalls, 1);
 });
 
-test('runBackfill Phase 1 falls back to synthesized work when no OL candidate matches', async () => {
+test('runBackfill Phase 1 leaves an unmatched orphan unlinked and counts it', async () => {
   const edition = makeEditionRow({
     uri: 'at://did:plc:user/community.lexicon.book.edition/orphan-2',
     rkey: 'orphan-2',
@@ -400,29 +423,70 @@ test('runBackfill Phase 1 falls back to synthesized work when no OL candidate ma
     publishedYear: 2020,
   });
   const { db, capture } = createFakeDb({ editions: [edition], works: new Map() });
-  // For the synthesized path upsertWorkRow still does its read-back, returning
-  // a synthetic row (we just pass back the same edition for simplicity).
-  const syntheticWork = makeWorkRow({
-    uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/synth-work-orphan-2',
-    rkey: 'synth-work-orphan-2',
-    title: 'Obcure',
-    identifiers: [],
-  });
   capture.rows.push(
-    [edition],          // phase-1 first
-    [syntheticWork],    // upsertWorkRow read-back
-    [],                 // phase-1 second
-    [],                 // phase-2 first
-    [],                 // phase-2 second
+    [edition],  // phase-1 first
+    [],         // phase-1 second
+    [],         // phase-2 first
+    [],         // phase-2 second
   );
   const ol = new FakeOpenLibrarySource(new Map([
     ['Obcure', [makeWorkItem({ title: 'Different Book', firstPublishedYear: 2020 })]], // wrong title
   ])) as unknown as OpenLibrarySource;
   const summary = await runBackfill({ db: db as unknown as Parameters<typeof runBackfill>[0]['db'], openLibrary: ol as unknown as Parameters<typeof runBackfill>[0]['openLibrary'], log: silentLog });
   assert.equal(summary.orphansFound, 1);
-  assert.equal(summary.linked, 1);
-  assert.equal(summary.created, 1);
-  assert.equal(summary.skipped, 0);
+  assert.equal(summary.unmatched, 1, 'no catalog work means no link, not a fabricated one');
+  assert.equal(summary.linked, 0);
+  assert.equal(summary.created, 0, 'a synthetic work would count here');
+  // The only write is the marker that keeps the next run from asking again.
+  assert.equal(capture.inserted.length, 1);
+  assert.equal(capture.inserted[0]?.uri, edition.uri);
+  assert.equal(capture.inserted[0]?.status, 'unmatched');
+  assert.equal(capture.updateCalls, 0);
+  assert.equal(capture.deleteCalls, 0);
+});
+
+test('runBackfill Phase 1 defers, rather than decides, when the catalog is down', async () => {
+  const edition = makeEditionRow({
+    uri: 'at://did:plc:user/community.lexicon.book.edition/orphan-3',
+    rkey: 'orphan-3',
+    title: 'Any Book',
+    identifiers: [],
+  });
+  const { db, capture } = createFakeDb({ editions: [edition], works: new Map() });
+  capture.rows.push([edition], [], [], []);
+  const ol = new FakeOpenLibrarySource(new Map()) as unknown as OpenLibrarySource;
+  (ol as unknown as FakeOpenLibrarySource).goDown();
+  const summary = await runBackfill({ db: db as unknown as Parameters<typeof runBackfill>[0]['db'], openLibrary: ol, log: silentLog });
+  assert.equal(summary.deferred, 1, 'a failed lookup is a miss, not a verdict');
+  assert.equal(summary.unmatched, 0, 'an outage must not be recorded as "no such work"');
+  assert.equal(summary.linked, 0);
+  assert.equal(capture.insertCalls, 0);
+  assert.equal(capture.updateCalls, 0);
+});
+
+test('runBackfill Phase 1 aborts once the catalog stays down', async () => {
+  // 26 orphans: one more than the consecutive-deferral cap, so the run must stop
+  // before walking the rest of the slice.
+  const editions = Array.from({ length: 26 }, (_, i) => makeEditionRow({
+    uri: `at://did:plc:user/community.lexicon.book.edition/orphan-${i}`,
+    rkey: `orphan-d-${i}`,
+    title: `Book ${i}`,
+    identifiers: [],
+  }));
+  const { db, capture } = createFakeDb({ editions, works: new Map() });
+  capture.rows.push(editions.slice(0, 10), editions.slice(10, 20), editions.slice(20));
+  const ol = new FakeOpenLibrarySource(new Map()) as unknown as OpenLibrarySource;
+  (ol as unknown as FakeOpenLibrarySource).goDown();
+  const summary = await runBackfill({
+    db: db as unknown as Parameters<typeof runBackfill>[0]['db'],
+    openLibrary: ol,
+    log: silentLog,
+    pageSize: 10,
+  });
+  assert.equal(summary.aborted, true);
+  assert.equal(summary.orphansFound, 25, 'stops at the cap, not at the end of the slice');
+  assert.equal(summary.deferred, 25);
+  assert.equal(summary.failed, 0);
 });
 
 test('runBackfill Phase 1 skips edition with empty title', async () => {
@@ -463,7 +527,7 @@ test('runBackfill Phase 2 is a no-op when CID already matches', async () => {
     rkey: 'linked-2',
     workUri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol-work-OL2W',
   });
-  const freshCid = await recomputeWorkCid(makeWorkRow({ uri: linkedEdition.workUri! }));
+  const freshCid = await recomputeWorkCid(makeWorkRow({ uri: linkedEdition.workUri! }), []);
   const workRow = makeWorkRow({ uri: linkedEdition.workUri!, cid: freshCid });
   const { db, capture } = createFakeDb({ editions: [linkedEdition], works: new Map([[workRow.uri, workRow]]) });
   capture.rows.push([], [linkedEdition], [workRow], []);
@@ -478,7 +542,7 @@ test('runBackfill second pass is a no-op when Phase 1 has no orphans', async () 
     workUri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol-work-OL1W',
     workCid: 'bafyc',
   });
-  const freshCid = await recomputeWorkCid(makeWorkRow({ uri: linkedEdition.workUri!, cid: 'bafyc' }));
+  const freshCid = await recomputeWorkCid(makeWorkRow({ uri: linkedEdition.workUri!, cid: 'bafyc' }), []);
   const workRow = makeWorkRow({ uri: linkedEdition.workUri!, cid: freshCid });
   const { db, capture } = createFakeDb({ editions: [linkedEdition], works: new Map([[workRow.uri, workRow]]) });
   capture.rows.push([], [linkedEdition], [workRow], []);

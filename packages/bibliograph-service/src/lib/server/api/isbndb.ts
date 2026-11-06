@@ -7,6 +7,7 @@ import type { EditionItem, WorkItem, Identifier, SearchQuery, SearchResult } fro
 import { isbndbEditionUri, isbndbWorkUri } from '../isbndb/keys';
 import { resolveContributorsByName } from './contributor-name-resolver';
 import { normalizeBookFormat } from '../format-view';
+import { isbnIdentifier, isbnValueFromIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
 
 const BASE = 'https://api2.isbndb.com';
 
@@ -39,22 +40,14 @@ interface IsbndbListResponse { total?: number; data?: IsbndbBook[]; page?: numbe
 
 function isbnFromIdentifiers(item: EditionItem): string | undefined {
   for (const id of item.identifiers) {
-    if (id.resource === 'isbn13' || id.resource === 'isbn10' || id.resource === 'isbn') {
-      return id.uri.replace(/^isbn:/, '').replace(/-/g, '');
-    }
+    const isbn = isbnValueFromIdentifier(id);
+    if (isbn) return isbn;
   }
   return undefined;
 }
 
 function makeIsbndbIdentifier(isbn13: string): Identifier {
-  return { uri: `https://api2.isbndb.com/book/${isbn13}`, resource: 'isbndb' };
-}
-
-function isbnIdentifier(isbn: string): Identifier | null {
-  const clean = isbn.replace(/-/g, '');
-  if (!clean) return null;
-  const resource = clean.length === 13 ? 'isbn13' : clean.length === 10 ? 'isbn10' : 'isbn';
-  return { uri: `isbn:${clean}`, resource };
+  return providerIdentifier('isbndb', `https://api2.isbndb.com/book/${isbn13}`);
 }
 
 function yearFromDatePublished(s: string | undefined | null): number | undefined {
@@ -89,9 +82,9 @@ function makeIdentifiers(b: IsbndbBook, primary: string): Identifier[] {
   for (const raw of [b.isbn13, b.isbn10, b.isbn]) {
     if (!raw) continue;
     const id = isbnIdentifier(raw);
-    if (id && !ids.some((existing) => existing.uri === id.uri)) ids.push(id);
+    if (id) ids.push(id);
   }
-  return ids;
+  return uniqueIdentifiers(ids);
 }
 
 async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, log: Logger): Promise<EditionItem | null> {
@@ -355,8 +348,7 @@ export async function enrichWorks(
   const seen = new Set<string>();
   for (const item of items) {
     for (const id of item.identifiers) {
-      if (id.resource !== 'isbn13' && id.resource !== 'isbn10' && id.resource !== 'isbn') continue;
-      const clean = id.uri.replace(/^isbn:/, '').replace(/-/g, '');
+      const clean = isbnValueFromIdentifier(id);
       if (clean && !seen.has(clean)) {
         isbns.push(clean);
         seen.add(clean);
@@ -370,8 +362,7 @@ export async function enrichWorks(
     let enriched = item;
     let matched: IsbndbBook | undefined;
     for (const id of item.identifiers) {
-      if (id.resource !== 'isbn13' && id.resource !== 'isbn10' && id.resource !== 'isbn') continue;
-      const clean = id.uri.replace(/^isbn:/, '').replace(/-/g, '');
+      const clean = isbnValueFromIdentifier(id);
       if (clean && lookup.has(clean)) {
         matched = lookup.get(clean);
         break;

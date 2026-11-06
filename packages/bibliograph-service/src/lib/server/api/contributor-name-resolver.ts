@@ -7,6 +7,7 @@ import { contributors } from '../db/schema';
 import { PUBLISHER_DID } from '../did';
 import { enqueueIngest } from '../jobs/enqueue';
 import type { ContributionEntry, Identifier, ContributorItem } from '../search/types';
+import { providerIdentifier } from '../identifiers';
 
 export type ContributorSource = 'googlebooks' | 'isbndb' | 'goodreads';
 
@@ -37,10 +38,10 @@ function uriFor(rkey: string): string {
 }
 
 function identifierFor(name: string, source: ContributorSource): Identifier {
-  return {
-    uri: `${source}://contributor/${slugify(name)}`,
-    resource: source,
-  };
+  // The synthetic `{source}://contributor/{slug}` URI is the identifier's own
+  // reference, not a provider page, so it only rides along as `url`; the pair
+  // clients compare is the provider domain plus the slug.
+  return providerIdentifier(source, `${source}://contributor/${slugify(name)}`);
 }
 
 async function lookupByName(

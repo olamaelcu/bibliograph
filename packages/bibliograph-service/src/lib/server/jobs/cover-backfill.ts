@@ -12,19 +12,13 @@ import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { getBookByIsbn } from '../api/isbndb';
+import { editionRecordValue, rowIdentifiers } from '../edition-record';
+import { isbnFromIdentifiers } from '../isbn/lookup';
+import { wireContributorsFor } from './wire-contributors';
 
 type Db = typeof defaultDb;
 
 const GB_BASE = 'https://www.googleapis.com/books/v1/volumes';
-
-export function isbnFromIdentifiers(identifiers: ReadonlyArray<{ uri: string; resource: string }>): string | undefined {
-  for (const ident of identifiers) {
-    if (ident.resource === 'isbn13' || ident.resource === 'isbn10' || ident.resource === 'isbn') {
-      return ident.uri.replace(/^isbn:/, '');
-    }
-  }
-  return undefined;
-}
 
 function gbCoverFromLinks(links: Record<string, string> | undefined): string | undefined {
   if (!links) return undefined;
@@ -103,7 +97,7 @@ export async function resolveCoverUrl(
       const cover = await fetchGbByVolumeId(vid, log, signal);
       if (cover) return cover;
     } catch { /* invalid rkey already validated */ }
-    const isbn = isbnFromIdentifiers(row.identifiers);
+    const isbn = isbnFromIdentifiers(rowIdentifiers(row.identifiers));
     if (isbn) {
       const cover = await fetchGbByIsbn(isbn, log, signal);
       if (cover) return cover;
@@ -115,7 +109,8 @@ export async function resolveCoverUrl(
   const olItem = await getEditionByRkey(rkey, log, signal);
   if (olItem?.coverImageUrl) return olItem.coverImageUrl;
 
-  const isbn = isbnFromIdentifiers(row.identifiers) ?? isbnFromIdentifiers(olItem?.identifiers ?? []);
+  const isbn =
+    isbnFromIdentifiers(rowIdentifiers(row.identifiers)) ?? isbnFromIdentifiers(olItem?.identifiers ?? []);
   if (isbn) {
     const cover = await fetchGbByIsbn(isbn, log, signal);
     if (cover) return cover;
@@ -128,23 +123,6 @@ export async function resolveCoverUrl(
 
   // Also try ISBN already present on OL item's volume via direct covers? already handled.
   return undefined;
-}
-
-function editionValueForCid(row: EditionRow, coverImageUrl: string): Record<string, unknown> {
-  return {
-    $type: 'community.lexicon.book.edition' as const,
-    title: row.title,
-    subtitle: row.subtitle ?? undefined,
-    place: row.place ?? undefined,
-    publishedYear: row.publishedYear ?? undefined,
-    language: row.language ?? undefined,
-    coverImageUrl,
-    contributors: row.contributors,
-    identifiers: row.identifiers,
-    description: row.description ?? undefined,
-    pages: row.pages ?? undefined,
-    createdAt: row.createdAt.toISOString(),
-  };
 }
 
 export async function backfillCoverForEdition(
@@ -166,7 +144,9 @@ export async function backfillCoverForEdition(
   const coverUrl = await resolveCoverUrl(row, log, signal);
   if (!coverUrl) return { updated: false, reason: 'no_cover_found' };
 
-  const value = editionValueForCid(row, coverUrl);
+  const contributors = await wireContributorsFor(db, row.contributors);
+  const value = editionRecordValue(row, { contributors, coverUrl });
+  if (!value) return { updated: false, reason: 'missing_identifiers' };
   const cid = (await cidForLex(value as unknown as LexMap)).toString();
 
   const updated = await db.update(editions)

@@ -3,7 +3,7 @@ import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { wikidataBreaker } from './breakers';
 import { searchProviderRequestsTotal } from '../metrics';
-import type { Identifier } from '../search/types';
+import { identifierKey, PROVIDER_IDENTIFIER_DOMAINS, providerIdentifier, type Identifier } from '../identifiers';
 
 /**
  * Wikidata as an *enricher*: it never contributes items, it only attaches
@@ -28,6 +28,10 @@ const MISS_TTL_MS = 60 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 5000;
 /** `community.lexicon.book.{edition,work,contributor}.identifiers` all cap at 32. */
 const MAX_IDENTIFIERS = 32;
+
+/** `identifier.type` namespaces this enricher joins on. */
+const OPENLIBRARY_TYPE = PROVIDER_IDENTIFIER_DOMAINS.openlibrary ?? 'openlibrary.org';
+const WIKIDATA_TYPE = PROVIDER_IDENTIFIER_DOMAINS.wikidata ?? 'wikidata.org';
 
 /** `identifiers` entries to append for one matched item. */
 export interface WikidataMatch {
@@ -72,10 +76,23 @@ function throttled<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 const OL_URI = /^https?:\/\/openlibrary\.org\/(?:works|books|authors)\/(OL\d+[A-Z])$/;
+/** The same entity kinds `OL_URI` accepts (works, books, authors), as a bare value. */
+const OL_ID = /^(OL\d+[WMA])$/;
 
 /** Bare Open Library ID (`OL66554W`) from an `openlibrary` identifier URI. */
 export function olIdFromIdentifierUri(uri: string): string | undefined {
   return OL_URI.exec(uri)?.[1];
+}
+
+/**
+ * Bare Open Library ID from a canonical `openlibrary` identifier. The value is
+ * the canonical form; `url` is only the display page, so it is the fallback for
+ * identifiers written before the value carried the OLID on its own.
+ */
+function olidFromIdentifier(identifier: Identifier): string | undefined {
+  const bare = OL_ID.exec(identifier.value)?.[1];
+  if (bare) return bare;
+  return identifier.url ? olIdFromIdentifierUri(identifier.url) : undefined;
 }
 
 function qidFromEntityUri(uri: string): string | undefined {
@@ -131,9 +148,9 @@ function rankCandidates(bindings: readonly SparqlBindings[]): Map<string, Candid
 }
 
 function toIdentifiers(c: Candidate): Identifier[] {
-  const out: Identifier[] = [{ uri: `https://www.wikidata.org/entity/${c.qid}`, resource: 'wikidata' }];
-  if (c.viaf) out.push({ uri: `https://viaf.org/viaf/${c.viaf}`, resource: 'viaf' });
-  if (c.isni) out.push({ uri: `https://isni.org/isni/${c.isni.replace(/\s+/g, '')}`, resource: 'isni' });
+  const out: Identifier[] = [providerIdentifier('wikidata', `https://www.wikidata.org/entity/${c.qid}`)];
+  if (c.viaf) out.push(providerIdentifier('viaf', `https://viaf.org/viaf/${c.viaf}`));
+  if (c.isni) out.push(providerIdentifier('isni', `https://isni.org/isni/${c.isni.replace(/\s+/g, '')}`));
   return out;
 }
 
@@ -199,21 +216,22 @@ async function fetchChunk(
   }
 }
 
-function remember(uri: string, match: WikidataMatch | null): void {
+function remember(key: string, match: WikidataMatch | null): void {
   if (cache.size >= CACHE_MAX_ENTRIES) {
     const oldest = cache.keys().next();
     if (!oldest.done) cache.delete(oldest.value);
   }
-  cache.set(uri, { match, expiresAt: Date.now() + (match ? HIT_TTL_MS : MISS_TTL_MS) });
+  cache.set(key, { match, expiresAt: Date.now() + (match ? HIT_TTL_MS : MISS_TTL_MS) });
 }
 
 function mergeIdentifiers(existing: readonly Identifier[], extra: readonly Identifier[]): Identifier[] {
-  const seen = new Set(existing.map((id) => id.uri));
+  const seen = new Set(existing.map((id) => identifierKey(id)));
   const merged = [...existing];
   for (const id of extra) {
     if (merged.length >= MAX_IDENTIFIERS) break;
-    if (seen.has(id.uri)) continue;
-    seen.add(id.uri);
+    const key = identifierKey(id);
+    if (seen.has(key)) continue;
+    seen.add(key);
     merged.push(id);
   }
   return merged;
@@ -233,35 +251,35 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   if (items.length === 0) return [];
 
   const start = performance.now();
-  const wanted = new Map<string, string>(); // identifier uri -> OLID
+  const wanted = new Map<string, string>(); // identifier key -> OLID
   for (const item of items) {
-    if (item.identifiers.some((id) => id.resource === 'wikidata')) continue;
+    if (item.identifiers.some((id) => id.type === WIKIDATA_TYPE)) continue;
     for (const id of item.identifiers) {
-      if (id.resource !== 'openlibrary') continue;
-      const olid = olIdFromIdentifierUri(id.uri);
-      if (olid) wanted.set(id.uri, olid);
+      if (id.type !== OPENLIBRARY_TYPE) continue;
+      const olid = olidFromIdentifier(id);
+      if (olid) wanted.set(identifierKey(id), olid);
     }
   }
 
   const matches = new Map<string, WikidataMatch>();
-  const pending: Array<[uri: string, olid: string]> = [];
+  const pending: Array<[key: string, olid: string]> = [];
   const now = Date.now();
-  for (const [uri, olid] of wanted) {
-    const cached = cache.get(uri);
+  for (const [key, olid] of wanted) {
+    const cached = cache.get(key);
     if (cached && cached.expiresAt > now) {
-      if (cached.match) matches.set(uri, cached.match);
+      if (cached.match) matches.set(key, cached.match);
       continue;
     }
-    pending.push([uri, olid]);
+    pending.push([key, olid]);
   }
 
   for (let i = 0; i < pending.length; i += CHUNK_SIZE) {
     const chunk = pending.slice(i, i + CHUNK_SIZE);
     const resolved = await fetchChunk(chunk.map(([, olid]) => olid), log, externalSignal);
-    for (const [uri, olid] of chunk) {
+    for (const [key, olid] of chunk) {
       const match = resolved.get(olid) ?? null;
-      remember(uri, match);
-      if (match) matches.set(uri, match);
+      remember(key, match);
+      if (match) matches.set(key, match);
     }
   }
 
@@ -282,8 +300,8 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   return items.map((item) => {
     const extra: Identifier[] = [];
     for (const id of item.identifiers) {
-      if (id.resource !== 'openlibrary') continue;
-      const match = matches.get(id.uri);
+      if (id.type !== OPENLIBRARY_TYPE) continue;
+      const match = matches.get(identifierKey(id));
       if (match) extra.push(...match.identifiers);
     }
     if (extra.length === 0) return item;

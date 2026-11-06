@@ -9,6 +9,7 @@ import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem,
 import { translateOlLanguages } from '../search/language';
 import { resolveOlContributors } from './open-library-contributors';
 import { normalizeBookFormat } from '../format-view';
+import { isbnIdentifier, isbnValueFromIdentifier, providerIdentifier, sameIdentifier, uniqueIdentifiers } from '../identifiers';
 
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
@@ -167,20 +168,13 @@ function makeOlIdentifier(key: string): Identifier {
   } else {
     uri = `https://openlibrary.org${key}`;
   }
-  return { uri, resource: 'openlibrary' };
-}
-
-function isbnIdentifier(isbn: string): Identifier {
-  const clean = isbn.replace(/-/g, '');
-  const resource = clean.length === 13 ? 'isbn13' : clean.length === 10 ? 'isbn10' : 'isbn';
-  return { uri: `isbn:${clean}`, resource };
+  return providerIdentifier('openlibrary', uri);
 }
 
 function isbnFromIdentifiers(item: EditionItem): string | undefined {
   for (const id of item.identifiers) {
-    if (id.resource === 'isbn13' || id.resource === 'isbn10' || id.resource === 'isbn') {
-      return id.uri.replace(/^isbn:/, '');
-    }
+    const isbn = isbnValueFromIdentifier(id);
+    if (isbn) return isbn;
   }
   return undefined;
 }
@@ -319,7 +313,8 @@ export async function searchEditions(
       const identifiers: Identifier[] = [makeOlIdentifier(editionKey)];
       if (d.isbn) {
         for (const raw of d.isbn.slice(0, 5)) {
-          identifiers.push(isbnIdentifier(raw));
+          const isbn = isbnIdentifier(raw);
+          if (isbn) identifiers.push(isbn);
         }
       }
       const year = d.first_publish_year ?? d.publish_year?.[0];
@@ -340,7 +335,9 @@ export async function searchEditions(
         coverImageUrl: coverUrl(d.cover_i),
         pages: d.number_of_pages,
         format: normalizeBookFormat(d.physical_format),
-        identifiers,
+        // Search docs list several ISBNs per work; ISBN-10 and ISBN-13 forms
+        // collapse onto one canonical identifier.
+        identifiers: uniqueIdentifiers(identifiers),
         contributors,
         createdAt,
       });
@@ -361,7 +358,11 @@ export async function searchWorks(
   const url = buildUrl(query.q, 'work', limit, page);
   const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await fetchJson<OlSearchResponse<OlWorkDoc>>(url, log, signal);
-  if (!data) return { items: [], total: 0 };
+  // `fetchJson` answers null for both a breaker-open skip and a failed call.
+  // Reporting that as "no results" made a failed lookup indistinguishable from
+  // an empty one: the works backfill counted those editions as unmatched and
+  // walked the whole catalog while OpenLibrary was never asked.
+  if (!data) return { items: [], total: 0, degraded: { upstream: 'openlibrary', reason: 'fetch_failed' } };
   const createdAt = new Date().toISOString();
   const items: WorkItem[] = [];
   for (const d of data.docs ?? []) {
@@ -445,7 +446,8 @@ async function getEditionByOlid(olid: string, log: Logger, signal?: AbortSignal)
   // with editions a reader's shelf cannot match.
   for (const value of [...(raw.isbn_13 ?? []), ...(raw.isbn_10 ?? []), ...(raw.isbn ?? [])]) {
     const identifier = isbnIdentifier(value);
-    if (identifiers.some((existing) => existing.uri === identifier.uri)) continue;
+    if (!identifier) continue;
+    if (identifiers.some((existing) => sameIdentifier(existing, identifier))) continue;
     identifiers.push(identifier);
     if (identifiers.length >= 6) break;
   }

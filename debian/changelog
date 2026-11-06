@@ -7,6 +7,12 @@ bibliograph (0.3.9) unstable; urgency=medium
     editions imported before the mapping changed, recomputing the CID, so the
     search scan no longer burns upstream calls on rows whose ISBN was already
     on-protocol.
+  * `edition_work_backfill` remembers which editions the works backfill asked
+    OpenLibrary about and found no match for, so a re-run skips them instead of
+    spending another day re-asking the same questions: the second pass over 35
+    editions took 92 ms against 10 s. `--retry-unmatched` ignores the markers
+    when the upstream catalog has grown, and a successful link deletes the
+    marker so an unlink is retried.
 
  -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 11:33:19 -0500
 
@@ -27,7 +33,7 @@ bibliograph (0.3.8) unstable; urgency=medium
     row) rather than recording "the catalog does not know this work" for a
     lookup that never happened — the breaker-open case that made an outage look
     like a catalog fact.
-
+ 
  -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 11:05:52 -0500
 
 bibliograph (0.3.7) unstable; urgency=medium

@@ -14,6 +14,7 @@ import { db } from '../src/lib/server/db';
 import { publishers } from '../src/lib/server/db/schema';
 import { PostgresSource } from '../src/lib/server/search/postgres-source';
 import type { SearchQuery } from '../src/lib/server/search/types';
+import { providerIdentifier, sameIdentifier } from '../src/lib/server/identifiers';
 
 if (!process.env.DATABASE_URL) {
   console.error('DATABASE_URL required');
@@ -23,7 +24,8 @@ if (!process.env.DATABASE_URL) {
 const log = pino({ level: 'silent' });
 const FIXTURE_URI = 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.publisher/verify-fixture-001';
 const FIXTURE_NAME = 'VerifyFixturePublisher';
-const FIXTURE_IDENT = { uri: 'https://openlibrary.org/publishers/VerifyFixturePublisher', resource: 'openlibrary' as const };
+const FIXTURE_IDENT_URL = 'https://openlibrary.org/publishers/VerifyFixturePublisher';
+const FIXTURE_IDENT = providerIdentifier('openlibrary', FIXTURE_IDENT_URL);
 
 async function insertFixture() {
   await db.delete(publishers).where(eq(publishers.uri, FIXTURE_URI));
@@ -53,7 +55,7 @@ test('searchPublishers matches by ilike on name', async () => {
     const hit = result.items.find((r) => r.uri === FIXTURE_URI);
     assert.ok(hit, 'expected fixture row in results');
     assert.equal(hit!.name, FIXTURE_NAME);
-    assert.ok(hit!.identifiers.some((id) => id.uri === FIXTURE_IDENT.uri));
+    assert.ok(hit!.identifiers.some((id) => sameIdentifier(id, FIXTURE_IDENT)));
   } finally { await cleanup(); }
 });
 
@@ -65,7 +67,7 @@ test('searchPublishers returns empty on miss', async () => {
 test('searchPublishers matches by identifier (jsonb @>)', async () => {
   await insertFixture();
   try {
-    const result = await source.searchPublishers({ id: [FIXTURE_IDENT.uri], limit: 20 });
+    const result = await source.searchPublishers({ id: [FIXTURE_IDENT_URL], limit: 20 });
     assert.ok(result.items.length >= 1, 'expected at least one result');
     const hit = result.items.find((r) => r.uri === FIXTURE_URI);
     assert.ok(hit, 'expected fixture row in id-based results');

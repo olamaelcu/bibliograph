@@ -5,24 +5,16 @@ import {
   hasIsbn,
   isbnFromIdentifier,
   isbnIdentifier,
-  isIsbnResource,
   mergeIsbnIdentifiers,
   normaliseIsbn,
 } from './merge';
+import { isbn13FromAny, providerIdentifier } from '../identifiers';
 import type { Identifier } from '../search/types';
 
-const OL_IDENTIFIER: Identifier = {
-  uri: 'https://openlibrary.org/books/OL3292288M',
-  resource: 'openlibrary',
-};
-
-test('isIsbnResource only accepts the three ISBN resources', () => {
-  assert.equal(isIsbnResource('isbn'), true);
-  assert.equal(isIsbnResource('isbn10'), true);
-  assert.equal(isIsbnResource('isbn13'), true);
-  assert.equal(isIsbnResource('openlibrary'), false);
-  assert.equal(isIsbnResource('toString'), false);
-});
+const OL_IDENTIFIER: Identifier = providerIdentifier(
+  'openlibrary',
+  'https://openlibrary.org/books/OL3292288M',
+);
 
 test('normaliseIsbn keeps digits and a trailing X', () => {
   assert.equal(normaliseIsbn('978-1-4696-1288-1'), '9781469612881');
@@ -30,11 +22,12 @@ test('normaliseIsbn keeps digits and a trailing X', () => {
   assert.equal(normaliseIsbn('n/a'), '');
 });
 
-test('isbnFromIdentifier reads only `isbn:` uris on ISBN resources', () => {
-  assert.equal(isbnFromIdentifier({ uri: 'isbn:9781469612881', resource: 'isbn13' }), '9781469612881');
-  assert.equal(isbnFromIdentifier({ uri: 'isbn:1469612887', resource: 'isbn10' }), '1469612887');
-  assert.equal(isbnFromIdentifier({ uri: 'urn:isbn:9781469612881', resource: 'isbn13' }), null);
-  assert.equal(isbnFromIdentifier({ uri: 'isbn:123', resource: 'isbn13' }), null);
+test('isbnFromIdentifier reads only canonical ISBN-13 values on `isbn` identifiers', () => {
+  assert.equal(isbnFromIdentifier({ type: 'isbn', value: '9781469612881' }), '9781469612881');
+  // An ISBN-10 is not representable: the lexicon requires ISBN-13 on write.
+  assert.equal(isbnFromIdentifier({ type: 'isbn', value: '1469612887' }), null);
+  assert.equal(isbnFromIdentifier({ type: 'isbn', value: 'urn:isbn:9781469612881' }), null);
+  assert.equal(isbnFromIdentifier({ type: 'isbn', value: '123' }), null);
   assert.equal(isbnFromIdentifier(OL_IDENTIFIER), null);
 });
 
@@ -42,12 +35,12 @@ test('hasIsbn sees through unrelated identifiers', () => {
   assert.equal(hasIsbn([OL_IDENTIFIER]), false);
   assert.equal(hasIsbn([]), false);
   assert.equal(hasIsbn(undefined), false);
-  assert.equal(hasIsbn([OL_IDENTIFIER, { uri: 'isbn:9781469612881', resource: 'isbn13' }]), true);
+  assert.equal(hasIsbn([OL_IDENTIFIER, { type: 'isbn', value: '9781469612881' }]), true);
 });
 
-test('isbnIdentifier picks the resource from the length', () => {
-  assert.deepEqual(isbnIdentifier('978-1469612881'), { uri: 'isbn:9781469612881', resource: 'isbn13' });
-  assert.deepEqual(isbnIdentifier('1469612887'), { uri: 'isbn:1469612887', resource: 'isbn10' });
+test('isbnIdentifier always yields one canonical ISBN-13', () => {
+  assert.deepEqual(isbnIdentifier('978-1469612881'), { type: 'isbn', value: '9781469612881' });
+  assert.deepEqual(isbnIdentifier('1469612887'), { type: 'isbn', value: isbn13FromAny('1469612887') });
   assert.equal(isbnIdentifier('12345'), null);
 });
 
@@ -56,20 +49,12 @@ test('mergeIsbnIdentifiers appends without touching what is there', () => {
 
   assert.deepEqual(added, ['9781469612881']);
   assert.deepEqual(identifiers[0], OL_IDENTIFIER);
-  assert.deepEqual(identifiers[1], { uri: 'isbn:9781469612881', resource: 'isbn13' });
-});
-
-test('mergeIsbnIdentifiers puts ISBN-13 before ISBN-10', () => {
-  const { identifiers } = mergeIsbnIdentifiers([], ['1469612887', '9781469612881']);
-  assert.deepEqual(
-    identifiers.map((ident) => ident.resource),
-    ['isbn13', 'isbn10'],
-  );
+  assert.deepEqual(identifiers[1], { type: 'isbn', value: '9781469612881' });
 });
 
 test('mergeIsbnIdentifiers collapses duplicates including hyphenated ones', () => {
   const { identifiers, added } = mergeIsbnIdentifiers(
-    [{ uri: 'isbn:9781469612881', resource: 'isbn13' }],
+    [{ type: 'isbn', value: '9781469612881' }],
     ['978-1-4696-1288-1', '9781469612881'],
   );
 
@@ -79,8 +64,8 @@ test('mergeIsbnIdentifiers collapses duplicates including hyphenated ones', () =
 
 test('mergeIsbnIdentifiers respects the lexicon cap', () => {
   const existing: Identifier[] = Array.from({ length: MAX_IDENTIFIERS - 1 }, (_, i) => ({
-    uri: `https://example.org/${i}`,
-    resource: 'custom',
+    type: 'example.org',
+    value: String(i),
   }));
   const { identifiers, added } = mergeIsbnIdentifiers(existing, ['9781469612881', '1469612887']);
 

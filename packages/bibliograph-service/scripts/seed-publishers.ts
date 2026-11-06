@@ -26,6 +26,7 @@ import { db } from '../src/lib/server/db';
 import { publishers } from '../src/lib/server/db/schema';
 import { PUBLISHER_DID } from '../src/lib/server/did';
 import { cidForLex } from '@atproto/lex-cbor';
+import { providerIdentifier, type Identifier } from '../src/lib/server/identifiers';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info', transport: undefined });
 
@@ -107,7 +108,7 @@ async function fetchOlPublisher(slug: string): Promise<OlPublisherPage | null> {
 async function upsertPublisher(record: {
   uri: string;
   name: string;
-  identifiers: Array<{ uri: string; resource: string }>;
+  identifiers: Identifier[];
   foundingDate?: number;
   closingDate?: number;
 }): Promise<void> {
@@ -184,7 +185,9 @@ async function main() {
       const record = {
         uri,
         name: olPage.name,
-        identifiers: [{ uri: `https://openlibrary.org/publishers/${slug}`, resource: 'openlibrary' as const }],
+        // Canonical `defs#identifier`: the OpenLibrary publisher page keeps its
+        // url for display, the OLID is the value the record compares on.
+        identifiers: [providerIdentifier('openlibrary', `https://openlibrary.org/publishers/${slug}`)],
       };
       if (dryRun) {
         log.info({ stage: 'seed-publishers', slug, name: record.name }, 'would insert');

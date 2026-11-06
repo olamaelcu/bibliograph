@@ -169,6 +169,13 @@
       "when": 1795000000002,
       "tag": "0025_editions_work_uri",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795000000003,
+      "tag": "0026_edition_work_backfill",
+      "breakpoints": true
     }
   ]
 }

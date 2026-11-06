@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import { planIsbnEnrichment, type IsbnEnrichmentDeps } from './isbn-backfill';
 import type { EditionRow } from '../db/schema';
 import type { EditionItem, Identifier } from '../search/types';
+import { providerIdentifier } from '../identifiers';
 
 const AUTHOR_URI = 'at://did:plc:author/community.lexicon.book.contributor/ol.A1';
 
-const OL_ONLY: Identifier[] = [{ uri: 'https://openlibrary.org/books/OL3292288M', resource: 'openlibrary' }];
+const OL_ONLY: Identifier[] = [providerIdentifier('openlibrary', 'https://openlibrary.org/books/OL3292288M')];
 const OL_WITH_ISBN: Identifier[] = [
   ...OL_ONLY,
-  { uri: 'isbn:1578067057', resource: 'isbn10' },
+  { type: 'isbn', value: '9781578067053' },
 ];
 
 function row(overrides: Partial<EditionRow> = {}): EditionRow {
@@ -67,15 +68,15 @@ test('tier 1 writes the ISBN the authority already knows', async () => {
 
   assert.equal(plan.action, 'write');
   assert.equal(plan.result, 'found');
-  assert.deepEqual(plan.added, ['1578067057']);
-  assert.deepEqual(plan.identifiers?.at(-1), { uri: 'isbn:1578067057', resource: 'isbn10' });
+  assert.deepEqual(plan.added, ['9781578067053']);
+  assert.deepEqual(plan.identifiers?.at(-1), { type: 'isbn', value: '9781578067053' });
 });
 
 test('an ISBNdb rkey carries its ISBN without any fetch', async () => {
   const plan = await planIsbnEnrichment(
     row({
       rkey: 'isbndb.9781469612881',
-      identifiers: [{ uri: 'https://api2.isbndb.com/book/9781469612881', resource: 'isbndb' }],
+      identifiers: [providerIdentifier('isbndb', 'https://api2.isbndb.com/book/9781469612881')],
     }),
     deps(),
   );
@@ -112,8 +113,8 @@ test('tier 2 writes the ISBN the authority did not already know', async () => {
 
   assert.equal(plan.action, 'write');
   assert.equal(plan.result, 'found');
-  assert.deepEqual(plan.added, ['1578067057']);
-  assert.deepEqual(plan.identifiers?.at(-1), { uri: 'isbn:1578067057', resource: 'isbn10' });
+  assert.deepEqual(plan.added, ['9781578067053']);
+  assert.deepEqual(plan.identifiers?.at(-1), { type: 'isbn', value: '9781578067053' });
   assert.equal(plan.candidates?.filter((candidate) => candidate.accepted).length, 1);
 });
 
@@ -123,8 +124,8 @@ test('two shadow candidates that both survive are ambiguous', async () => {
     deps({
       fetchOlEdition: async () => editionItem({ identifiers: OL_ONLY }),
       searchOl: async () => [
-        editionItem({ identifiers: [{ uri: 'isbn:1578067057', resource: 'isbn10' }] }),
-        editionItem({ identifiers: [{ uri: 'isbn:9781578067053', resource: 'isbn13' }] }),
+        editionItem({ identifiers: [{ type: 'isbn', value: '9781578067053' }] }),
+        editionItem({ identifiers: [{ type: 'isbn', value: '9780060512750' }] }),
       ],
     }),
   );

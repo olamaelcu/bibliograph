@@ -2,10 +2,22 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/db';
 import { editions, editionIsbnEnrichment, type EditionRow } from '$lib/server/db/schema';
-import { editionRecordCid } from '$lib/server/edition-record';
+import { editionRecordCid, rowIdentifiers } from '$lib/server/edition-record';
 import { resolveEditions } from '$lib/server/edition-lookup';
 import { editionUriForRkey } from '$lib/server/edition-work-votes';
 import { PUBLISHER_DID } from '$lib/server/did';
+import { wireContributors } from '$lib/server/book-wire';
+import { contributorUrisFor, loadContributorRefs } from '$lib/server/contributor-refs';
+import {
+  GLOBAL_IDENTIFIER_TOKENS,
+  identifierFromString,
+  identifierTypeForResource,
+  isbnIdentifier,
+  providerIdentifier,
+  uniqueIdentifiers,
+  type Identifier,
+} from '$lib/server/identifiers';
+import { MAX_IDENTIFIERS } from '$lib/server/isbn/merge';
 import { isLibrarian } from '$lib/server/labeler/labels';
 import {
   enqueueCoverBackfill,
@@ -14,13 +26,8 @@ import {
 } from '$lib/server/jobs/enqueue';
 import type { Actions, PageServerLoad } from './$types';
 
-/** `community.lexicon.book.edition` caps `identifiers` at 32 entries. */
-const MAX_IDENTIFIERS = 32;
-
-/** Resources are slugs (`isbn13`, `openlibrary`, `googlebooks-canonical`). */
-const RESOURCE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
-
-type EditionIdentifier = EditionRow['identifiers'][number];
+/** `identifier.type` is a global token (`isbn`, …) or a provider domain. */
+const TYPE_PATTERN = /^[a-z0-9][a-z0-9.-]*$/;
 
 function editPath(rkey: string): string {
   return `/editions/${rkey}/edit`;
@@ -54,47 +61,52 @@ async function loadEditableRow(rkey: string): Promise<EditionRow> {
 }
 
 /**
- * One identifier per line, `uri:resource`. Splitting on the *last* colon keeps
- * uri schemes intact: `isbn:9780123456789:isbn13` → uri `isbn:9780123456789`,
- * resource `isbn13`, and `https://example.org/x:custom` works the same way.
+ * Read one identifier line as `type:value`.
+ *
+ * Free-form provider pages and the `isbn:`/`urn:isbn:` scheme forms come
+ * first, so a pasted URL keeps its page as the display `url`; what is left is
+ * split on the *first* colon. A bare legacy resource token is mapped onto the
+ * namespace it names (`isbn13` → `isbn`, `goodreads` → `goodreads.com`), which
+ * keeps the stored `type` canonical.
  */
-function parseIdentifiers(raw: string): EditionIdentifier[] {
-  const parsed: EditionIdentifier[] = [];
-  raw.split(/\r?\n/).forEach((line, index) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    const cut = trimmed.lastIndexOf(':');
-    const uri = cut > 0 ? trimmed.slice(0, cut).trim() : '';
-    const resource = cut > 0 ? trimmed.slice(cut + 1).trim() : '';
-    if (!uri || !resource || /\s/.test(uri) || !RESOURCE_PATTERN.test(resource)) {
-      throw new Error(
-        `Line ${index + 1}: expected "uri:resource" — for example ` +
-          `"isbn:9780123456789:isbn13" — got "${trimmed}".`,
-      );
-    }
-    parsed.push({ uri, resource });
-  });
-  if (parsed.length === 0) throw new Error('Enter at least one identifier, one per line.');
-  return parsed;
+function parseIdentifierLine(raw: string): Identifier | null {
+  const known = identifierFromString(raw);
+  if (known) return known;
+
+  const cut = raw.indexOf(':');
+  if (cut <= 0) return null;
+  const token = raw.slice(0, cut).trim().toLowerCase();
+  const value = raw.slice(cut + 1).trim();
+  if (!token || !value || !TYPE_PATTERN.test(token) || /\s/.test(value)) return null;
+
+  const type = identifierTypeForResource(token);
+  // `type` is what the lexicon compares, so an ISBN is always a hyphenless
+  // ISBN-13 and a provider value is the provider's own key.
+  if (type === 'isbn') return isbnIdentifier(value);
+  if (GLOBAL_IDENTIFIER_TOKENS[type] === true) return { type, value };
+  return providerIdentifier(token, value);
 }
 
 /**
- * Union in the order given, deduped on `uri|resource` — the same key
- * `computeMergedEdition` uses, so one ISBN can keep several resources.
+ * One identifier per line, `type:value` — for example
+ * `isbn:9780123456789`, `openlibrary.org:OL45804W`, or a provider page URL.
  */
-function mergeIdentifiers(
-  existing: readonly EditionIdentifier[],
-  incoming: readonly EditionIdentifier[],
-): EditionIdentifier[] {
-  const seen = new Set<string>();
-  const merged: EditionIdentifier[] = [];
-  for (const identifier of [...existing, ...incoming]) {
-    const key = `${identifier.uri}|${identifier.resource}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push({ uri: identifier.uri, resource: identifier.resource });
-  }
-  return merged;
+function parseIdentifiers(raw: string): Identifier[] {
+  const parsed: Identifier[] = [];
+  raw.split(/\r?\n/).forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const identifier = parseIdentifierLine(trimmed);
+    if (!identifier) {
+      throw new Error(
+        `Line ${index + 1}: expected "type:value" — for example ` +
+          `"isbn:9780123456789" — got "${trimmed}".`,
+      );
+    }
+    parsed.push(identifier);
+  });
+  if (parsed.length === 0) throw new Error('Enter at least one identifier, one per line.');
+  return parsed;
 }
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -103,7 +115,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   return {
     rkey: row.rkey,
     title: row.title,
-    identifiers: row.identifiers,
+    identifiers: rowIdentifiers(row.identifiers),
   };
 };
 
@@ -162,7 +174,7 @@ export const actions: Actions = {
     const row = await loadEditableRow(params.rkey);
 
     const form = await request.formData();
-    let parsed: EditionIdentifier[];
+    let parsed: Identifier[];
     try {
       parsed = parseIdentifiers(String(form.get('identifiers') ?? ''));
     } catch (err) {
@@ -171,13 +183,17 @@ export const actions: Actions = {
       });
     }
 
-    const merged = mergeIdentifiers(row.identifiers, parsed);
+    // Identifiers compare on `type`+`value` only, so a differing `url` is the
+    // same identifier and the first-seen display url wins.
+    const existing = rowIdentifiers(row.identifiers);
+    const merged = uniqueIdentifiers([...existing, ...parsed]);
+    // `community.lexicon.book.defs#edition` caps `identifiers` at 32 entries.
     if (merged.length > MAX_IDENTIFIERS) {
       return fail(400, {
         error: `That would leave ${merged.length} identifiers; the lexicon allows ${MAX_IDENTIFIERS}.`,
       });
     }
-    const added = merged.length - row.identifiers.length;
+    const added = merged.length - existing.length;
     if (added === 0) {
       return { identifiers: 'Those identifiers are already on this edition — nothing changed.' };
     }
@@ -192,7 +208,18 @@ export const actions: Actions = {
 
     // Identifiers are part of the record value, so the CID has to move with
     // them — otherwise clients would keep serving the old revision.
-    const cid = await editionRecordCid(row, { identifiers: merged });
+    // `defs#contributor` inlines names, so the contributor refs are resolved
+    // from the same rows the response boundary reads before hashing.
+    const contributors = wireContributors(
+      row.contributors,
+      await loadContributorRefs(contributorUrisFor(row.contributors)),
+    );
+    const cid = await editionRecordCid(row, { identifiers: merged, contributors });
+    if (!cid) {
+      return fail(400, {
+        error: 'Those identifiers did not produce a valid edition record.',
+      });
+    }
     await db
       .update(editions)
       .set({ identifiers: merged, cid, indexedAt: new Date() })

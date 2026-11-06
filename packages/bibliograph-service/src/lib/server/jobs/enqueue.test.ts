@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { enqueueIngest, enqueueRecordUpsert, enqueueRecordDelete } from './enqueue';
 import type { EditionItem, WorkItem, ContributorItem } from '../search/types';
+import { providerIdentifier } from '../identifiers';
 
 // Integration smoke: these calls would fail without a DATABASE_URL pointing at a
 // real Postgres, but the signature/import-level contract is what's under test.
@@ -11,7 +12,7 @@ import type { EditionItem, WorkItem, ContributorItem } from '../search/types';
 const editionItem: EditionItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL1M',
   title: 'Test Edition',
-  identifiers: [{ uri: 'https://openlibrary.org/books/OL1M', resource: 'openlibrary' }],
+  identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/books/OL1M')],
   contributors: [],
   createdAt: new Date().toISOString(),
 };
@@ -20,7 +21,7 @@ const workItem: WorkItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.W1W',
   title: 'Test Work',
   subjects: [],
-  identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],
+  identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/works/OL1W')],
   contributors: [],
   createdAt: new Date().toISOString(),
 };
@@ -29,7 +30,7 @@ const contributorItem: ContributorItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.A1A',
   name: 'Test Author',
   aliases: [],
-  identifiers: [{ uri: 'https://openlibrary.org/authors/OL1A', resource: 'openlibrary' }],
+  identifiers: [providerIdentifier('openlibrary', 'https://openlibrary.org/authors/OL1A')],
   createdAt: new Date().toISOString(),
 };
 

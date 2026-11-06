@@ -12,23 +12,12 @@ import { isIsbndbRkey, isbnFromIsbndbRkey } from '../isbndb/keys';
 import { getEditionByVolumeId, googleBooksDescription } from '../api/google-books';
 import { getWorkByRkey, openLibraryDescription } from '../api/open-library';
 import { getBookByIsbn, isbndbDescription } from '../api/isbndb';
+import { isbnFromIdentifiers } from '../isbn/lookup';
+import { rowIdentifiers } from '../edition-record';
+import { wireContributorsFor } from './wire-contributors';
+import { workRecordValue } from '../book-records';
 
 type Db = typeof defaultDb;
-
-function workValueForCid(row: WorkRow, description: string): Record<string, unknown> {
-  return {
-    $type: 'community.lexicon.book.work' as const,
-    title: row.title,
-    subtitle: row.subtitle ?? undefined,
-    originalLanguage: row.originalLanguage ?? undefined,
-    firstPublishedYear: row.firstPublishedYear ?? undefined,
-    subjects: row.subjects,
-    contributors: row.contributors,
-    identifiers: row.identifiers,
-    description,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
 
 export async function resolveWorkDescription(
   row: WorkRow,
@@ -57,10 +46,8 @@ export async function resolveWorkDescription(
       // fall through
     }
   }
-  // ISBNdb via identifiers (isbn13/isbn10)
-  const isbn = row.identifiers.find(
-    (id) => id.resource === 'isbn13' || id.resource === 'isbn10' || id.resource === 'isbn',
-  )?.uri.replace(/^isbn:/, '');
+  // ISBNdb via identifiers
+  const isbn = isbnFromIdentifiers(rowIdentifiers(row.identifiers));
   if (isbn && isIsbndbRkey(row.rkey)) {
     try {
       const book = await getBookByIsbn(isbn, log, s);
@@ -102,7 +89,8 @@ export async function backfillDescriptionForWork(
     await db.update(works).set({ descriptionCheckedAt: new Date() }).where(eq(works.uri, uri));
     return { updated: false, reason: 'no_description_found' };
   }
-  const value = workValueForCid(row, description);
+  const contributors = await wireContributorsFor(db, row.contributors);
+  const value = workRecordValue(row, contributors, { description });
   const cid = (await cidForLex(value as unknown as LexMap)).toString();
   const updated = await db
     .update(works)

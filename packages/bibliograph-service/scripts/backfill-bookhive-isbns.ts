@@ -26,6 +26,8 @@ import { fetchCatalogBooksPage } from '../src/lib/server/bookhive/catalog';
 import { bhEditionRkey } from '../src/lib/server/bookhive/keys';
 import { hasIsbn, mergeIsbnIdentifiers } from '../src/lib/server/isbn/merge';
 import { editionRecordValueForCid } from '../src/lib/server/isbn/record-value';
+import { rowIdentifiers } from '../src/lib/server/edition-record';
+import { wireContributorsFor } from '../src/lib/server/jobs/wire-contributors';
 
 interface Options {
   dry: boolean;
@@ -92,11 +94,14 @@ async function run(): Promise<void> {
 
       for (const row of rows) {
         if (limit !== undefined && written >= limit) break;
-        if (hasIsbn(row.identifiers)) {
+        // Rows written before the identifier migration still hold the legacy
+        // `{ uri, resource }` pair, so normalise instead of trusting the column.
+        const identifiers = rowIdentifiers(row.identifiers);
+        if (hasIsbn(identifiers)) {
           already++;
           continue;
         }
-        const merged = mergeIsbnIdentifiers(row.identifiers, isbnsByRkey.get(row.rkey) ?? []);
+        const merged = mergeIsbnIdentifiers(identifiers, isbnsByRkey.get(row.rkey) ?? []);
         if (merged.added.length === 0) {
           already++;
           continue;
@@ -106,7 +111,14 @@ async function run(): Promise<void> {
           console.log(`[backfill-bookhive-isbns] would write ${row.rkey} += ${merged.added.join(',')}`);
           continue;
         }
-        const value = editionRecordValueForCid(row, merged.identifiers);
+        // `defs#contributor` inlines names, so the stored strongRefs are
+        // expanded exactly as the response boundary expands them before hashing.
+        const contributors = await wireContributorsFor(db, row.contributors);
+        const value = editionRecordValueForCid(row, merged.identifiers, contributors);
+        if (!value) {
+          failed++;
+          continue;
+        }
         const cid = (await cidForLex(value as unknown as LexMap)).toString();
         const updated = await db
           .update(editions)

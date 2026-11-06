@@ -1,49 +1,69 @@
 {
   "lexicon": 1,
   "id": "community.lexicon.book.searchEditions",
+  "description": "Search a provider's catalog using text and structured hints. Fuzzy matching, field interpretation, and ranking are provider-specific. This operation does not write user records.",
   "defs": {
     "main": {
-      "type": "query",
-      "description": "Search bibliographic editions by free-form text (q) and/or identifiers (id, repeatable).",
-      "parameters": {
-        "type": "params",
-        "properties": {
-          "q": { "type": "string", "maxLength": 1024, "description": "Free-form text query." },
-          "id": {
-            "type": "array",
-            "items": { "type": "string", "maxLength": 2048 },
-            "maxLength": 32,
-            "description": "Identifiers to match (URI or URN form). Repeatable."
-          },
-          "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 },
-          "cursor": { "type": "string", "maxLength": 256 },
-          "lang": {
-            "type": "array",
-            "items": { "type": "string", "format": "language" },
-            "maxLength": 16,
-            "description": "BCP-47 language tags to filter editions to. Editions whose `language` doesn't match any tag (or any of its normalized 2-letter / 3-letter variants) are excluded. Empty / omitted = no language filter."
+      "type": "procedure",
+      "description": "Search a provider's catalog using text and structured hints. Fuzzy matching, field interpretation, and ranking are provider-specific. This operation does not write user records.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "description": "Supply at least one nonblank q, title, author, or a nonempty identifiers array. Providers enforce this cross-field requirement.",
+          "required": [],
+          "properties": {
+            "q": {
+              "type": "string",
+              "description": "Broad search text, which may describe a title, contributor, description, or identifier. Matching and ranking are provider-defined.",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string",
+              "description": "Title relevance hint, interpreted by the provider.",
+              "minLength": 1
+            },
+            "author": {
+              "type": "string",
+              "description": "Author relevance hint, interpreted by the provider.",
+              "minLength": 1
+            },
+            "identifiers": {
+              "type": "array",
+              "description": "Structured identifier relevance hints; search matching and ranking are provider-defined.",
+              "items": {
+                "type": "ref",
+                "ref": "community.lexicon.book.defs#identifier"
+              },
+              "minLength": 1
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of matching editions to skip in the provider's ordered result set."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25,
+              "description": "Maximum number of editions to return in this page."
+            }
           }
         }
       },
       "output": {
         "encoding": "application/json",
         "schema": {
-          "type": "object",
-          "required": ["items", "total"],
-          "properties": {
-            "items": {
-              "type": "array",
-              "items": { "type": "ref", "ref": "community.lexicon.book.edition" }
-            },
-            "cursor": { "type": "string" },
-            "total": { "type": "integer", "minimum": 0 }
-          }
+          "type": "ref",
+          "ref": "community.lexicon.book.defs#editionResults"
         }
       },
       "errors": [
         {
           "name": "InvalidQuery",
-          "description": "The query syntax was invalid for this AppView (e.g. Lucene syntax error)."
+          "description": "No nonblank q, title, author, or nonempty identifiers array was supplied."
         }
       ]
     }

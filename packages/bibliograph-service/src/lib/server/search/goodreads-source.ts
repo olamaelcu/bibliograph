@@ -8,6 +8,7 @@ import {
 import { resolveContributorsByName } from "../api/contributor-name-resolver";
 import { goodreadsBookUrl, grEditionUri } from "../gr/keys";
 import { isbnFromQuery } from "../api/isbndb";
+import { providerIdentifier } from "../identifiers";
 import type { EditionItem, SearchQuery, SearchResult } from "./types";
 
 /** Goodreads often serves covers from Amazon's media CDN; the cover proxy allows i.gr-assets. */
@@ -37,7 +38,7 @@ function mapHit(
     title: hit.title,
     publishedYear: hit.publishedYear,
     coverImageUrl: goodreadsCoverUrl(hit.coverImageUrl),
-    identifiers: [{ uri: goodreadsBookUrl(hit.id), resource: "goodreads" }],
+    identifiers: [providerIdentifier("goodreads", goodreadsBookUrl(hit.id))],
     contributors,
     createdAt,
   };
@@ -62,7 +63,7 @@ export async function fetchGoodreadsEdition(
     coverImageUrl: goodreadsCoverUrl(book.imageUrl),
     pages: book.pages,
     format: book.format,
-    identifiers: [{ uri: goodreadsBookUrl(id), resource: "goodreads" }],
+    identifiers: [providerIdentifier("goodreads", goodreadsBookUrl(id))],
     contributors,
     createdAt: new Date().toISOString(),
   };

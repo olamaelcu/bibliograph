@@ -20,6 +20,7 @@ import { db as defaultDb } from './db';
 import { editions, type EditionRow } from './db/schema';
 import type { DbExecutor } from './stats';
 import { recordEditionAliases } from './edition-lookup';
+import { identifierKey } from './identifiers';
 
 export type EditionIdentifier = EditionRow['identifiers'][number];
 export type EditionContributor = EditionRow['contributors'][number];
@@ -67,10 +68,10 @@ export function computeMergedEdition(
 
   for (const edition of sourceEditions) {
     for (const identifier of edition.identifiers) {
-      const key = `${identifier.uri}|${identifier.resource}`;
+      const key = identifierKey(identifier);
       if (seenIdentifiers.has(key)) continue;
       seenIdentifiers.add(key);
-      identifiers.push({ uri: identifier.uri, resource: identifier.resource });
+      identifiers.push(identifier);
     }
     for (const contributor of edition.contributors) {
       const key = `${contributor.subject.uri}|${contributor.role}`;

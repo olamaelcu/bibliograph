@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { editionRecordCid, editionRecordValue } from "./edition-record";
 import type { EditionRow } from "./db/schema";
+import type { Identifier } from "./identifiers";
 
 const row = {
   uri: "at://did:plc:test/community.lexicon.book.edition/1",
@@ -32,26 +33,32 @@ const row = {
 
 test("record overrides replace the stored values the CID covers", () => {
   const value = editionRecordValue(row, {
+    contributors: [],
     pages: 200,
-    identifiers: [{ uri: "isbn:9780306406157", resource: "isbn13" }],
+    identifiers: [{ type: "isbn", value: "9780306406157" }],
     publishedYear: 2020,
     language: "en",
   });
+  assert.ok(value);
   assert.equal(value.pages, 200);
   assert.deepEqual(value.identifiers, [
-    { uri: "isbn:9780306406157", resource: "isbn13" },
+    { type: "isbn", value: "9780306406157" },
   ]);
-  assert.equal(value.publishedYear, 2020);
+  assert.equal(value.publishedDate, "2020");
   assert.equal(value.language, "en");
 });
 
 test("a record metadata change moves the CID", async () => {
-  const before = await editionRecordCid(row);
+  const identifiers: Identifier[] = [{ type: "isbn", value: "9780306406157" }];
+  const before = await editionRecordCid(row, { contributors: [], identifiers });
   const after = await editionRecordCid(row, {
+    contributors: [],
     pages: 200,
-    identifiers: [{ uri: "isbn:9780306406157", resource: "isbn13" }],
+    identifiers,
     publishedYear: 2020,
     language: "en",
   });
+  assert.ok(before);
+  assert.ok(after);
   assert.notEqual(before, after);
 });

@@ -8,11 +8,15 @@ import { editions, works, contributors, records, ingestDeadLetter, tapDeadLetter
 import type { EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier } from '../search/types';
 import { PUBLISHER_DID } from '../did';
 import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionRkey, workRkey, contributorRkey, publisherRkey } from '../ol/keys';
-import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from '../gb/keys';
+import { gbEditionRkey, gbWorkRkey, gbPublisherRkey } from '../gb/keys';
 import { datacenterCoverUrl } from '../gb/cover-url';
-import { bhEditionRkey, hiveIdFromCatalogUri, isHiveId } from '../bookhive/keys';
-import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
-import { grEditionRkey, grIdFromIdentifier } from '../gr/keys';
+import { bhEditionRkey, isHiveId } from '../bookhive/keys';
+import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey } from '../isbndb/keys';
+import { grEditionRkey } from '../gr/keys';
+import { editionRecordValue } from '../edition-record';
+import { isbnFromIdentifiers } from '../isbn/lookup';
+import { wireContributorsForAll } from './wire-contributors';
+import { contributorRecordValue, publisherRecordValue, workRecordValue } from '../book-records';
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
@@ -41,53 +45,44 @@ const db: typeof defaultDb = defaultDb;
 
 type SourceKind = 'ol' | 'gb' | 'isbndb' | 'bh' | 'gr';
 
-function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
-  const i = idents.find((i) => i.resource === 'openlibrary');
-  if (!i) return undefined;
-  try {
-    return new URL(i.uri).pathname;
-  } catch {
-    return undefined;
-  }
-}
-
-function gbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
-  const i = idents.find((x) => x.resource === 'googlebooks');
-  if (!i) return undefined;
-  return gbIdentifierFromUri(i.uri) ?? undefined;
-}
-
-function isbndbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
-  const i = idents.find((x) => x.resource === 'isbndb');
-  if (i) {
-    const isbn = isbndbIdentifierFromUri(i.uri);
-    if (isbn) return isbn;
-  }
-  for (const id of idents) {
-    if (id.resource === 'isbn13' || id.resource === 'isbn10' || id.resource === 'isbn') {
-      const clean = id.uri.replace(/^isbn:/, '').replace(/-/g, '');
-      if (/^\d{10}(\d{3})?$/.test(clean)) return clean;
-    }
-  }
+/**
+ * The OL key form (`/books/OL…M`, `/works/OL…W`, …) that the key parsers expect,
+ * from the canonical identifier's OLID value.
+ */
+function olKeyFromOlid(value: string): string | undefined {
+  if (/^OL\d+M$/.test(value)) return `/books/${value}`;
+  if (/^OL\d+W$/.test(value)) return `/works/${value}`;
+  if (/^OL\d+A$/.test(value)) return `/authors/${value}`;
+  if (/^OL\d+P$/.test(value)) return `/publishers/${value}`;
   return undefined;
 }
 
-/**
- * Hive id carried by a `bookhive` identifier — the catalog record's at-uri
- * (`at://…/buzz.bookhive.catalogBook/{hiveId}`), or the bare hive id.
- */
-function grIdFromIdentifiers(idents: Identifier[]): string | undefined {
-  const goodreads = idents.find((x) => x.resource === 'goodreads');
-  if (!goodreads) return undefined;
-  return grIdFromIdentifier(goodreads.uri) ?? undefined;
+function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
+  const identifier = idents.find((ident) => ident.type === 'openlibrary.org');
+  return identifier ? olKeyFromOlid(identifier.value) : undefined;
 }
 
+function gbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
+  return idents.find((ident) => ident.type === 'books.google.com')?.value;
+}
+
+function isbndbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
+  const identifier = idents.find((ident) => ident.type === 'isbndb.com');
+  return identifier ? identifier.value : isbnFromIdentifiers(idents);
+}
+
+/** Goodreads book id carried by a `goodreads.com` identifier. */
+function grIdFromIdentifiers(idents: Identifier[]): string | undefined {
+  const goodreads = idents.find((ident) => ident.type === 'goodreads.com');
+  if (!goodreads) return undefined;
+  return /^\d+$/.test(goodreads.value) ? goodreads.value : undefined;
+}
+
+/** Hive id carried by a `bookhive.buzz` identifier. */
 function bhHiveIdFromIdentifiers(idents: Identifier[]): string | undefined {
-  const bookhive = idents.find((x) => x.resource === 'bookhive');
+  const bookhive = idents.find((ident) => ident.type === 'bookhive.buzz');
   if (!bookhive) return undefined;
-  const hiveId = hiveIdFromCatalogUri(bookhive.uri);
-  if (hiveId) return hiveId;
-  return isHiveId(bookhive.uri) ? bookhive.uri : undefined;
+  return isHiveId(bookhive.value) ? bookhive.value : undefined;
 }
 
 /** Determine which synthesis path applies for an item, returning OL key, GB volume id, ISBNDb isbn, or nothing. */
@@ -226,26 +221,18 @@ export const ingestContributorBatchTask: Task = async (payload, helpers) => {
 
 export async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: number): Promise<void> {
   try {
+    const contributors = await wireContributorsForAll(db, items.map((item) => item.contributors));
     const allRows: unknown[] = [];
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
       const uri = editionUriFor(item.identifiers);
       if (!uri) continue;
       const rkey = uri.slice(uri.lastIndexOf('/') + 1);
       const coverImageUrl = item.coverImageUrl ? datacenterCoverUrl(item.coverImageUrl) : undefined;
-      const value = {
-        $type: 'community.lexicon.book.edition' as const,
-        title: item.title,
-        subtitle: item.subtitle ?? undefined,
-        place: item.place ?? undefined,
-        publishedYear: item.publishedYear ?? undefined,
-        language: item.language ?? undefined,
-        coverImageUrl,
-        contributors: item.contributors,
-        identifiers: item.identifiers,
-        description: item.description ?? undefined,
-        pages: item.pages,
-        createdAt: item.createdAt,
-      };
+      const value = editionRecordValue({ ...item, createdAt: new Date(item.createdAt) }, {
+        contributors: contributors[index] ?? [],
+        coverUrl: coverImageUrl ?? null,
+      });
+      if (!value) continue;
       const cid = await cidForLex(value as unknown as LexMap);
       allRows.push({
         uri,
@@ -303,8 +290,9 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
 
 async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number): Promise<void> {
   try {
+    const contributors = await wireContributorsForAll(db, items.map((item) => item.contributors));
     const allRows: unknown[] = [];
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
       const source = identifySource(item.identifiers);
       let uri: string | undefined;
       let rkey: string | undefined;
@@ -332,18 +320,10 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
         }
       }
       if (!uri || !rkey) continue;
-      const value = {
-        $type: 'community.lexicon.book.work' as const,
-        title: item.title,
-        subtitle: item.subtitle ?? undefined,
-        originalLanguage: item.originalLanguage ?? undefined,
-        firstPublishedYear: item.firstPublishedYear ?? undefined,
-        subjects: item.subjects,
-        contributors: item.contributors,
-        identifiers: item.identifiers,
-        description: item.description ?? undefined,
-        createdAt: item.createdAt,
-      };
+      const value = workRecordValue(
+        { ...item, uri, createdAt: new Date(item.createdAt) },
+        contributors[index] ?? [],
+      );
       const cid = await cidForLex(value as unknown as LexMap);
       allRows.push({
         uri,
@@ -409,17 +389,12 @@ async function ingestContributorBatch(items: ContributorItem[], log: Logger, att
         }
       }
       if (!uri || !rkey) continue;
-      const value = {
-        $type: 'community.lexicon.book.contributor' as const,
-        name: item.name,
-        aliases: item.aliases,
-        bio: item.bio ?? undefined,
-        bornYear: item.bornYear ?? undefined,
-        diedYear: item.diedYear ?? undefined,
-        linkedDid: item.linkedDid ?? undefined,
+      const value = contributorRecordValue({
+        ...item,
+        uri,
+        createdAt: new Date(item.createdAt),
         identifiers: item.identifiers,
-        createdAt: item.createdAt,
-      };
+      });
       const cid = await cidForLex(value as unknown as LexMap);
       allRows.push({
         uri,
@@ -473,16 +448,13 @@ async function ingestPublisherBatch(items: PublisherItem[], log: Logger, attempt
       const uri = publisherUriFor(item);
       const rkey = uri ? uri.split('/').pop() : undefined;
       if (!uri || !rkey) continue;
-      const value = {
-        $type: 'community.lexicon.book.publisher' as const,
+      const value = publisherRecordValue({
+        ...item,
         uri,
-        name: item.name,
-        imprintOf: item.imprintOf,
-        foundingDate: item.foundingDate ?? undefined,
-        closingDate: item.closingDate ?? undefined,
-        identifiers: item.identifiers,
-        createdAt: item.createdAt,
-      };
+        createdAt: new Date(item.createdAt),
+        imprintOfUri: item.imprintOf?.uri ?? null,
+        imprintOfCid: item.imprintOf?.cid ?? null,
+      });
       const cid = await cidForLex(value as unknown as LexMap);
       allRows.push({
         uri,

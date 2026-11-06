@@ -23,7 +23,7 @@
             "type": "array",
             "minLength": 0,
             "maxLength": 64,
-            "items": { "type": "ref", "ref": "community.lexicon.book.defs#contribution" }
+            "items": { "type": "ref", "ref": "community.lexicon.book.defs#contributor" }
           },
           "identifiers": {
             "type": "array",

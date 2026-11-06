@@ -51,7 +51,7 @@ function primaryFixture(overrides: Partial<EditionRow> = {}): EditionRow {
     description: 'Primary description',
     tid: '3mzkprimaryaa',
     coverImageUrl: 'https://covers.test/primary.jpg',
-    identifiers: [{ uri: 'isbn:111', resource: 'isbn' }],
+    identifiers: [{ type: 'isbn', value: '9780306406157' }],
     contributors: [{ subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' }],
     ...overrides,
   });
@@ -67,9 +67,9 @@ function sourceFixture(overrides: Partial<EditionRow> = {}): EditionRow {
     description: 'Source description',
     coverImageUrl: 'https://covers.test/source.jpg',
     identifiers: [
-      { uri: 'isbn:111', resource: 'isbn' },
-      { uri: 'isbn:111', resource: 'amazon' },
-      { uri: 'ol:OL1W', resource: 'openlibrary' },
+      { type: 'isbn', value: '9780306406157' },
+      { type: 'amazon.com', value: '9780306406157' },
+      { type: 'openlibrary.org', value: 'OL1W' },
     ],
     contributors: [
       { subject: { uri: AUTHOR, cid: 'bafystale' }, role: 'author' },
@@ -79,13 +79,13 @@ function sourceFixture(overrides: Partial<EditionRow> = {}): EditionRow {
   });
 }
 
-test('computeMergedEdition unions identifiers and contributors, deduping on (uri, resource) and (subject.uri, role)', () => {
+test('computeMergedEdition unions identifiers and contributors, deduping on (type, value) and (subject.uri, role)', () => {
   const merged = computeMergedEdition([primaryFixture(), sourceFixture()], PRIMARY);
 
   assert.deepEqual(merged.identifiers, [
-    { uri: 'isbn:111', resource: 'isbn' },
-    { uri: 'isbn:111', resource: 'amazon' },
-    { uri: 'ol:OL1W', resource: 'openlibrary' },
+    { type: 'isbn', value: '9780306406157' },
+    { type: 'amazon.com', value: '9780306406157' },
+    { type: 'openlibrary.org', value: 'OL1W' },
   ]);
   assert.deepEqual(merged.contributors, [
     { subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' },
@@ -261,9 +261,9 @@ test('mergeEditionsInDb writes the union to the primary and deletes only the oth
 
   assert.deepEqual(capture.updateSet, {
     identifiers: [
-      { uri: 'isbn:111', resource: 'isbn' },
-      { uri: 'isbn:111', resource: 'amazon' },
-      { uri: 'ol:OL1W', resource: 'openlibrary' },
+      { type: 'isbn', value: '9780306406157' },
+      { type: 'amazon.com', value: '9780306406157' },
+      { type: 'openlibrary.org', value: 'OL1W' },
     ],
     contributors: [
       { subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' },
@@ -293,9 +293,9 @@ test('mergeEditionsInDb folds the winner in first even when the database returns
     { subject: { uri: TRANSLATOR, cid: 'bafytranslator' }, role: 'translator' },
   ]);
   assert.deepEqual(result.merged.identifiers, [
-    { uri: 'isbn:111', resource: 'isbn' },
-    { uri: 'isbn:111', resource: 'amazon' },
-    { uri: 'ol:OL1W', resource: 'openlibrary' },
+    { type: 'isbn', value: '9780306406157' },
+    { type: 'amazon.com', value: '9780306406157' },
+    { type: 'openlibrary.org', value: 'OL1W' },
   ]);
   assert.equal(result.merged.coverImageUrl, 'https://covers.test/primary.jpg');
   assert.deepEqual(result.deleted, [SOURCE]);
@@ -334,7 +334,7 @@ test('mergeEditionsInDb of a single edition updates it in place and deletes noth
 
   assert.equal(capture.deleteCount, 0);
   assert.deepEqual(result.deleted, []);
-  assert.deepEqual(result.merged.identifiers, [{ uri: 'isbn:111', resource: 'isbn' }]);
+  assert.deepEqual(result.merged.identifiers, [{ type: 'isbn', value: '9780306406157' }]);
   // Nothing was retired, so nothing is aliased either.
   assert.equal(capture.aliasRows, undefined);
 });

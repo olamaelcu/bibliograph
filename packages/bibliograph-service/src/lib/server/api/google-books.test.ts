@@ -6,6 +6,7 @@ import { enrichEditions, getEditionByVolumeId, searchEditions } from './google-b
 import { db } from '../db';
 import { contributors } from '../db/schema';
 import type { EditionItem } from '../search/types';
+import { isbnIdentifier } from '../identifiers';
 
 const log = pino({ level: 'silent' });
 
@@ -27,10 +28,12 @@ function stubFetch(impl: (url: string) => Promise<Response>) {
 }
 
 function itemWithIsbn(isbn: string): EditionItem {
+  const identifier = isbnIdentifier(isbn);
+  if (!identifier) throw new Error(`not an ISBN: ${isbn}`);
   return {
     uri: `at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.Test${isbn}`,
     title: 'Test',
-    identifiers: [{ uri: `isbn:${isbn}`, resource: 'isbn13' }],
+    identifiers: [identifier],
     contributors: [],
     createdAt: new Date().toISOString(),
   };

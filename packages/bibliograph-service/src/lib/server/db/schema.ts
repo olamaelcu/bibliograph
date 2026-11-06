@@ -1,5 +1,6 @@
 import { pgTable, text, jsonb, timestamp, integer, boolean, bigserial, bigint, index, foreignKey, primaryKey, check } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import type { Identifier } from '../identifiers';
 
 export const editions = pgTable(
   'editions',
@@ -34,7 +35,7 @@ export const editions = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     identifiers: jsonb('identifiers')
-      .$type<Array<{ uri: string; resource: string }>>()
+      .$type<Identifier[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
     description: text('description'),
@@ -112,6 +113,28 @@ export const editionGoodreadsBackfill = pgTable('edition_goodreads_backfill', {
   checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+
+/**
+ * Works backfill bookkeeping.
+ *
+ * The reconciler joins an edition to a work only when OpenLibrary returns a
+ * match. Most editions get no match, and without a marker every run would ask
+ * OpenLibrary about all of them again — a full catalog pass costs about a day.
+ * A row here says "asked, no match"; the scan skips those editions until an
+ * operator deletes the row (or runs the backfill with `--retry-unmatched`).
+ *
+ * `deferred` is deliberately never written: a lookup that never happened is not
+ * an answer, so those rows stay eligible for the next run.
+ */
+export const editionWorkBackfill = pgTable('edition_work_backfill', {
+  uri: text('uri')
+    .primaryKey()
+    .references(() => editions.uri, { onDelete: 'cascade' }),
+  status: text('status').notNull(),
+  reason: text('reason'),
+  checkedAt: timestamp('checked_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 /**
  * ISBN enrichment bookkeeping (migration 0012).
  *
@@ -154,7 +177,7 @@ export const works = pgTable(
       .notNull()
       .default(sql`'[]'::jsonb`),
     identifiers: jsonb('identifiers')
-      .$type<Array<{ uri: string; resource: string }>>()
+      .$type<Identifier[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
     description: text('description'),
@@ -183,7 +206,7 @@ export const contributors = pgTable(
     bornYear: integer('born_year'),
     diedYear: integer('died_year'),
     identifiers: jsonb('identifiers')
-      .$type<Array<{ uri: string; resource: string }>>()
+      .$type<Identifier[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
     imageUrl: text('image_url'),
@@ -219,7 +242,7 @@ export const publishers = pgTable(
     foundingDate: integer('founding_date'),
     closingDate: integer('closing_date'),
     identifiers: jsonb('identifiers')
-      .$type<Array<{ uri: string; resource: string }>>()
+      .$type<Identifier[]>()
       .notNull()
       .default(sql`'[]'::jsonb`),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),

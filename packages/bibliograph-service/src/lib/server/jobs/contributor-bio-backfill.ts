@@ -8,22 +8,10 @@ import type { ContributorRow } from '../db/schema';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { enrichContributorBios } from '../api/wikipedia';
 import { getContributorBioByRkey, openLibraryDescription } from '../api/open-library';
+import { rowIdentifiers } from '../edition-record';
+import { contributorRecordValue } from '../book-records';
 
 type Db = typeof defaultDb;
-
-function contributorValueForCid(row: ContributorRow, bio?: string): Record<string, unknown> {
-  return {
-    $type: 'community.lexicon.book.contributor' as const,
-    name: row.name,
-    aliases: row.aliases,
-    bio: bio ?? undefined,
-    bornYear: row.bornYear ?? undefined,
-    diedYear: row.diedYear ?? undefined,
-    linkedDid: row.linkedDid ?? undefined,
-    identifiers: row.identifiers,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
 
 export async function resolveContributorBio(
   row: ContributorRow,
@@ -35,12 +23,19 @@ export async function resolveContributorBio(
   // The column types are nullable; the enricher's inputs are optional. Absent and
   // null mean the same thing to it, so normalize rather than spread the null
   // through a type that has no room for it.
-  const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear ?? undefined, diedYear: row.diedYear ?? undefined, linkedDid: row.linkedDid ?? undefined, identifiers: row.identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, s);
+  const identifiers = rowIdentifiers(row.identifiers);
+  const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear ?? undefined, diedYear: row.diedYear ?? undefined, linkedDid: row.linkedDid ?? undefined, identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, s);
   const wikiBio = bio[0]?.bio;
   if (wikiBio) return wikiBio;
 
   // Fallback: OpenLibrary author doc bio for contributors derived from OL.
-  if (row.identifiers.some((id) => id.resource === 'openlibrary' && id.uri.includes('/authors/'))) {
+  if (
+    identifiers.some(
+      (identifier) =>
+        identifier.type === 'openlibrary.org' &&
+        (/^OL\d+A$/.test(identifier.value) || (identifier.url ?? '').includes('/authors/')),
+    )
+  ) {
     try {
       const olBio = await getContributorBioByRkey(row.rkey, log, s);
       if (olBio) return openLibraryDescription(olBio) ?? olBio;
@@ -67,7 +62,7 @@ export async function backfillBioForContributor(
     await db.update(contributors).set({ bioCheckedAt: new Date() }).where(eq(contributors.uri, uri));
     return { updated: false, reason: 'no_bio_found' };
   }
-  const value = contributorValueForCid(row, bio);
+  const value = contributorRecordValue({ ...row, bio });
   const cid = (await cidForLex(value as unknown as LexMap)).toString();
   const updated = await db
     .update(contributors)

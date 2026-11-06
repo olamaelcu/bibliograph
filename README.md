@@ -109,6 +109,15 @@ can vote on which work an edition belongs to.
 - A decision is stamped `editions.work_link_source = 'consensus'`, and the
   automatic reconciler (`pnpm backfill:works`) skips those rows — otherwise a
   nightly run would silently undo a voted unlink.
+- A run links an edition only when OpenLibrary returns a work whose title (and
+  first-publish year, within ±2) matches. No match leaves `work_uri` NULL: the
+  reconciler does not invent a work from the edition's own fields, so an
+  unlinked edition means the catalog genuinely does not know its work.
+  `pnpm backfill:works --shard=<index>/<count>` walks one slice of the table,
+  for splitting a large catalog across several processes.
+  A miss is recorded in `edition_work_backfill`, so later runs skip it instead
+  of asking OpenLibrary again; `--retry-unmatched` clears that memory when the
+  upstream catalog has grown.
 
 OAuth is least-privilege: the client asks only for
 `repo:net.olamaelcu.livtet.biblio.editionWorkLink`, never for general repo or

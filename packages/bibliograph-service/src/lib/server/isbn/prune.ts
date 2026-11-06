@@ -1,5 +1,5 @@
 import type { EditionItem } from '../search/types';
-import { isbnFromIdentifier, normaliseIsbn } from './merge';
+import { isbnValueFromIdentifier, normaliseIsbn } from '../identifiers';
 
 /**
  * Pruning a search result down to the ISBN that belongs to *this* edition.
@@ -233,7 +233,7 @@ export function candidateFromEditionItem(
       .filter((name): name is string => typeof name === 'string'),
     publishedYear: item.publishedYear ?? null,
     isbns: (item.identifiers ?? [])
-      .map((identifier) => isbnFromIdentifier(identifier))
+      .map((identifier) => isbnValueFromIdentifier(identifier))
       .filter((value): value is string => value !== null),
   };
 }

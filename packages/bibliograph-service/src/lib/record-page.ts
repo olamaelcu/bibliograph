@@ -42,11 +42,13 @@ export function rkeyFromUri(uri: string): string {
   return at >= 0 ? uri.slice(at + 1) : uri;
 }
 
+/**
+ * Identifier as `value · type` — the value is the provider's own key, the type
+ * the namespace that minted it (`isbn`, `goodreads.com`, …). The `url` is
+ * display-only and never part of this label.
+ */
 export function identifierLabel(id: Identifier): string {
-  const tail = id.uri.includes(":")
-    ? id.uri.split(":").slice(1).join(":")
-    : id.uri;
-  return `${tail} · ${id.resource}`;
+  return `${id.value} · ${id.type}`;
 }
 
 /**
@@ -84,7 +86,13 @@ export function contributorItems(contributions: Contribution[]): BodyItem[] {
 }
 
 export function identifierItems(identifiers: Identifier[]): BodyItem[] {
-  return identifiers.map((id) => ({ text: identifierLabel(id), code: true }));
+  return identifiers.map((id) => {
+    const item: BodyItem = { text: identifierLabel(id), code: true };
+    // `url` is the provider page when one was recorded; without it the row is
+    // text rather than a dead link.
+    if (id.url) item.href = id.url;
+    return item;
+  });
 }
 
 export function isEditionValue(

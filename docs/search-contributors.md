@@ -25,8 +25,9 @@
       "aliases": ["string"],
       "identifiers": [
         {
-          "uri": "string",
-          "resource": "string"
+          "type": "string (global token or provider domain)",
+          "value": "string",
+          "url": "string (optional, display only)"
         }
       ],
       "createdAt": "string (datetime)"
@@ -49,8 +50,9 @@
       "aliases": [],
       "identifiers": [
         {
-          "uri": "https://openlibrary.org/authors/OL14286376A",
-          "resource": "openlibrary"
+          "type": "openlibrary.org",
+          "value": "OL14286376A",
+          "url": "https://openlibrary.org/authors/OL14286376A"
         }
       ],
       "createdAt": "2026-10-25T00:13:18.838Z"
@@ -70,8 +72,8 @@ The contributor record requires:
 ## Where Book Search Returns Contributors
 
 Based on the codebase:
-1. **`searchEditions`** - may include contributor URIs in edition records
-2. **`searchWork`** - may include contributor URIs in work records
+1. **`searchEditions`** - inlines contributors on each `editionView` as `{name, role, identifiers?, ref?}`
+2. **`searchWork`** - inlines contributors on each work record, same shape
 3. **`searchContributors`** - dedicated endpoint for finding contributors
 
 ## Wikidata identity links on contributors
@@ -80,16 +82,19 @@ Based on the codebase:
 `WikidataContributorEnricher`, which appends Wikidata identity links to the
 existing `identifiers` array:
 
-| `resource` | `uri` example |
-|---|---|
-| `wikidata` | `https://www.wikidata.org/entity/Q34660` |
-| `viaf` | `https://viaf.org/viaf/116796842` |
-| `isni` | `https://isni.org/isni/000000012148628X` |
+| `type` | `value` | `url` |
+|---|---|---|
+| `wikidata.org` | `Q34660` | `https://www.wikidata.org/entity/Q34660` |
+| `viaf.org` | `116796842` | `https://viaf.org/viaf/116796842` |
+| `isni.org` | `000000012148628X` | `https://isni.org/isni/000000012148628X` |
 
 These land in `identifiers` rather than new top-level fields because
 `community.lexicon.book.*` hand-maps every response field: a new field would be
-dropped at the XRPC boundary and never persisted. `identifiers` already declares
-`wikidata`/`viaf`/`isni` in its `knownValues`.
+dropped at the XRPC boundary and never persisted. `defs#identifier` accepts any
+`type` string; its `knownValues` only enumerate the global scheme tokens
+(`isbn`, `issn`, `doi`, `asin`, `oclc`, `lccn`), while a provider namespace is
+written as the provider's lowercase domain. Identifiers compare by exact
+`type` + `value`; `url` is display-only and never part of a match.
 
 The join key is the contributor's own Open Library author ID (Wikidata `P648`).
 Names are deliberately not used as a lookup key — an exact-label match on a
