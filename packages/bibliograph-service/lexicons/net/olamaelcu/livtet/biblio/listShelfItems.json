@@ -1,0 +1,58 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.listShelfItems",
+  "description": "List the books placed on a shelf: its shelfItem records, hydrated with the shelf and book views.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["shelf"],
+        "properties": {
+          "shelf": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the shelf to list items for."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50,
+            "description": "Maximum number of shelfItem records to return."
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["items"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.defs#shelfItemView"
+              },
+              "description": "Items in record-uri order; a client ordering a curated shelf sorts by metadata.position."
+            },
+            "cursor": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "The shelf parameter is not an AT-URI."
+        }
+      ]
+    }
+  }
+}

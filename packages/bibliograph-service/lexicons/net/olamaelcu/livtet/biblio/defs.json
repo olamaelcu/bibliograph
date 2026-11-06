@@ -543,6 +543,69 @@
         }
       }
     },
+    "shelfItemMetadata": {
+      "type": "object",
+      "description": "Optional ordering and presentation metadata for a book's place on a shelf.",
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Position of the book within the shelf (1-indexed)."
+        },
+        "notes": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Personal notes about this book on the shelf."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing this book on the shelf."
+        }
+      }
+    },
+    "shelfItemView": {
+      "type": "object",
+      "description": "A book placed on a shelf, hydrated with the shelf and book views.",
+      "required": ["uri", "shelf", "book", "metadata", "did"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the shelfItem record."
+        },
+        "shelf": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfView",
+          "description": "The shelf the book is on."
+        },
+        "book": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookView",
+          "description": "The book on the shelf."
+        },
+        "metadata": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfItemMetadata",
+          "description": "Position, notes and emoji for this book's place on the shelf."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the account that owns the shelf."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
     "shelfWithBooksView": {
       "type": "object",
       "required": ["shelf", "books"],

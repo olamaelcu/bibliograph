@@ -11,6 +11,7 @@ import { BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
 import { normalizeBookhiveBook } from '../bookhive/records';
 import { catalogEditionUriFromRkey } from './catalog-uri';
 import { formatViewFor } from '../format-view';
+import { displayNameForShelfRkey, shelfViewFromValue } from './shelf-view';
 
 const log = createLogger('web');
 
@@ -20,16 +21,10 @@ type Did = `did:${string}:${string}`;
 // pulling in this module's `db` import. Re-exported here for existing callers.
 export { catalogEditionUriFromRkey };
 
-const SHELF_DISPLAY_NAMES: Record<string, string> = {
-  'reading': 'Currently Reading',
-  'to-read': 'To Read',
-  'read': 'Read',
-  'dnf': 'Did Not Finish',
-};
-
-export function displayNameForShelfRkey(rkey: string): string | null {
-  return SHELF_DISPLAY_NAMES[rkey] ?? null;
-}
+// The display-name table and the record→view derivation moved to
+// `shelf-view.ts`, so the mirror read here, the PDS read in `getShelf` and the
+// shelf listing all publish the same view. Re-exported for existing callers.
+export { displayNameForShelfRkey } from './shelf-view';
 
 export async function hydrateShelvesByUri(
   uris: string[],
@@ -38,12 +33,7 @@ export async function hydrateShelvesByUri(
   const rows = await db.select().from(records).where(inArray(records.uri, uris));
   const map = new Map<string, NetOlamaelcuLivtetBiblioDefs.ShelfView>();
   for (const r of rows) {
-    const v = r.value as { name?: string };
-    map.set(r.uri, {
-      uri: r.uri as never,
-      name: v.name ?? '',
-      $type: 'net.olamaelcu.livtet.biblio.defs#shelfView',
-    });
+    map.set(r.uri, shelfViewFromValue(r.uri, r.value));
   }
   return map;
 }

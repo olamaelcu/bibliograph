@@ -1,3 +1,11 @@
+bibliograph (0.3.2) unstable; urgency=medium
+
+  * Custom shelving. Shelf records carry an optional description, and the
+    new shelfItem record stores one membership edge per (shelf, book) pair.
+    listShelfItems reads a shelf by AT-URI from the mirror or the owner's PDS.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 19:10:00 -0500
+
 bibliograph (0.3.1) unstable; urgency=medium
 
   * Raise the Goodreads metadata backfill failure guard from 20% to 80%,

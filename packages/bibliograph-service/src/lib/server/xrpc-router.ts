@@ -26,6 +26,7 @@ import {
   NetOlamaelcuLivtetBiblioGetBookOnShelf,
   NetOlamaelcuLivtetBiblioListShelves,
   NetOlamaelcuLivtetBiblioListBooksOnShelf,
+  NetOlamaelcuLivtetBiblioListShelfItems,
   NetOlamaelcuLivtetBiblioGetShelvingOfBook,
   NetOlamaelcuLivtetBiblioGetShelversOfBook,
   NetOlamaelcuLivtetBiblioGetEditionsByContributor,
@@ -101,7 +102,16 @@ import {
   shelfUriForRow,
 } from './shelving/hydrate';
 import { resolveEditions } from './edition-lookup';
-import { shelfEntryConditions, shelfRkeyForBookhiveStatus } from './shelving/shelf-rows';
+import { shelfEntryConditions, shelfRkeyForBookhiveStatus, shelfRkeyOf } from './shelving/shelf-rows';
+import { shelfViewFromValue } from './shelving/shelf-view';
+import {
+  SHELF_ITEM_COLLECTION,
+  bookUriForItemRow,
+  buildShelfItemView,
+  clampShelfItemLimit,
+  isShelfItemOf,
+  shelfItemConditions,
+} from './shelving/shelf-items';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import { datacenterCoverUrl } from './gb/cover-url';
@@ -756,7 +766,11 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
       if (!isRecordResponse(raw)) {
         return Response.json({ error: 'RecordNotResolved', message: 'PDS record missing' }, { status: 404 });
       }
-      const shelf = raw.value as unknown as NetOlamaelcuLivtetBiblioDefs.ShelfView;
+      // The record value is the shelf; building the view here (instead of
+      // passing the value through) is what publishes `description` and the
+      // timestamps, and keeps fields the lexicon does not declare out of the
+      // response.
+      const shelf = shelfViewFromValue(uri, raw.value);
       return json({ shelf } as NetOlamaelcuLivtetBiblioGetShelf.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -812,14 +826,6 @@ function pdsRecordRow(
     createdAt: new Date(),
     indexedAt: new Date(),
     recordCreatedAt: recordSortKeyOf({ value: record.value }),
-  };
-}
-
-function shelfViewOf(r: typeof records.$inferSelect) {
-  return {
-    uri: r.uri as `${string}:${string}`,
-    name: ((r.value as { name?: string }).name) ?? '',
-    $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
   };
 }
 
@@ -891,7 +897,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
       if (resume?.tier === 'pds') {
         const { rows, cursor: next } = await scanPdsShelves(resume.value);
         return json({
-          shelves: rows.map(shelfViewOf),
+          shelves: rows.map((row) => shelfViewFromValue(row.uri, row.value)),
           cursor: next ? `pds:${next}` : undefined,
         } as NetOlamaelcuLivtetBiblioListShelves.$output);
       }
@@ -929,10 +935,8 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
         }
       }
 
-      const shelves: NetOlamaelcuLivtetBiblioDefs.ShelfView[] = merged.map((row) => ({
-        ...shelfViewOf(row),
-        uri: row.uri as NetOlamaelcuLivtetBiblioDefs.ShelfView['uri'],
-      }));
+      const shelves: NetOlamaelcuLivtetBiblioDefs.ShelfView[] = merged.map((row) =>
+        shelfViewFromValue(row.uri, row.value));
 
       // The derived containers are constant, so they belong on the first page
       // only; paging continues on the real records. A real shelf record of the
@@ -1457,6 +1461,185 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
   },
 });
 
+/**
+ * The shelf record a custom shelf's items name, read once from its owner's PDS
+ * when the mirror has not indexed it yet (a shelf created moments ago). Returns
+ * null on any failure: the caller falls back to the name derived from the URI,
+ * which is enough to render a status shelf and degrades gracefully for a custom
+ * one.
+ */
+async function fetchShelfViewFromPds(
+  uri: string,
+  did: string,
+): Promise<NetOlamaelcuLivtetBiblioDefs.ShelfView | null> {
+  try {
+    const { client } = await pdsClient(did);
+    const raw = await client.get('com.atproto.repo.getRecord', {
+      params: { repo: did as `did:${string}:${string}`, collection: SHELF_COLLECTION, rkey: shelfRkeyOf(uri) },
+      signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+    });
+    if (!isRecordResponse(raw)) return null;
+    return shelfViewFromValue(uri, raw.value);
+  } catch (err: unknown) {
+    log.warn({ err, did, uri }, 'listShelfItems: shelf record read failed; publishing the derived name');
+    return null;
+  }
+}
+
+/**
+ * Hydrate shelfItem rows into views: the shelf once, the books in one batch.
+ *
+ * A book the catalog does not hold is looked up through the same lazy edition
+ * path the shelving reads use, then dropped if it still does not resolve — an
+ * item that lost its edition (a merge retired the URI, the provider dropped the
+ * record) cannot be rendered, and publishing half an item is worse than
+ * omitting it.
+ */
+async function hydrateShelfItems(
+  rows: Array<typeof records.$inferSelect>,
+  shelfUri: string,
+  did: string,
+): Promise<NetOlamaelcuLivtetBiblioDefs.ShelfItemView[]> {
+  if (rows.length === 0) return [];
+  const bookUris = Array.from(new Set(
+    rows.map((row) => bookUriForItemRow(row)).filter((uri): uri is string => !!uri),
+  ));
+  const [shelfMap, bookMap] = await Promise.all([
+    hydrateShelvesByUri([shelfUri]),
+    hydrateBooksByUri(bookUris),
+  ]);
+
+  const missing = bookUris.filter((uri) => !bookMap.has(uri));
+  if (missing.length > 0) {
+    const resolved = await resolveMissingEditions(missing);
+    if (resolved.length > 0) {
+      const refilled = await hydrateBooksByUri(resolved);
+      for (const [uri, view] of refilled) bookMap.set(uri, view);
+    }
+  }
+
+  const shelfView = shelfMap.get(shelfUri)
+    ?? await fetchShelfViewFromPds(shelfUri, did)
+    ?? shelfViewFromValue(shelfUri, undefined);
+
+  const items: NetOlamaelcuLivtetBiblioDefs.ShelfItemView[] = [];
+  for (const row of rows) {
+    const bookUri = bookUriForItemRow(row);
+    const bookView = bookUri ? bookMap.get(bookUri) : undefined;
+    if (!bookView) {
+      log.warn(
+        { stage: 'listShelfItems.orphan', uri: row.uri, did: row.did, bookUri },
+        'dropping shelfItem row: book not in catalog',
+      );
+      continue;
+    }
+    items.push(buildShelfItemView(row, shelfView, bookView));
+  }
+  return items;
+}
+
+/**
+ * The books on one shelf, as `shelfItem` records.
+ *
+ * Two tiers, for the same reason `listBooksOnShelf` has two: the mirror is what
+ * TAP has seen, the PDS scan catches items written since it caught up (and repos
+ * TAP does not follow). Both read the shelfItem collection; the mirror filters
+ * on `value->>'shelf'` in SQL, the scan filters each record with
+ * `isShelfItemOf`. Pages are ordered by record URI — a total, repeatable order
+ * for offset paging — and a curated order is `metadata.position`, which the
+ * client sorts on.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioListShelfItems.mainSchema, {
+  async handler({ params }) {
+    const shelfUri = params.shelf as string;
+    const limit = clampShelfItemLimit(params.limit);
+    let did: string;
+    try {
+      did = parseDidFromUri(shelfUri);
+    } catch {
+      return Response.json({ error: 'InvalidRequest', message: 'shelf must be an AT-URI' }, { status: 400 });
+    }
+    try {
+      const resume = parseCursor(params.cursor);
+
+      const scanPds = async (startCursor?: string) => {
+        const { client } = await pdsClient(did);
+        let cur = startCursor;
+        const fetched: Array<typeof records.$inferSelect> = [];
+        let pages = 0;
+        while (fetched.length < limit && pages < MAX_PDS_SCAN_PAGES) {
+          pages += 1;
+          const page = await client.get('com.atproto.repo.listRecords', {
+            params: { repo: did as `did:${string}:${string}`, collection: SHELF_ITEM_COLLECTION, limit, cursor: cur },
+            signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+          });
+          const parsed = safeParseListRecords(page);
+          if (!parsed.ok) {
+            log.warn({ stage: 'listShelfItems.parse', did, shelfUri, issues: parsed.issues }, 'listRecords response did not match schema');
+            break;
+          }
+          cur = parsed.data.cursor;
+          for (const record of parsed.data.records) {
+            if (!isShelfItemOf(record.value, shelfUri)) continue;
+            fetched.push(pdsRecordRow(did, SHELF_ITEM_COLLECTION, record));
+          }
+          if (!cur) break;
+        }
+        return { rows: fetched, cursor: cur };
+      };
+
+      // A continuation belongs entirely to the tier that issued the cursor;
+      // merging tiers again would re-send what the first page already returned.
+      if (resume?.tier === 'pds') {
+        const { rows, cursor: next } = await scanPds(resume.value);
+        return json({
+          items: await hydrateShelfItems(rows, shelfUri, did),
+          cursor: next ? `pds:${next}` : undefined,
+        } as NetOlamaelcuLivtetBiblioListShelfItems.$output);
+      }
+
+      const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
+      const mirrorRows = await db
+        .select()
+        .from(records)
+        .where(shelfItemConditions({ shelfUri, did }))
+        .orderBy(records.uri)
+        .limit(limit + 1)
+        .offset(offset);
+      const hasMore = mirrorRows.length > limit;
+      const merged = hasMore ? mirrorRows.slice(0, limit) : mirrorRows;
+      let nextCursor: string | undefined = hasMore ? `tap:${offset + limit}` : undefined;
+
+      if (!resume && merged.length < limit) {
+        try {
+          const seen = new Set(merged.map((row) => row.uri));
+          const { rows, cursor: next } = await scanPds();
+          // The whole scanned slice is merged on purpose, like `listShelves`:
+          // the cursor points at the next PDS page, so dropping the tail of this
+          // one would strand those items forever.
+          for (const row of rows) {
+            if (seen.has(row.uri)) continue;
+            seen.add(row.uri);
+            merged.push(row);
+          }
+          if (next) nextCursor = `pds:${next}`;
+        } catch (err: unknown) {
+          log.warn({ err, did, shelfUri }, 'listShelfItems: PDS scan failed (mirror-only result returned)');
+        }
+      }
+
+      return json({
+        items: await hydrateShelfItems(merged, shelfUri, did),
+        cursor: nextCursor,
+      } as NetOlamaelcuLivtetBiblioListShelfItems.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, did, shelfUri }, 'listShelfItems: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
 router.addQuery(NetOlamaelcuLivtetBiblioGetReviewsByBook.mainSchema, {
   async handler({ params }) {
     const bookUri = params.book as string;
@@ -1721,17 +1904,12 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelvesWithBooks.mainSchema, {
       // shelf the reader has no record for, so no uri appears twice.
       const containers: Array<{ uri: string; did: string; shelf: NetOlamaelcuLivtetBiblioDefs.ShelfView }> =
         page.map((row) => {
-          const value = asRecord(row.value);
           return {
             uri: row.uri,
             did: row.did,
-            shelf: shelfMap.get(row.uri) ?? {
-              // jsonb text → the branded at-uri the view publishes; the row's own
-              // uri is what a shelf is addressed by, so no re-derivation.
-              uri: row.uri as NetOlamaelcuLivtetBiblioDefs.ShelfView['uri'],
-              name: typeof value.name === 'string' ? value.name : '',
-              $type: 'net.olamaelcu.livtet.biblio.defs#shelfView' as const,
-            },
+            // The row's own uri is what a shelf is addressed by, so the view is
+            // built from it rather than re-derived.
+            shelf: shelfMap.get(row.uri) ?? shelfViewFromValue(row.uri, row.value),
           };
         });
       if (did) {
