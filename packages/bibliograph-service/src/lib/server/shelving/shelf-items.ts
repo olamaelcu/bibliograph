@@ -48,6 +48,25 @@ export function shelfItemConditions({ shelfUri, did }: ShelfItemQueryOptions): S
   )!;
 }
 
+export interface ShelfItemBookQueryOptions {
+  /** AT-URI of the book whose memberships to read. */
+  bookUri: string;
+  /** Restrict to the shelf owner's repo. */
+  did: string;
+}
+
+/** `WHERE` for one book's custom-shelf memberships in one reader's repo. */
+export function shelfItemBookConditions({
+  bookUri,
+  did,
+}: ShelfItemBookQueryOptions): SQL {
+  return and(
+    eq(records.collection, SHELF_ITEM_COLLECTION),
+    sql`${records.value}->'book'->>'uri' = ${bookUri}`,
+    eq(records.did, did),
+  )!;
+}
+
 /** Shelf URI an item row points at, or null when the record omits it. */
 export function shelfUriForItemRow(row: Pick<RecordRow, 'value'>): string | null {
   const value = row.value;

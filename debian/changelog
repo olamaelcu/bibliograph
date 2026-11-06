@@ -1,3 +1,10 @@
+bibliograph (0.3.6) unstable; urgency=medium
+
+  * Add listShelfItemsByBook, one indexed read for the shelves that hold a
+    book in a reader's repo, replacing the book page's per-shelf fan-out.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 21:45:00 -0500
+
 bibliograph (0.3.5) unstable; urgency=medium
 
   * listShelves reads page one from the owner's PDS before the mirror, so a

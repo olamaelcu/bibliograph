@@ -34,6 +34,7 @@ import {
   NetOlamaelcuLivtetBiblioListRecentShelving,
   NetOlamaelcuLivtetBiblioListReviewsByActor,
   NetOlamaelcuLivtetBiblioListShelvesWithBooks,
+  NetOlamaelcuLivtetBiblioListShelfItemsByBook,
   NetOlamaelcuLivtetBiblioGetImageForBook,
   NetOlamaelcuLivtetBiblioGetImageForContributor,
   NetOlamaelcuLivtetBiblioGetReviewsByBook,
@@ -110,7 +111,9 @@ import {
   buildShelfItemView,
   clampShelfItemLimit,
   isShelfItemOf,
+  shelfItemBookConditions,
   shelfItemConditions,
+  shelfUriForItemRow,
 } from './shelving/shelf-items';
 import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
@@ -1569,6 +1572,57 @@ async function hydrateShelfItems(
 }
 
 /**
+ * Hydrate the memberships of one book across several shelves. Unlike the
+ * shelf-keyed read, rows here can name different shelf records, so the shelf
+ * lookup is a batch plus a per-missing-record PDS read.
+ */
+async function hydrateShelfItemsForBook(
+  rows: Array<typeof records.$inferSelect>,
+  did: string,
+  bookUri: string,
+): Promise<NetOlamaelcuLivtetBiblioDefs.ShelfItemView[]> {
+  if (rows.length === 0) return [];
+  const shelfUris = Array.from(new Set(
+    rows.map(shelfUriForItemRow).filter((uri): uri is string => uri !== null),
+  ));
+  const [shelfMap, bookMap] = await Promise.all([
+    hydrateShelvesByUri(shelfUris),
+    hydrateBooksByUri([bookUri]),
+  ]);
+
+  for (const shelfUri of shelfUris) {
+    if (shelfMap.has(shelfUri)) continue;
+    const fromPds = await fetchShelfViewFromPds(shelfUri, did);
+    shelfMap.set(shelfUri, fromPds ?? shelfViewFromValue(shelfUri, undefined));
+  }
+
+  let bookView = bookMap.get(bookUri);
+  if (!bookView) {
+    const resolved = await resolveMissingEditions([bookUri]);
+    if (resolved.length > 0) {
+      const refilled = await hydrateBooksByUri(resolved);
+      bookView = refilled.get(bookUri);
+    }
+  }
+  if (!bookView) {
+    log.warn(
+      { stage: 'listShelfItemsByBook.orphan', did, bookUri },
+      'dropping shelfItem rows: book not in catalog',
+    );
+    return [];
+  }
+
+  const items: NetOlamaelcuLivtetBiblioDefs.ShelfItemView[] = [];
+  for (const row of rows) {
+    const shelfUri = shelfUriForItemRow(row);
+    const shelfView = shelfUri ? shelfMap.get(shelfUri) : undefined;
+    if (!shelfView || bookUriForItemRow(row) !== bookUri) continue;
+    items.push(buildShelfItemView(row, shelfView, bookView));
+  }
+  return items;
+}
+
+/**
  * The books on one shelf, as `shelfItem` records.
  *
  * Two tiers, for the same reason `listBooksOnShelf` has two: the mirror is what
@@ -1663,6 +1717,92 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelfItems.mainSchema, {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ err, did, shelfUri }, 'listShelfItems: failed');
+      return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
+    }
+  },
+});
+
+/**
+ * Every custom shelf holding one book in one reader's repo. The book page used
+ * to answer this by reading each custom shelf's full item list; one indexed
+ * query replaces that N+1 fan-out.
+ */
+router.addQuery(NetOlamaelcuLivtetBiblioListShelfItemsByBook.mainSchema, {
+  async handler({ params }) {
+    const bookUri = params.book as string;
+    const did = params.did as string;
+    const limit = clampShelfItemLimit(params.limit);
+    if (!bookUri.startsWith('at://')) {
+      return Response.json({ error: 'InvalidRequest', message: 'book must be an AT-URI' }, { status: 400 });
+    }
+    try {
+      const resume = parseCursor(params.cursor);
+
+      const scanPds = async (startCursor?: string) => {
+        const { client } = await pdsClient(did);
+        let cur = startCursor;
+        const fetched: Array<typeof records.$inferSelect> = [];
+        let pages = 0;
+        while (fetched.length < limit && pages < MAX_PDS_SCAN_PAGES) {
+          pages += 1;
+          const page = await client.get('com.atproto.repo.listRecords', {
+            params: { repo: did as `did:${string}:${string}`, collection: SHELF_ITEM_COLLECTION, limit, cursor: cur },
+            signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
+          });
+          const parsed = safeParseListRecords(page);
+          if (!parsed.ok) {
+            log.warn({ stage: 'listShelfItemsByBook.parse', did, bookUri, issues: parsed.issues }, 'listRecords response did not match schema');
+            break;
+          }
+          cur = parsed.data.cursor;
+          for (const record of parsed.data.records) {
+            if (bookUriForItemRow({ value: record.value }) !== bookUri) continue;
+            fetched.push(pdsRecordRow(did, SHELF_ITEM_COLLECTION, record));
+          }
+          if (!cur) break;
+        }
+        return { rows: fetched, cursor: cur };
+      };
+
+      if (resume?.tier === 'pds') {
+        const { rows, cursor: next } = await scanPds(resume.value);
+        return json({
+          items: await hydrateShelfItemsForBook(rows, did, bookUri),
+          cursor: next ? `pds:${next}` : undefined,
+        } as NetOlamaelcuLivtetBiblioListShelfItemsByBook.$output);
+      }
+
+      // Page one is authoritative PDS state, matching the shelf-keyed read: a
+      // just-removed membership must not linger from the mirror.
+      if (!resume) {
+        try {
+          const { rows, cursor: next } = await scanPds();
+          return json({
+            items: await hydrateShelfItemsForBook(rows, did, bookUri),
+            cursor: next ? `pds:${next}` : undefined,
+          } as NetOlamaelcuLivtetBiblioListShelfItemsByBook.$output);
+        } catch (err: unknown) {
+          log.warn({ err, did, bookUri }, 'listShelfItemsByBook: PDS scan failed (mirror-only result returned)');
+        }
+      }
+
+      const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
+      const mirrorRows = await db
+        .select()
+        .from(records)
+        .where(shelfItemBookConditions({ bookUri, did }))
+        .orderBy(records.uri)
+        .limit(limit + 1)
+        .offset(offset);
+      const hasMore = mirrorRows.length > limit;
+      const page = hasMore ? mirrorRows.slice(0, limit) : mirrorRows;
+      return json({
+        items: await hydrateShelfItemsForBook(page, did, bookUri),
+        cursor: hasMore ? `tap:${offset + limit}` : undefined,
+      } as NetOlamaelcuLivtetBiblioListShelfItemsByBook.$output);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err, did, bookUri }, 'listShelfItemsByBook: failed');
       return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
     }
   },

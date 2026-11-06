@@ -10,6 +10,7 @@ import {
   buildShelfItemView,
   clampShelfItemLimit,
   isShelfItemOf,
+  shelfItemBookConditions,
   shelfItemConditions,
   shelfItemMetadataOf,
   shelfUriForItemRow,
@@ -75,8 +76,19 @@ test('shelfItemConditions: reads the shelfItem collection for one shelf', () => 
 test('shelfItemConditions: scoping to a repo adds the did predicate', () => {
   const { sql, params } = compiled(shelfItemConditions({ shelfUri: SHELF_URI, did: USER }));
 
-  assert.match(sql, /"records"\."did" = \$\d+/);
+  assert.match(sql, /"records"\.["did"] = \$\d+/);
   assert.deepEqual(params, [SHELF_ITEM_COLLECTION, SHELF_URI, USER]);
+});
+
+test('shelfItemBookConditions: one book and one reader', () => {
+  const { sql, params } = compiled(
+    shelfItemBookConditions({ bookUri: BOOK_URI, did: USER }),
+  );
+
+  assert.match(sql, /"records"\."collection" = \$\d+/);
+  assert.match(sql, /"records"\."value"->'book'->>'uri' = \$\d+/);
+  assert.match(sql, /"records"\."did" = \$\d+/);
+  assert.deepEqual(params, [SHELF_ITEM_COLLECTION, BOOK_URI, USER]);
 });
 
 test('shelfItemConditions: another shelf never enters the same page', () => {
