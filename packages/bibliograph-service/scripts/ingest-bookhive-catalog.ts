@@ -14,7 +14,9 @@
 //
 
 import { inArray, sql } from 'drizzle-orm';
+import type { Logger } from 'pino';
 import { db } from '../src/lib/server/db/index';
+import { resolveContributorsByName } from '../src/lib/server/api/contributor-name-resolver';
 import { contributors } from '../src/lib/server/db/schema';
 import { createLogger } from '../src/lib/server/logger';
 import { syncIngestEditions } from '../src/lib/server/jobs/handlers';
@@ -30,12 +32,16 @@ function flagValue(args: string[], name: string): string | undefined {
 }
 
 /**
- * Resolve author names to contributor strongRefs. Bookhive only carries a free
- * form author *string*, so the edition lexicon's refs can only be filled for
- * names the local catalog already knows; unknown names are dropped rather than
- * invented.
+ * Resolve author names to contributor strongRefs.
+ *
+ * Bookhive carries a free-form author *string*, not ids. Names the catalog
+ * already knows resolve to their existing row; the rest get a `bh.a-<slug>`
+ * stub contributor (deterministic uri + cid, ingest job queued) so the edition
+ * record is complete and the ISBN matcher has an author to verify against.
+ * A later authoritative source can rename the stub in place — the ref survives
+ * because it is keyed by the slug, not by the display string.
  */
-async function contributionsFor(names: string[]): Promise<Map<string, ContributionEntry[]>> {
+async function contributionsFor(names: string[], log: Logger): Promise<Map<string, ContributionEntry[]>> {
   const wanted = [...new Set(names.map((n) => n.trim().toLowerCase()).filter((n) => n !== ''))];
   const byName = new Map<string, ContributionEntry[]>();
   if (wanted.length === 0) return byName;
@@ -48,6 +54,11 @@ async function contributionsFor(names: string[]): Promise<Map<string, Contributi
     const list = byName.get(key) ?? [];
     list.push({ subject: { uri: row.uri, cid: row.cid }, role: 'author' });
     byName.set(key, list);
+  }
+  for (const name of wanted) {
+    if (byName.has(name)) continue;
+    const entries = await resolveContributorsByName([name], 'bookhive', log);
+    if (entries.length > 0) byName.set(name, entries);
   }
   return byName;
 }
@@ -77,7 +88,7 @@ async function main(): Promise<void> {
     seen += page.records.length;
 
     const names = page.records.flatMap((r) => splitAuthors(r.value.authors));
-    const contributions = await contributionsFor(names);
+    const contributions = await contributionsFor(names, log);
 
     const items: EditionItem[] = [];
     for (const record of page.records) {

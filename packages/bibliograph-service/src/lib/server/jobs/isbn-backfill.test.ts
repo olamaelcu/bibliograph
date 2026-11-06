@@ -58,6 +58,8 @@ function deps(overrides: Partial<IsbnEnrichmentDeps> = {}): IsbnEnrichmentDeps {
   return {
     fetchGbEdition: never,
     searchGb: async () => [],
+    searchOl: async () => [],
+    searchGr: async () => [],
     authorNames: async () => new Map([[AUTHOR_URI, 'Ursula K. Le Guin']]),
     ...overrides,
   };
@@ -116,6 +118,32 @@ test('tier 2 writes the ISBN the authority did not already know', async () => {
   assert.deepEqual(plan.added, ['9781578067053']);
   assert.deepEqual(plan.identifiers?.at(-1), { type: 'isbn', value: '9781578067053' });
   assert.equal(plan.candidates?.filter((candidate) => candidate.accepted).length, 1);
+});
+
+test('tier 2 takes an ISBN from an OpenLibrary title search', async () => {
+  const plan = await planIsbnEnrichment(
+    row(),
+    deps({
+      fetchGbEdition: async () => editionItem({ identifiers: GB_ONLY }),
+      searchOl: async () => [editionItem()],
+    }),
+  );
+
+  assert.equal(plan.action, 'write');
+  assert.deepEqual(plan.added, ['9781578067053']);
+});
+
+test('tier 2 takes an ISBN from a Goodreads title search', async () => {
+  const plan = await planIsbnEnrichment(
+    row(),
+    deps({
+      fetchGbEdition: async () => editionItem({ identifiers: GB_ONLY }),
+      searchGr: async () => [editionItem()],
+    }),
+  );
+
+  assert.equal(plan.action, 'write');
+  assert.deepEqual(plan.added, ['9781578067053']);
 });
 
 test('two shadow candidates that both survive are ambiguous', async () => {

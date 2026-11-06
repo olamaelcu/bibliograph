@@ -35,6 +35,7 @@ test('normaliseTitle drops subtitles, articles, punctuation and accents', () => 
   assert.equal(normaliseTitle('The Dispossessed: An Ambiguous Utopia'), 'dispossessed');
   assert.equal(normaliseTitle('Le Guin — The Dispossessed'), 'le guin the dispossessed');
   assert.equal(normaliseTitle('Brontë: A Life'), 'bronte');
+  assert.equal(normaliseTitle('The Dispossessed [50th Anniversary Edition]'), 'dispossessed');
   assert.equal(normaliseTitle('  A   Book  '), 'book');
 });
 

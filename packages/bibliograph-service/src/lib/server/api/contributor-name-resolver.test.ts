@@ -62,3 +62,14 @@ test('resolveContributorsByName skips empty / whitespace names', async () => {
   const entries = await resolveContributorsByName(['', '   ', undefined as unknown as string], 'googlebooks', log);
   assert.deepEqual(entries, []);
 });
+
+test('bookhive stubs are keyed bh.a-<slug>', async () => {
+  await cleanup();
+  try {
+    const entries = await resolveContributorsByName([TEST_AUTHOR], 'bookhive', log);
+    assert.equal(entries.length, 1);
+    assert.match(entries[0]?.subject.uri ?? '', /\/bh\.a-name-resolver-test-author$/);
+  } finally {
+    await cleanup();
+  }
+});

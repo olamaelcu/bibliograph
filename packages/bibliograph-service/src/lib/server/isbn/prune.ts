@@ -63,13 +63,13 @@ function stripDiacritics(value: string): string {
  * Reduce a title to what two providers can agree on: no accents, no
  * punctuation, no leading article, no subtitle, single-spaced, lowercase.
  *
- * Subtitles are cut at `:`/`;`/`(` — the markers providers actually use — and
+ * Subtitles are cut at `:`/`;`/`(`/`[` — the markers providers actually use — and
  * deliberately *not* at a dash: "Author — Title" and "Title — Subtitle" are
  * indistinguishable, and a wrong cut would make two different books compare
  * equal. Leaving the dash in only ever causes a safe mismatch.
  */
 export function normaliseTitle(raw: string): string {
-  const withoutSubtitle = raw.split(/[:;(]/)[0] ?? raw;
+  const withoutSubtitle = raw.split(/[:;([]/)[0] ?? raw;
   const words = stripDiacritics(withoutSubtitle)
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')

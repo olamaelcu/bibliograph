@@ -1,3 +1,25 @@
+bibliograph (0.5.0) unstable; urgency=medium
+
+  * OpenLibrary returns as an ISBN-discovery source only. A title search
+    resolves each top work's editions and pairs every edition with its own
+    ISBN (work-level results aggregate all editions' ISBNs, which is the wrong
+    thing to write); the existing matcher still decides.
+  * Goodreads joins the ISBN search: its general source maps no ISBN, so the
+    lookup fetches the top hits' pages (three, bounded) and keeps the ones that
+    carry one.
+  * Bookhive contributors are ingested: the free-form `authors` string now
+    mints `bh.a-<slug>` strongRefs (deterministic uri/cid, ingest queued)
+    instead of being dropped, so records serve contributors and the ISBN
+    matcher has an author to verify. `scripts/backfill-bookhive-catalog.ts`
+    fills both ISBNs and contributors on editions imported before the change.
+  * `scripts/requeue-isbn-enrichment.ts --result=<shadow|none|ambiguous>`
+    re-enqueues rows the daily scan skips because they already have a verdict,
+    so the new sources can revisit the backlog.
+  * Titles cut subtitles at `[` as well as `:`/`;`/`(`, matching the bracketed
+    edition notes OpenLibrary uses.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 16:31:59 -0500
+
 bibliograph (0.4.1) unstable; urgency=medium
 
   * The ISBN scanners (daily backfill and the shadow re-enqueue) test the

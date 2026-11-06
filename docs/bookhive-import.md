@@ -57,8 +57,9 @@ percentages are how many of those 1000 values carry the field.
    value: '<hyphenless ISBN-13>' }` — the only ISBN shape `defs#identifier` can represent, since
    ISBN-10 is converted on write and the two forms collapse to one identifier. Implemented:
    `parseCatalogBook` keeps both fields, `identifiersFor` emits the canonical identifier, and
-   `scripts/backfill-bookhive-isbns.ts` copies it onto editions imported before the mapping
-   changed, recomputing the record CID.
+   `scripts/backfill-bookhive-catalog.ts` copies it onto editions imported before the mapping
+   changed, recomputing the record CID. The same pass also fills the contributor strongRefs
+   the mapping used to drop, minting `bh.a-<slug>` rows for names the catalog does not know.
 2. `identifiers.goodreadsId` → `goodreads` identifier, replacing the `source`/`sourceId` guess
    that silently drops every non-Goodreads-sourced record.
 3. `description` → `editions.description`, which also removes those editions from

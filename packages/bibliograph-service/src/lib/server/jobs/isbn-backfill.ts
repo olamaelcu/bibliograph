@@ -6,6 +6,10 @@ import { db as defaultDb } from '../db/index';
 import { contributors, editionIsbnEnrichment, editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
+import { resolveContributorsByName } from '../api/contributor-name-resolver';
+import { searchOpenLibraryEditionsByTitle } from '../api/open-library-search';
+import { isbnIdentifier } from '../identifiers';
+import { searchGoodreadsIsbnCandidates } from '../search/goodreads-isbn';
 import { getEditionByVolumeId, searchEditions as searchGbEditions } from '../api/google-books';
 import type { EditionItem, Identifier } from '../search/types';
 import { hasIsbn, isbnFromIdentifier, mergeIsbnIdentifiers } from '../isbn/merge';
@@ -35,8 +39,9 @@ import { wireContributorsFor } from './wire-contributors';
  * surviving ISBN at the top score is written; a tie is recorded as `ambiguous`
  * and nothing is written, because a wrong ISBN silently repoints a reader's
  * shelf at a different physical book. Rows that older versions of this job
- * stamped `shadow` are re-enqueued by `scripts/enqueue-shadow-isbns.ts`, which
- * is the only producer of that historical result value today.
+ * already stamped with a verdict (`shadow`, `none`) are re-enqueued by
+ * `scripts/requeue-isbn-enrichment.ts --result=<verdict>`, since the daily scan
+ * skips any row that has one.
  */
 
 type Db = typeof defaultDb;
@@ -48,6 +53,10 @@ type ContributorRef = { uri: string };
 export interface IsbnEnrichmentDeps {
   fetchGbEdition(volumeId: string): Promise<EditionItem | null>;
   searchGb(query: string): Promise<EditionItem[]>;
+  /** OpenLibrary edition search, used only for ISBN discovery by title. */
+  searchOl(query: string): Promise<EditionItem[]>;
+  /** Goodreads title search, resolved down to hits that carry an ISBN. */
+  searchGr(query: string): Promise<EditionItem[]>;
   /** contributor uri → name, for the refs the planner hands over. */
   authorNames(refs: readonly ContributorRef[]): Promise<Map<string, string>>;
 }
@@ -127,18 +136,26 @@ export async function planIsbnEnrichment(
   const candidates: CandidateBook[] = [];
   if (target.title.trim().length > 0) {
     const surname = target.authors[0]?.split(/\s+/).pop() ?? '';
+    const olQuery = `title:"${target.title}"`;
     const gbQuery = [`intitle:${target.title}`, surname ? `inauthor:${surname}` : ''].filter(Boolean).join(' ');
+    const grQuery = [target.title, surname].filter(Boolean).join(' ');
 
-    const gbHits = await deps.searchGb(gbQuery).catch(() => []);
+    const [olHits, gbHits, grHits] = await Promise.all([
+      deps.searchOl(olQuery).catch(() => []),
+      deps.searchGb(gbQuery).catch(() => []),
+      deps.searchGr(grQuery).catch(() => []),
+    ]);
 
-    const candidateRefs: ContributorRef[] = gbHits.flatMap((hit) =>
+    const candidateRefs: ContributorRef[] = [...olHits, ...gbHits, ...grHits].flatMap((hit) =>
       (hit.contributors ?? []).map((contribution) => ({ uri: contribution.subject?.uri ?? '' })),
     );
     const candidateNames = await deps
       .authorNames(candidateRefs.filter((ref) => ref.uri.length > 0))
       .catch(() => new Map<string, string>());
 
+    for (const hit of olHits) candidates.push(candidateFromEditionItem('openlibrary', hit, candidateNames));
     for (const hit of gbHits) candidates.push(candidateFromEditionItem('googlebooks', hit, candidateNames));
+    for (const hit of grHits) candidates.push(candidateFromEditionItem('goodreads', hit, candidateNames));
   }
 
   const pruned = pruneCandidates(target, candidates);
@@ -160,6 +177,28 @@ export function defaultIsbnDeps(
   return {
     fetchGbEdition: (volumeId) => getEditionByVolumeId(volumeId, log, signal),
     searchGb: async (q) => (await searchGbEditions({ q, limit: 8 }, log, signal)).items,
+    searchOl: async (q) => {
+      const hits = await searchOpenLibraryEditionsByTitle(q, log, signal);
+      const createdAt = new Date().toISOString();
+      const items: EditionItem[] = [];
+      for (const hit of hits) {
+        const contributorEntries = await resolveContributorsByName(hit.authors, 'openlibrary', log);
+        items.push({
+          uri: `https://openlibrary.org${hit.key}`,
+          title: hit.title,
+          publishedYear: hit.publishedYear,
+          identifiers: hit.isbns
+            .map((isbn) => isbnIdentifier(isbn))
+            .filter((identifier): identifier is Identifier => identifier !== null),
+          contributors: contributorEntries,
+          createdAt,
+        });
+      }
+      return items;
+    },
+    // Three hits keeps a row's upstream cost bounded: each hit is a book-page
+    // fetch on top of the search itself.
+    searchGr: (q) => searchGoodreadsIsbnCandidates(q, log, 3, signal),
     authorNames: async (refs) => {
       const uris = [...new Set(refs.map((ref) => ref.uri))];
       if (uris.length === 0) return new Map();

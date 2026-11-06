@@ -42,6 +42,7 @@ export const PROVIDER_IDENTIFIER_DOMAINS: Record<string, string> = {
 	bookhive: 'bookhive.buzz',
 	googlebooks: 'books.google.com',
 	'googlebooks-canonical': 'books.google.com',
+	openlibrary: 'openlibrary.org',
 	isbndb: 'isbndb.com',
 	hardcover: 'hardcover.app',
 	wikidata: 'wikidata.org',

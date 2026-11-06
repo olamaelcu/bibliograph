@@ -20,13 +20,13 @@ run = ["pnpm run worker"]
 description = "Run the ISBN backfill scan once (enqueues jobs for the worker)"
 run = ["pnpm --filter bibliograph-service run backfill:isbns"]
 
-[tasks."backfill:shadow-isbns"]
-description = "Re-enqueue editions an earlier ISBN lookup stamped shadow"
-run = ["pnpm --filter bibliograph-service run backfill:shadow-isbns"]
+[tasks."backfill:requeue-isbns"]
+description = "Re-enqueue ISBN lookups for editions stamped shadow/none/ambiguous"
+run = ["pnpm --filter bibliograph-service run backfill:requeue-isbns"]
 
-[tasks."backfill:bookhive-isbns"]
-description = "Copy Bookhive's on-protocol ISBNs into the bh.* editions that lack one"
-run = ["pnpm --filter bibliograph-service run backfill:bookhive-isbns"]
+[tasks."backfill:bookhive-catalog"]
+description = "Fill bh.* editions from Bookhive's catalog: on-protocol ISBNs and contributor refs"
+run = ["pnpm --filter bibliograph-service run backfill:bookhive-catalog"]
 
 [tasks.worker]
 description = "Run the worker (TAP consumer + graphile task lists) to drain the queue"

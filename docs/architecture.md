@@ -112,6 +112,7 @@ provider authority (tier 1, deterministic) and, when that has no ISBN, searches
 Google Books and writes a single surviving candidate; a tie is
 recorded `ambiguous` and written nowhere.
 
-Rows stamped `shadow` by the older shadow-only tier 2 are not reached by that scan,
-so `scripts/enqueue-shadow-isbns.ts` re-enqueues the ones still missing an ISBN. Once
-written their result becomes `found`, which keeps the second pass idempotent.
+Rows already stamped with a verdict (`shadow`, `none`) are not reached by that scan,
+so `scripts/requeue-isbn-enrichment.ts --result=<verdict>` re-enqueues the ones still
+missing an ISBN. Once written their result becomes `found`, which keeps the second
+pass idempotent.

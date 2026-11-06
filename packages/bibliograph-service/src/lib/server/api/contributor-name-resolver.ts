@@ -9,11 +9,13 @@ import { enqueueIngest } from '../jobs/enqueue';
 import type { ContributionEntry, Identifier, ContributorItem } from '../search/types';
 import { providerIdentifier } from '../identifiers';
 
-export type ContributorSource = 'googlebooks' | 'isbndb' | 'goodreads';
+export type ContributorSource = 'googlebooks' | 'isbndb' | 'goodreads' | 'openlibrary' | 'bookhive';
 
 const GB_PREFIX = 'gb.a-';
 const ISBNDB_PREFIX = 'isbndb.a-';
 const GR_PREFIX = 'gr.a-';
+const OL_PREFIX = 'ol.a-';
+const BH_PREFIX = 'bh.a-';
 
 function slugify(name: string): string {
   return name
@@ -30,6 +32,8 @@ function rkeyFor(name: string, source: ContributorSource): string {
   const slug = slugify(name);
   if (source === 'googlebooks') return `${GB_PREFIX}${slug}`;
   if (source === 'isbndb') return `${ISBNDB_PREFIX}${slug}`;
+  if (source === 'openlibrary') return `${OL_PREFIX}${slug}`;
+  if (source === 'bookhive') return `${BH_PREFIX}${slug}`;
   return `${GR_PREFIX}${slug}`;
 }
 
@@ -145,9 +149,10 @@ async function stubContributor(
 }
 
 /**
- * Resolve a list of plain-text author names (from Google Books or ISBNdb,
- * neither of which exposes stable IDs) into `ContributionEntry` strongRefs
- * that point at `community.lexicon.book.contributor` records in biblio.
+ * Resolve a list of plain-text author names (from Google Books, ISBNdb,
+ * Goodreads, OpenLibrary search or the Bookhive catalog — none of which exposes
+ * stable author IDs) into `ContributionEntry` strongRefs that point at
+ * `community.lexicon.book.contributor` records in biblio.
  *
  * Each name is looked up by deterministic slug-derived rkey, then by
  * case-insensitive `name` match across sources. On miss a stub contributor

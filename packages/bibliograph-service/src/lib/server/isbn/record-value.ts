@@ -12,7 +12,7 @@ import type { Contributor } from '../book-wire';
  * exactly one edition record shape in the codebase.
  *
  * Kept as a separate entry point because the BookHive catalog pass
- * (`scripts/backfill-bookhive-isbns.ts`) writes the same field.
+ * (`scripts/backfill-bookhive-catalog.ts`) writes the same field.
  */
 export function editionRecordValueForCid(
   row: EditionRow,
