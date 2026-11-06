@@ -1,3 +1,11 @@
+bibliograph (0.3.4) unstable; urgency=medium
+
+  * listShelfItems reads page one from the owner's PDS before the mirror, so
+    a removed shelf item disappears immediately instead of waiting for the
+    TAP delete to be indexed.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 19:25:00 -0500
+
 bibliograph (0.3.3) unstable; urgency=medium
 
   * Unwrap the PDS record envelope in getShelf and the shelfItem shelf

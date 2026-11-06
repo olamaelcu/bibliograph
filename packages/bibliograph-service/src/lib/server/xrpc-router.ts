@@ -1619,6 +1619,22 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelfItems.mainSchema, {
         } as NetOlamaelcuLivtetBiblioListShelfItems.$output);
       }
 
+      // Page one comes from the PDS, not the mirror. A deletion is not visible
+      // to the mirror until its TAP delete is consumed, so a removed book would
+      // otherwise remain on the shelf on every immediate reload. The mirror
+      // stays the fallback when the PDS scan cannot answer.
+      if (!resume || resume.tier === 'tap') {
+        try {
+          const { rows, cursor: next } = await scanPds();
+          return json({
+            items: await hydrateShelfItems(rows, shelfUri, did),
+            cursor: next ? `pds:${next}` : undefined,
+          } as NetOlamaelcuLivtetBiblioListShelfItems.$output);
+        } catch (err: unknown) {
+          log.warn({ err, did, shelfUri }, 'listShelfItems: PDS scan failed (mirror-only result returned)');
+        }
+      }
+
       const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
       const mirrorRows = await db
         .select()
@@ -1629,25 +1645,7 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelfItems.mainSchema, {
         .offset(offset);
       const hasMore = mirrorRows.length > limit;
       const merged = hasMore ? mirrorRows.slice(0, limit) : mirrorRows;
-      let nextCursor: string | undefined = hasMore ? `tap:${offset + limit}` : undefined;
-
-      if (!resume && merged.length < limit) {
-        try {
-          const seen = new Set(merged.map((row) => row.uri));
-          const { rows, cursor: next } = await scanPds();
-          // The whole scanned slice is merged on purpose, like `listShelves`:
-          // the cursor points at the next PDS page, so dropping the tail of this
-          // one would strand those items forever.
-          for (const row of rows) {
-            if (seen.has(row.uri)) continue;
-            seen.add(row.uri);
-            merged.push(row);
-          }
-          if (next) nextCursor = `pds:${next}`;
-        } catch (err: unknown) {
-          log.warn({ err, did, shelfUri }, 'listShelfItems: PDS scan failed (mirror-only result returned)');
-        }
-      }
+      const nextCursor: string | undefined = hasMore ? `tap:${offset + limit}` : undefined;
 
       return json({
         items: await hydrateShelfItems(merged, shelfUri, did),
