@@ -151,6 +151,6 @@ test('fetchEditionForUri does not ask the catalog for a malformed bh. rkey', asy
 
 test('providerForEditionUri names the owning provider', () => {
   assert.equal(providerForEditionUri(EDITION_URI), 'bh');
-  assert.equal(providerForEditionUri('at://did:web:x/community.lexicon.book.edition/ol.OL1W'), 'ol');
+  assert.equal(providerForEditionUri('at://did:web:x/community.lexicon.book.edition/isbndb.9781607785927'), 'isbndb');
   assert.equal(providerForEditionUri('at://did:web:x/community.lexicon.book.edition/zz.1'), null);
 });

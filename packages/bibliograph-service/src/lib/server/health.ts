@@ -1,6 +1,6 @@
 import { createLogger } from './logger';
 import { getTapQueueDepth } from './jobs/depth';
-import { openLibraryBreaker, googleBooksBreaker, wikipediaBreaker, isbndbBreaker, wikidataBreaker, commonsBreaker } from './api/breakers';
+import { googleBooksBreaker, wikipediaBreaker, isbndbBreaker, wikidataBreaker, commonsBreaker } from './api/breakers';
 import { Pool } from 'pg';
 
 const log = createLogger('health');
@@ -41,7 +41,6 @@ export async function computeHealth(): Promise<HealthStatus> {
   try { queueDepth = await getTapQueueDepth(); } catch { /* ignore */ }
 
   const breakers = [
-    { name: 'openlibrary', b: openLibraryBreaker },
     { name: 'googlebooks', b: googleBooksBreaker },
     { name: 'wikipedia', b: wikipediaBreaker },
     { name: 'isbndb', b: isbndbBreaker },

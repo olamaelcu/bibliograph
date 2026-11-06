@@ -385,7 +385,7 @@ test('invalid cursor (wrong src) is ignored — no where clause', async () => {
   const fakeDb = createFakeDb([makeEditionRow()], cap);
   const src = new PostgresSource(silentLog, fakeDb);
 
-  const wrongSrc = Buffer.from(JSON.stringify({ v: 2, src: 'openlibrary', p: 1 })).toString('base64url');
+  const wrongSrc = Buffer.from(JSON.stringify({ v: 2, src: 'googlebooks', p: 1 })).toString('base64url');
   await src.searchEditions({ cursor: wrongSrc, limit: 10 });
 
   assert.equal(cap.whereCalled, false);

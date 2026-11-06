@@ -42,7 +42,6 @@ export const PROVIDER_IDENTIFIER_DOMAINS: Record<string, string> = {
 	bookhive: 'bookhive.buzz',
 	googlebooks: 'books.google.com',
 	'googlebooks-canonical': 'books.google.com',
-	openlibrary: 'openlibrary.org',
 	isbndb: 'isbndb.com',
 	hardcover: 'hardcover.app',
 	wikidata: 'wikidata.org',
@@ -106,7 +105,7 @@ function lastPathSegment(uri: string): string {
 /**
  * The `identifier.value` for a provider identifier, i.e. the provider's own
  * opaque key rather than the URL carrying it. Values are the provider's stable
- * identity — a Goodreads id, an OpenLibrary OLID, a Google Books volume id —
+ * identity — a Goodreads id, an ISBNdb isbn, a Google Books volume id —
  * so the same book resolves identically regardless of URL shape.
  */
 function providerValue(resource: string, uri: string): string {
@@ -129,7 +128,6 @@ function providerValue(resource: string, uri: string): string {
 			const match = /\/book\/([^/?#]+)/.exec(uri);
 			return match?.[1] ?? lastPathSegment(uri);
 		}
-		case 'openlibrary':
 		case 'wikidata':
 		case 'viaf':
 		case 'isni':

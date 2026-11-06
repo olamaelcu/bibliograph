@@ -154,7 +154,7 @@ per page, 10 pages each, cached per DID for 60 s (512 entries). An unreadable
 repo yields an empty feed rather than the whole catalog.
 
 **Ranking.** `works.subjects` is the genre/tag vocabulary the catalog ingests
-from OpenLibrary and Google Books. For each seed set — books in `reading`, then
+from Google Books. For each seed set — books in `reading`, then
 books in `read` — the query collects the seeds' subjects, scores every work that
 shares at least one by how many it shares, and joins back to that work's
 editions. Active-read matches lead the page, the past-read matches follow, and a

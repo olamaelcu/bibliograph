@@ -57,16 +57,13 @@ import { cidForLex, decode as cborDecode } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
 import { PostgresSource } from './search/postgres-source';
-import { OpenLibrarySource } from './search/open-library-source';
 import { GoogleBooksEnricher } from './search/google-books-enricher';
-import { OpenLibraryEnricher } from './search/open-library-enricher';
 import { GoogleBooksSource } from './search/google-books-source';
 import { IsbndbSource } from './search/isbndb-source';
 import { GoodreadsSource } from './search/goodreads-source';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './search/isbndb-enricher';
-import { WikidataContributorEnricher, WikidataEditionEnricher } from './search/wikidata-enricher';
-import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './search/wikipedia-enricher';
-import * as openLibraryApi from './api/open-library';
+import { WikidataEditionEnricher } from './search/wikidata-enricher';
+import { AuthorWikipediaEnricher } from './search/wikipedia-enricher';
 import { SearchService } from './search/service';
 import { eq, inArray, and, gt, sql } from 'drizzle-orm';
 import { db } from './db';
@@ -110,7 +107,6 @@ import {
   shelfItemConditions,
   shelfUriForItemRow,
 } from './shelving/shelf-items';
-import { olidFromEditionRkey } from './ol/keys';
 import { isGbRkey } from './gb/keys';
 import { datacenterCoverUrl } from './gb/cover-url';
 import { coverProxyUrl, isAllowedCoverUrl } from './cover-cache';
@@ -143,34 +139,25 @@ export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
 
 const postgresSource = new PostgresSource(log);
-const openLibrarySource = new OpenLibrarySource(log);
 const googleBooksSource = new GoogleBooksSource(log);
 const isbndbSource = new IsbndbSource(log);
 const goodreadsSource = new GoodreadsSource(log);
 const googleBooksEnricher = new GoogleBooksEnricher();
-const openLibraryEnricher = new OpenLibraryEnricher();
 const isbndbEnricher = new IsbndbEnricher();
 const isbndbWorkEnricher = new IsbndbWorkEnricher();
 const authorWikipediaEnricher = new AuthorWikipediaEnricher();
 const wikidataEditionEnricher = new WikidataEditionEnricher();
-const wikidataContributorEnricher = new WikidataContributorEnricher();
-const contributorWikipediaEnricher = new ContributorWikipediaEnricher();
 const searchService = new SearchService(
   {
     postgres: postgresSource,
-    openLibrary: openLibrarySource,
-    publisherSource: openLibraryApi,
     googleBooksSource,
     isbndbSource,
     goodreadsSource,
     googleBooks: googleBooksEnricher,
-    openLibraryEnricher,
     isbndbEnricher,
     isbndbWorkEnricher,
     authorWikipedia: authorWikipediaEnricher,
-    contributorWikipedia: contributorWikipediaEnricher,
     wikidataEdition: wikidataEditionEnricher,
-    wikidataContributor: wikidataContributorEnricher,
   },
   log,
 );
@@ -1026,13 +1013,8 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
     // book the catalog can serve perfectly well.
     const row = (await resolveEditions([uri])).get(uri);
     if (!row) {
-      const isOl = rkey.startsWith('ol.');
       const isGb = rkey.startsWith('gb.');
-      if (isOl) {
-        try { olidFromEditionRkey(rkey); } catch {
-          return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
-        }
-      } else if (isGb) {
+      if (isGb) {
         if (!isGbRkey(rkey)) {
           return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
         }
@@ -1040,9 +1022,8 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
         // `bh.` editions are Bookhive catalog mirrors. Their cover comes from the
         // catalog record at ingest, so the row is the whole answer: rejecting the
         // rkey sent every Bookhive cover down the caller's own record-read
-        // fallback — one extra PDS read per tile — and the backfill below, which
-        // only knows how to ask OpenLibrary and Google Books, can never serve
-        // them.
+        // fallback — one extra PDS read per tile — and the backfill below can
+        // never serve them.
         return Response.json({ error: 'InvalidRequest', message: `invalid edition rkey: ${rkey}` }, { status: 400 });
       }
       return Response.json({ error: 'RecordNotFound', message: `no edition at ${uri}` }, { status: 404 });

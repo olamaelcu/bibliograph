@@ -2,7 +2,7 @@
   // Editing is a librarian-only operation; the server load already refused
   // anonymous visitors and accounts without the "librarian" label.
   // `community.lexicon.book.defs#identifier`: `type` is a global token (`isbn`)
-  // or a provider domain (`openlibrary.org`), `value` the namespace's own key,
+  // or a provider domain (`goodreads.com`), `value` the namespace's own key,
   // and `url` the provider page when one is known (display-only, never compared).
   type Identifier = { type: string; value: string; url?: string };
 
@@ -60,7 +60,7 @@
     <h2>Identifiers ({data.identifiers.length})</h2>
     <p class="muted">
       One per line as <code>type:value</code>: the type is a global token
-      (<code>isbn</code>) or the provider's domain (<code>openlibrary.org</code>),
+      (<code>isbn</code>) or the provider's domain (<code>goodreads.com</code>),
       and the value is that namespace's own key. ISBNs are stored as hyphenless
       ISBN-13, so an ISBN-10 is converted on write. Existing identifiers are
       kept and duplicates ignored; the lexicon allows 32 in total.
@@ -87,7 +87,7 @@
       <wa-textarea
         name="identifiers"
         label="Identifiers to add"
-        hint="type:value, one per line — e.g. isbn:9780123456789, openlibrary.org:OL45804W"
+        hint="type:value, one per line — e.g. isbn:9780123456789, goodreads.com:12345"
         placeholder="isbn:9780123456789"
         rows="5"
         required

@@ -1,10 +1,10 @@
 // Provider dispatch for catalog editions.
 //
 // A shelf row (or a review, or a feed entry) carries a catalog URI like
-// `at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL123W`.
+// `at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/gb.b9AOEAAAQBAJ`.
 // When that row is missing from `editions`, the only way to fill it is to ask
-// the provider that owns the rkey prefix: the aggregator catalogs (OpenLibrary,
-// Google Books, ISBNdb) are not published as atproto repos, so there is nothing
+// the provider that owns the rkey prefix: the aggregator catalogs (Google Books,
+// ISBNdb, Goodreads) are not published as atproto repos, so there is nothing
 // local to copy. Bookhive's catalog *is* an atproto repo, so its editions are
 // simply read back by id.
 //
@@ -15,7 +15,6 @@
 
 import type { Logger } from 'pino';
 import type { EditionItem } from '../search/types';
-import { getEditionByRkey } from '../api/open-library';
 import { getEditionByVolumeId } from '../api/google-books';
 import { getEditionByIsbn } from '../api/isbndb';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
@@ -62,9 +61,6 @@ export async function fetchEditionForUri(
 ): Promise<EditionItem | null> {
   const rkey = editionRkeyOf(uri);
   try {
-    if (rkey.startsWith('ol.')) {
-      return await getEditionByRkey(rkey, log, signal);
-    }
     if (rkey.startsWith('isbndb.')) {
       return await getEditionByIsbn(rkey.slice('isbndb.'.length), log, signal);
     }
@@ -86,9 +82,8 @@ export async function fetchEditionForUri(
 }
 
 /** Provider name for an edition URI, for reporting. `null` when unmapped. */
-export function providerForEditionUri(uri: string): 'ol' | 'isbndb' | 'gb' | 'bh' | 'gr' | null {
+export function providerForEditionUri(uri: string): 'isbndb' | 'gb' | 'bh' | 'gr' | null {
   const rkey = editionRkeyOf(uri);
-  if (rkey.startsWith('ol.')) return 'ol';
   if (rkey.startsWith('isbndb.')) return 'isbndb';
   if (isGbRkey(rkey)) return 'gb';
   if (rkey.startsWith('bh.')) return 'bh';

@@ -30,7 +30,7 @@
     <a class="tool" href="/admin/import/isbn">
       <span class="title">ISBN import</span>
       <span class="body">
-        Look a print ISBN up across iSBNdb, Google Books, and Open Library, then edit and
+        Look a print ISBN up across iSBNdb and Google Books, then edit and
         publish the edition record.
       </span>
       <span class="meta">Publishes to the labeler repo</span>

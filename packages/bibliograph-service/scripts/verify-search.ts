@@ -3,7 +3,7 @@
 // endpoints with stubbed external APIs.
 //
 // Usage:
-//   pnpm exec tsx scripts/verify-search.ts
+//   pnpm exec tsx --test scripts/verify-search.ts
 //
 // Requires DATABASE_URL to point at a database with the editions/works/contributors
 // tables and the `cover_image_url` column on editions. Tests stub fetch globally
@@ -19,51 +19,41 @@ import {
   CommunityLexiconBookSearchWorks,
 } from '../src/lib/server/lexicons/index.js';
 import { PostgresSource } from '../src/lib/server/search/postgres-source.js';
-import { OpenLibrarySource } from '../src/lib/server/search/open-library-source.js';
 import { GoogleBooksEnricher } from '../src/lib/server/search/google-books-enricher.js';
 import { GoogleBooksSource } from '../src/lib/server/search/google-books-source.js';
-import { OpenLibraryEnricher } from '../src/lib/server/search/open-library-enricher.js';
 import { IsbndbEnricher, IsbndbWorkEnricher } from '../src/lib/server/search/isbndb-enricher.js';
 import { IsbndbSource } from '../src/lib/server/search/isbndb-source.js';
-import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from '../src/lib/server/search/wikipedia-enricher.js';
-import { WikidataContributorEnricher, WikidataEditionEnricher } from '../src/lib/server/search/wikidata-enricher.js';
+import { AuthorWikipediaEnricher } from '../src/lib/server/search/wikipedia-enricher.js';
+import { WikidataEditionEnricher } from '../src/lib/server/search/wikidata-enricher.js';
 
-import { SearchService } from '../src/lib/server/search/service.js';
+import { SearchService, type SearchServiceDeps } from '../src/lib/server/search/service.js';
 
 const log = pino({ level: 'silent' });
 
-function stubEverything() {
-  return stubFetch(async (url: string) => {
-    if (url.includes('openlibrary.org/search') && (url.endsWith('.json') || url.includes('?'))) {
-      if (url.includes('/search/authors.json')) {
-        return new Response(JSON.stringify({
-          numFound: 1,
-          docs: [{ key: '/authors/OL12345A', name: 'OL Author', birth_date: '1800-01-01', top_work: 'OL Work', work_count: 5 }],
-        }), { headers: { 'content-type': 'application/json' } });
-      }
-      const type = new URL(url).searchParams.get('type');
-      const docs = type === 'work'
-        ? [{ key: '/works/OL66554W', title: 'OL Work', first_publish_year: 1850 }]
-        : [{ key: '/books/OL12345M', title: 'OL Edition', isbn: ['9780123456789'] }];
-      return new Response(JSON.stringify({ numFound: 1, docs }), { headers: { 'content-type': 'application/json' } });
-    }
+/** Unique per run, so the shared Google Books cache cannot replay another run's body. */
+const RUN = Date.now().toString(36);
+
+function stubFetch(impl: (url: string) => Promise<Response>): { restore: () => void; calls: () => number } {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = ((url: string | URL | Request) => {
+    calls++;
+    return impl(String(url));
+  }) as typeof fetch;
+  return { restore: () => { globalThis.fetch = original; }, calls: () => calls };
+}
+
+/** One Google Books volume, shaped so both `mapGbToEdition` and `mapGbToWork` accept it. */
+function stubGoogleBooks(id: string, title: string): { restore: () => void; calls: () => number } {
+  return stubFetch(async (url) => {
     if (url.includes('googleapis.com/books')) {
       return new Response(JSON.stringify({
-        items: [{ volumeInfo: { description: 'A book.', imageLinks: { thumbnail: 'http://x/cover.jpg' } } }],
+        totalItems: 1,
+        items: [{ id, volumeInfo: { title, publishedDate: '1990', imageLinks: { thumbnail: 'http://x/cover.jpg' } } }],
       }), { headers: { 'content-type': 'application/json' } });
-    }
-    if (url.includes('wikipedia.org')) {
-      return new Response(JSON.stringify({ query: { pages: { '1': { extract: 'A person.', title: 'OL Author' } } } }),
-        { headers: { 'content-type': 'application/json' } });
     }
     return new Response('not found', { status: 404 });
   });
-}
-
-function stubFetch(impl: (url: string) => Promise<Response>): () => void {
-  const original = globalThis.fetch;
-  globalThis.fetch = ((url: string | URL | Request) => impl(String(url))) as typeof fetch;
-  return () => { globalThis.fetch = original; };
 }
 
 /**
@@ -103,25 +93,24 @@ function procedureRequest(nsid: string, input: Record<string, unknown>): Request
   });
 }
 
+/** The production dependency graph, minus nothing: every remaining source and enricher is wired. */
+function buildService(): SearchServiceDeps {
+  return {
+    postgres: new PostgresSource(log),
+    googleBooksSource: new GoogleBooksSource(log),
+    isbndbSource: new IsbndbSource(log),
+    googleBooks: new GoogleBooksEnricher(),
+    isbndbEnricher: new IsbndbEnricher(),
+    isbndbWorkEnricher: new IsbndbWorkEnricher(),
+    authorWikipedia: new AuthorWikipediaEnricher(),
+    wikidataEdition: new WikidataEditionEnricher(),
+  };
+}
+
 function buildRouter(): { router: XRPCRouter; restore: () => void } {
-  const restore = stubEverything();
+  const stub = stubGoogleBooks('gb-verify-1', 'GB Edition');
   const router = new XRPCRouter();
-  const pg = new PostgresSource(log);
-  const ol = new OpenLibrarySource(log);
-    const gb = new GoogleBooksSource(log);
-    const ib = new IsbndbSource(log);
-    const gbe = new GoogleBooksEnricher();
-    const ole = new OpenLibraryEnricher();
-    const ibe = new IsbndbEnricher();
-    const ibwe = new IsbndbWorkEnricher();
-    const aw = new AuthorWikipediaEnricher();
-    const cw = new ContributorWikipediaEnricher();
-    const wde = new WikidataEditionEnricher();
-    const wdc = new WikidataContributorEnricher();
-    const svc = new SearchService(
-      { postgres: pg, openLibrary: ol, publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: gb, isbndbSource: ib, googleBooks: gbe, openLibraryEnricher: ole, isbndbEnricher: ibe, isbndbWorkEnricher: ibwe, authorWikipedia: aw, contributorWikipedia: cw, wikidataEdition: wde, wikidataContributor: wdc },
-      log,
-    );
+  const svc = new SearchService(buildService(), log);
   registerSearchEditions(router, svc);
   router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
     async handler({ params }: { params: { q?: string; id?: string[]; limit?: number; cursor?: string } }) {
@@ -135,14 +124,14 @@ function buildRouter(): { router: XRPCRouter; restore: () => void } {
       return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
     },
   });
-  return { router, restore };
+  return { router, restore: stub.restore };
 }
 
-test('searchEditions returns Google Books primary results on Postgres miss', async () => {
+test('searchEditions serves Google Books results on a Postgres miss', async () => {
   process.env.GOOGLE_BOOKS_API_KEY = 'k';
   const { router, restore } = buildRouter();
   try {
-    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'anything' }));
+    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: `verify-${RUN}-editions` }));
     assert.equal(res.status, 200);
     const body = (await res.json()) as {
       items: Array<{ title: string; uri: string; coverImageUrl?: string }>;
@@ -150,141 +139,60 @@ test('searchEditions returns Google Books primary results on Postgres miss', asy
       total?: number;
     };
     assert.ok(body.items.length >= 1, 'expected Google Books primary to return at least one edition');
-    assert.equal(body.items[0]?.title, 'OL Edition');
+    assert.equal(body.items[0]?.title, 'GB Edition');
     assert.equal(body.items[0]?.coverImageUrl, 'https://x/cover.jpg');
-    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.edition\/ol\./);
+    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.edition\/gb\./);
     assert.equal(body.hasMore, false, 'one hit under the page limit must not claim more pages');
   } finally { restore(); }
 });
 
-test('searchEditions falls back to OpenLibrary when Google Books is empty', async () => {
+test('searchWorks serves Google Books results on a Postgres miss', async () => {
   process.env.GOOGLE_BOOKS_API_KEY = 'k';
-  const restore = stubFetch(async (url: string) => {
-    if (url.includes('googleapis.com/books')) {
-      return new Response(JSON.stringify({ totalItems: 0, items: [] }), { headers: { 'content-type': 'application/json' } });
-    }
-    if (url.includes('openlibrary.org/search') && (url.endsWith('.json') || url.includes('?'))) {
-      return new Response(JSON.stringify({
-        numFound: 1,
-        docs: [{ key: '/books/OL999M', title: 'OL Fallback Edition', isbn: ['9780123456789'] }],
-      }), { headers: { 'content-type': 'application/json' } });
-    }
-    return new Response('not found', { status: 404 });
+  const stub = stubGoogleBooks('gb-verify-2', 'GB Work');
+  const router = new XRPCRouter();
+  const svc = new SearchService(buildService(), log);
+  router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
+    async handler({ params }: { params: { q?: string; id?: string[]; limit?: number; cursor?: string } }) {
+      const r = await svc.searchWorks({ q: params.q, id: params.id, limit: params.limit ?? 20, cursor: params.cursor });
+      return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
+    },
   });
   try {
-    const router = new XRPCRouter();
-    const svc = new SearchService(
-      { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher(), wikidataEdition: new WikidataEditionEnricher(), wikidataContributor: new WikidataContributorEnricher() },
-      log,
-    );
-    registerSearchEditions(router, svc);
-    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'fallback' }));
+    const res = await router.fetch(new Request(`http://localhost/xrpc/community.lexicon.book.searchWorks?q=verify-${RUN}-works`));
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ title: string; uri: string }>; hasMore: boolean; total?: number };
-    assert.equal(body.items[0]?.title, 'OL Fallback Edition');
-    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.edition\/ol\./);
-    assert.equal(body.hasMore, false);
-  } finally { restore(); }
-});
-
-test('searchWorks returns OpenLibrary work results', async () => {
-  const { router, restore } = buildRouter();
-  try {
-    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchWorks?q=work'));
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ title: string }>; total?: number };
+    const body = (await res.json()) as { items: Array<{ title: string; uri: string }>; total?: number };
     assert.ok(body.items.length >= 1);
-    assert.equal(body.items[0]?.title, 'OL Work');
-  } finally { restore(); }
-});
-
-test('searchContributors returns OpenLibrary author results with Wikipedia bio', async () => {
-  const { router, restore } = buildRouter();
-  try {
-    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchContributors?q=author'));
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ name: string; bio?: string }> };
-    assert.ok(body.items.length >= 1);
-    assert.equal(body.items[0]?.name, 'OL Author');
-    assert.equal(body.items[0]?.bio, 'A person.');
-  } finally { restore(); }
+    assert.equal(body.items[0]?.title, 'GB Work');
+    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.work\/gb\./);
+  } finally { stub.restore(); }
 });
 
 test('searchEditions degrades when GOOGLE_BOOKS_API_KEY is missing', async () => {
   delete process.env.GOOGLE_BOOKS_API_KEY;
   const { router, restore } = buildRouter();
   try {
-    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'anything' }));
+    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: `verify-${RUN}-no-key` }));
     assert.equal(res.status, 200);
     const body = (await res.json()) as { items: Array<{ coverImageUrl?: string }>; hasMore: boolean };
     assert.equal(body.items[0]?.coverImageUrl, undefined);
   } finally { restore(); }
 });
 
-test('searchContributors parses bare OpenLibrary author OLIDs (no /authors/ prefix)', async () => {
-  const restore = stubFetch(async (url: string) => {
-    if (url.includes('/search/authors.json')) {
-      return new Response(JSON.stringify({
-        numFound: 1,
-        docs: [{ key: 'OL28885A', name: 'Maya Angelou', birth_date: 'April 4, 1928' }],
-      }), { headers: { 'content-type': 'application/json' } });
-    }
-    if (url.includes('wikipedia.org')) {
-      return new Response(JSON.stringify({ query: { pages: { '1': { extract: 'Bio.', title: 'Maya Angelou' } } } }),
-        { headers: { 'content-type': 'application/json' } });
-    }
-    return new Response('not found', { status: 404 });
-  });
+test('searchContributors is answered from Postgres with no upstream request', async () => {
+  const stub = stubFetch(async () => new Response('not found', { status: 404 }));
   const router = new XRPCRouter();
-  const svc = new SearchService(
-    { postgres: new PostgresSource(log), openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher(), wikidataEdition: new WikidataEditionEnricher(), wikidataContributor: new WikidataContributorEnricher() },
-    log,
-  );
+  const svc = new SearchService(buildService(), log);
   router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
-    async handler({ params }: { params: { q?: string } }) {
-      const r = await svc.searchContributors({ q: params.q, id: undefined, limit: 20, cursor: undefined });
+    async handler({ params }: { params: { q?: string; id?: string[]; limit?: number; cursor?: string } }) {
+      const r = await svc.searchContributors({ q: params.q, id: params.id, limit: params.limit ?? 20, cursor: params.cursor });
       return new Response(JSON.stringify(r), { headers: { 'content-type': 'application/json' } });
     },
   });
   try {
-    const res = await router.fetch(new Request('http://localhost/xrpc/community.lexicon.book.searchContributors?q=Maya+Angelou'));
+    const res = await router.fetch(new Request(`http://localhost/xrpc/community.lexicon.book.searchContributors?q=verify-${RUN}-contributor`));
     assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ name: string; uri: string }> };
-    assert.ok(body.items.length >= 1, 'bare OLID must parse, not be skipped');
-    assert.equal(body.items[0]?.name, 'Maya Angelou');
-    assert.match(body.items[0]?.uri ?? '', /^at:\/\/did:web:biblio\.livtet\.olamaelcu\.net\/community\.lexicon\.book\.contributor\/ol\.A28885A$/);
-  } finally { restore(); }
-});
-
-test('searchEditions skips work-only docs with no cover edition (no /books/ key)', async () => {
-  const restore = stubFetch(async (url: string) => {
-    if (url.includes('openlibrary.org/search') && url.includes('type=edition')) {
-      return new Response(JSON.stringify({
-        numFound: 2,
-        docs: [
-          { key: '/works/OL80021W', title: 'No Cover Edition' },
-          { key: '/books/OL3321378M', title: 'With Edition', isbn: ['9780123456789'] },
-        ],
-      }), { headers: { 'content-type': 'application/json' } });
-    }
-    if (url.includes('googleapis.com/books')) {
-      return new Response(JSON.stringify({ items: [] }), { headers: { 'content-type': 'application/json' } });
-    }
-    return new Response('not found', { status: 404 });
-  });
-  const router = new XRPCRouter();
-  const pg = new PostgresSource(log);
-  const svc = new SearchService(
-      { postgres: pg, openLibrary: new OpenLibrarySource(log), publisherSource: { searchPublishers: async () => ({ items: [], total: 0 }) } as never, googleBooksSource: new GoogleBooksSource(log), isbndbSource: new IsbndbSource(log), googleBooks: new GoogleBooksEnricher(), openLibraryEnricher: new OpenLibraryEnricher(), isbndbEnricher: new IsbndbEnricher(), isbndbWorkEnricher: new IsbndbWorkEnricher(), authorWikipedia: new AuthorWikipediaEnricher(), contributorWikipedia: new ContributorWikipediaEnricher(), wikidataEdition: new WikidataEditionEnricher(), wikidataContributor: new WikidataContributorEnricher() },
-    log,
-  );
-  registerSearchEditions(router, svc);
-  try {
-    const res = await router.fetch(procedureRequest('community.lexicon.book.searchEditions', { q: 'work-unique-xyz' }));
-    assert.equal(res.status, 200);
-    const body = (await res.json()) as { items: Array<{ title: string }>; hasMore: boolean; total?: number };
-    assert.equal(body.items.length, 1, 'work-only doc must be skipped, not synthesized');
-    assert.equal(body.items[0]?.title, 'With Edition');
-    assert.equal(body.total, 2, 'total reflects OpenLibrary numFound, not the filtered set');
-  } finally { restore(); }
+    const body = (await res.json()) as { items: Array<{ name: string }>; total?: number };
+    assert.ok(Array.isArray(body.items), 'the index is the answer, matched or not');
+    assert.equal(stub.calls(), 0, 'contributors must not consult any upstream');
+  } finally { stub.restore(); }
 });

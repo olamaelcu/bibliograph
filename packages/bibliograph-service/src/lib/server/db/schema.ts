@@ -117,14 +117,15 @@ export const editionGoodreadsBackfill = pgTable('edition_goodreads_backfill', {
 /**
  * Works backfill bookkeeping.
  *
- * The reconciler joins an edition to a work only when OpenLibrary returns a
- * match. Most editions get no match, and without a marker every run would ask
- * OpenLibrary about all of them again — a full catalog pass costs about a day.
- * A row here says "asked, no match"; the scan skips those editions until an
- * operator deletes the row (or runs the backfill with `--retry-unmatched`).
+ * One row records the reconciler's verdict about one edition, which is what
+ * keeps the scan finite: `unmatched` rows were written while a work provider
+ * still answered, and a run skips them until an operator deletes the row (or
+ * runs the backfill with `--retry-unmatched`).
  *
- * `deferred` is deliberately never written: a lookup that never happened is not
- * an answer, so those rows stay eligible for the next run.
+ * Phase 1 now defers rather than answers: with no work provider left to ask, an
+ * orphan keeps `work_uri` NULL and only increments the run's `deferred` count,
+ * writing no row at all. Nothing therefore claims the catalog was consulted,
+ * and every orphan stays eligible if a work source appears again.
  */
 export const editionWorkBackfill = pgTable('edition_work_backfill', {
   uri: text('uri')

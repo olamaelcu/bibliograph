@@ -1,36 +1,28 @@
 import type { Logger } from 'pino';
 import { getCorrelationLog } from '../correlation';
 import { PostgresSource } from './postgres-source';
-import { OpenLibrarySource } from './open-library-source';
 import { GoogleBooksSource } from './google-books-source';
 import { IsbndbSource } from './isbndb-source';
 import { GoodreadsSource } from './goodreads-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
-import { OpenLibraryEnricher } from './open-library-enricher';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './isbndb-enricher';
-import { ContributorWikipediaEnricher, AuthorWikipediaEnricher } from './wikipedia-enricher';
-import { WikidataContributorEnricher, WikidataEditionEnricher } from './wikidata-enricher';
-import * as openLibraryApi from '../api/open-library';
+import { AuthorWikipediaEnricher } from './wikipedia-enricher';
+import { WikidataEditionEnricher } from './wikidata-enricher';
 import { isbnFromQuery } from '../api/isbndb';
-import { syncIngestEditions, syncIngestWorks, syncIngestContributors, syncIngestPublishers } from '../jobs/handlers';
+import { syncIngestEditions, syncIngestWorks } from '../jobs/handlers';
 import { validContributorName } from './contributor-name';
-import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier, Enricher } from './types';
+import type { SearchQuery, SearchResult, EditionItem, WorkItem, ContributorItem, PublisherItem, Enricher } from './types';
 
 export interface SearchServiceDeps {
   postgres: PostgresSource;
-  openLibrary: OpenLibrarySource;
-  publisherSource: Pick<typeof openLibraryApi, 'searchPublishers'>;
   googleBooksSource: GoogleBooksSource;
   isbndbSource: IsbndbSource;
   goodreadsSource?: GoodreadsSource;
   googleBooks: GoogleBooksEnricher;
-  openLibraryEnricher: OpenLibraryEnricher;
   isbndbEnricher: IsbndbEnricher;
   isbndbWorkEnricher: IsbndbWorkEnricher;
   authorWikipedia: AuthorWikipediaEnricher;
-  contributorWikipedia: ContributorWikipediaEnricher;
   wikidataEdition: WikidataEditionEnricher;
-  wikidataContributor: WikidataContributorEnricher;
 }
 
 type ItemLike = { uri: string };
@@ -90,7 +82,6 @@ export class SearchService {
     ]);
 
     const editionEnrichers: ReadonlyArray<Enricher<EditionItem>> = [
-      this.deps.openLibraryEnricher,
       this.deps.googleBooks,
       this.deps.isbndbEnricher,
       this.deps.authorWikipedia,
@@ -176,7 +167,7 @@ export class SearchService {
     gb: SearchResult<EditionItem>,
     log: Logger,
     enrichers: ReadonlyArray<Enricher<EditionItem>>,
-  ): Promise<{ items: EditionItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | 'openlibrary' | null; degraded?: SearchResult<EditionItem>['degraded'] }> {
+  ): Promise<{ items: EditionItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | null; degraded?: SearchResult<EditionItem>['degraded'] }> {
     if (gb.items.length > 0) {
       return {
         items: await this.runEnrichers(gb.items, enrichers, log),
@@ -201,18 +192,6 @@ export class SearchService {
         };
       }
     }
-
-    const ol = await this.deps.openLibrary.searchEditions(query);
-    degraded = degraded ?? ol.degraded;
-    if (ol.items.length > 0) {
-      return {
-        items: await this.runEnrichers(ol.items, enrichers, log),
-        cursor: ol.cursor,
-        total: ol.total,
-        source: 'openlibrary',
-        degraded,
-      };
-    }
     return { items: [], source: null, degraded };
   }
 
@@ -221,7 +200,7 @@ export class SearchService {
     gb: SearchResult<WorkItem>,
     log: Logger,
     enrichers: ReadonlyArray<Enricher<WorkItem>>,
-  ): Promise<{ items: WorkItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | 'openlibrary' | null; degraded?: SearchResult<WorkItem>['degraded'] }> {
+  ): Promise<{ items: WorkItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | null; degraded?: SearchResult<WorkItem>['degraded'] }> {
     if (gb.items.length > 0) {
       return {
         items: await this.runEnrichers(gb.items, enrichers, log),
@@ -246,98 +225,21 @@ export class SearchService {
         };
       }
     }
-
-    const ol = await this.deps.openLibrary.searchWorks(query);
-    degraded = degraded ?? ol.degraded;
-    if (ol.items.length > 0) {
-      return {
-        items: await this.runEnrichers(ol.items, enrichers, log),
-        cursor: ol.cursor,
-        total: ol.total,
-        source: 'openlibrary',
-        degraded,
-      };
-    }
     return { items: [], source: null, degraded };
   }
 
   async searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
-    const log = this.log();
-
-    if (!query.q && query.id && query.id.length > 0) {
-      const localOnly = await this.deps.postgres.searchContributors(query);
-      return { ...localOnly, items: localOnly.items.filter((i) => validContributorName(i.name)) };
-    }
-
-    const [pg, ol] = await Promise.all([
-      this.deps.postgres.searchContributors(query),
-      this.deps.openLibrary.searchContributors(query),
-    ]);
-
-    const enrichedRemote = ol.items.length > 0
-      ? await this.deps.wikidataContributor.enrich(
-        await this.deps.contributorWikipedia.enrich(ol.items, log),
-        log,
-      )
-      : [];
+    // Contributors have no remote catalog source: the index is the answer.
+    const local = await this.deps.postgres.searchContributors(query);
     // An empty/whitespace name violates the lexicon's minLength: 1, so it must
-    // never reach the wire nor be persisted by the sync ingest below.
-    const remoteItems: ContributorItem[] = enrichedRemote.filter((i) => validContributorName(i.name));
-    const localItems = pg.items.filter((i) => validContributorName(i.name));
-
-    const merged = this.mergeItems(remoteItems, localItems);
-
-    if (remoteItems.length > 0) {
-      try {
-        await syncIngestContributors(remoteItems, log);
-      } catch (err) {
-        console.error('SYNC INGEST ERR:', err);
-        log.error({ stage: 'search-contributors.sync-ingest', err }, 'sync ingest failed; continuing');
-      }
-    }
-
-    log.info({
-      stage: 'search-contributors',
-      remoteCount: remoteItems.length,
-      localCount: localItems.length,
-      mergedCount: merged.length,
-      droppedInvalid: (enrichedRemote.length - remoteItems.length) + (pg.items.length - localItems.length),
-      total: ol.total || pg.total || 0,
-    }, 'search done');
-
-    return { items: merged, cursor: ol.cursor ?? pg.cursor, total: ol.total || pg.total || 0 };
+    // never reach the wire.
+    const items = local.items.filter((i) => validContributorName(i.name));
+    return { items, cursor: local.cursor, total: local.total };
   }
 
   async searchPublishers(query: SearchQuery): Promise<SearchResult<PublisherItem>> {
-    const log = this.log();
-
-    const [pg, ol] = await Promise.all([
-      this.deps.postgres.searchPublishers(query),
-      this.deps.publisherSource.searchPublishers(query, log).catch((err: unknown) => {
-        log.warn({ stage: 'search-publishers', err }, 'OL publisher search failed; postgres only');
-        return { items: [] as Array<{ uri: string; name: string; identifiers: Identifier[]; createdAt: string }>, total: 0 };
-      }),
-    ]);
-
-    const remoteItems = ol.items as PublisherItem[];
-    const merged = this.mergeItems(remoteItems, pg.items);
-
-    if (remoteItems.length > 0) {
-      try {
-        await syncIngestPublishers(remoteItems, log);
-      } catch (err) {
-        log.error({ stage: 'search-publishers.sync-ingest', err }, 'sync ingest failed; continuing');
-      }
-    }
-
-    log.info({
-      stage: 'search-publishers',
-      remoteCount: remoteItems.length,
-      localCount: pg.items.length,
-      mergedCount: merged.length,
-      total: ol.total || pg.total || 0,
-    }, 'search done');
-
-    return { items: merged, cursor: undefined, total: ol.total || pg.total || 0 };
+    // Publishers have no remote catalog source: the index is the answer.
+    const pg = await this.deps.postgres.searchPublishers(query);
+    return { items: pg.items, cursor: undefined, total: pg.total ?? 0 };
   }
 }

@@ -6,15 +6,15 @@
 //   pnpm backfill:works
 //   pnpm backfill:works --shard=0/4
 //
-// A 240k-edition catalog spends this job's whole life waiting on OpenLibrary,
-// so the scan can be split into disjoint slices: `--shard=<index>/<count>`, or
+// A 240k-edition catalog makes one pass a long walk, so the scan can be split
+// into disjoint slices: `--shard=<index>/<count>`, or
 // `SHARD_INDEX` + `SHARD_COUNT` for a systemd unit. Each process walks one
 // slice and a restart resumes that same slice, because the slice is a function
 // of the edition uri (`shardPredicate`).
 //
-// Editions an earlier pass asked OpenLibrary about and found no match for are
-// skipped (`edition_work_backfill`). `--retry-unmatched` ignores those markers
-// and asks again — for when the upstream catalog has grown.
+// Editions an earlier pass already reached a verdict about are skipped
+// (`edition_work_backfill`). `--retry-unmatched` ignores those markers and
+// looks again.
 //
 // Requires DATABASE_URL. Streams per-row pino logs to logs/worker.*.log, paints
 // a progress bar per phase on stderr, and prints a final JSON summary line on
@@ -91,8 +91,8 @@ async function main(): Promise<void> {
       shardCount,
       ...summary,
     }));
-    // A run that stopped because the catalog lookup was down is not a success:
-    // say so in the exit code so a wrapper does not treat it as a finished pass.
+    // A run that stopped before finishing is not a success: say so in the exit
+    // code so a wrapper does not treat it as a finished pass.
     process.exit(summary.failed > 0 || summary.aborted ? 1 : 0);
   } finally {
     // pino.transport holds a worker thread; close it so the process exits.

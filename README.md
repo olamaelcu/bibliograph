@@ -58,13 +58,13 @@ would only cost storage. Set `BOOKHIVE_PDS` to point somewhere other than
 
 Information is sourced from a few places:
 
-- Book information is sourced from OpenLibrary (works + editions APIs) with
-  optional Google Books enrichment for descriptions and covers (requires
+- Book information is sourced from Google Books, ISBNdb and Goodreads. Google
+  Books enrichment supplies descriptions and covers (requires
   `GOOGLE_BOOKS_API_KEY`). Google Books answers are cached in Postgres for 24
   hours — hits and "no such volume" misses alike — because the quota is charged
   per request against that one key, which the web and worker processes share.
 - Cover bytes are cached on disk under `COVER_CACHE_DIR` the first time
-  `getImageForBook` serves them, so Google Books and Open Library are only
+  `getImageForBook` serves them, so the cover providers are only
   contacted on a miss. The cache survives restarts and package upgrades.
 - Edition display metadata — the normalized format (`hardcover`, `paperback`,
   `ebook`, `audiobook`) and page count — is stored on `editions` and returned
@@ -89,7 +89,7 @@ Information is sourced from a few places:
   `gr.<bookId>` editions. They are deduped by normalized title against the
   primary sources; a blocked or failed Goodreads call is returned as a
   `degraded: { upstream: 'goodreads' }` result rather than failing the search.
-- Author information is _gleamed_ from Wikipedia and OpenLibrary
+- Author information is _gleamed_ from Wikipedia
 
 ## Catalog curation
 
@@ -109,15 +109,14 @@ can vote on which work an edition belongs to.
 - A decision is stamped `editions.work_link_source = 'consensus'`, and the
   automatic reconciler (`pnpm backfill:works`) skips those rows — otherwise a
   nightly run would silently undo a voted unlink.
-- A run links an edition only when OpenLibrary returns a work whose title (and
-  first-publish year, within ±2) matches. No match leaves `work_uri` NULL: the
-  reconciler does not invent a work from the edition's own fields, so an
-  unlinked edition means the catalog genuinely does not know its work.
-  `pnpm backfill:works --shard=<index>/<count>` walks one slice of the table,
-  for splitting a large catalog across several processes.
-  A miss is recorded in `edition_work_backfill`, so later runs skip it instead
-  of asking OpenLibrary again; `--retry-unmatched` clears that memory when the
-  upstream catalog has grown.
+- The reconciler has no work catalogue to consult any more: a run leaves
+  `work_uri` NULL and reports each orphan as deferred, rather than inventing a
+  work from the edition's own fields, so an unlinked edition means the catalog
+  genuinely does not know its work. `pnpm backfill:works --shard=<index>/<count>`
+  walks one slice of the table, for splitting a large catalog across several
+  processes, and phase 2 re-verifies the CID of every already-linked work.
+  `edition_work_backfill` rows written by earlier builds are still honoured —
+  `--retry-unmatched` ignores them — but nothing writes new ones.
 
 OAuth is least-privilege: the client asks only for
 `repo:net.olamaelcu.livtet.biblio.editionWorkLink`, never for general repo or

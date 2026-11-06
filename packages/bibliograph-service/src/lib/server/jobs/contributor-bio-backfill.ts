@@ -7,7 +7,6 @@ import { contributors } from '../db/schema';
 import type { ContributorRow } from '../db/schema';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { enrichContributorBios } from '../api/wikipedia';
-import { getContributorBioByRkey, openLibraryDescription } from '../api/open-library';
 import { rowIdentifiers } from '../edition-record';
 import { contributorRecordValue } from '../book-records';
 
@@ -26,24 +25,7 @@ export async function resolveContributorBio(
   const identifiers = rowIdentifiers(row.identifiers);
   const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear ?? undefined, diedYear: row.diedYear ?? undefined, linkedDid: row.linkedDid ?? undefined, identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, s);
   const wikiBio = bio[0]?.bio;
-  if (wikiBio) return wikiBio;
-
-  // Fallback: OpenLibrary author doc bio for contributors derived from OL.
-  if (
-    identifiers.some(
-      (identifier) =>
-        identifier.type === 'openlibrary.org' &&
-        (/^OL\d+A$/.test(identifier.value) || (identifier.url ?? '').includes('/authors/')),
-    )
-  ) {
-    try {
-      const olBio = await getContributorBioByRkey(row.rkey, log, s);
-      if (olBio) return openLibraryDescription(olBio) ?? olBio;
-    } catch {
-      // fall through
-    }
-  }
-  return undefined;
+  return wikiBio;
 }
 
 export async function backfillBioForContributor(

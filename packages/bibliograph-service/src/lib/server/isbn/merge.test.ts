@@ -11,9 +11,9 @@ import {
 import { isbn13FromAny, providerIdentifier } from '../identifiers';
 import type { Identifier } from '../search/types';
 
-const OL_IDENTIFIER: Identifier = providerIdentifier(
-  'openlibrary',
-  'https://openlibrary.org/books/OL3292288M',
+const GB_IDENTIFIER: Identifier = providerIdentifier(
+  'googlebooks',
+  'https://books.google.com/books?id=b9AOEAAAQBAJ',
 );
 
 test('normaliseIsbn keeps digits and a trailing X', () => {
@@ -28,14 +28,14 @@ test('isbnFromIdentifier reads only canonical ISBN-13 values on `isbn` identifie
   assert.equal(isbnFromIdentifier({ type: 'isbn', value: '1469612887' }), null);
   assert.equal(isbnFromIdentifier({ type: 'isbn', value: 'urn:isbn:9781469612881' }), null);
   assert.equal(isbnFromIdentifier({ type: 'isbn', value: '123' }), null);
-  assert.equal(isbnFromIdentifier(OL_IDENTIFIER), null);
+  assert.equal(isbnFromIdentifier(GB_IDENTIFIER), null);
 });
 
 test('hasIsbn sees through unrelated identifiers', () => {
-  assert.equal(hasIsbn([OL_IDENTIFIER]), false);
+  assert.equal(hasIsbn([GB_IDENTIFIER]), false);
   assert.equal(hasIsbn([]), false);
   assert.equal(hasIsbn(undefined), false);
-  assert.equal(hasIsbn([OL_IDENTIFIER, { type: 'isbn', value: '9781469612881' }]), true);
+  assert.equal(hasIsbn([GB_IDENTIFIER, { type: 'isbn', value: '9781469612881' }]), true);
 });
 
 test('isbnIdentifier always yields one canonical ISBN-13', () => {
@@ -45,10 +45,10 @@ test('isbnIdentifier always yields one canonical ISBN-13', () => {
 });
 
 test('mergeIsbnIdentifiers appends without touching what is there', () => {
-  const { identifiers, added } = mergeIsbnIdentifiers([OL_IDENTIFIER], ['9781469612881']);
+  const { identifiers, added } = mergeIsbnIdentifiers([GB_IDENTIFIER], ['9781469612881']);
 
   assert.deepEqual(added, ['9781469612881']);
-  assert.deepEqual(identifiers[0], OL_IDENTIFIER);
+  assert.deepEqual(identifiers[0], GB_IDENTIFIER);
   assert.deepEqual(identifiers[1], { type: 'isbn', value: '9781469612881' });
 });
 

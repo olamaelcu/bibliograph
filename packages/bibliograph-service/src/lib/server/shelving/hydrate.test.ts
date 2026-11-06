@@ -13,7 +13,7 @@ import { PUBLISHER_DID } from '../did';
 const SHELF_URI = `at://did:plc:e2ctbutx6kya6si4if5ngjmm/net.olamaelcu.livtet.biblio.shelf/to-read`;
 const SHELVING_URI = `at://did:plc:e2ctbutx6kya6si4if5ngjmm/net.olamaelcu.livtet.biblio.bookShelving/rk`;
 const EDITION_URI_GB = `at://${PUBLISHER_DID}/community.lexicon.book.edition/gb.qzybEQAAQBAJ`;
-const EDITION_URI_OL = `at://${PUBLISHER_DID}/community.lexicon.book.edition/ol.OL32984650M`;
+const EDITION_URI_ISBNDB = `at://${PUBLISHER_DID}/community.lexicon.book.edition/isbndb.9781607785927`;
 
 function makeBookView(uri: string, title = 'Some Book'): NetOlamaelcuLivtetBiblioDefs.BookView {
   return {
@@ -68,10 +68,10 @@ test('catalogEditionUriFromRkey maps gb.<vid> to catalog edition URI', () => {
   );
 });
 
-test('catalogEditionUriFromRkey maps ol.<OLID>M to catalog edition URI', () => {
+test('catalogEditionUriFromRkey maps isbndb.<isbn> to catalog edition URI', () => {
   assert.equal(
-    catalogEditionUriFromRkey('ol.OL32984650M'),
-    EDITION_URI_OL,
+    catalogEditionUriFromRkey('isbndb.9781607785927'),
+    EDITION_URI_ISBNDB,
   );
 });
 
@@ -80,10 +80,13 @@ test('catalogEditionUriFromRkey returns null for invalid gb rkey', () => {
   assert.equal(catalogEditionUriFromRkey('gb.bad'), null);
 });
 
-test('catalogEditionUriFromRkey returns null for non-edition ol rkey', () => {
-  // Work rkey (ol.W...) and contributor rkey (ol.A...) are not editions.
+test('catalogEditionUriFromRkey returns null for non-edition and retired rkeys', () => {
+  // Work rkeys (…W) and contributor rkeys (…A) are not editions.
   assert.equal(catalogEditionUriFromRkey('ol.W66554W'), null);
   assert.equal(catalogEditionUriFromRkey('ol.A12345A'), null);
+  // No provider owns the retired `ol.` edition prefix, so a stale shelving
+  // reference resolves to nothing.
+  assert.equal(catalogEditionUriFromRkey('ol.OL32984650M'), null);
 });
 
 test('catalogEditionUriFromRkey returns null for unknown prefix', () => {
@@ -133,15 +136,15 @@ test('resolveBookShelf: empty book.uri falls back to rkey-derived URI', () => {
   assert.equal(result.view!.book.title, 'Fallback Title');
 });
 
-test('resolveBookShelf: empty book.uri with ol. rkey falls back', () => {
+test('resolveBookShelf: empty book.uri with isbndb. rkey falls back', () => {
   const row = makeShelvingRow({
-    rkey: 'ol.OL32984650M',
+    rkey: 'isbndb.9781607785927',
     bookRef: { uri: '' },
   });
-  const bookMap = new Map([[EDITION_URI_OL, makeBookView(EDITION_URI_OL, 'OL Book')]]);
+  const bookMap = new Map([[EDITION_URI_ISBNDB, makeBookView(EDITION_URI_ISBNDB, 'ISBNdb Book')]]);
   const result = resolveBookShelf(row, bookMap, new Map());
   assert.equal(result.ok, true);
-  assert.equal(result.view!.book.uri, EDITION_URI_OL);
+  assert.equal(result.view!.book.uri, EDITION_URI_ISBNDB);
 });
 
 test('resolveBookShelf: drops row when neither strongRef nor rkey resolves', () => {
@@ -370,9 +373,9 @@ test('bookUriForRow: a bookhive row without any hive identity has no book', () =
 test('bookUriForRow: a livtet row still reads its own strongRef first', () => {
   const row = makeShelvingRow({
     rkey: 'dune',
-    bookRef: { uri: 'at://did:web:biblio.test/community.lexicon.book.edition/ol.OL1W' },
+    bookRef: { uri: 'at://did:web:biblio.test/community.lexicon.book.edition/gb.qzybEQAAQBAJ' },
   });
-  assert.equal(bookUriForRow(row), 'at://did:web:biblio.test/community.lexicon.book.edition/ol.OL1W');
+  assert.equal(bookUriForRow(row), 'at://did:web:biblio.test/community.lexicon.book.edition/gb.qzybEQAAQBAJ');
 });
 
 // Reference unrelated constant to satisfy unused-import linters.

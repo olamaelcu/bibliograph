@@ -1,13 +1,6 @@
 import type { Logger } from 'pino';
 import * as wikipedia from '../api/wikipedia';
-import type { ContributorItem, EditionItem, WorkItem, Enricher } from './types';
-
-export class ContributorWikipediaEnricher implements Enricher<ContributorItem> {
-  readonly name = 'wikipedia-enricher-contributor';
-  enrich(items: ContributorItem[], log: Logger, signal?: AbortSignal): Promise<ContributorItem[]> {
-    return wikipedia.enrichContributorBios(items, log, signal);
-  }
-}
+import type { EditionItem, WorkItem, Enricher } from './types';
 
 export class AuthorWikipediaEnricher implements Enricher<EditionItem | WorkItem> {
   readonly name = 'wikipedia-enricher-author';

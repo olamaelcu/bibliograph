@@ -89,7 +89,7 @@ function parseIdentifierLine(raw: string): Identifier | null {
 
 /**
  * One identifier per line, `type:value` — for example
- * `isbn:9780123456789`, `openlibrary.org:OL45804W`, or a provider page URL.
+ * `isbn:9780123456789`, `goodreads.com:12345`, or a provider page URL.
  */
 function parseIdentifiers(raw: string): Identifier[] {
   const parsed: Identifier[] = [];

@@ -1,17 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-test('loadRecord editions: DB hit returns value, no OL fetch', async () => {
+test('loadRecord editions: returns a loader function', async () => {
   const { loadRecord } = await import('./record-detail.js');
   assert.equal(typeof loadRecord, 'function');
 });
 
-test('loadRecord editions: invalid rkey returns notFound without OL fetch', async () => {
+test('loadRecord editions: unknown rkey returns notFound', async () => {
   const { loadRecord } = await import('./record-detail.js');
-  // Invalid rkeys don't match OL formats, so no OL fetch should be attempted
-  // The helper functions in open-library.ts return null for invalid rkeys
+  // A bogus rkey belongs to no provider, so nothing can be fetched for it.
   const result = await loadRecord('editions', 'bogus-rkey');
-  // Without DB row and without OL match, should be notFound
+  // Without a DB row there is nothing left to serve.
   assert.equal(result.notFound, true);
   assert.equal(result.rkey, 'bogus-rkey');
   assert.equal(result.kind, 'editions');
@@ -31,10 +30,10 @@ test('loadRecord contributors: DB miss returns notFound for invalid rkey', async
   assert.equal(result.kind, 'contributors');
 });
 
-test('loadRecord publishers: DB miss returns notFound (no OL fallback)', async () => {
+test('loadRecord publishers: DB miss returns notFound (no provider fallback)', async () => {
   const { loadRecord } = await import('./record-detail.js');
   const result = await loadRecord('publishers', 'does-not-matter');
-  // Publishers have no OL fallback per spec
+  // Publishers are only ever served from the database.
   assert.equal(result.notFound, true);
   assert.equal(result.kind, 'publishers');
 });

@@ -30,7 +30,7 @@ const FORMATS: Record<BookFormat, FormatMeta> = {
 };
 
 /**
- * Provider binding strings are free text: Open Library's `physical_format`,
+ * Provider binding strings are free text: Google Books' `physicalFormat`,
  * ISBNDb's `binding`. Normalize the common spellings to the four values the
  * AppView exposes, and leave anything unrecognized out rather than inventing a
  * fifth format.

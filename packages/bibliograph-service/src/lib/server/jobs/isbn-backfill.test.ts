@@ -5,20 +5,22 @@ import type { EditionRow } from '../db/schema';
 import type { EditionItem, Identifier } from '../search/types';
 import { providerIdentifier } from '../identifiers';
 
-const AUTHOR_URI = 'at://did:plc:author/community.lexicon.book.contributor/ol.A1';
+const AUTHOR_URI = 'at://did:plc:author/community.lexicon.book.contributor/gb.GhPSEAAAQBAJ';
 
-const OL_ONLY: Identifier[] = [providerIdentifier('openlibrary', 'https://openlibrary.org/books/OL3292288M')];
-const OL_WITH_ISBN: Identifier[] = [
-  ...OL_ONLY,
+const GB_ONLY: Identifier[] = [
+  providerIdentifier('googlebooks', 'https://books.google.com/books?id=GhPSEAAAQBAJ'),
+];
+const GB_WITH_ISBN: Identifier[] = [
+  ...GB_ONLY,
   { type: 'isbn', value: '9781578067053' },
 ];
 
 function row(overrides: Partial<EditionRow> = {}): EditionRow {
   return {
-    uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL3292288M',
+    uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/gb.GhPSEAAAQBAJ',
     cid: 'bafyreiexample',
     did: 'did:web:biblio.livtet.olamaelcu.net',
-    rkey: 'ol.OL3292288M',
+    rkey: 'gb.GhPSEAAAQBAJ',
     title: 'The Dispossessed',
     subtitle: null,
     workUri: null,
@@ -30,7 +32,7 @@ function row(overrides: Partial<EditionRow> = {}): EditionRow {
     publishedYear: 1974,
     language: 'eng',
     contributors: [{ subject: { uri: AUTHOR_URI, cid: 'bafyauthor' }, role: 'author' }],
-    identifiers: OL_ONLY,
+    identifiers: GB_ONLY,
     description: null,
     coverImageUrl: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -41,11 +43,11 @@ function row(overrides: Partial<EditionRow> = {}): EditionRow {
 
 function editionItem(overrides: Partial<EditionItem> = {}): EditionItem {
   return {
-    uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL3292288M',
+    uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/gb.GhPSEAAAQBAJ',
     title: 'The Dispossessed',
     publishedYear: 1974,
     contributors: [{ subject: { uri: AUTHOR_URI, cid: 'bafyauthor' }, role: 'author' }],
-    identifiers: OL_WITH_ISBN,
+    identifiers: GB_WITH_ISBN,
     createdAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   } as EditionItem;
@@ -54,9 +56,7 @@ function editionItem(overrides: Partial<EditionItem> = {}): EditionItem {
 function deps(overrides: Partial<IsbnEnrichmentDeps> = {}): IsbnEnrichmentDeps {
   const never = async () => null;
   return {
-    fetchOlEdition: never,
     fetchGbEdition: never,
-    searchOl: async () => [],
     searchGb: async () => [],
     authorNames: async () => new Map([[AUTHOR_URI, 'Ursula K. Le Guin']]),
     ...overrides,
@@ -64,7 +64,7 @@ function deps(overrides: Partial<IsbnEnrichmentDeps> = {}): IsbnEnrichmentDeps {
 }
 
 test('tier 1 writes the ISBN the authority already knows', async () => {
-  const plan = await planIsbnEnrichment(row(), deps({ fetchOlEdition: async () => editionItem() }));
+  const plan = await planIsbnEnrichment(row(), deps({ fetchGbEdition: async () => editionItem() }));
 
   assert.equal(plan.action, 'write');
   assert.equal(plan.result, 'found');
@@ -88,9 +88,9 @@ test('an ISBNdb rkey carries its ISBN without any fetch', async () => {
 test('an edition that already has an ISBN is left alone', async () => {
   let fetched = false;
   const plan = await planIsbnEnrichment(
-    row({ identifiers: OL_WITH_ISBN }),
+    row({ identifiers: GB_WITH_ISBN }),
     deps({
-      fetchOlEdition: async () => {
+      fetchGbEdition: async () => {
         fetched = true;
         return editionItem();
       },
@@ -106,8 +106,8 @@ test('tier 2 writes the ISBN the authority did not already know', async () => {
     row(),
     deps({
       // The authority record exists but carries no ISBN.
-      fetchOlEdition: async () => editionItem({ identifiers: OL_ONLY }),
-      searchOl: async () => [editionItem()],
+      fetchGbEdition: async () => editionItem({ identifiers: GB_ONLY }),
+      searchGb: async () => [editionItem()],
     }),
   );
 
@@ -122,8 +122,8 @@ test('two shadow candidates that both survive are ambiguous', async () => {
   const plan = await planIsbnEnrichment(
     row(),
     deps({
-      fetchOlEdition: async () => editionItem({ identifiers: OL_ONLY }),
-      searchOl: async () => [
+      fetchGbEdition: async () => editionItem({ identifiers: GB_ONLY }),
+      searchGb: async () => [
         editionItem({ identifiers: [{ type: 'isbn', value: '9781578067053' }] }),
         editionItem({ identifiers: [{ type: 'isbn', value: '9780060512750' }] }),
       ],
@@ -138,8 +138,8 @@ test('a shadow candidate is only rejected for an unknown author, never written',
   const plan = await planIsbnEnrichment(
     row({ contributors: [] }),
     deps({
-      fetchOlEdition: async () => editionItem({ identifiers: OL_ONLY, contributors: [] }),
-      searchOl: async () => [editionItem()],
+      fetchGbEdition: async () => editionItem({ identifiers: GB_ONLY, contributors: [] }),
+      searchGb: async () => [editionItem()],
       authorNames: async () => new Map(),
     }),
   );
@@ -154,7 +154,7 @@ test('a shadow candidate is only rejected for an unknown author, never written',
 test('no candidates at all records none', async () => {
   const plan = await planIsbnEnrichment(
     row(),
-    deps({ fetchOlEdition: async () => editionItem({ identifiers: OL_ONLY }) }),
+    deps({ fetchGbEdition: async () => editionItem({ identifiers: GB_ONLY }) }),
   );
 
   assert.equal(plan.action, 'none');
@@ -165,10 +165,7 @@ test('a failing search does not fail the plan', async () => {
   const plan = await planIsbnEnrichment(
     row(),
     deps({
-      fetchOlEdition: async () => editionItem({ identifiers: OL_ONLY }),
-      searchOl: async () => {
-        throw new Error('upstream down');
-      },
+      fetchGbEdition: async () => editionItem({ identifiers: GB_ONLY }),
       searchGb: async () => {
         throw new Error('upstream down');
       },

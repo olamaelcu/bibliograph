@@ -17,7 +17,6 @@
       editionUri?: string;
       rkey?: string;
       error?: string;
-      coverUrl?: string;
       results?: Record<string, EditionItem[]>;
     };
   } = $props();
@@ -37,7 +36,6 @@
   let editCoverUrl = $state(selectedItem?.coverImageUrl ?? '');
   let editIdentifiers = $state((selectedItem?.identifiers ?? []).map(identifierEntry).join(', '));
   let editIsbn = $state('');
-  let coverSearchResult = $state('');
 
   /** Canonical identifier as the editable `type:value` pair. */
   function identifierEntry(identifier: Identifier): string {
@@ -70,7 +68,6 @@
 
   function selectItem(item: EditionItem, provider: string) {
     selectedItem = item;
-    coverSearchResult = '';
     // Set URL param for persistence
     const url = new URL(window.location.href);
     url.searchParams.set('selected', JSON.stringify({ ...item, provider }));
@@ -90,13 +87,7 @@
       Imported! <a href={form.editionUrl}>View edition</a>.
     </wa-callout>
   {/if}
-  {#if form?.coverUrl}
-    <wa-callout variant="info" style="margin-block-end: var(--wa-space-m)">
-      Cover URL found: <a href={form.coverUrl} target="_blank" rel="noopener">{form.coverUrl}</a>
-    </wa-callout>
-  {/if}
-
-  <section style="margin-block: var(--wa-space-l)">
+  <section style="margin-block: var(--wa-space-l);">
     <h2>Search by ISBN</h2>
     <form method="POST" action="?/search" style="display: flex; gap: var(--wa-space-s); align-items: center;">
       <input
@@ -114,8 +105,8 @@
     {@const res = form?.results ?? data.results ?? {}}
     <section>
       <h2>Results</h2>
-      {#each ['isbndb', 'google-books', 'open-library'] as provider}
-        <div style="margin-block: var(--wa-space-m)">
+      {#each ['isbndb', 'google-books'] as provider}
+        <div style="margin-block: var(--wa-space-m);">
           <h3 style="margin-block-end: var(--wa-space-s); text-transform: capitalize;">
             {provider.replace('-', ' ')}
             <span class="muted small">({res[provider]?.length ?? 0})</span>
@@ -210,19 +201,11 @@
 
         <div style="display: flex; gap: var(--wa-space-s); align-items: center; flex-wrap: wrap;">
           <button type="submit" class="primary">Import</button>
-          <button type="button" onclick={() => { selectedItem = null; coverSearchResult = ''; }} class="secondary">Cancel</button>
+          <button type="button" onclick={() => { selectedItem = null; }} class="secondary">Cancel</button>
         </div>
       </form>
 
       <div style="margin-top: var(--wa-space-s);">
-        <form method="POST" action="?/coverSearch" style="display: flex; gap: var(--wa-space-xs); align-items: center;">
-          <input type="hidden" name="isbn" value={editIsbn} />
-          <label style="margin: 0; font-weight: normal; display: flex; gap: var(--wa-space-xs); align-items: center; width: 100%;">
-            <span>Cover search:</span>
-            <input type="text" name="olId" placeholder="OL cover id" bind:value={coverSearchResult} style="flex: 1;" />
-            <button type="submit" class="secondary">Search cover</button>
-          </label>
-        </form>
         {#if editCoverUrl}
           <img src={editCoverUrl} alt="Cover preview" style="max-width: 8rem; margin-top: var(--wa-space-s); border-radius: 4px;" loading="lazy" />
         {/if}

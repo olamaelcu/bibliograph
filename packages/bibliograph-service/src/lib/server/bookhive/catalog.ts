@@ -13,8 +13,8 @@ import {
 /**
  * `buzz.bookhive.catalogBook` → `community.lexicon.book.edition` mapping.
  *
- * Bookhive's catalog is Goodreads-derived, so what it gives us is thinner than
- * OpenLibrary: a title, an author *string*, a cover URL, an average rating and
+ * Bookhive's catalog is Goodreads-derived, so what it gives us is thin: a
+ * title, an author *string*, a cover URL, an average rating and
  * the upstream source id. Two consequences:
  *
  * - `authors` cannot become `contributors` on its own — the edition lexicon

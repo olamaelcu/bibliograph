@@ -76,13 +76,13 @@ test('catalogBookToEditionItem keys the edition bh.{hiveId} with a bookhive iden
 
 test('catalogBookToEditionItem keeps resolved contributions as given', () => {
   const rec = parseCatalogBook(RECORD)!;
-  const contribution = { subject: { uri: 'at://did:plc:x/community.lexicon.book.contributor/ol.A1', cid: 'bafy1' }, role: 'author' };
+  const contribution = { subject: { uri: 'at://did:plc:x/community.lexicon.book.contributor/gb.a-jane-doe', cid: 'bafy1' }, role: 'author' };
   const item = catalogBookToEditionItem(rec, [contribution])!;
   assert.deepEqual(item.contributors, [contribution]);
 });
 
 test('catalogBookToEditionItem omits goodreads identifier for other sources', () => {
-  const rec = parseCatalogBook({ ...RECORD, source: 'OpenLibrary', sourceId: 'OL1W' })!;
+  const rec = parseCatalogBook({ ...RECORD, source: 'Amazon', sourceId: 'B000FC1GE0' })!;
   const item = catalogBookToEditionItem(rec)!;
   assert.deepEqual(item.identifiers, [
     providerIdentifier('bookhive', `at://${BOOKHIVE_DID}/buzz.bookhive.catalogBook/${HIVE_ID}`),

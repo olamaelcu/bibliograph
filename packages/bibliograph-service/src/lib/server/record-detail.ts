@@ -3,7 +3,6 @@ import { db } from './db';
 import { works, contributors, publishers } from './db/schema';
 import { PUBLISHER_DID } from './did';
 import { resolveEditions } from './edition-lookup';
-import { getWorkByRkey, getContributorByRkey } from './api/open-library.js';
 import { fetchEditionForUri } from './shelving/edition-fetch';
 import { enqueueIngest } from './jobs/enqueue.js';
 import { rowIdentifiers } from './edition-record';
@@ -84,25 +83,7 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
   }
   if (kind === 'works') {
     const [row] = await db.select().from(works).where(eq(works.uri, uri)).limit(1);
-    if (!row) {
-      const item = await getWorkByRkey(rkey, log).catch(() => null);
-      if (item) {
-        enqueueIngest('work', item).catch(() => {});
-        return { kind, rkey, notFound: false, value: {
-          $type: 'community.lexicon.book.work',
-          title: item.title,
-          subtitle: item.subtitle,
-          originalLanguage: item.originalLanguage,
-          firstPublishedYear: item.firstPublishedYear,
-          subjects: item.subjects,
-          description: item.description,
-          contributors: item.contributors as unknown as Contribution[],
-          identifiers: item.identifiers,
-          createdAt: item.createdAt,
-        }};
-      }
-      return { kind, rkey, notFound: true };
-    }
+    if (!row) return { kind, rkey, notFound: true };
     const value: WorkValue = {
       $type: 'community.lexicon.book.work',
       title: row.title,
@@ -119,24 +100,7 @@ export async function loadRecord(kind: DetailKind, rkey: string): Promise<LoadRe
   }
   if (kind === 'contributors') {
     const [row] = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
-    if (!row) {
-      const item = await getContributorByRkey(rkey, log).catch(() => null);
-      if (item) {
-        enqueueIngest('contributor', item).catch(() => {});
-        return { kind, rkey, notFound: false, value: {
-          $type: 'community.lexicon.book.contributor',
-          name: item.name,
-          aliases: item.aliases,
-          bio: item.bio ?? undefined,
-          bornYear: item.bornYear ?? undefined,
-          diedYear: item.diedYear ?? undefined,
-          linkedDid: item.linkedDid ?? undefined,
-          identifiers: item.identifiers,
-          createdAt: item.createdAt,
-        }};
-      }
-      return { kind, rkey, notFound: true };
-    }
+    if (!row) return { kind, rkey, notFound: true };
     const value: ContributorValue = {
       $type: 'community.lexicon.book.contributor',
       name: row.name,

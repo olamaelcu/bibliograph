@@ -109,7 +109,7 @@ resurrect the duplicate under a fresh `tid`.
 catalog edition with no ISBN and no `edition_isbn_enrichment` row, skipping rows that
 already have a queued job (the row budget goes to fresh work). The job refetches the
 provider authority (tier 1, deterministic) and, when that has no ISBN, searches
-OpenLibrary and Google Books and writes a single surviving candidate; a tie is
+Google Books and writes a single surviving candidate; a tie is
 recorded `ambiguous` and written nowhere.
 
 Rows stamped `shadow` by the older shadow-only tier 2 are not reached by that scan,

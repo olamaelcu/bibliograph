@@ -33,7 +33,7 @@ export const load: PageServerLoad = async ({
   // This page calls `searchService` directly in SSR, bypassing the XRPC
   // middleware chain and its limiter. Without this guard the storefront is an
   // unmetered path to the paid upstream search providers (Google Books,
-  // ISBNdb, OpenLibrary, Wikidata), so it gets a tighter budget than the
+  // ISBNdb, Wikidata), so it gets a tighter budget than the
   // XRPC default.
   if (!allowRequest(getClientAddress(), 'page:/search', SEARCH_PAGE_RPM)) {
     throw error(429, 'Too many searches. Try again in a minute.');

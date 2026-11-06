@@ -6,7 +6,6 @@ import { db as defaultDb } from '../db/index';
 import { contributors, editionIsbnEnrichment, editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
-import { getEditionByRkey, searchEditions as searchOlEditions } from '../api/open-library';
 import { getEditionByVolumeId, searchEditions as searchGbEditions } from '../api/google-books';
 import type { EditionItem, Identifier } from '../search/types';
 import { hasIsbn, isbnFromIdentifier, mergeIsbnIdentifiers } from '../isbn/merge';
@@ -26,19 +25,18 @@ import { wireContributorsFor } from './wire-contributors';
 /**
  * Backfill the ISBN an edition record is missing.
  *
- * Almost every ISBN-less edition in the catalog is an `ol.*` or `gb.*` record,
- * and the authority it was derived from already knows the ISBN — OpenLibrary's
- * edition document carries `isbn_10`/`isbn_13`. That authority refetch is tier
- * 1 and it is deterministic: no matching, no guessing.
+ * Almost every ISBN-less edition in the catalog is a `gb.*` or `isbndb.*`
+ * record, and the authority it was derived from already knows the ISBN. That
+ * authority refetch is tier 1 and it is deterministic: no matching, no
+ * guessing.
  *
- * Tier 2 only runs when the authority has no ISBN to give. It searches
- * OpenLibrary and Google Books, then prunes the candidates down with
- * `pruneCandidates`. A single surviving ISBN at the top score is written; a
- * tie is recorded as `ambiguous` and nothing is written, because a wrong ISBN
- * silently repoints a reader's shelf at a different physical book. Rows that
- * older versions of this job stamped `shadow` are re-enqueued by
- * `scripts/enqueue-shadow-isbns.ts`, which is the only producer of that
- * historical result value today.
+ * Tier 2 only runs when the authority has no ISBN to give. It searches Google
+ * Books, then prunes the candidates down with `pruneCandidates`. A single
+ * surviving ISBN at the top score is written; a tie is recorded as `ambiguous`
+ * and nothing is written, because a wrong ISBN silently repoints a reader's
+ * shelf at a different physical book. Rows that older versions of this job
+ * stamped `shadow` are re-enqueued by `scripts/enqueue-shadow-isbns.ts`, which
+ * is the only producer of that historical result value today.
  */
 
 type Db = typeof defaultDb;
@@ -48,9 +46,7 @@ type ContributorRef = { uri: string };
 
 /** Everything tier 2 needs; injected so the planner is testable. */
 export interface IsbnEnrichmentDeps {
-  fetchOlEdition(rkey: string): Promise<EditionItem | null>;
   fetchGbEdition(volumeId: string): Promise<EditionItem | null>;
-  searchOl(query: string): Promise<EditionItem[]>;
   searchGb(query: string): Promise<EditionItem[]>;
   /** contributor uri → name, for the refs the planner hands over. */
   authorNames(refs: readonly ContributorRef[]): Promise<Map<string, string>>;
@@ -71,7 +67,6 @@ async function fetchAuthorityItem(
   row: EditionRow,
   deps: IsbnEnrichmentDeps,
 ): Promise<EditionItem | null> {
-  if (row.rkey.startsWith('ol.')) return deps.fetchOlEdition(row.rkey);
   if (isGbRkey(row.rkey)) return deps.fetchGbEdition(volumeIdFromGbRkey(row.rkey));
   // `isbndb.*` rkeys carry the ISBN themselves; `bh.*` has no per-edition API.
   return null;
@@ -132,22 +127,17 @@ export async function planIsbnEnrichment(
   const candidates: CandidateBook[] = [];
   if (target.title.trim().length > 0) {
     const surname = target.authors[0]?.split(/\s+/).pop() ?? '';
-    const olQuery = [`title:"${target.title}"`, surname ? `author:"${surname}"` : ''].filter(Boolean).join(' ');
     const gbQuery = [`intitle:${target.title}`, surname ? `inauthor:${surname}` : ''].filter(Boolean).join(' ');
 
-    const [olHits, gbHits] = await Promise.all([
-      deps.searchOl(olQuery).catch(() => []),
-      deps.searchGb(gbQuery).catch(() => []),
-    ]);
+    const gbHits = await deps.searchGb(gbQuery).catch(() => []);
 
-    const candidateRefs: ContributorRef[] = [...olHits, ...gbHits].flatMap((hit) =>
+    const candidateRefs: ContributorRef[] = gbHits.flatMap((hit) =>
       (hit.contributors ?? []).map((contribution) => ({ uri: contribution.subject?.uri ?? '' })),
     );
     const candidateNames = await deps
       .authorNames(candidateRefs.filter((ref) => ref.uri.length > 0))
       .catch(() => new Map<string, string>());
 
-    for (const hit of olHits) candidates.push(candidateFromEditionItem('openlibrary', hit, candidateNames));
     for (const hit of gbHits) candidates.push(candidateFromEditionItem('googlebooks', hit, candidateNames));
   }
 
@@ -168,9 +158,7 @@ export function defaultIsbnDeps(
   signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
 ): IsbnEnrichmentDeps {
   return {
-    fetchOlEdition: (rkey) => getEditionByRkey(rkey, log, signal),
     fetchGbEdition: (volumeId) => getEditionByVolumeId(volumeId, log, signal),
-    searchOl: async (q) => (await searchOlEditions({ q, limit: 8 }, log, signal)).items,
     searchGb: async (q) => (await searchGbEditions({ q, limit: 8 }, log, signal)).items,
     authorNames: async (refs) => {
       const uris = [...new Set(refs.map((ref) => ref.uri))];

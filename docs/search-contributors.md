@@ -45,14 +45,14 @@
   "items": [
     {
       "$type": "community.lexicon.book.contributor",
-      "uri": "at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.A14286376A",
+      "uri": "at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/gb.a-jane-doe",
       "name": "Trivium Test Trivium Test Prep",
       "aliases": [],
       "identifiers": [
         {
-          "type": "openlibrary.org",
-          "value": "OL14286376A",
-          "url": "https://openlibrary.org/authors/OL14286376A"
+          "type": "books.google.com",
+          "value": "b9AOEAAAQBAJ",
+          "url": "https://books.google.com/books?id=b9AOEAAAQBAJ"
         }
       ],
       "createdAt": "2026-10-25T00:13:18.838Z"
@@ -76,11 +76,15 @@ Based on the codebase:
 2. **`searchWork`** - inlines contributors on each work record, same shape
 3. **`searchContributors`** - dedicated endpoint for finding contributors
 
-## Wikidata identity links on contributors
+`searchContributors` has no remote catalog source: it reads `contributors`
+through `PostgresSource.searchContributors` and returns those rows. Contributor
+records themselves are minted by `contributor-name-resolver` (a slug-derived
+rkey per source) and by the contributor backfill jobs, not by search ingest.
 
-`searchContributors` enriches OL-sourced contributors through
-`WikidataContributorEnricher`, which appends Wikidata identity links to the
-existing `identifiers` array:
+## Wikidata identity links on editions and works
+
+`searchEditions` / `searchWorks` run `WikidataEditionEnricher`, which appends
+Wikidata identity links to an item's existing `identifiers` array:
 
 | `type` | `value` | `url` |
 |---|---|---|
@@ -96,10 +100,10 @@ dropped at the XRPC boundary and never persisted. `defs#identifier` accepts any
 written as the provider's lowercase domain. Identifiers compare by exact
 `type` + `value`; `url` is display-only and never part of a match.
 
-The join key is the contributor's own Open Library author ID (Wikidata `P648`).
-Names are deliberately not used as a lookup key — an exact-label match on a
-common name binds the wrong entity, and the result is written to the database by
-sync ingest. Items with no OLID are passed through unchanged.
+The join key is the item's own `wikidata` identifier: no name matching is
+involved, so an exact-label collision cannot bind the wrong entity. Items
+carrying no Wikidata identifier are passed through unchanged and cost no
+request.
 
 ## Empty-name invariant
 
@@ -225,5 +229,5 @@ The worktree was left untouched.
 5. `packages/bibliograph-service/src/lib/server/search/contributor-name.ts` — `validContributorName`
 6. `packages/bibliograph-service/src/lib/server/search/postgres-source.ts` — SQL predicate
 7. `packages/bibliograph-service/drizzle/0010_contributor_name_nonempty.sql` — CHECK constraint
-8. `packages/bibliograph-service/src/lib/server/search/wikidata-enricher.ts` — `WikidataContributorEnricher`
+8. `packages/bibliograph-service/src/lib/server/search/wikidata-enricher.ts` — `WikidataEditionEnricher`
 9. `packages/bibliograph-service/src/lib/server/api/wikidata.ts` — SPARQL lookup + `identifiers` merge

@@ -9,11 +9,10 @@ import { identifierKey, PROVIDER_IDENTIFIER_DOMAINS, providerIdentifier, type Id
  * Wikidata as an *enricher*: it never contributes items, it only attaches
  * structured identity links to items another source already produced.
  *
- * The join key is Open Library's own ID (Wikidata P648), because that is the
- * identifier every OL-sourced edition/work/contributor already carries, and it
- * is answered from Wikidata's indexed triple store in ~1s. ISBN joins (P212)
- * were measured at 20s+ and returned nothing for real OL ISBNs, so they are not
- * used — see the smoke notes in the PR body.
+ * The join key is the item's own `wikidata` identifier, i.e. the Q-id the
+ * record already carries — one lookup per distinct Q-id, answered from
+ * Wikidata's indexed triple store in ~1s. Items without a Q-id are not asked
+ * about at all: there is nothing to join on.
  */
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
@@ -29,8 +28,7 @@ const CACHE_MAX_ENTRIES = 5000;
 /** `community.lexicon.book.{edition,work,contributor}.identifiers` all cap at 32. */
 const MAX_IDENTIFIERS = 32;
 
-/** `identifier.type` namespaces this enricher joins on. */
-const OPENLIBRARY_TYPE = PROVIDER_IDENTIFIER_DOMAINS.openlibrary ?? 'openlibrary.org';
+/** `identifier.type` namespace this enricher joins on. */
 const WIKIDATA_TYPE = PROVIDER_IDENTIFIER_DOMAINS.wikidata ?? 'wikidata.org';
 
 /** `identifiers` entries to append for one matched item. */
@@ -49,11 +47,11 @@ interface SparqlResponse {
 
 interface Candidate {
   qid: string;
-  sitelinks: number;
   viaf?: string;
   isni?: string;
 }
 
+/** Keyed by bare Q-id: the same item reached through two identifier shapes is one lookup. */
 const cache = new Map<string, { match: WikidataMatch | null; expiresAt: number }>();
 
 /** Serialises SPARQL calls and spaces their start times by `MIN_INTERVAL_MS`. */
@@ -75,76 +73,44 @@ function throttled<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-const OL_URI = /^https?:\/\/openlibrary\.org\/(?:works|books|authors)\/(OL\d+[A-Z])$/;
-/** The same entity kinds `OL_URI` accepts (works, books, authors), as a bare value. */
-const OL_ID = /^(OL\d+[WMA])$/;
-
-/** Bare Open Library ID (`OL66554W`) from an `openlibrary` identifier URI. */
-export function olIdFromIdentifierUri(uri: string): string | undefined {
-  return OL_URI.exec(uri)?.[1];
+/** Bare `Q…` id from a Wikidata entity URI (`…/entity/Q42`). */
+function qidFromEntityUri(uri: string): string | undefined {
+  return /\/entity\/(Q\d+)$/i.exec(uri)?.[1]?.toUpperCase();
 }
 
 /**
- * Bare Open Library ID from a canonical `openlibrary` identifier. The value is
- * the canonical form; `url` is only the display page, so it is the fallback for
- * identifiers written before the value carried the OLID on its own.
+ * Bare `Q…` id from a `wikidata` identifier. The value is the canonical form;
+ * `url` is only the display page, so it is the fallback for identifiers written
+ * before the value carried the Q-id on its own.
  */
-function olidFromIdentifier(identifier: Identifier): string | undefined {
-  const bare = OL_ID.exec(identifier.value)?.[1];
-  if (bare) return bare;
-  return identifier.url ? olIdFromIdentifierUri(identifier.url) : undefined;
+function qidFromIdentifier(identifier: Identifier): string | undefined {
+  const bare = /^(Q\d+)$/i.exec(identifier.value.trim())?.[1];
+  if (bare) return bare.toUpperCase();
+  return identifier.url ? qidFromEntityUri(identifier.url) : undefined;
 }
 
-function qidFromEntityUri(uri: string): string | undefined {
-  const m = /\/entity\/(Q\d+)$/.exec(uri);
-  return m?.[1];
-}
-
-/** Lower Q-number = older, usually the canonical item; used only to break sitelink ties. */
-function qidNumber(qid: string): number {
-  return Number(qid.slice(1));
-}
-
-function buildQuery(olIds: readonly string[]): string {
-  const values = olIds.map((id) => `"${id}"`).join(' ');
-  return `SELECT ?item ?olid (MAX(?sitelinks) AS ?links) (SAMPLE(?viaf) AS ?viafId) (SAMPLE(?isni) AS ?isniId) WHERE {
-  VALUES ?olid { ${values} }
-  ?item wdt:P648 ?olid .
-  OPTIONAL { ?item wikibase:sitelinks ?sitelinks }
+function buildQuery(qids: readonly string[]): string {
+  const values = qids.map((qid) => `wd:${qid}`).join(' ');
+  return `SELECT ?item (SAMPLE(?viaf) AS ?viafId) (SAMPLE(?isni) AS ?isniId) WHERE {
+  VALUES ?item { ${values} }
   OPTIONAL { ?item wdt:P214 ?viaf }
   OPTIONAL { ?item wdt:P213 ?isni }
-} GROUP BY ?item ?olid`;
+} GROUP BY ?item`;
 }
 
 /**
- * One OLID can be claimed by several Wikidata items (a stub duplicating a real
- * one). Pick the item with the most sitelinks — a notability proxy that
- * reliably separates the real item from an empty duplicate — then the lowest
- * Q-number so the choice is stable across runs.
+ * One row per requested Q-id, carrying whatever authority ids Wikidata holds.
+ * `VALUES` binds every requested Q-id whether or not Wikidata has the item, so
+ * a row by itself is not a match; the links it brings are what gets appended.
  */
-function rankCandidates(bindings: readonly SparqlBindings[]): Map<string, Candidate> {
-  const grouped = new Map<string, Candidate[]>();
+function parseCandidates(bindings: readonly SparqlBindings[]): Map<string, Candidate> {
+  const found = new Map<string, Candidate>();
   for (const b of bindings) {
-    const olid = b.olid?.value;
     const qid = b.item?.value ? qidFromEntityUri(b.item.value) : undefined;
-    if (!olid || !qid) continue;
-    const list = grouped.get(olid) ?? [];
-    list.push({
-      qid,
-      sitelinks: Number(b.links?.value ?? 0) || 0,
-      viaf: b.viafId?.value,
-      isni: b.isniId?.value,
-    });
-    grouped.set(olid, list);
+    if (!qid) continue;
+    found.set(qid, { qid, viaf: b.viafId?.value, isni: b.isniId?.value });
   }
-
-  const best = new Map<string, Candidate>();
-  for (const [olid, list] of grouped) {
-    list.sort((a, b) => b.sitelinks - a.sitelinks || qidNumber(a.qid) - qidNumber(b.qid));
-    const winner = list[0];
-    if (winner) best.set(olid, winner);
-  }
-  return best;
+  return found;
 }
 
 function toIdentifiers(c: Candidate): Identifier[] {
@@ -155,12 +121,12 @@ function toIdentifiers(c: Candidate): Identifier[] {
 }
 
 async function fetchChunk(
-  olIds: readonly string[],
+  qids: readonly string[],
   log: Logger,
   externalSignal?: AbortSignal,
 ): Promise<Map<string, WikidataMatch>> {
   const resolved = new Map<string, WikidataMatch>();
-  if (olIds.length === 0) return resolved;
+  if (qids.length === 0) return resolved;
   if (!wikidataBreaker.canCall()) {
     log.warn(
       { stage: 'wikidata-enricher', breaker: wikidataBreaker.getState() },
@@ -180,7 +146,7 @@ async function fetchChunk(
             accept: 'application/sparql-results+json',
             'content-type': 'application/x-www-form-urlencoded',
           },
-          body: new URLSearchParams({ query: buildQuery(olIds) }).toString(),
+          body: new URLSearchParams({ query: buildQuery(qids) }).toString(),
           signal: externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
         });
         if (!res.ok) {
@@ -193,15 +159,15 @@ async function fetchChunk(
       }, log),
     );
 
-    const best = rankCandidates(body.results?.bindings ?? []);
-    for (const [olid, candidate] of best) resolved.set(olid, { qid: candidate.qid, identifiers: toIdentifiers(candidate) });
+    const found = parseCandidates(body.results?.bindings ?? []);
+    for (const [qid, candidate] of found) resolved.set(qid, { qid, identifiers: toIdentifiers(candidate) });
 
     wikidataBreaker.recordSuccess();
     searchProviderRequestsTotal.inc({ provider: 'wikidata', status: 'success' });
     log.info(
       {
         stage: 'wikidata-enricher',
-        requested: olIds.length,
+        requested: qids.length,
         matched: resolved.size,
         durationMs: Math.round((performance.now() - start) * 100) / 100,
       },
@@ -211,17 +177,17 @@ async function fetchChunk(
   } catch (err) {
     wikidataBreaker.recordFailure();
     searchProviderRequestsTotal.inc({ provider: 'wikidata', status: 'error' });
-    log.error({ stage: 'wikidata-enricher', err, requested: olIds.length }, 'wikidata fetch failed');
+    log.error({ stage: 'wikidata-enricher', err, requested: qids.length }, 'wikidata fetch failed');
     return resolved;
   }
 }
 
-function remember(key: string, match: WikidataMatch | null): void {
+function remember(qid: string, match: WikidataMatch | null): void {
   if (cache.size >= CACHE_MAX_ENTRIES) {
     const oldest = cache.keys().next();
     if (!oldest.done) cache.delete(oldest.value);
   }
-  cache.set(key, { match, expiresAt: Date.now() + (match ? HIT_TTL_MS : MISS_TTL_MS) });
+  cache.set(qid, { match, expiresAt: Date.now() + (match ? HIT_TTL_MS : MISS_TTL_MS) });
 }
 
 function mergeIdentifiers(existing: readonly Identifier[], extra: readonly Identifier[]): Identifier[] {
@@ -238,10 +204,10 @@ function mergeIdentifiers(existing: readonly Identifier[], extra: readonly Ident
 }
 
 /**
- * Append Wikidata identity links to any item carrying `openlibrary`
- * identifiers. Items are returned untouched when nothing matches, when the
- * breaker is open, or when the endpoint fails: enrichment degrades to a no-op
- * rather than failing the search that triggered it.
+ * Append Wikidata's authority links (VIAF, ISNI) to any item carrying a
+ * `wikidata` identifier. Items are returned untouched when nothing matches,
+ * when the breaker is open, or when the endpoint fails: enrichment degrades to
+ * a no-op rather than failing the search that triggered it.
  */
 export async function enrichWithWikidata<T extends { identifiers: Identifier[] }>(
   items: readonly T[],
@@ -251,35 +217,35 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   if (items.length === 0) return [];
 
   const start = performance.now();
-  const wanted = new Map<string, string>(); // identifier key -> OLID
+  const wanted = new Set<string>();
   for (const item of items) {
-    if (item.identifiers.some((id) => id.type === WIKIDATA_TYPE)) continue;
     for (const id of item.identifiers) {
-      if (id.type !== OPENLIBRARY_TYPE) continue;
-      const olid = olidFromIdentifier(id);
-      if (olid) wanted.set(identifierKey(id), olid);
+      if (id.type !== WIKIDATA_TYPE) continue;
+      const qid = qidFromIdentifier(id);
+      if (qid) wanted.add(qid);
     }
   }
+  if (wanted.size === 0) return [...items];
 
   const matches = new Map<string, WikidataMatch>();
-  const pending: Array<[key: string, olid: string]> = [];
+  const pending: string[] = [];
   const now = Date.now();
-  for (const [key, olid] of wanted) {
-    const cached = cache.get(key);
+  for (const qid of wanted) {
+    const cached = cache.get(qid);
     if (cached && cached.expiresAt > now) {
-      if (cached.match) matches.set(key, cached.match);
+      if (cached.match) matches.set(qid, cached.match);
       continue;
     }
-    pending.push([key, olid]);
+    pending.push(qid);
   }
 
   for (let i = 0; i < pending.length; i += CHUNK_SIZE) {
     const chunk = pending.slice(i, i + CHUNK_SIZE);
-    const resolved = await fetchChunk(chunk.map(([, olid]) => olid), log, externalSignal);
-    for (const [key, olid] of chunk) {
-      const match = resolved.get(olid) ?? null;
-      remember(key, match);
-      if (match) matches.set(key, match);
+    const resolved = await fetchChunk(chunk, log, externalSignal);
+    for (const qid of chunk) {
+      const match = resolved.get(qid) ?? null;
+      remember(qid, match);
+      if (match) matches.set(qid, match);
     }
   }
 
@@ -300,8 +266,9 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   return items.map((item) => {
     const extra: Identifier[] = [];
     for (const id of item.identifiers) {
-      if (id.type !== OPENLIBRARY_TYPE) continue;
-      const match = matches.get(identifierKey(id));
+      if (id.type !== WIKIDATA_TYPE) continue;
+      const qid = qidFromIdentifier(id);
+      const match = qid ? matches.get(qid) : undefined;
       if (match) extra.push(...match.identifiers);
     }
     if (extra.length === 0) return item;

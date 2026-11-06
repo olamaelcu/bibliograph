@@ -69,7 +69,7 @@ function sourceFixture(overrides: Partial<EditionRow> = {}): EditionRow {
     identifiers: [
       { type: 'isbn', value: '9780306406157' },
       { type: 'amazon.com', value: '9780306406157' },
-      { type: 'openlibrary.org', value: 'OL1W' },
+      { type: 'goodreads.com', value: '23692271' },
     ],
     contributors: [
       { subject: { uri: AUTHOR, cid: 'bafystale' }, role: 'author' },
@@ -85,7 +85,7 @@ test('computeMergedEdition unions identifiers and contributors, deduping on (typ
   assert.deepEqual(merged.identifiers, [
     { type: 'isbn', value: '9780306406157' },
     { type: 'amazon.com', value: '9780306406157' },
-    { type: 'openlibrary.org', value: 'OL1W' },
+    { type: 'goodreads.com', value: '23692271' },
   ]);
   assert.deepEqual(merged.contributors, [
     { subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' },
@@ -263,7 +263,7 @@ test('mergeEditionsInDb writes the union to the primary and deletes only the oth
     identifiers: [
       { type: 'isbn', value: '9780306406157' },
       { type: 'amazon.com', value: '9780306406157' },
-      { type: 'openlibrary.org', value: 'OL1W' },
+      { type: 'goodreads.com', value: '23692271' },
     ],
     contributors: [
       { subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' },
@@ -295,7 +295,7 @@ test('mergeEditionsInDb folds the winner in first even when the database returns
   assert.deepEqual(result.merged.identifiers, [
     { type: 'isbn', value: '9780306406157' },
     { type: 'amazon.com', value: '9780306406157' },
-    { type: 'openlibrary.org', value: 'OL1W' },
+    { type: 'goodreads.com', value: '23692271' },
   ]);
   assert.equal(result.merged.coverImageUrl, 'https://covers.test/primary.jpg');
   assert.deepEqual(result.deleted, [SOURCE]);
