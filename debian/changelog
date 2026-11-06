@@ -1,3 +1,11 @@
+bibliograph (0.3.5) unstable; urgency=medium
+
+  * listShelves reads page one from the owner's PDS before the mirror, so a
+    deleted custom shelf leaves the landing page immediately; the mirror is
+    the fallback and still serves legacy cursors.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 19:30:00 -0500
+
 bibliograph (0.3.4) unstable; urgency=medium
 
   * listShelfItems reads page one from the owner's PDS before the mirror, so

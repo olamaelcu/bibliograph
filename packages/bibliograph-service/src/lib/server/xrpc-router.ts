@@ -922,6 +922,28 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
         } as NetOlamaelcuLivtetBiblioListShelves.$output);
       }
 
+      let shelves: NetOlamaelcuLivtetBiblioDefs.ShelfView[];
+      let nextCursor: string | undefined;
+      let pdsSucceeded = false;
+
+      // The first page comes from the PDS, not the mirror: a deleted shelf
+      // stays in the mirror until TAP consumes its delete, which would leave a
+      // phantom shelf on the landing page after the reader removed it. The
+      // mirror remains the fallback and owns legacy `tap:` cursors.
+      if (!resume) {
+        try {
+          const { rows, cursor: next } = await scanPdsShelves();
+          shelves = rows.map((row) => shelfViewFromValue(row.uri, row.value));
+          nextCursor = next ? `pds:${next}` : undefined;
+          pdsSucceeded = true;
+        } catch (err: unknown) {
+          log.warn({ err, did }, 'listShelves: PDS scan failed (cache-only result returned)');
+          shelves = [];
+        }
+      } else {
+        shelves = [];
+      }
+
       const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
       const cacheRows = await db
         .select()
@@ -936,27 +958,14 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
         .orderBy(newestRecordFirst())
         .limit(limit + 1)
         .offset(offset);
-      const hasMore = cacheRows.length > limit;
-      const merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
-      let nextCursor: string | undefined = hasMore ? `tap:${offset + limit}` : undefined;
-
-      if (!resume && merged.length < limit) {
-        try {
-          const { rows, cursor: next } = await scanPdsShelves();
-          const seen = new Set(merged.map((r) => r.uri));
-          // The whole PDS page is merged on purpose: breaking out early would
-          // strand the rest of it, because the cursor only moves to the next
-          // page. The mixed mirror-plus-PDS page can therefore carry up to twice
-          // the requested limit, which paging clients handle as a full page.
-          for (const row of rows) if (!seen.has(row.uri)) merged.push(row);
-          if (next) nextCursor = `pds:${next}`;
-        } catch (err: unknown) {
-          log.warn({ err, did }, 'listShelves: PDS scan failed (cache-only result returned)');
-        }
+      // Mirror fallback for a failed PDS scan, and the source for legacy
+      // `tap:` continuations.
+      if (!pdsSucceeded && (!resume || resume.tier === 'tap')) {
+        const hasMore = cacheRows.length > limit;
+        const merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
+        shelves = merged.map((row) => shelfViewFromValue(row.uri, row.value));
+        nextCursor = hasMore ? `tap:${offset + limit}` : undefined;
       }
-
-      const shelves: NetOlamaelcuLivtetBiblioDefs.ShelfView[] = merged.map((row) =>
-        shelfViewFromValue(row.uri, row.value));
 
       // The derived containers are constant, so they belong on the first page
       // only; paging continues on the real records. A real shelf record of the
