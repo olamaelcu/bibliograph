@@ -628,6 +628,23 @@ function isRecordResponse(value: unknown): value is PdsRecordResponse {
   return typeof v.uri === 'string' && typeof v.value === 'object' && v.value !== null;
 }
 
+/**
+ * The record itself, unwrapping the `@atcute/client` `{ok,data}` envelope.
+ * `isRecordResponse` accepts both shapes, but only the data object has `value`;
+ * reading `raw.value` on the envelope returns undefined and made every PDS
+ * shelf read look like a record with no fields.
+ */
+function recordResponseOf(value: unknown): PdsRecordResponse | null {
+  if (!isRecordResponse(value)) return null;
+  const wrapper = value as { ok?: unknown; data?: unknown };
+  if (wrapper.ok === true) {
+    return isRecordResponse(wrapper.data)
+      ? (wrapper.data as PdsRecordResponse)
+      : null;
+  }
+  return value as PdsRecordResponse;
+}
+
 interface PdsListRecordsResponse {
   records: Array<{ uri: string; cid?: string; value: Record<string, unknown> }>;
   cursor?: string;
@@ -709,11 +726,12 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetReadingGoal.mainSchema, {
       return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
     }
 
-    if (!isRecordResponse(raw)) {
+    const record = recordResponseOf(raw);
+    if (!record) {
       log.warn({ did: params.did, raw }, 'getReadingGoal: unexpected PDS response shape');
       return Response.json({ goal: null });
     }
-    return json({ goal: raw.value as NetOlamaelcuLivtetBiblioGetReadingGoal.$output['goal'] } as unknown as NetOlamaelcuLivtetBiblioGetReadingGoal.$output);
+    return json({ goal: record.value as NetOlamaelcuLivtetBiblioGetReadingGoal.$output['goal'] } as unknown as NetOlamaelcuLivtetBiblioGetReadingGoal.$output);
   },
 });
 
@@ -739,11 +757,12 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetActorProfile.mainSchema, {
       return Response.json({ error: 'UpstreamUnavailable', message }, { status: 502 });
     }
 
-    if (!isRecordResponse(raw)) {
+    const record = recordResponseOf(raw);
+    if (!record) {
       log.warn({ did: params.did, raw }, 'getActorProfile: unexpected PDS response shape');
       return Response.json({ profile: null });
     }
-    return json({ profile: raw.value as NetOlamaelcuLivtetBiblioGetActorProfile.$output['profile'] } as unknown as NetOlamaelcuLivtetBiblioGetActorProfile.$output);
+    return json({ profile: record.value as NetOlamaelcuLivtetBiblioGetActorProfile.$output['profile'] } as unknown as NetOlamaelcuLivtetBiblioGetActorProfile.$output);
   },
 });
 // Shelving and image queries
@@ -763,14 +782,15 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelf.mainSchema, {
         params: { repo: did as `did:${string}:${string}`, collection: 'net.olamaelcu.livtet.biblio.shelf', rkey: uri.split('/').pop()! },
         signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
       });
-      if (!isRecordResponse(raw)) {
+      const record = recordResponseOf(raw);
+      if (!record) {
         return Response.json({ error: 'RecordNotResolved', message: 'PDS record missing' }, { status: 404 });
       }
       // The record value is the shelf; building the view here (instead of
       // passing the value through) is what publishes `description` and the
       // timestamps, and keeps fields the lexicon does not declare out of the
       // response.
-      const shelf = shelfViewFromValue(uri, raw.value);
+      const shelf = shelfViewFromValue(uri, record.value);
       return json({ shelf } as NetOlamaelcuLivtetBiblioGetShelf.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1478,8 +1498,9 @@ async function fetchShelfViewFromPds(
       params: { repo: did as `did:${string}:${string}`, collection: SHELF_COLLECTION, rkey: shelfRkeyOf(uri) },
       signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
     });
-    if (!isRecordResponse(raw)) return null;
-    return shelfViewFromValue(uri, raw.value);
+    const record = recordResponseOf(raw);
+    if (!record) return null;
+    return shelfViewFromValue(uri, record.value);
   } catch (err: unknown) {
     log.warn({ err, did, uri }, 'listShelfItems: shelf record read failed; publishing the derived name');
     return null;

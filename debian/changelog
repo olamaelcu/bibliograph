@@ -1,3 +1,11 @@
+bibliograph (0.3.3) unstable; urgency=medium
+
+  * Unwrap the PDS record envelope in getShelf and the shelfItem shelf
+    hydration. A custom shelf's name and description were being dropped
+    because the envelope, not its data, was read as the record.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 05 Nov 2026 19:20:00 -0500
+
 bibliograph (0.3.2) unstable; urgency=medium
 
   * Custom shelving. Shelf records carry an optional description, and the
