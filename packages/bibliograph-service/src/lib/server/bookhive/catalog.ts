@@ -1,4 +1,5 @@
 import type { ContributionEntry, EditionItem, Identifier } from '../search/types';
+import { isbnIdentifier } from '../isbn/merge';
 import {
   BOOKHIVE_CATALOG_COLLECTION,
   BOOKHIVE_DID,
@@ -41,6 +42,10 @@ export interface CatalogBookRecord {
   rating?: number;
   createdAt?: string;
   updatedAt?: string;
+  /** On-protocol ISBN-13 from `identifiers.isbn13`, when the record carries it. */
+  isbn13?: string;
+  /** On-protocol ISBN-10 from `identifiers.isbn10`, when the record carries it. */
+  isbn10?: string;
 }
 
 export interface CatalogPage {
@@ -98,6 +103,14 @@ export function parseCatalogBook(value: unknown): CatalogBookRecord | null {
   if (createdAt) rec.createdAt = createdAt;
   const updatedAt = str(v.updatedAt);
   if (updatedAt) rec.updatedAt = updatedAt;
+  const identifiers = v.identifiers;
+  if (identifiers && typeof identifiers === 'object') {
+    const idents = identifiers as Record<string, unknown>;
+    const isbn13 = str(idents.isbn13);
+    if (isbn13) rec.isbn13 = isbn13;
+    const isbn10 = str(idents.isbn10);
+    if (isbn10) rec.isbn10 = isbn10;
+  }
   return rec;
 }
 
@@ -107,6 +120,12 @@ function identifiersFor(rec: CatalogBookRecord): Identifier[] {
   ];
   if (rec.sourceId && rec.source && rec.source.toLowerCase() === 'goodreads') {
     identifiers.push({ uri: goodreadsUri(rec.sourceId), resource: 'goodreads' });
+  }
+  // Bookhive carries ISBNs on-protocol (99% of the catalog). ISBN-13 goes
+  // first because the reading clients take the first ISBN-resource entry.
+  for (const raw of [rec.isbn13, rec.isbn10]) {
+    const ident = raw ? isbnIdentifier(raw) : null;
+    if (ident) identifiers.push(ident);
   }
   return identifiers;
 }

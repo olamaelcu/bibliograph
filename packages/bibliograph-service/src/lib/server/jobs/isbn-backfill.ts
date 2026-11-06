@@ -19,6 +19,7 @@ import {
 } from '../isbn/prune';
 import { isIsbndbRkey, isbnFromIsbndbRkey } from '../isbndb/keys';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
+import { editionRecordValueForCid } from '../isbn/record-value';
 
 /**
  * Backfill the ISBN an edition record is missing.
@@ -157,24 +158,6 @@ export async function planIsbnEnrichment(
   return { action: 'none', result: 'none', candidates: recorded };
 }
 
-/** The lexicon-shaped record value, so the CID matches what the API serves. */
-function editionValueForCid(row: EditionRow, identifiers: Identifier[]): Record<string, unknown> {
-  return {
-    $type: 'community.lexicon.book.edition' as const,
-    title: row.title,
-    subtitle: row.subtitle ?? undefined,
-    place: row.place ?? undefined,
-    publishedYear: row.publishedYear ?? undefined,
-    language: row.language ?? undefined,
-    coverImageUrl: row.coverImageUrl ?? undefined,
-    contributors: row.contributors,
-    identifiers,
-    description: row.description ?? undefined,
-    pages: row.pages ?? undefined,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
 /** Wire the real clients, with the job's logger and timeout baked in. */
 export function defaultIsbnDeps(
   log: Logger,
@@ -235,7 +218,7 @@ export async function backfillIsbnForEdition(
   if (plan.action === 'already_has_isbn') return { updated: false, reason: 'already_has_isbn' };
 
   if (plan.action === 'write' && plan.identifiers) {
-    const value = editionValueForCid(row, plan.identifiers);
+    const value = editionRecordValueForCid(row, plan.identifiers);
     const cid = (await cidForLex(value as unknown as LexMap)).toString();
     const updated = await db
       .update(editions)

@@ -96,3 +96,40 @@ test('catalogBookToEditionItem needs a usable timestamp', () => {
   const viaUpdate = parseCatalogBook({ ...RECORD, createdAt: undefined, updatedAt: '2025-01-02T03:04:05.000Z' })!;
   assert.equal(catalogBookToEditionItem(viaUpdate)?.createdAt, '2025-01-02T03:04:05.000Z');
 });
+
+test('parseCatalogBook keeps the on-protocol ISBNs', () => {
+  const rec = parseCatalogBook({
+    ...RECORD,
+    identifiers: { hiveId: HIVE_ID, isbn13: '9780307420657', isbn10: '1400080460' },
+  });
+  assert.equal(rec?.isbn13, '9780307420657');
+  assert.equal(rec?.isbn10, '1400080460');
+});
+
+test('parseCatalogBook tolerates an identifiers object without ISBNs', () => {
+  const rec = parseCatalogBook({ ...RECORD, identifiers: { hiveId: HIVE_ID, goodreadsId: '1' } });
+  assert.ok(rec);
+  assert.equal(rec.isbn13, undefined);
+  assert.equal(rec.isbn10, undefined);
+});
+
+test('catalogBookToEditionItem carries the ISBNs, ISBN-13 first', () => {
+  const rec = parseCatalogBook({
+    ...RECORD,
+    identifiers: { hiveId: HIVE_ID, isbn13: '9780307420657', isbn10: '1400080460' },
+  })!;
+  const item = catalogBookToEditionItem(rec)!;
+  assert.deepEqual(item.identifiers.slice(-2), [
+    { uri: 'isbn:9780307420657', resource: 'isbn13' },
+    { uri: 'isbn:1400080460', resource: 'isbn10' },
+  ]);
+});
+
+test('catalogBookToEditionItem drops ISBNs of unusable length', () => {
+  const rec = parseCatalogBook({
+    ...RECORD,
+    identifiers: { hiveId: HIVE_ID, isbn13: '123' },
+  })!;
+  const item = catalogBookToEditionItem(rec)!;
+  assert.equal(item.identifiers.some((ident) => ident.resource.startsWith('isbn')), false);
+});

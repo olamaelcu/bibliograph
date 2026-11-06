@@ -1,8 +1,32 @@
+bibliograph (0.3.9) unstable; urgency=medium
+
+  * Bookhive catalog ISBNs are imported. `buzz.bookhive.catalogBook` carries
+    `identifiers.isbn10`/`isbn13` on 82% of its records, and the edition
+    mapping dropped them; they now reach `editions.identifiers` (ISBN-13
+    first). `scripts/backfill-bookhive-isbns.ts` copies them onto the bh.*
+    editions imported before the mapping changed, recomputing the CID, so the
+    search scan no longer burns upstream calls on rows whose ISBN was already
+    on-protocol.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 11:33:19 -0500
+
 bibliograph (0.3.8) unstable; urgency=medium
 
   * The daily ISBN backfill scans 83,000 rows per tick instead of 200, and its
     start timeout grows to one hour to cover the sequential enqueue, so the
     ~165k missing-ISBN backlog clears in about two days.
+
+  * The works backfill no longer fabricates a work when OpenLibrary has no
+    match: an unmatched edition is left with `work_uri` NULL instead of gaining
+    a subjectless, contributor-less work row, and the summary reports those as
+    `unmatched` rather than counting them as created. The scan also takes
+    `--shard=<index>/<count>` (or SHARD_INDEX/SHARD_COUNT), so a 240k-edition
+    catalog can be walked by several processes over disjoint uri slices.
+  * A failed OpenLibrary search is now reported as `degraded` instead of an
+    empty result, so the backfill defers those rows (and stops after 25 in a
+    row) rather than recording "the catalog does not know this work" for a
+    lookup that never happened — the breaker-open case that made an outage look
+    like a catalog fact.
 
  -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 11:05:52 -0500
 
