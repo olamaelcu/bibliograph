@@ -8,6 +8,11 @@ bibliograph (0.4.0) unstable; urgency=medium
   * Re-key Wikidata enrichment onto an item's own `wikidata` identifier
     (appending VIAF/ISNI) instead of resolving a QID from an OpenLibrary ID,
     and move the generic breaker+retry JSON helper out of the deleted client.
+  * Identifiers are stored in the lexicon's canonical `{type, value}` form
+    instead of the internal `{uri, resource}` pair, and every record CID is
+    recomputed from the value the API serves (`scripts/migrate-identifiers-canonical.ts`,
+    `pnpm db:migrate:identifiers`). Run it with `--dry-run` first: it rewrites
+    the stored jsonb of every edition, work, contributor and publisher row.
   * The works reconciler has no work catalogue left to consult: phase 1 leaves
     `work_uri` NULL and reports rows as deferred instead of marking them
     `unmatched` or inventing a work, so nothing stamps the catalog with a
