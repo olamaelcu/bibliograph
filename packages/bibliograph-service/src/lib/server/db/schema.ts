@@ -60,6 +60,11 @@ export const editions = pgTable(
     // `EXISTS`, and `edition-work-actions` resolving an edition — which without
     // this index is a sequential scan of the whole catalog per lookup.
     rkeyIdx: index('editions_rkey_idx').on(t.rkey),
+    // The recommendation feed joins subject-sharing works back to their
+    // editions; without this, every "For You" read scanned the catalog.
+    workUriIdx: index('editions_work_uri_idx')
+      .on(t.workUri)
+      .where(sql`${t.workUri} IS NOT NULL`),
     // editions.work_uri / editions.publisher_uri FKs are declared in the
     // initial migration (kept out of the schema to avoid the self-reference
     // cycle through publishers.imprint_of_uri).

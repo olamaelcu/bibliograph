@@ -134,6 +134,11 @@ import { registerBookQueries } from '../../routes/xrpc/book-queries';
 import { queryLabels, labelToJson } from './labeler/labels';
 import { verifyFeedAuth, requireFeedAuth } from './auth/feed-auth';
 import { publicOrigin } from './auth/oauth';
+import {
+  RECOMMENDATION_LIMIT,
+  readViewerLibrary,
+  recommendBookUris,
+} from './recommendation';
 
 export const log = createLogger('web');
 log.info({ nodeEnv: process.env.NODE_ENV }, 'web process started');
@@ -2721,6 +2726,13 @@ router.addQuery(describeFeedGeneratorSchema, {
           description: 'Reviews and shelving by people followed by the people you follow (2 hops)',
           requiresAuth: true,
         },
+        {
+          uri: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/recommendations`,
+          displayName: 'Bibliograph For You',
+          description:
+            'Books you have not shelved that share genres with what you are reading and what you have read',
+          requiresAuth: true,
+        },
       ],
     } as unknown as v.InferXRPCBodyOutput<typeof describeFeedGeneratorSchema['output']>);
   },
@@ -2980,6 +2992,34 @@ router.addQuery(getFeedSkeletonSchema, {
       }
 
       return json({ feed, cursor: outCursor } as unknown as v.InferXRPCBodyOutput<typeof getFeedSkeletonSchema['output']>);
+    }
+
+    // ── Recommendations ("For You", requires auth) ────────────────────
+    // at://<did>/net.olamaelcu.livtet.biblio.feed.generator/recommendations
+    //
+    // The one generator whose `post` is a catalog edition rather than a record
+    // in someone's repo: a recommendation has no author and no createdAt, so
+    // there is no record to point at. `reason` says which kind of entry it is,
+    // and the client renders a book card instead of hydrating a repo record.
+    //
+    // Single page on purpose: the answer is a ranked set of at most
+    // RECOMMENDATION_LIMIT books, not a stream, and a cursor would only reshuffle
+    // the same ranked list against a shelf that may have changed since.
+    if (feedType === 'recommendations') {
+      const userDid = await requireFeedAuth(ctx.request);
+      if (!allowRequest(`did:${userDid}`, 'com.atproto.feed.getFeedSkeleton')) {
+        log.warn({ userDid }, 'rate limited (recommendation feed)');
+        return new Response(JSON.stringify({ error: 'RateLimited', message: 'Too many requests' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '60' },
+        });
+      }
+
+      const wanted = Math.min(limit, RECOMMENDATION_LIMIT);
+      const library = await readViewerLibrary(userDid);
+      const uris = library ? await recommendBookUris(library, wanted) : [];
+      const feed = uris.map((uri) => ({ post: uri, reason: 'recommendation' }));
+      return json({ feed } as unknown as v.InferXRPCBodyOutput<typeof getFeedSkeletonSchema['output']>);
     }
 
     // ── Edition-specific feed (public) ────────────────────────────────

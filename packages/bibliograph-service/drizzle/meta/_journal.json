@@ -162,6 +162,13 @@
       "when": 1795000000001,
       "tag": "0024_edition_goodreads_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795000000002,
+      "tag": "0025_editions_work_uri",
+      "breakpoints": true
     }
   ]
 }
