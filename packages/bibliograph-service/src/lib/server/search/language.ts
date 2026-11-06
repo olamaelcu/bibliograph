@@ -3,11 +3,9 @@
  * and the various representations used by the upstream sources we proxy.
  *
  *  - PostgreSQL `editions.language` / `works.originalLanguage` carry mixed values:
- *    OL ingests as 3-letter MARC (`eng`), Google Books and ISBNDB as 2-letter ISO
- *    639-1 (`en`). Postgres-side filtering therefore has to expand each input tag
- *    to all known variants to avoid silent misses.
- *
- *  - OpenLibrary's `search.json?language=` accepts the MARC 3-letter form only.
+ *    some sources ingest 3-letter MARC (`eng`), Google Books and ISBNDB write
+ *    2-letter ISO 639-1 (`en`). Postgres-side filtering therefore has to expand
+ *    each input tag to all known variants to avoid silent misses.
  *
  *  - Google Books' `langRestrict=` accepts a single 2-letter ISO 639-1 tag and
  *    returns nothing on a multi-language request — that's why we only set it when
@@ -89,50 +87,6 @@ const MARC_TO_ISO_639_1: Record<string, string> = {
   ukr: 'uk',
 };
 
-const ISO_639_2_TO_ISO_639_1: Record<string, string> = {
-  eng: 'en',
-  fre: 'fr',
-  ger: 'de',
-  spa: 'es',
-  por: 'pt',
-  ita: 'it',
-  dut: 'nl',
-  jpn: 'ja',
-  chi: 'zh',
-  rus: 'ru',
-  ara: 'ar',
-  kor: 'ko',
-  pol: 'pl',
-  swe: 'sv',
-  nor: 'no',
-  dan: 'da',
-  fin: 'fi',
-  gre: 'el',
-  heb: 'he',
-  tur: 'tr',
-  cze: 'cs',
-  hun: 'hu',
-  rum: 'ro',
-  ukr: 'uk',
-};
-
-/** Translate a BCP-47 tag to the MARC21 3-letter form OpenLibrary's `language=`
- *  parameter expects. Returns null for tags without a known mapping so the caller
- *  can choose to omit the upstream param rather than send a wrong value. */
-export function toOlLanguage(tag: string): string | null {
-  const norm = normalize(tag);
-  if (!norm) return null;
-  const base = norm.split('-')[0]!;
-  if (base.length === 3 && ISO_639_2_TO_ISO_639_1[base]) {
-    // already MARC (or other ISO 639-2 bibliographic) — pass through
-    return base;
-  }
-  if (base.length === 2) {
-    return ISO_639_1_TO_MARC[base] ?? null;
-  }
-  return null;
-}
-
 /** Translate a BCP-47 tag to the ISO 639-1 form Google Books' `langRestrict=`
  *  parameter expects. Returns null for tags without a known 2-letter base, so the
  *  caller can omit `langRestrict` rather than send a code GB will silently ignore. */
@@ -155,7 +109,7 @@ export function toGbLangRestrict(tag: string): string | null {
  *   - the 3-letter MARC form (`eng`)
  *
  * Both the input and the base are emitted so an `en-us` filter still hits the
- * `eng` rows OL wrote. Empty array / all-unparseable → empty array.
+ * `eng` rows a MARC source wrote. Empty array / all-unparseable → empty array.
  */
 export function pgLanguageVariants(tags: readonly string[]): string[] {
   if (tags.length === 0) return [];
@@ -188,14 +142,4 @@ export function languageOf<T extends { language?: string | null; originalLanguag
   return v.toLowerCase();
 }
 
-/** Returns the input tags filtered/normalized to those we can act on. Empty
- *  result means no upstream filtering is possible. */
-export function translateOlLanguages(tags: readonly string[]): string[] {
-  if (tags.length === 0) return [];
-  const out = new Set<string>();
-  for (const tag of tags) {
-    const mapped = toOlLanguage(tag);
-    if (mapped) out.add(mapped);
-  }
-  return Array.from(out);
-}
+

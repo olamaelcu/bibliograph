@@ -5,7 +5,7 @@ import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
-import { googleBooksBreaker, isbndbBreaker, openLibraryBreaker } from '../api/breakers';
+import { googleBooksBreaker, isbndbBreaker } from '../api/breakers';
 import { withRetry } from '../api/retry';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
@@ -17,14 +17,12 @@ import {
   getBookByIsbn,
   isbndbDescription,
 } from '../api/isbndb';
-import { getEditionByRkey, openLibraryDescription } from '../api/open-library';
 
 /**
  * Backfill missing `description` on an edition record.
  *
  * Mirrors `cover-backfill.ts`:
  *   - GB by volume-id (GB rkey) or by ISBN (fallback)
- *   - OL by rkey (edition record already has OL id)
  *   - ISBNdb by ISBN (last resort)
  *
  * Updates the row + recomputes the record CID when the new description
@@ -125,11 +123,6 @@ export async function resolveDescription(
     } catch {
       // Invalid rkey already validated.
     }
-  } else {
-    // OL path: edition doc already has the description field.
-    const olItem = await getEditionByRkey(row.rkey, log, signal);
-    const desc = openLibraryDescription(olItem?.description);
-    if (desc) return desc;
   }
 
   const isbn = isbnFromIdentifiers(row.identifiers);
@@ -191,7 +184,7 @@ export async function backfillDescriptionForEdition(
 
   // A negative result is only trustworthy when every upstream we would consult
   // was actually reachable; otherwise the row stays unchecked for a later run.
-  const deferrable = () => [googleBooksBreaker, isbndbBreaker, openLibraryBreaker]
+  const deferrable = () => [googleBooksBreaker, isbndbBreaker]
     .some((b) => !b.canCall());
   const wasDeferred = deferrable();
   const description = await resolveDescription(row, log, signal);

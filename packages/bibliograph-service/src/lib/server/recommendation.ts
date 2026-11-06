@@ -5,7 +5,7 @@
 // should they see next?
 //
 // The similarity signal is the work's `subjects` (the genre/tag vocabulary the
-// catalog ingests from OpenLibrary and Google Books). Embeddings would be the
+// catalog ingests from Google Books). Embeddings would be the
 // richer signal, but this service has no model runtime and no vector column:
 // every embedding path would be an in-process download and a full catalog
 // re-embed on each deploy. Subject overlap is the fallback the design named for

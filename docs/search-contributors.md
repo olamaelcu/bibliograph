@@ -44,13 +44,13 @@
   "items": [
     {
       "$type": "community.lexicon.book.contributor",
-      "uri": "at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.A14286376A",
+      "uri": "at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/gb.a-jane-doe",
       "name": "Trivium Test Trivium Test Prep",
       "aliases": [],
       "identifiers": [
         {
-          "uri": "https://openlibrary.org/authors/OL14286376A",
-          "resource": "openlibrary"
+          "uri": "googlebooks://contributor/jane-doe",
+          "resource": "googlebooks"
         }
       ],
       "createdAt": "2026-10-25T00:13:18.838Z"
@@ -69,16 +69,19 @@ The contributor record requires:
 
 ## Where Book Search Returns Contributors
 
-Based on the codebase:
 1. **`searchEditions`** - may include contributor URIs in edition records
 2. **`searchWork`** - may include contributor URIs in work records
-3. **`searchContributors`** - dedicated endpoint for finding contributors
+3. **`searchContributors`** - dedicated endpoint, served from Postgres only
 
-## Wikidata identity links on contributors
+`searchContributors` has no remote catalog source: it reads `contributors`
+through `PostgresSource.searchContributors` and returns those rows. Contributor
+records themselves are minted by `contributor-name-resolver` (a slug-derived
+rkey per source) and by the contributor backfill jobs, not by search ingest.
 
-`searchContributors` enriches OL-sourced contributors through
-`WikidataContributorEnricher`, which appends Wikidata identity links to the
-existing `identifiers` array:
+## Wikidata identity links on editions and works
+
+`searchEditions` / `searchWorks` run `WikidataEditionEnricher`, which appends
+Wikidata identity links to an item's existing `identifiers` array:
 
 | `resource` | `uri` example |
 |---|---|
@@ -91,10 +94,10 @@ These land in `identifiers` rather than new top-level fields because
 dropped at the XRPC boundary and never persisted. `identifiers` already declares
 `wikidata`/`viaf`/`isni` in its `knownValues`.
 
-The join key is the contributor's own Open Library author ID (Wikidata `P648`).
-Names are deliberately not used as a lookup key — an exact-label match on a
-common name binds the wrong entity, and the result is written to the database by
-sync ingest. Items with no OLID are passed through unchanged.
+The join key is the item's own `wikidata` identifier: no name matching is
+involved, so an exact-label collision cannot bind the wrong entity. Items
+carrying no Wikidata identifier are passed through unchanged and cost no
+request.
 
 ## Empty-name invariant
 
@@ -112,7 +115,7 @@ Closed at four layers, all keyed off one predicate,
 |---|---|---|
 | Database | `contributors_name_non_empty` CHECK (`btrim(name) <> ''`), migration `0010` | Empty/whitespace names cannot be written |
 | SQL read | `PostgresSource.searchContributors` | `btrim(name) <> ''` predicate, so `items` and `total` agree |
-| Service | `SearchService.searchContributors` | Drops invalid names from local **and** remote results before merge and before `syncIngestContributors` |
+| Service | `SearchService.searchContributors` | Drops invalid names from the local results before returning them |
 | XRPC handler | `routes/xrpc/book-queries.ts` | Final filter + `invalid_contributor_responses_total{nsid=…searchContributors,reason=empty_name}` |
 
 Live data is already clean — 2639 rows locally and 410 sampled over the wire had
@@ -130,9 +133,8 @@ response — both come from local cache columns:
 | contributors | `contributors.image_url` | none — `community.lexicon.book.contributor` has no image field |
 
 `ContributorItem.imageUrl` is filled by `PostgresSource.mapContributorRow` and
-survives the remote/local merge in `SearchService.mergeItems`, because
-OL-derived items carry no `imageUrl` key and so cannot overwrite the cached one.
-The column itself is populated by the `backfill-contributor-image` job
+reaches the caller untouched, since contributors are served from Postgres with
+no remote merge. The column itself is populated by the `backfill-contributor-image` job
 (`pnpm backfill:contributor-images`); until that has run for a contributor, its
 row renders text-only.
 
@@ -220,5 +222,5 @@ The worktree was left untouched.
 5. `packages/bibliograph-service/src/lib/server/search/contributor-name.ts` — `validContributorName`
 6. `packages/bibliograph-service/src/lib/server/search/postgres-source.ts` — SQL predicate
 7. `packages/bibliograph-service/drizzle/0010_contributor_name_nonempty.sql` — CHECK constraint
-8. `packages/bibliograph-service/src/lib/server/search/wikidata-enricher.ts` — `WikidataContributorEnricher`
+8. `packages/bibliograph-service/src/lib/server/search/wikidata-enricher.ts` — `WikidataEditionEnricher`
 9. `packages/bibliograph-service/src/lib/server/api/wikidata.ts` — SPARQL lookup + `identifiers` merge

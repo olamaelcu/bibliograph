@@ -42,7 +42,7 @@ test('buildBookContributorViews emits the platform BookContributorView shape', a
     bio: null,
     bornYear: null,
     diedYear: null,
-    identifiers: [{ uri: 'https://openlibrary.org/authors/OL0001A', resource: 'openlibrary' }],
+    identifiers: [{ uri: 'https://www.wikidata.org/entity/Q1234', resource: 'wikidata' }],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
   });
 
@@ -59,7 +59,7 @@ test('buildBookContributorViews emits the platform BookContributorView shape', a
     assert.equal(result[0]?.contributor.uri, SEED_URI);
     assert.equal(result[0]?.contributor.name, SEED_NAME);
     assert.deepEqual(result[0]?.contributor.identifiers, [
-      { uri: 'https://openlibrary.org/authors/OL0001A', resource: 'openlibrary' },
+      { uri: 'https://www.wikidata.org/entity/Q1234', resource: 'wikidata' },
     ]);
     assert.equal(result[0]?.contributor.createdAt, '2026-01-01T00:00:00.000Z');
   } finally {

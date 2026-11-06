@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
- * Disk-backed cache for cover bytes fetched from Google Books and Open Library.
+ * Disk-backed cache for cover bytes fetched from the catalog cover providers.
  *
  * `getImageForBook` used to hand clients the provider URL, so every reader and
  * every deploy re-fetched the same JPEG from the provider. The bytes never
@@ -30,13 +30,12 @@ const ALLOWED_CONTENT_TYPES = new Set([
 const ALLOWED_COVER_HOSTS = new Set([
   'books.google.com',
   'books.googleusercontent.com',
-  'covers.openlibrary.org',
   'covers.isbndb.com',
   'i.gr-assets.com',
   'images.gr-assets.com',
 ]);
 
-/** Open Library redirects a cover to `archive.org` and then to `ia*.archive.org`. */
+/** A cover host may redirect through `archive.org` to `ia*.archive.org`. */
 function isAllowedCoverHost(hostname: string): boolean {
   return ALLOWED_COVER_HOSTS.has(hostname) || hostname === 'archive.org' || hostname.endsWith('.archive.org');
 }
@@ -135,9 +134,9 @@ async function writeToDisk(key: string, cover: CachedCover, source: string): Pro
 async function fetchCover(source: string): Promise<CachedCover | null> {
   let url = source;
   // Follow redirects manually so every hop stays on the cover allowlist. The
-  // provider chain for Open Library is covers.openlibrary.org -> archive.org
-  // -> ia*.archive.org; a blanket redirect policy would let a compromised or
-  // open redirect reach an internal host.
+  // provider chain runs through archive.org -> ia*.archive.org; a blanket
+  // redirect policy would let a compromised or open redirect reach an
+  // internal host.
   for (let hop = 0; hop < 5; hop += 1) {
     if (!isAllowedCoverUrl(url)) return null;
     let response: Response;

@@ -1,13 +1,13 @@
 #!/usr/bin/env tsx
 //
-// Re-enqueue every edition whose `contributors` is empty so the OL/GB/ISBNdb
-// resolvers can repopulate them from upstream metadata. Idempotent — safe to
+// Re-enqueue every edition whose `contributors` is empty so the GB/ISBNdb/
+// Goodreads resolvers can repopulate them from upstream metadata. Idempotent — safe to
 // re-run; the ingest handler overwrites on conflict.
 //
 //   pnpm backfill:edition-contributors       # enqueue all
 //   pnpm backfill:edition-contributors -- --dry
 //   pnpm backfill:edition-contributors -- --limit=500
-//   pnpm backfill:edition-contributors -- --rkey=ol.OL24954708M
+//   pnpm backfill:edition-contributors -- --rkey=isbndb.9780441569595
 //
 // Requires DATABASE_URL.
 //
@@ -15,7 +15,7 @@
 import { and, asc, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '../src/lib/server/db';
 import { editions } from '../src/lib/server/db/schema';
-import { getEditionByRkey } from '../src/lib/server/api/open-library';
+import { fetchEditionForUri } from '../src/lib/server/shelving/edition-fetch';
 import { enqueueIngest } from '../src/lib/server/jobs/enqueue';
 import { createLogger } from '../src/lib/server/logger';
 import { ProgressBar } from './lib/progress';
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
           : EMPTY_CONTRIBUTORS;
 
     const rows = await db
-      .select({ uri: editions.uri, rkey: editions.rkey })
+      .select({ uri: editions.uri })
       .from(editions)
       .where(filter as unknown as SQL)
       .orderBy(asc(editions.uri))
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     for (const row of rows) {
       scanned++;
       try {
-        const item = await getEditionByRkey(row.rkey, log as never);
+        const item = await fetchEditionForUri(row.uri, log);
         if (!item) {
           skipped++;
         } else if (dry) {

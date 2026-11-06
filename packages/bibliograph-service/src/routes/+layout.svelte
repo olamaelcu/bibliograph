@@ -170,7 +170,6 @@
         >AT Protocol AppView</a
       >
       <a href="https://atproto.com">AT Protocol</a>
-      <a href="https://openlibrary.org">Open Library</a>
     </div>
     <div class="footer-col">
       <div class="footer-head">Built by</div>

@@ -28,7 +28,7 @@ afterEach(async () => {
 });
 
 const IMAGE = Buffer.from('jpeg-bytes');
-const SOURCE = 'https://covers.openlibrary.org/b/id/42-L.jpg';
+const SOURCE = 'https://covers.isbndb.com/cover.jpg';
 
 function imageResponse(): Response {
   return new Response(IMAGE, {
@@ -51,13 +51,13 @@ test('allows the providers Bibliograph emits and rejects other hosts', () => {
     true,
   );
   assert.equal(isAllowedCoverUrl('https://example.com/cover.jpg'), false);
-  assert.equal(isAllowedCoverUrl('http://covers.openlibrary.org/b/id/1-L.jpg'), false);
+  assert.equal(isAllowedCoverUrl('http://covers.isbndb.com/cover.jpg'), false);
 });
 
 test('builds an encoded proxy URL', () => {
   assert.equal(
     coverProxyUrl(SOURCE, 'https://biblio.test/'),
-    'https://biblio.test/image/cover?url=https%3A%2F%2Fcovers.openlibrary.org%2Fb%2Fid%2F42-L.jpg',
+    'https://biblio.test/image/cover?url=https%3A%2F%2Fcovers.isbndb.com%2Fcover.jpg',
   );
 });
 
@@ -109,7 +109,7 @@ test('does not cache a non-image response', async () => {
   assert.deepEqual(await readdir(dir), []);
 });
 
-test('follows the Open Library archive redirect', async () => {
+test('follows the archive.org cover redirect', async () => {
   const requested: string[] = [];
   globalThis.fetch = (async (input) => {
     const url =

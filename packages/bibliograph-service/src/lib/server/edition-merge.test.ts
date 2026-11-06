@@ -69,7 +69,7 @@ function sourceFixture(overrides: Partial<EditionRow> = {}): EditionRow {
     identifiers: [
       { uri: 'isbn:111', resource: 'isbn' },
       { uri: 'isbn:111', resource: 'amazon' },
-      { uri: 'ol:OL1W', resource: 'openlibrary' },
+      { uri: 'https://www.wikidata.org/entity/Q1', resource: 'wikidata' },
     ],
     contributors: [
       { subject: { uri: AUTHOR, cid: 'bafystale' }, role: 'author' },
@@ -85,7 +85,7 @@ test('computeMergedEdition unions identifiers and contributors, deduping on (uri
   assert.deepEqual(merged.identifiers, [
     { uri: 'isbn:111', resource: 'isbn' },
     { uri: 'isbn:111', resource: 'amazon' },
-    { uri: 'ol:OL1W', resource: 'openlibrary' },
+    { uri: 'https://www.wikidata.org/entity/Q1', resource: 'wikidata' },
   ]);
   assert.deepEqual(merged.contributors, [
     { subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' },
@@ -263,7 +263,7 @@ test('mergeEditionsInDb writes the union to the primary and deletes only the oth
     identifiers: [
       { uri: 'isbn:111', resource: 'isbn' },
       { uri: 'isbn:111', resource: 'amazon' },
-      { uri: 'ol:OL1W', resource: 'openlibrary' },
+      { uri: 'https://www.wikidata.org/entity/Q1', resource: 'wikidata' },
     ],
     contributors: [
       { subject: { uri: AUTHOR, cid: 'bafyauthor' }, role: 'author' },
@@ -295,7 +295,7 @@ test('mergeEditionsInDb folds the winner in first even when the database returns
   assert.deepEqual(result.merged.identifiers, [
     { uri: 'isbn:111', resource: 'isbn' },
     { uri: 'isbn:111', resource: 'amazon' },
-    { uri: 'ol:OL1W', resource: 'openlibrary' },
+    { uri: 'https://www.wikidata.org/entity/Q1', resource: 'wikidata' },
   ]);
   assert.equal(result.merged.coverImageUrl, 'https://covers.test/primary.jpg');
   assert.deepEqual(result.deleted, [SOURCE]);

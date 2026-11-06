@@ -5,12 +5,11 @@ import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { works } from '../db/schema';
 import type { WorkRow } from '../db/schema';
-import { googleBooksBreaker, isbndbBreaker, openLibraryBreaker } from '../api/breakers';
+import { googleBooksBreaker, isbndbBreaker } from '../api/breakers';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
-import { isIsbndbRkey, isbnFromIsbndbRkey } from '../isbndb/keys';
-import { getEditionByVolumeId, googleBooksDescription } from '../api/google-books';
-import { getWorkByRkey, openLibraryDescription } from '../api/open-library';
+import { isIsbndbRkey } from '../isbndb/keys';
+import { getEditionByVolumeId } from '../api/google-books';
 import { getBookByIsbn, isbndbDescription } from '../api/isbndb';
 
 type Db = typeof defaultDb;
@@ -40,19 +39,7 @@ export async function resolveWorkDescription(
     try {
       const volId = volumeIdFromGbRkey(row.rkey);
       const item = await getEditionByVolumeId(volId, log, s);
-      if (item?.description) {
-        return openLibraryDescription(item.description) ?? item.description;
-      }
-    } catch {
-      // fall through
-    }
-  }
-  // OL work
-  if (row.rkey.startsWith('ol.')) {
-    try {
-      const item = await getWorkByRkey(row.rkey, log, s);
-      const desc = item ? openLibraryDescription(item.description) : undefined;
-      if (desc) return desc;
+      if (item?.description) return item.description;
     } catch {
       // fall through
     }
@@ -89,7 +76,7 @@ export async function backfillDescriptionForWork(
   if (row.description) return { updated: false, reason: 'already_has_description' };
   // A negative result is only trustworthy when every upstream we would consult
   // was actually reachable; otherwise the row stays unchecked for a later run.
-  const deferrable = () => [googleBooksBreaker, isbndbBreaker, openLibraryBreaker]
+  const deferrable = () => [googleBooksBreaker, isbndbBreaker]
     .some((b) => !b.canCall());
   const wasDeferred = deferrable();
   const description = await resolveWorkDescription(row, log, signal);

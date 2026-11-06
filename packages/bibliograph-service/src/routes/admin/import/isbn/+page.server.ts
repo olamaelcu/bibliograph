@@ -5,9 +5,8 @@ import { isAdministrator } from '$lib/server/labeler/librarian';
 import { PUBLISHER_DID } from '$lib/server/did';
 import { db } from '$lib/server/db';
 import { editions, works, publishers } from '$lib/server/db/schema';
-import { searchEditions, isbnFromQuery } from '$lib/server/api/isbndb';
+import { searchEditions } from '$lib/server/api/isbndb';
 import { searchEditions as gbSearchEditions } from '$lib/server/api/google-books';
-import { searchEditions as olSearchEditions } from '$lib/server/api/open-library';
 import { randomBytes } from 'node:crypto';
 import type { EditionItem } from '$lib/server/search/types';
 import { createLogger } from '$lib/server/logger';
@@ -33,21 +32,15 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   if (q.trim().length >= 5) {
     const isbn = cleanIsbn(q);
     const logStub = { info: () => {}, warn: () => {}, error: () => {} } as never;
-    const [isbndbRes, gbRes, olRes] = await Promise.allSettled([
+    const [isbndbRes, gbRes] = await Promise.allSettled([
       searchEditions({ q: isbn, limit: 10 }, logStub, undefined),
       gbSearchEditions({ q: isbn, limit: 10 }, logStub, undefined),
-      olSearchEditions({ q: isbn, limit: 10 }, logStub, undefined),
     ]);
 
     results = {
       isbndb: isbndbRes.status === 'fulfilled' ? (isbndbRes.value?.items ?? []) : [],
       'google-books': gbRes.status === 'fulfilled' ? (gbRes.value?.items ?? []) : [],
-      'open-library': olRes.status === 'fulfilled' ? (olRes.value?.items ?? []) : [],
     };
-    // `results` is keyed by provider, so every read is optional under
-    // `noUncheckedIndexedAccess`; the counts are diagnostics, so a provider that
-    // did not answer reports zero rather than crashing the page.
-    log.info({ stage: 'isbn-search', q: isbn, isbndb: results['isbndb']?.length ?? 0, 'google-books': results['google-books']?.length ?? 0, 'open-library': results['open-library']?.length ?? 0 }, 'ISBN import page search');
   }
 
   return {
@@ -66,19 +59,17 @@ export const actions: Actions = {
 
     const clean = cleanIsbn(isbn);
     const logStub = { info: () => {}, warn: () => {}, error: () => {} } as never;
-    const [isbndbRes, gbRes, olRes] = await Promise.allSettled([
+    const [isbndbRes, gbRes] = await Promise.allSettled([
       searchEditions({ q: clean, limit: 10 }, logStub, undefined),
       gbSearchEditions({ q: clean, limit: 10 }, logStub, undefined),
-      olSearchEditions({ q: clean, limit: 10 }, logStub, undefined),
     ]);
 
-    log.info({ stage: 'isbn-search-action', isbn: clean, isbndb: isbndbRes.status, 'google-books': gbRes.status, 'open-library': olRes.status }, 'ISBN import action search');
+    log.info({ stage: 'isbn-search-action', isbn: clean, isbndb: isbndbRes.status, 'google-books': gbRes.status }, 'ISBN import action search');
 
     return {
       results: {
         isbndb: isbndbRes.status === 'fulfilled' ? (isbndbRes.value?.items ?? []) : [],
         'google-books': gbRes.status === 'fulfilled' ? (gbRes.value?.items ?? []) : [],
-        'open-library': olRes.status === 'fulfilled' ? (olRes.value?.items ?? []) : [],
       }
     };
   },
@@ -181,25 +172,6 @@ export const actions: Actions = {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return fail(500, { error: `Import failed: ${message}` });
-    }
-  },
-
-
-  coverSearch: async ({ locals, request }) => {
-    if (!locals.viewer) redirect(303, `/login?next=/admin/import/isbn`);
-    if (!(await isLibrarian(locals.viewer.did)) && !(await isAdministrator(locals.viewer.did))) return fail(403, { error: 'Not a librarian or administrator.' });
-
-    const form = await request.formData();
-    const olId = String(form.get('olId') ?? '').trim();
-    if (!olId) return fail(400, { error: 'OpenLibrary identifier required.' });
-
-    log.info({ stage: 'isbn-cover-search', olId }, 'ISBN import cover search');
-
-    try {
-      const coverUrl = `https://covers.openlibrary.org/b/id/${olId}-L.jpg`;
-      return { ok: true, coverUrl };
-    } catch (err) {
-      return fail(500, { error: String(err) });
     }
   },
 };

@@ -17,7 +17,7 @@ import type { Actions, PageServerLoad } from './$types';
 /** `community.lexicon.book.edition` caps `identifiers` at 32 entries. */
 const MAX_IDENTIFIERS = 32;
 
-/** Resources are slugs (`isbn13`, `openlibrary`, `googlebooks-canonical`). */
+/** Resources are slugs (`isbn13`, `wikidata`, `googlebooks-canonical`). */
 const RESOURCE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 type EditionIdentifier = EditionRow['identifiers'][number];

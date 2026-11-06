@@ -3,13 +3,10 @@
 // Two phases, both always on:
 //
 //   Phase 1 — orphans (editions.work_uri IS NULL):
-//     For each orphan: derive a search key from identifiers (ISBN preferred)
-//     or title, query OpenLibrary's work search, pick the first candidate
-//     whose title matches case-insensitively AND whose `first_publish_year`
-//     is within ±2 years (or missing on both sides). If no candidate matches,
-//     synthesize a work record from the edition's own fields. Ingest the
-//     resulting WorkItem (idempotent upsert keyed by deterministic URI),
-//     then write `editions.work_uri` / `work_cid` for the now-linked pair.
+//     For each orphan: synthesize a work record from the edition's own fields.
+//     Ingest the resulting WorkItem (idempotent upsert keyed by deterministic
+//     URI), then write `editions.work_uri` / `work_cid` for the now-linked
+//     pair.
 //
 //   Phase 2 — CID re-verify (editions.work_uri IS NOT NULL):
 //     For each already-linked edition, load the work row, recompute its CID
@@ -29,14 +26,11 @@ import { db as defaultDb } from '../db/index';
 import { editions, works } from '../db/schema';
 import type { DbExecutor } from '../stats';
 import { PUBLISHER_DID } from '../did';
-import { OpenLibrarySource } from '../search/open-library-source';
-import type { WorkItem, Identifier } from '../search/types';
+import type { WorkItem } from '../search/types';
 import type { EditionRow, WorkRow } from '../db/schema';
 
 type Db = DbExecutor;
 
-const YEAR_TOLERANCE = 2;
-const OL_WORK_PREFIX = '/works/';
 const PAGE_SIZE = 100;
 
 /** Size a phase up front so the caller's progress bar is real, not a spinner. */
@@ -63,7 +57,6 @@ export interface BackfillSummary {
 
 export interface BackfillOpts {
   db?: Db;
-  openLibrary?: OpenLibrarySource;
   log: Logger;
   pageSize?: number;
   now?: () => Date;
@@ -72,55 +65,6 @@ export interface BackfillOpts {
    * progress bar from the real total), then after each row.
    */
   onProgress?: (phase: 'orphans' | 'cids', done: number, total: number) => void;
-}
-
-export function isbnFromIdentifiers(idents: ReadonlyArray<Identifier>): string | undefined {
-  for (const ident of idents) {
-    if (ident.resource === 'isbn13' || ident.resource === 'isbn10' || ident.resource === 'isbn') {
-      return ident.uri.replace(/^isbn:/, '');
-    }
-  }
-  return undefined;
-}
-
-export function editionSearchQuery(edition: Pick<EditionRow, 'title' | 'identifiers'>): string {
-  return isbnFromIdentifiers(edition.identifiers) ?? edition.title;
-}
-
-export function normalizeTitle(s: string): string {
-  return s.trim().toLowerCase();
-}
-
-export function matchWorkCandidate(
-  candidates: ReadonlyArray<WorkItem>,
-  edition: Pick<EditionRow, 'title' | 'publishedYear'>,
-): WorkItem | null {
-  const target = normalizeTitle(edition.title);
-  const targetYear = edition.publishedYear ?? undefined;
-  for (const candidate of candidates) {
-    if (normalizeTitle(candidate.title) !== target) continue;
-    if (targetYear !== undefined && candidate.firstPublishedYear !== undefined) {
-      if (Math.abs(candidate.firstPublishedYear - targetYear) > YEAR_TOLERANCE) continue;
-    }
-    return candidate;
-  }
-  return null;
-}
-
-export function olKeyFromWorkIdentifiers(idents: ReadonlyArray<Identifier>): string | undefined {
-  for (const ident of idents) {
-    if (ident.resource === 'openlibrary') {
-      let u: URL;
-      try { u = new URL(ident.uri); } catch { continue; }
-      if (u.hostname === 'openlibrary.org' && u.pathname.startsWith(OL_WORK_PREFIX)) return u.pathname;
-    }
-  }
-  return undefined;
-}
-
-export function rkeyForWorkFromOlKey(olKey: string): string {
-  const olId = olKey.replace(OL_WORK_PREFIX, '');
-  return `ol.W${olId.slice(2)}`;
 }
 
 export function rkeyForSyntheticWork(editionUri: string): string {
@@ -242,47 +186,18 @@ async function upsertWorkRow(
 async function reconcileOneOrphan(
   edition: EditionRow,
   db: Db,
-  openLibrary: OpenLibrarySource,
   log: Logger,
   now: () => Date,
   summary: BackfillSummary,
 ): Promise<void> {
-  const q = editionSearchQuery(edition);
   const editionTitleLen = edition.title.trim().length;
   if (editionTitleLen === 0) {
     log.warn({ stage: 'backfill-works', editionUri: edition.uri }, 'orphan edition has no title; skipped');
     summary.skipped++;
     return;
   }
-  const olResult = await openLibrary.searchWorks({ q, limit: 5 });
-  const match = olResult.items.length > 0 ? matchWorkCandidate(olResult.items, edition) : null;
-  let workItem: WorkItem;
-  let rkey: string;
-  let outcome: 'reused' | 'created-from-ol' | 'synthesized';
-  if (match) {
-    const olKey = olKeyFromWorkIdentifiers(match.identifiers);
-    if (olKey) {
-      rkey = rkeyForWorkFromOlKey(olKey);
-      workItem = match;
-      outcome = 'created-from-ol';
-    } else {
-      // Defensive: matched but OL key missing → fall through to synthesized.
-      workItem = synthesizeWorkFromEdition(edition, now());
-      rkey = rkeyForSyntheticWork(edition.uri);
-      outcome = 'synthesized';
-    }
-  } else if (olResult.items.length > 0) {
-    // OL returned items but none matched (year drift, etc.). Synthesize so the
-    // orphan gets resolved; the synthetic rkey avoids colliding with future OL
-    // matches.
-    workItem = synthesizeWorkFromEdition(edition, now());
-    rkey = rkeyForSyntheticWork(edition.uri);
-    outcome = 'synthesized';
-  } else {
-    workItem = synthesizeWorkFromEdition(edition, now());
-    rkey = rkeyForSyntheticWork(edition.uri);
-    outcome = 'synthesized';
-  }
+  const workItem: WorkItem = synthesizeWorkFromEdition(edition, now());
+  const rkey = rkeyForSyntheticWork(edition.uri);
   const uri = workUriForRkey(rkey);
   const row = await upsertWorkRow(db, workItem, uri, log);
   const updated = await db.update(editions)
@@ -294,11 +209,11 @@ async function reconcileOneOrphan(
     summary.skipped++;
     return;
   }
-  if (outcome === 'synthesized' || outcome === 'created-from-ol') summary.created++;
+  summary.created++;
   summary.linked++;
   log.info({
     stage: 'backfill-works',
-    outcome,
+    outcome: 'synthesized',
     editionUri: edition.uri,
     workUri: uri,
     workCid: row.cid,
@@ -340,7 +255,6 @@ export async function runBackfill(opts: BackfillOpts): Promise<BackfillSummary> 
   const startedAt = Date.now();
   const db = opts.db ?? defaultDb;
   const log = opts.log;
-  const openLibrary = opts.openLibrary ?? new OpenLibrarySource(log);
   const pageSize = opts.pageSize ?? PAGE_SIZE;
   const now = opts.now ?? (() => new Date());
 
@@ -377,7 +291,7 @@ export async function runBackfill(opts: BackfillOpts): Promise<BackfillSummary> 
       cursor = edition.uri;
       summary.orphansFound++;
       try {
-        await reconcileOneOrphan(edition, db, openLibrary, log, now, summary);
+        await reconcileOneOrphan(edition, db, log, now, summary);
       } catch (err) {
         log.error({ stage: 'backfill-works', err, editionUri: edition.uri }, 'reconcile failed');
         summary.failed++;

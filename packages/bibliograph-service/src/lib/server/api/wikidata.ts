@@ -9,11 +9,11 @@ import type { Identifier } from '../search/types';
  * Wikidata as an *enricher*: it never contributes items, it only attaches
  * structured identity links to items another source already produced.
  *
- * The join key is Open Library's own ID (Wikidata P648), because that is the
- * identifier every OL-sourced edition/work/contributor already carries, and it
- * is answered from Wikidata's indexed triple store in ~1s. ISBN joins (P212)
- * were measured at 20s+ and returned nothing for real OL ISBNs, so they are not
- * used — see the smoke notes in the PR body.
+ * The join key is the item's own `wikidata` identifier: for a record that
+ * already names a Q-id, the one thing left to add is the authority records
+ * stored beside it. A `VALUES` lookup on the item itself is answered from
+ * Wikidata's indexed triple store in about a second, where joins on external
+ * keys are not.
  */
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
@@ -43,13 +43,6 @@ interface SparqlResponse {
   results?: { bindings?: SparqlBindings[] };
 }
 
-interface Candidate {
-  qid: string;
-  sitelinks: number;
-  viaf?: string;
-  isni?: string;
-}
-
 const cache = new Map<string, { match: WikidataMatch | null; expiresAt: number }>();
 
 /** Serialises SPARQL calls and spaces their start times by `MIN_INTERVAL_MS`. */
@@ -71,79 +64,51 @@ function throttled<T>(fn: () => Promise<T>): Promise<T> {
   return run;
 }
 
-const OL_URI = /^https?:\/\/openlibrary\.org\/(?:works|books|authors)\/(OL\d+[A-Z])$/;
-
-/** Bare Open Library ID (`OL66554W`) from an `openlibrary` identifier URI. */
-export function olIdFromIdentifierUri(uri: string): string | undefined {
-  return OL_URI.exec(uri)?.[1];
-}
-
 function qidFromEntityUri(uri: string): string | undefined {
   const m = /\/entity\/(Q\d+)$/.exec(uri);
   return m?.[1];
 }
 
-/** Lower Q-number = older, usually the canonical item; used only to break sitelink ties. */
-function qidNumber(qid: string): number {
-  return Number(qid.slice(1));
-}
-
-function buildQuery(olIds: readonly string[]): string {
-  const values = olIds.map((id) => `"${id}"`).join(' ');
-  return `SELECT ?item ?olid (MAX(?sitelinks) AS ?links) (SAMPLE(?viaf) AS ?viafId) (SAMPLE(?isni) AS ?isniId) WHERE {
-  VALUES ?olid { ${values} }
-  ?item wdt:P648 ?olid .
-  OPTIONAL { ?item wikibase:sitelinks ?sitelinks }
+function buildQuery(qids: readonly string[]): string {
+  const values = qids.map((qid) => `wd:${qid}`).join(' ');
+  return `SELECT ?item (SAMPLE(?viaf) AS ?viafId) (SAMPLE(?isni) AS ?isniId) WHERE {
+  VALUES ?item { ${values} }
   OPTIONAL { ?item wdt:P214 ?viaf }
   OPTIONAL { ?item wdt:P213 ?isni }
-} GROUP BY ?item ?olid`;
+} GROUP BY ?item`;
 }
 
 /**
- * One OLID can be claimed by several Wikidata items (a stub duplicating a real
- * one). Pick the item with the most sitelinks — a notability proxy that
- * reliably separates the real item from an empty duplicate — then the lowest
- * Q-number so the choice is stable across runs.
+ * The authorities a Q-id carries, as `identifiers` entries. The Q-id itself is
+ * already on the item, so it is never repeated here; an item with neither VIAF
+ * nor ISNI is a miss rather than a match with nothing to append.
  */
-function rankCandidates(bindings: readonly SparqlBindings[]): Map<string, Candidate> {
-  const grouped = new Map<string, Candidate[]>();
-  for (const b of bindings) {
-    const olid = b.olid?.value;
-    const qid = b.item?.value ? qidFromEntityUri(b.item.value) : undefined;
-    if (!olid || !qid) continue;
-    const list = grouped.get(olid) ?? [];
-    list.push({
-      qid,
-      sitelinks: Number(b.links?.value ?? 0) || 0,
-      viaf: b.viafId?.value,
-      isni: b.isniId?.value,
-    });
-    grouped.set(olid, list);
-  }
-
-  const best = new Map<string, Candidate>();
-  for (const [olid, list] of grouped) {
-    list.sort((a, b) => b.sitelinks - a.sitelinks || qidNumber(a.qid) - qidNumber(b.qid));
-    const winner = list[0];
-    if (winner) best.set(olid, winner);
-  }
-  return best;
-}
-
-function toIdentifiers(c: Candidate): Identifier[] {
-  const out: Identifier[] = [{ uri: `https://www.wikidata.org/entity/${c.qid}`, resource: 'wikidata' }];
-  if (c.viaf) out.push({ uri: `https://viaf.org/viaf/${c.viaf}`, resource: 'viaf' });
-  if (c.isni) out.push({ uri: `https://isni.org/isni/${c.isni.replace(/\s+/g, '')}`, resource: 'isni' });
+function toIdentifiers(viaf?: string, isni?: string): Identifier[] {
+  const out: Identifier[] = [];
+  if (viaf) out.push({ uri: `https://viaf.org/viaf/${viaf}`, resource: 'viaf' });
+  if (isni) out.push({ uri: `https://isni.org/isni/${isni.replace(/\s+/g, '')}`, resource: 'isni' });
   return out;
 }
 
+function matchesFromBindings(bindings: readonly SparqlBindings[]): Map<string, WikidataMatch> {
+  const matches = new Map<string, WikidataMatch>();
+  for (const b of bindings) {
+    const qid = b.item?.value ? qidFromEntityUri(b.item.value) : undefined;
+    if (!qid) continue;
+    const identifiers = toIdentifiers(b.viafId?.value, b.isniId?.value);
+    if (identifiers.length === 0) continue;
+    matches.set(qid, { qid, identifiers });
+  }
+  return matches;
+}
+
 async function fetchChunk(
-  olIds: readonly string[],
+  qids: readonly string[],
   log: Logger,
   externalSignal?: AbortSignal,
 ): Promise<Map<string, WikidataMatch>> {
   const resolved = new Map<string, WikidataMatch>();
-  if (olIds.length === 0) return resolved;
+  if (qids.length === 0) return resolved;
   if (!wikidataBreaker.canCall()) {
     log.warn(
       { stage: 'wikidata-enricher', breaker: wikidataBreaker.getState() },
@@ -163,7 +128,7 @@ async function fetchChunk(
             accept: 'application/sparql-results+json',
             'content-type': 'application/x-www-form-urlencoded',
           },
-          body: new URLSearchParams({ query: buildQuery(olIds) }).toString(),
+          body: new URLSearchParams({ query: buildQuery(qids) }).toString(),
           signal: externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
         });
         if (!res.ok) {
@@ -176,15 +141,14 @@ async function fetchChunk(
       }, log),
     );
 
-    const best = rankCandidates(body.results?.bindings ?? []);
-    for (const [olid, candidate] of best) resolved.set(olid, { qid: candidate.qid, identifiers: toIdentifiers(candidate) });
+    for (const [qid, match] of matchesFromBindings(body.results?.bindings ?? [])) resolved.set(qid, match);
 
     wikidataBreaker.recordSuccess();
     searchProviderRequestsTotal.inc({ provider: 'wikidata', status: 'success' });
     log.info(
       {
         stage: 'wikidata-enricher',
-        requested: olIds.length,
+        requested: qids.length,
         matched: resolved.size,
         durationMs: Math.round((performance.now() - start) * 100) / 100,
       },
@@ -194,7 +158,7 @@ async function fetchChunk(
   } catch (err) {
     wikidataBreaker.recordFailure();
     searchProviderRequestsTotal.inc({ provider: 'wikidata', status: 'error' });
-    log.error({ stage: 'wikidata-enricher', err, requested: olIds.length }, 'wikidata fetch failed');
+    log.error({ stage: 'wikidata-enricher', err, requested: qids.length }, 'wikidata fetch failed');
     return resolved;
   }
 }
@@ -220,8 +184,8 @@ function mergeIdentifiers(existing: readonly Identifier[], extra: readonly Ident
 }
 
 /**
- * Append Wikidata identity links to any item carrying `openlibrary`
- * identifiers. Items are returned untouched when nothing matches, when the
+ * Append the VIAF and ISNI authorities to any item carrying a `wikidata`
+ * identifier. Items are returned untouched when nothing matches, when the
  * breaker is open, or when the endpoint fails: enrichment degrades to a no-op
  * rather than failing the search that triggered it.
  */
@@ -233,33 +197,32 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   if (items.length === 0) return [];
 
   const start = performance.now();
-  const wanted = new Map<string, string>(); // identifier uri -> OLID
+  const wanted = new Map<string, string>(); // identifier uri -> Q-id
   for (const item of items) {
-    if (item.identifiers.some((id) => id.resource === 'wikidata')) continue;
     for (const id of item.identifiers) {
-      if (id.resource !== 'openlibrary') continue;
-      const olid = olIdFromIdentifierUri(id.uri);
-      if (olid) wanted.set(id.uri, olid);
+      if (id.resource !== 'wikidata') continue;
+      const qid = qidFromEntityUri(id.uri);
+      if (qid) wanted.set(id.uri, qid);
     }
   }
 
   const matches = new Map<string, WikidataMatch>();
-  const pending: Array<[uri: string, olid: string]> = [];
+  const pending: Array<[uri: string, qid: string]> = [];
   const now = Date.now();
-  for (const [uri, olid] of wanted) {
+  for (const [uri, qid] of wanted) {
     const cached = cache.get(uri);
     if (cached && cached.expiresAt > now) {
       if (cached.match) matches.set(uri, cached.match);
       continue;
     }
-    pending.push([uri, olid]);
+    pending.push([uri, qid]);
   }
 
   for (let i = 0; i < pending.length; i += CHUNK_SIZE) {
     const chunk = pending.slice(i, i + CHUNK_SIZE);
-    const resolved = await fetchChunk(chunk.map(([, olid]) => olid), log, externalSignal);
-    for (const [uri, olid] of chunk) {
-      const match = resolved.get(olid) ?? null;
+    const resolved = await fetchChunk(chunk.map(([, qid]) => qid), log, externalSignal);
+    for (const [uri, qid] of chunk) {
+      const match = resolved.get(qid) ?? null;
       remember(uri, match);
       if (match) matches.set(uri, match);
     }
@@ -282,7 +245,7 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   return items.map((item) => {
     const extra: Identifier[] = [];
     for (const id of item.identifiers) {
-      if (id.resource !== 'openlibrary') continue;
+      if (id.resource !== 'wikidata') continue;
       const match = matches.get(id.uri);
       if (match) extra.push(...match.identifiers);
     }

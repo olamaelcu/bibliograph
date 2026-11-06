@@ -22,7 +22,7 @@
           "type": "string",
           "knownValues": [
             "isbn", "isbn13", "isbn10", "asin", "doi", "oclc", "isbnPrefix",
-            "isni", "viaf", "wikidata", "openlibrary", "googleBooks",
+            "isni", "viaf", "wikidata", "googleBooks",
             "goodreads", "amazon", "barnes", "hardcover", "bookhive",
             "bibliograph", "imdb", "official", "web"
           ]

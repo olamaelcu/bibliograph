@@ -1,27 +1,17 @@
 import type { Logger } from 'pino';
-import {
-  commonsBreaker,
-  openLibraryBreaker,
-  wikidataBreaker,
-} from '../api/breakers';
+import { commonsBreaker, wikidataBreaker } from '../api/breakers';
 import { UpstreamDeferred } from '../api/deferred';
-import { fetchJson } from '../api/open-library';
+import { fetchJson } from '../api/fetch-json';
 import { withRetry } from '../api/retry';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
-import { olidFromContributorRkey } from '../ol/keys';
 
 /**
  * Resolve a contributor image into its url + license/artist metadata.
  *
- * Two source families:
- *   1. `ol.A*` (OpenLibrary). The OL author doc carries `photos[]` and
- *      `remote_ids.wikidata` (QID). No license metadata is available from
- *      OL, so we set `attributionRequired: false` and `source: 'openlibrary'`.
- *   2. `gb.a-*` (Google Books). GB has no author-photo API. We fall back
- *      to Wikidata: search by exact name, gate on `P31:Q5` (instance of
- *      human) AND `P106` ∩ AUTHOR_OCCUPATIONS (writer/novelist/poet/etc.),
- *      then read `P18` (image) and pull Commons extmetadata for the
- *      license/artist/attribution fields.
+ * Google Books has no author-photo API, so the source is Wikidata: search by
+ * exact name, gate on `P31:Q5` (instance of human) AND `P106` ∩
+ * AUTHOR_OCCUPATIONS (writer/novelist/poet/etc.), then read `P18` (image) and
+ * pull Commons extmetadata for the license/artist/attribution fields.
  *
  * The result is intentionally `undefined` when nothing resolvable was
  * found (NOT an error). The caller records `imageCheckedAt` either way so
@@ -46,7 +36,7 @@ const COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
 
 export interface ResolvedContributorImage {
   url: string;
-  source: 'openlibrary' | 'wikidata';
+  source: 'wikidata';
   artist?: string;
   license?: string;
   licenseUrl?: string;
@@ -70,73 +60,10 @@ export type ContributorImageResolver = (
 
 const s = (signal?: AbortSignal) => signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
 
-function isOpenLibraryRkey(rkey: string): boolean {
-  return rkey.startsWith('ol.');
-}
-
 export async function resolveContributorImage(
   opts: ResolveOptions,
 ): Promise<ResolvedContributorImage | undefined> {
-  if (isOpenLibraryRkey(opts.rkey)) {
-    return resolveOpenLibraryImage(opts);
-  }
   return resolveWikidataImage(opts);
-}
-
-async function resolveOpenLibraryImage(
-  opts: ResolveOptions,
-): Promise<ResolvedContributorImage | undefined> {
-  let olid: string;
-  try {
-    olid = olidFromContributorRkey(opts.rkey);
-  } catch {
-    return undefined;
-  }
-  if (!openLibraryBreaker.canCall()) {
-    opts.log.warn(
-      { breaker: openLibraryBreaker.getState(), rkey: opts.rkey },
-      'openlibrary breaker open; deferring contributor image lookup',
-    );
-    throw new UpstreamDeferred('openlibrary', 'breaker-open');
-  }
-  const url = `https://openlibrary.org/authors/${olid}.json`;
-  interface OlAuthorWithPhotos {
-    photos?: number[];
-    remote_ids?: { wikid?: string };
-  };
-  // `fetchJson` records success/failure on the breaker it is given, so this
-  // path only decides what a null answer means.
-  const raw = await fetchJson<OlAuthorWithPhotos>(url, opts.log, s(opts.signal));
-  if (!raw) throw new UpstreamDeferred('openlibrary', 'request-failed');
-  const photoId = raw.photos?.find((p: number) => typeof p === 'number' && p > 0);
-  if (photoId === undefined) return undefined;
-
-  // Construct the candidate url and validate it returns a real image
-  // (200 = photo present, 302 = photo id was deleted/missing).
-  const candidate = `https://covers.openlibrary.org/a/id/${photoId}-L.jpg`;
-  if (!(await validateOlPhotoUrl(candidate))) return undefined;
-
-  return {
-    url: candidate,
-    source: 'openlibrary',
-    attributionRequired: false,
-  };
-}
-
-async function validateOlPhotoUrl(candidateUrl: string): Promise<boolean> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), UPSTREAM_TIMEOUT_MS);
-  try {
-    const res = await fetch(`${candidateUrl}?default=false`, {
-      method: 'HEAD',
-      signal: ctrl.signal,
-    });
-    return res.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(t);
-  }
 }
 
 async function resolveWikidataImage(

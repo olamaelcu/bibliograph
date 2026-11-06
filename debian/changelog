@@ -1,3 +1,19 @@
+bibliograph (0.3.9) unstable; urgency=medium
+
+  * Remove the OpenLibrary integration: its search source, enricher, HTTP
+    client, author keys, cover host and circuit breaker are gone, so
+    searchEditions/searchWorks fall back to Google Books, ISBNdb and Goodreads
+    only. Contributors and publishers are now served from Postgres alone, and
+    the contributor ingest path it fed is deleted.
+  * Re-key Wikidata enrichment onto an item's own `wikidata` identifier
+    (appending VIAF/ISNI) instead of joining through an OpenLibrary ID, and move
+    the generic breaker+retry JSON helper out of the deleted client.
+  * Drop the OpenLibrary-identified catalog rows: 5,953 editions, 14,276 works
+    and 20,992 contributors, detaching the 779 non-OL editions that had been
+    linked to OL works so the foreign key stays satisfied.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 11:50:24 -0500
+
 bibliograph (0.3.8) unstable; urgency=medium
 
   * The daily ISBN backfill scans 83,000 rows per tick instead of 200, and its

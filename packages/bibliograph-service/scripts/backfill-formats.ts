@@ -6,7 +6,7 @@
 // logged, but not yet stored because the edition schema has no column for them.
 //
 // Provider APIs are preferred, but Google-only editions carry no binding at all
-// and OpenLibrary does not always expose one. Goodreads publishes both in the
+// and ISBNdb does not always expose one. Goodreads publishes both in the
 // book page's `p[data-testid="pagesFormat"]` field. This is a manually-run
 // backfill, not a request-path scrape: Goodreads is HTML and can change or
 // rate-limit without warning.

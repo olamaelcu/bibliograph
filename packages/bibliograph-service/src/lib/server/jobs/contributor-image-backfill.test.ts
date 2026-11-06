@@ -66,7 +66,7 @@ const never = (async () => undefined) as ContributorImageResolver;
 test('deferred upstream leaves the contributor unchecked', async () => {
   const capture: Capture = { sets: [] };
   const deferred = (async () => {
-    throw new UpstreamDeferred('openlibrary', 'breaker-open');
+    throw new UpstreamDeferred('wikidata', 'breaker-open');
   }) as ContributorImageResolver;
 
   const result = await backfillContributorImageForUri(URI, log, makeDb(row(), capture), deferred);
@@ -88,15 +88,18 @@ test('an authoritative miss stamps the row', async () => {
 test('a resolved image persists url and license metadata', async () => {
   const capture: Capture = { sets: [] };
   const found = (async () => ({
-    url: 'https://covers.openlibrary.org/a/id/7278269-L.jpg',
-    source: 'openlibrary' as const,
+    url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Ursula_K_Le_Guin.jpg/440px-Ursula_K_Le_Guin.jpg',
+    source: 'wikidata' as const,
     attributionRequired: false,
   })) as ContributorImageResolver;
 
   const result = await backfillContributorImageForUri(URI, log, makeDb(row(), capture), found);
 
   assert.equal(result.updated, true);
-  assert.equal(capture.sets[0]?.imageUrl, 'https://covers.openlibrary.org/a/id/7278269-L.jpg');
+  assert.equal(
+    capture.sets[0]?.imageUrl,
+    'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a1/Ursula_K_Le_Guin.jpg/440px-Ursula_K_Le_Guin.jpg',
+  );
 });
 
 test('an already-checked row is skipped without a second lookup', async () => {

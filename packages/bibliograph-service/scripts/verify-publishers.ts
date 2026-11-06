@@ -23,7 +23,7 @@ if (!process.env.DATABASE_URL) {
 const log = pino({ level: 'silent' });
 const FIXTURE_URI = 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.publisher/verify-fixture-001';
 const FIXTURE_NAME = 'VerifyFixturePublisher';
-const FIXTURE_IDENT = { uri: 'https://openlibrary.org/publishers/VerifyFixturePublisher', resource: 'openlibrary' as const };
+const FIXTURE_IDENT = { uri: 'https://www.wikidata.org/entity/Q123456789', resource: 'wikidata' as const };
 
 async function insertFixture() {
   await db.delete(publishers).where(eq(publishers.uri, FIXTURE_URI));

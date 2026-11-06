@@ -238,8 +238,8 @@ async function main(): Promise<void> {
       if (!item) {
         counts.failed++;
       } else if (editionUriFor(item.identifiers) !== uri) {
-        // The provider answered but mapped to a different URI (e.g. an OLID was
-        // resolved where the reference carries an ISBNdb id): persisting it would
+        // The provider answered but mapped to a different URI (e.g. a Google Books
+        // volume was resolved where the reference carries an ISBNdb id): persisting it would
         // not resolve this row and would silently change which book it shows.
         counts.uri_mismatch++;
       } else {

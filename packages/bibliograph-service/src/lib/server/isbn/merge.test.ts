@@ -11,16 +11,16 @@ import {
 } from './merge';
 import type { Identifier } from '../search/types';
 
-const OL_IDENTIFIER: Identifier = {
-  uri: 'https://openlibrary.org/books/OL3292288M',
-  resource: 'openlibrary',
+const WIKIDATA_IDENTIFIER: Identifier = {
+  uri: 'https://www.wikidata.org/entity/Q1443346',
+  resource: 'wikidata',
 };
 
 test('isIsbnResource only accepts the three ISBN resources', () => {
   assert.equal(isIsbnResource('isbn'), true);
   assert.equal(isIsbnResource('isbn10'), true);
   assert.equal(isIsbnResource('isbn13'), true);
-  assert.equal(isIsbnResource('openlibrary'), false);
+  assert.equal(isIsbnResource('wikidata'), false);
   assert.equal(isIsbnResource('toString'), false);
 });
 
@@ -35,14 +35,14 @@ test('isbnFromIdentifier reads only `isbn:` uris on ISBN resources', () => {
   assert.equal(isbnFromIdentifier({ uri: 'isbn:1469612887', resource: 'isbn10' }), '1469612887');
   assert.equal(isbnFromIdentifier({ uri: 'urn:isbn:9781469612881', resource: 'isbn13' }), null);
   assert.equal(isbnFromIdentifier({ uri: 'isbn:123', resource: 'isbn13' }), null);
-  assert.equal(isbnFromIdentifier(OL_IDENTIFIER), null);
+  assert.equal(isbnFromIdentifier(WIKIDATA_IDENTIFIER), null);
 });
 
 test('hasIsbn sees through unrelated identifiers', () => {
-  assert.equal(hasIsbn([OL_IDENTIFIER]), false);
+  assert.equal(hasIsbn([WIKIDATA_IDENTIFIER]), false);
   assert.equal(hasIsbn([]), false);
   assert.equal(hasIsbn(undefined), false);
-  assert.equal(hasIsbn([OL_IDENTIFIER, { uri: 'isbn:9781469612881', resource: 'isbn13' }]), true);
+  assert.equal(hasIsbn([WIKIDATA_IDENTIFIER, { uri: 'isbn:9781469612881', resource: 'isbn13' }]), true);
 });
 
 test('isbnIdentifier picks the resource from the length', () => {
@@ -52,10 +52,10 @@ test('isbnIdentifier picks the resource from the length', () => {
 });
 
 test('mergeIsbnIdentifiers appends without touching what is there', () => {
-  const { identifiers, added } = mergeIsbnIdentifiers([OL_IDENTIFIER], ['9781469612881']);
+  const { identifiers, added } = mergeIsbnIdentifiers([WIKIDATA_IDENTIFIER], ['9781469612881']);
 
   assert.deepEqual(added, ['9781469612881']);
-  assert.deepEqual(identifiers[0], OL_IDENTIFIER);
+  assert.deepEqual(identifiers[0], WIKIDATA_IDENTIFIER);
   assert.deepEqual(identifiers[1], { uri: 'isbn:9781469612881', resource: 'isbn13' });
 });
 

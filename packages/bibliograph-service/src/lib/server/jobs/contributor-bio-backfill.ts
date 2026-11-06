@@ -7,7 +7,6 @@ import { contributors } from '../db/schema';
 import type { ContributorRow } from '../db/schema';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { enrichContributorBios } from '../api/wikipedia';
-import { getContributorBioByRkey, openLibraryDescription } from '../api/open-library';
 
 type Db = typeof defaultDb;
 
@@ -31,24 +30,12 @@ export async function resolveContributorBio(
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  // Primary: Wikipedia by contributor name.
+  // Wikipedia by contributor name is the only bio source.
   // The column types are nullable; the enricher's inputs are optional. Absent and
   // null mean the same thing to it, so normalize rather than spread the null
   // through a type that has no room for it.
   const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear ?? undefined, diedYear: row.diedYear ?? undefined, linkedDid: row.linkedDid ?? undefined, identifiers: row.identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, s);
-  const wikiBio = bio[0]?.bio;
-  if (wikiBio) return wikiBio;
-
-  // Fallback: OpenLibrary author doc bio for contributors derived from OL.
-  if (row.identifiers.some((id) => id.resource === 'openlibrary' && id.uri.includes('/authors/'))) {
-    try {
-      const olBio = await getContributorBioByRkey(row.rkey, log, s);
-      if (olBio) return openLibraryDescription(olBio) ?? olBio;
-    } catch {
-      // fall through
-    }
-  }
-  return undefined;
+  return bio[0]?.bio;
 }
 
 export async function backfillBioForContributor(

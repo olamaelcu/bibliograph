@@ -9,27 +9,27 @@ import type { EditionItem, WorkItem, ContributorItem } from '../search/types';
 // scripts/verify-tap-jobs.ts.
 
 const editionItem: EditionItem = {
-  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL1M',
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/gb.zyTCAlFPjgYC',
   title: 'Test Edition',
-  identifiers: [{ uri: 'https://openlibrary.org/books/OL1M', resource: 'openlibrary' }],
+  identifiers: [{ uri: 'isbn:9780123456789', resource: 'isbn13' }],
   contributors: [],
   createdAt: new Date().toISOString(),
 };
 
 const workItem: WorkItem = {
-  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/ol.W1W',
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.work/wd.Q1',
   title: 'Test Work',
   subjects: [],
-  identifiers: [{ uri: 'https://openlibrary.org/works/OL1W', resource: 'openlibrary' }],
+  identifiers: [{ uri: 'https://www.wikidata.org/entity/Q1', resource: 'wikidata' }],
   contributors: [],
   createdAt: new Date().toISOString(),
 };
 
 const contributorItem: ContributorItem = {
-  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/ol.A1A',
+  uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/wd.Q1',
   name: 'Test Author',
   aliases: [],
-  identifiers: [{ uri: 'https://openlibrary.org/authors/OL1A', resource: 'openlibrary' }],
+  identifiers: [{ uri: 'https://www.wikidata.org/entity/Q1', resource: 'wikidata' }],
   createdAt: new Date().toISOString(),
 };
 

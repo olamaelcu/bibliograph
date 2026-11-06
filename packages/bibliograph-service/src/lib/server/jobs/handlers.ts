@@ -4,14 +4,13 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
-import { editions, works, contributors, records, ingestDeadLetter, tapDeadLetter, publishers } from '../db/schema';
-import type { EditionItem, WorkItem, ContributorItem, PublisherItem, Identifier } from '../search/types';
+import { editions, works, records, ingestDeadLetter, tapDeadLetter } from '../db/schema';
+import type { EditionItem, WorkItem, Identifier } from '../search/types';
 import { PUBLISHER_DID } from '../did';
-import { parseEditionKey, parseWorkKey, parseAuthorKey, parsePublisherKey, editionRkey, workRkey, contributorRkey, publisherRkey } from '../ol/keys';
-import { gbEditionRkey, gbWorkRkey, gbPublisherRkey, gbIdentifierFromUri } from '../gb/keys';
+import { gbEditionRkey, gbWorkRkey, gbIdentifierFromUri } from '../gb/keys';
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { bhEditionRkey, hiveIdFromCatalogUri, isHiveId } from '../bookhive/keys';
-import { isbndbEditionRkey, isbndbWorkRkey, isbndbPublisherRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
+import { isbndbEditionRkey, isbndbWorkRkey, isbndbIdentifierFromUri } from '../isbndb/keys';
 import { grEditionRkey, grIdFromIdentifier } from '../gr/keys';
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
@@ -39,17 +38,7 @@ import {
 
 const db: typeof defaultDb = defaultDb;
 
-type SourceKind = 'ol' | 'gb' | 'isbndb' | 'bh' | 'gr';
-
-function olKeyFromIdentifiers(idents: Identifier[]): string | undefined {
-  const i = idents.find((i) => i.resource === 'openlibrary');
-  if (!i) return undefined;
-  try {
-    return new URL(i.uri).pathname;
-  } catch {
-    return undefined;
-  }
-}
+type SourceKind = 'gb' | 'isbndb' | 'bh' | 'gr';
 
 function gbKeyFromIdentifiers(idents: Identifier[]): string | undefined {
   const i = idents.find((x) => x.resource === 'googlebooks');
@@ -90,27 +79,24 @@ function bhHiveIdFromIdentifiers(idents: Identifier[]): string | undefined {
   return isHiveId(bookhive.uri) ? bookhive.uri : undefined;
 }
 
-/** Determine which synthesis path applies for an item, returning OL key, GB volume id, ISBNDb isbn, or nothing. */
+/** Determine which synthesis path applies for an item, returning GB volume id, ISBNDb isbn, hive id or Goodreads id, or nothing. */
 function identifySource(
   idents: Identifier[],
 ): {
   kind: SourceKind;
-  olKey: string;
   gbId: string;
   isbndbIsbn: string;
   hiveId: string;
   grId: string;
 } | null {
-  const olKey = olKeyFromIdentifiers(idents);
-  if (olKey) return { kind: 'ol', olKey, gbId: '', isbndbIsbn: '', hiveId: '', grId: '' };
   const gbId = gbKeyFromIdentifiers(idents);
-  if (gbId) return { kind: 'gb', olKey: '', gbId, isbndbIsbn: '', hiveId: '', grId: '' };
+  if (gbId) return { kind: 'gb', gbId, isbndbIsbn: '', hiveId: '', grId: '' };
   const isbndbIsbn = isbndbKeyFromIdentifiers(idents);
-  if (isbndbIsbn) return { kind: 'isbndb', olKey: '', gbId: '', isbndbIsbn, hiveId: '', grId: '' };
+  if (isbndbIsbn) return { kind: 'isbndb', gbId: '', isbndbIsbn, hiveId: '', grId: '' };
   const hiveId = bhHiveIdFromIdentifiers(idents);
-  if (hiveId) return { kind: 'bh', olKey: '', gbId: '', isbndbIsbn: '', hiveId, grId: '' };
+  if (hiveId) return { kind: 'bh', gbId: '', isbndbIsbn: '', hiveId, grId: '' };
   const grId = grIdFromIdentifiers(idents);
-  if (grId) return { kind: 'gr', olKey: '', gbId: '', isbndbIsbn: '', hiveId: '', grId };
+  if (grId) return { kind: 'gr', gbId: '', isbndbIsbn: '', hiveId: '', grId };
   return null;
 }
 
@@ -124,7 +110,6 @@ export function editionUriFor(idents: Identifier[]): string | undefined {
   if (!source) return undefined;
   const base = `at://${PUBLISHER_DID}/community.lexicon.book.edition/`;
   try {
-    if (source.kind === 'ol') return `${base}${editionRkey(parseEditionKey(source.olKey))}`;
     if (source.kind === 'gb') return `${base}${gbEditionRkey(source.gbId)}`;
     if (source.kind === 'isbndb') return `${base}${isbndbEditionRkey(source.isbndbIsbn)}`;
     if (source.kind === 'gr') return `${base}${grEditionRkey(source.grId)}`;
@@ -132,38 +117,6 @@ export function editionUriFor(idents: Identifier[]): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function publisherUriFor(item: PublisherItem): string | undefined {
-  const olKey = olKeyFromIdentifiers(item.identifiers);
-  if (olKey) {
-    try {
-      const olid = parsePublisherKey(olKey);
-      const rkey = publisherRkey(olid);
-      return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${rkey}`;
-    } catch {
-      return undefined;
-    }
-  }
-  const gbId = gbKeyFromIdentifiers(item.identifiers);
-  if (gbId) {
-    try {
-      const rkey = gbPublisherRkey(gbId);
-      return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${rkey}`;
-    } catch {
-      return undefined;
-    }
-  }
-  const isbndbIsbn = isbndbKeyFromIdentifiers(item.identifiers);
-  if (isbndbIsbn) {
-    try {
-      const rkey = isbndbPublisherRkey(isbndbIsbn);
-      return `at://${PUBLISHER_DID}/community.lexicon.book.publisher/${rkey}`;
-    } catch {
-      return undefined;
-    }
-  }
-  return undefined;
 }
 
 async function writeIngestDLQ(uri: string, payload: unknown, errorMessage: string, attempts: number): Promise<void> {
@@ -203,10 +156,6 @@ export const ingestWorkTask: Task = async (payload, helpers) => {
   await ingestWorkBatch([payload as WorkItem], helpers.logger as unknown as Logger, helpers.job.attempts);
 };
 
-export const ingestContributorTask: Task = async (payload, helpers) => {
-  await ingestContributorBatch([payload as ContributorItem], helpers.logger as unknown as Logger, helpers.job.attempts);
-};
-
 // -- batched handlers (single multi-row INSERT per call) --
 
 export const ingestEditionBatchTask: Task = async (payload, helpers) => {
@@ -217,11 +166,6 @@ export const ingestEditionBatchTask: Task = async (payload, helpers) => {
 export const ingestWorkBatchTask: Task = async (payload, helpers) => {
   const items = payload as WorkItem[];
   await ingestWorkBatch(items, helpers.logger as unknown as Logger, helpers.job.attempts);
-};
-
-export const ingestContributorBatchTask: Task = async (payload, helpers) => {
-  const items = payload as ContributorItem[];
-  await ingestContributorBatch(items, helpers.logger as unknown as Logger, helpers.job.attempts);
 };
 
 export async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: number): Promise<void> {
@@ -308,15 +252,7 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
       const source = identifySource(item.identifiers);
       let uri: string | undefined;
       let rkey: string | undefined;
-      if (source?.kind === 'ol') {
-        try {
-          const olid = parseWorkKey(source.olKey);
-          rkey = workRkey(olid);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
-        } catch {
-          continue;
-        }
-      } else if (source?.kind === 'gb') {
+      if (source?.kind === 'gb') {
         try {
           rkey = gbWorkRkey(source.gbId);
           uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
@@ -377,146 +313,7 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'ingest-work-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
     for (const item of items) {
-      const olKey = olKeyFromIdentifiers(item.identifiers);
-      let uri = 'at://unknown/community.lexicon.book.work/unknown';
-      if (olKey) {
-        try {
-          const olid = parseWorkKey(olKey);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${workRkey(olid)}`;
-        } catch {
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/unknown`;
-        }
-      }
-      await writeIngestDLQ(uri, item, message, attempts);
-    }
-  }
-}
-
-async function ingestContributorBatch(items: ContributorItem[], log: Logger, attempts: number): Promise<void> {
-  try {
-    const allRows: unknown[] = [];
-    for (const item of items) {
-      const olKey = olKeyFromIdentifiers(item.identifiers);
-      let uri: string | undefined;
-      let rkey: string | undefined;
-      if (olKey) {
-        try {
-          const olid = parseAuthorKey(olKey);
-          rkey = contributorRkey(olid);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${rkey}`;
-        } catch {
-          continue;
-        }
-      }
-      if (!uri || !rkey) continue;
-      const value = {
-        $type: 'community.lexicon.book.contributor' as const,
-        name: item.name,
-        aliases: item.aliases,
-        bio: item.bio ?? undefined,
-        bornYear: item.bornYear ?? undefined,
-        diedYear: item.diedYear ?? undefined,
-        linkedDid: item.linkedDid ?? undefined,
-        identifiers: item.identifiers,
-        createdAt: item.createdAt,
-      };
-      const cid = await cidForLex(value as unknown as LexMap);
-      allRows.push({
-        uri,
-        cid: cid.toString(),
-        did: PUBLISHER_DID,
-        rkey,
-        name: item.name,
-        aliases: item.aliases,
-        linkedDid: item.linkedDid ?? null,
-        bio: item.bio ?? null,
-        bornYear: item.bornYear ?? null,
-        diedYear: item.diedYear ?? null,
-        identifiers: item.identifiers,
-        createdAt: new Date(item.createdAt),
-      });
-    }
-    if (allRows.length === 0) return;
-    await db.insert(contributors).values(allRows as never).onConflictDoUpdate({
-      target: contributors.uri,
-      set: {
-        name: sql`excluded.name`,
-        aliases: sql`excluded.aliases`,
-        bio: sql`excluded.bio`,
-        identifiers: sql`excluded.identifiers`,
-        indexedAt: new Date(),
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ stage: 'ingest-contributor-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
-    for (const item of items) {
-      const olKey = olKeyFromIdentifiers(item.identifiers);
-      let uri = 'at://unknown/community.lexicon.book.contributor/unknown';
-      if (olKey) {
-        try {
-          const olid = parseAuthorKey(olKey);
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/${contributorRkey(olid)}`;
-        } catch {
-          uri = `at://${PUBLISHER_DID}/community.lexicon.book.contributor/unknown`;
-        }
-      }
-      await writeIngestDLQ(uri, item, message, attempts);
-    }
-  }
-}
-
-async function ingestPublisherBatch(items: PublisherItem[], log: Logger, attempts: number): Promise<void> {
-  try {
-    const allRows: unknown[] = [];
-    for (const item of items) {
-      const uri = publisherUriFor(item);
-      const rkey = uri ? uri.split('/').pop() : undefined;
-      if (!uri || !rkey) continue;
-      const value = {
-        $type: 'community.lexicon.book.publisher' as const,
-        uri,
-        name: item.name,
-        imprintOf: item.imprintOf,
-        foundingDate: item.foundingDate ?? undefined,
-        closingDate: item.closingDate ?? undefined,
-        identifiers: item.identifiers,
-        createdAt: item.createdAt,
-      };
-      const cid = await cidForLex(value as unknown as LexMap);
-      allRows.push({
-        uri,
-        cid: cid.toString(),
-        did: PUBLISHER_DID,
-        rkey,
-        name: item.name,
-        imprintOfUri: item.imprintOf?.uri ?? null,
-        imprintOfCid: item.imprintOf?.cid ?? null,
-        foundingDate: item.foundingDate ?? null,
-        closingDate: item.closingDate ?? null,
-        identifiers: item.identifiers,
-        createdAt: new Date(item.createdAt),
-      });
-    }
-    if (allRows.length === 0) return;
-    await db.insert(publishers).values(allRows as never).onConflictDoUpdate({
-      target: publishers.uri,
-      set: {
-        name: sql`excluded.name`,
-        imprintOfUri: sql`excluded.imprint_of_uri`,
-        imprintOfCid: sql`excluded.imprint_of_cid`,
-        foundingDate: sql`excluded.founding_date`,
-        closingDate: sql`excluded.closing_date`,
-        identifiers: sql`excluded.identifiers`,
-        indexedAt: new Date(),
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error({ stage: 'ingest-publisher-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
-    for (const item of items) {
-      const uri = publisherUriFor(item) ?? `at://${PUBLISHER_DID}/community.lexicon.book.publisher/unknown`;
-      await writeIngestDLQ(uri, item, message, attempts);
+      await writeIngestDLQ('at://unknown/community.lexicon.book.work/unknown', item, message, attempts);
     }
   }
 }
@@ -531,14 +328,6 @@ export async function syncIngestEditions(items: EditionItem[], log: Logger): Pro
 
 export async function syncIngestWorks(items: WorkItem[], log: Logger): Promise<void> {
   await ingestWorkBatch(items, log, 1);
-}
-
-export async function syncIngestContributors(items: ContributorItem[], log: Logger): Promise<void> {
-  await ingestContributorBatch(items, log, 1);
-}
-
-export async function syncIngestPublishers(items: PublisherItem[], log: Logger): Promise<void> {
-  await ingestPublisherBatch(items, log, 1);
 }
 
 // -- TAP record handlers --
@@ -959,10 +748,8 @@ export const backfillEditionIsbnTask: Task = async (payload, helpers) => {
 export const searchTaskList: TaskList = {
   'ingest-edition': ingestEditionTask,
   'ingest-work': ingestWorkTask,
-  'ingest-contributor': ingestContributorTask,
   'ingest-edition-batch': ingestEditionBatchTask,
   'ingest-work-batch': ingestWorkBatchTask,
-  'ingest-contributor-batch': ingestContributorBatchTask,
   'backfill-edition-cover': backfillEditionCoverTask,
   'backfill-edition-description': backfillEditionDescriptionTask,
   'backfill-contributor-image': backfillContributorImageTask,

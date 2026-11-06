@@ -14,8 +14,8 @@
 //   pnpm tsx scripts/backfill-contributor-images.ts
 //   pnpm tsx scripts/backfill-contributor-images.ts --limit=200   # one batch
 //
-// `--limit` exists because the resolver fans out to OpenLibrary, Wikidata and
-// Commons: a first fill of thousands of authors is better enqueued in batches
+// `--limit` exists because the resolver fans out to Wikidata and Commons:
+// a first fill of thousands of authors is better enqueued in batches
 // with pauses, so no upstream breaker opens mid-run.
 
 import { and, asc, gt, isNull, sql } from 'drizzle-orm';

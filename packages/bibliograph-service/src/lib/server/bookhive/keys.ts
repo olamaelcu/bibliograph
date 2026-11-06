@@ -4,7 +4,7 @@ import { PUBLISHER_DID } from '../did';
  * Bookhive (<https://bookhive.buzz>) is a reading tracker that publishes its
  * whole catalog and its users' book records on-protocol from a single PDS.
  *
- * Bibliograph consumes it the same way it consumes OpenLibrary / Google Books /
+ * Bibliograph consumes it the same way it consumes Google Books / ISBNdb /
  * ISBNDb: `buzz.bookhive.catalogBook` records become
  * `community.lexicon.book.edition` rows keyed `bh.{hiveId}`, and the Bookhive
  * record's at-uri is carried as a `bookhive` identifier. That identifier is the

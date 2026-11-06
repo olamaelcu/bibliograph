@@ -5,7 +5,6 @@
 // thing that decides which provider owns the edition.
 
 import { gbEditionUri, isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
-import { editionUri, olidFromEditionRkey } from '../ol/keys';
 import { bhEditionUri, isBhRkey, hiveIdFromBhRkey } from '../bookhive/keys';
 import { isIsbndbRkey, isbnFromIsbndbRkey, isbndbEditionUri } from '../isbndb/keys';
 import { grEditionUri, grIdFromRkey, isGrRkey } from '../gr/keys';
@@ -35,13 +34,6 @@ export function catalogEditionUriFromRkey(rkey: string): string | null {
   if (isGrRkey(rkey)) {
     try {
       return grEditionUri(grIdFromRkey(rkey));
-    } catch {
-      return null;
-    }
-  }
-  if (rkey.startsWith('ol.')) {
-    try {
-      return editionUri(olidFromEditionRkey(rkey));
     } catch {
       return null;
     }

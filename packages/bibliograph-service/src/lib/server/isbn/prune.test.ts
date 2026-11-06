@@ -20,7 +20,7 @@ const TARGET: TargetEdition = {
 
 function candidate(overrides: Partial<CandidateBook> = {}): CandidateBook {
   return {
-    source: 'openlibrary',
+    source: 'isbndb',
     title: 'The dispossessed',
     authors: ['Ursula K. Le Guin'],
     publishedYear: 1974,
@@ -141,20 +141,21 @@ test('nothing surviving is none', () => {
 
 test('candidateFromEditionItem reads contributors, year and ISBNs', () => {
   const item: EditionItem = {
-    uri: 'at://did:web:biblio/community.lexicon.book.edition/ol.OL1M',
+    uri: 'at://did:web:biblio/community.lexicon.book.edition/isbn.9780060512750',
     title: 'The Dispossessed',
     publishedYear: 1974,
     contributors: [{ subject: { uri: 'at://author/1', cid: 'bafy' }, role: 'author' }],
     identifiers: [
-      { uri: 'https://openlibrary.org/books/OL1M', resource: 'openlibrary' },
+      { uri: 'https://www.wikidata.org/entity/Q1443346', resource: 'wikidata' },
       { uri: 'isbn:9780060512750', resource: 'isbn13' },
     ],
     createdAt: '2026-01-01T00:00:00.000Z',
   };
   const itemNames = new Map([['at://author/1', 'Ursula K. Le Guin']]);
-  const candidate = candidateFromEditionItem('openlibrary', item, itemNames);
+  const candidate = candidateFromEditionItem('isbndb', item, itemNames);
 
   assert.equal(candidate.title, 'The Dispossessed');
+  assert.equal(candidate.source, 'isbndb');
   assert.deepEqual(candidate.authors, ['Ursula K. Le Guin']);
   assert.equal(candidate.publishedYear, 1974);
   assert.deepEqual(candidate.isbns, ['9780060512750']);

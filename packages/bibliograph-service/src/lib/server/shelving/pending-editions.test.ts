@@ -22,8 +22,8 @@ test('a bare string book is read the same as a strongRef', () => {
 });
 
 test('a record that predates the book ref falls back to its rkey', () => {
-  const uri = catalogUriForMirroredRecord(SHELVING_COLLECTION, 'ol.OL9M', { shelf: 'at://did:plc:user/x/read' });
-  assert.equal(uri, 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/ol.OL9M');
+  const uri = catalogUriForMirroredRecord(SHELVING_COLLECTION, 'isbndb.9781607785927', { shelf: 'at://did:plc:user/x/read' });
+  assert.equal(uri, 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/isbndb.9781607785927');
 });
 
 test('a bookShelving rkey no provider owns asks for nothing', () => {

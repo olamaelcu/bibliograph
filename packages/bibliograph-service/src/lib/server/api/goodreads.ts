@@ -3,7 +3,7 @@ import { normalizeBookFormat, type BookFormat } from "../format-view";
 /**
  * Last-resort format/page-count lookup through Goodreads.
  *
- * The structured providers are preferred: OpenLibrary and ISBNDb expose the
+ * The structured providers are preferred: Google Books and ISBNDb expose the
  * binding and page count as data, and Google Books exposes the page count. A
  * Google-only edition carries no format at all, though, and Goodreads's book
  * page publishes both in one labelled paragraph:

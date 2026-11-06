@@ -23,8 +23,8 @@ test('leaves an already-publisher URL unchanged', () => {
 
 test('leaves non-Google and non-cover URLs unchanged', () => {
   assert.equal(
-    datacenterCoverUrl('https://covers.openlibrary.org/b/id/14328630-L.jpg'),
-    'https://covers.openlibrary.org/b/id/14328630-L.jpg',
+    datacenterCoverUrl('https://covers.isbndb.com/cover.jpg'),
+    'https://covers.isbndb.com/cover.jpg',
   );
   assert.equal(
     datacenterCoverUrl('https://books.google.com/books?id=abc123'),

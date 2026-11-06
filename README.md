@@ -58,13 +58,13 @@ would only cost storage. Set `BOOKHIVE_PDS` to point somewhere other than
 
 Information is sourced from a few places:
 
-- Book information is sourced from OpenLibrary (works + editions APIs) with
-  optional Google Books enrichment for descriptions and covers (requires
+- Book information is sourced from Google Books, ISBNdb and Goodreads. Google
+  Books enrichment supplies descriptions and covers (requires
   `GOOGLE_BOOKS_API_KEY`). Google Books answers are cached in Postgres for 24
   hours — hits and "no such volume" misses alike — because the quota is charged
   per request against that one key, which the web and worker processes share.
 - Cover bytes are cached on disk under `COVER_CACHE_DIR` the first time
-  `getImageForBook` serves them, so Google Books and Open Library are only
+  `getImageForBook` serves them, so the cover providers are only
   contacted on a miss. The cache survives restarts and package upgrades.
 - Edition display metadata — the normalized format (`hardcover`, `paperback`,
   `ebook`, `audiobook`) and page count — is stored on `editions` and returned
@@ -89,7 +89,7 @@ Information is sourced from a few places:
   `gr.<bookId>` editions. They are deduped by normalized title against the
   primary sources; a blocked or failed Goodreads call is returned as a
   `degraded: { upstream: 'goodreads' }` result rather than failing the search.
-- Author information is _gleamed_ from Wikipedia and OpenLibrary
+- Author information is _gleamed_ from Wikipedia
 
 ## Catalog curation
 

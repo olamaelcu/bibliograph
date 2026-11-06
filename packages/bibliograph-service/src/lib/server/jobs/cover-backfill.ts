@@ -5,7 +5,6 @@ import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
-import { getEditionByRkey } from '../api/open-library';
 import { googleBooksBreaker } from '../api/breakers';
 import { withRetry } from '../api/retry';
 import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
@@ -111,11 +110,7 @@ export async function resolveCoverUrl(
     return undefined;
   }
 
-  // OL path: try OL first
-  const olItem = await getEditionByRkey(rkey, log, signal);
-  if (olItem?.coverImageUrl) return olItem.coverImageUrl;
-
-  const isbn = isbnFromIdentifiers(row.identifiers) ?? isbnFromIdentifiers(olItem?.identifiers ?? []);
+  const isbn = isbnFromIdentifiers(row.identifiers);
   if (isbn) {
     const cover = await fetchGbByIsbn(isbn, log, signal);
     if (cover) return cover;
@@ -125,8 +120,6 @@ export async function resolveCoverUrl(
       if (cover) return cover;
     }
   }
-
-  // Also try ISBN already present on OL item's volume via direct covers? already handled.
   return undefined;
 }
 
