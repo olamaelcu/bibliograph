@@ -1,3 +1,17 @@
+bibliograph (0.3.7) unstable; urgency=medium
+
+  * ISBN backfill tier 2 now writes the single search candidate it prunes to
+    instead of only recording it: editions missing an ISBN gain one from the
+    OpenLibrary/Google Books search, with the record CID recomputed. Rows the
+    old shadow mode stamped are re-enqueued by the new
+    scripts/enqueue-shadow-isbns.ts, the scan skips editions that already have
+    a queued job, and the daily timer replaces the quarter-hour one.
+  * Add the For You recommendation feed: catalog editions sharing subjects
+    with the works a reader is reading and has read, excluding what they have
+    shelved, backed by a partial index on editions.work_uri.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 10:36:42 -0500
+
 bibliograph (0.3.6) unstable; urgency=medium
 
   * Add listShelfItemsByBook, one indexed read for the shelves that hold a

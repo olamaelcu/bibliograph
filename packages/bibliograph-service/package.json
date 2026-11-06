@@ -20,6 +20,8 @@
     "backfill:works": "tsx scripts/backfill-works.ts",
     "backfill:covers": "tsx scripts/backfill-covers.ts",
     "backfill:formats": "tsx scripts/backfill-formats.ts",
+    "backfill:isbns": "tsx scripts/backfill-edition-isbns.ts",
+    "backfill:shadow-isbns": "tsx scripts/enqueue-shadow-isbns.ts",
     "backfill:edition-contributors": "tsx scripts/backfill-edition-contributors.ts",
     "backfill:contributor-images": "tsx scripts/backfill-contributor-images.ts",
     "backfill:shelving-editions": "tsx scripts/backfill-shelving-editions.ts",

@@ -16,6 +16,18 @@ run = ["pnpm run dev --host"]
 [tasks.worker-dev]
 run = ["pnpm run worker"]
 
+[tasks."backfill:isbns"]
+description = "Run the ISBN backfill scan once (enqueues jobs for the worker)"
+run = ["pnpm --filter bibliograph-service run backfill:isbns"]
+
+[tasks."backfill:shadow-isbns"]
+description = "Re-enqueue editions an earlier ISBN lookup stamped shadow"
+run = ["pnpm --filter bibliograph-service run backfill:shadow-isbns"]
+
+[tasks.worker]
+description = "Run the worker (TAP consumer + graphile task lists) to drain the queue"
+run = ["pnpm --filter bibliograph-service run worker"]
+
 [tasks.dev]
 depends = ["containers"]
 run = ["mise run worker-dev ::: web-dev"]

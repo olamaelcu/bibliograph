@@ -100,7 +100,7 @@ test('an edition that already has an ISBN is left alone', async () => {
   assert.equal(fetched, false, 'no upstream call when there is nothing to do');
 });
 
-test('tier 2 records a shadow match without writing identifiers', async () => {
+test('tier 2 writes the ISBN the authority did not already know', async () => {
   const plan = await planIsbnEnrichment(
     row(),
     deps({
@@ -110,9 +110,10 @@ test('tier 2 records a shadow match without writing identifiers', async () => {
     }),
   );
 
-  assert.equal(plan.action, 'shadow');
-  assert.equal(plan.result, 'shadow');
-  assert.equal(plan.identifiers, undefined, 'shadow mode never proposes an identifier write');
+  assert.equal(plan.action, 'write');
+  assert.equal(plan.result, 'found');
+  assert.deepEqual(plan.added, ['1578067057']);
+  assert.deepEqual(plan.identifiers?.at(-1), { uri: 'isbn:1578067057', resource: 'isbn10' });
   assert.equal(plan.candidates?.filter((candidate) => candidate.accepted).length, 1);
 });
 

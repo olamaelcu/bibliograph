@@ -30,10 +30,12 @@ import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
  *
  * Tier 2 only runs when the authority has no ISBN to give. It searches
  * OpenLibrary and Google Books, then prunes the candidates down with
- * `pruneCandidates`. It is in **shadow mode**: it records what it would have
- * written (and why the rest were rejected) but never touches the identifiers,
- * because a wrong ISBN silently repoints a reader's shelf at a different
- * physical book.
+ * `pruneCandidates`. A single surviving ISBN at the top score is written; a
+ * tie is recorded as `ambiguous` and nothing is written, because a wrong ISBN
+ * silently repoints a reader's shelf at a different physical book. Rows that
+ * older versions of this job stamped `shadow` are re-enqueued by
+ * `scripts/enqueue-shadow-isbns.ts`, which is the only producer of that
+ * historical result value today.
  */
 
 type Db = typeof defaultDb;
@@ -54,8 +56,7 @@ export interface IsbnEnrichmentDeps {
 export type EnrichmentResultName = 'found' | 'shadow' | 'ambiguous' | 'none' | 'already';
 
 export interface EnrichmentPlan {
-  /** `write` only ever comes from tier 1. */
-  action: 'already_has_isbn' | 'write' | 'shadow' | 'none';
+  action: 'already_has_isbn' | 'write' | 'none';
   result: EnrichmentResultName;
   identifiers?: Identifier[];
   added?: string[];
@@ -121,6 +122,7 @@ export async function planIsbnEnrichment(
     title: authority?.title ?? row.title,
     authors: [...names.values()],
     publishedYear: authority?.publishedYear ?? row.publishedYear ?? null,
+    pages: row.pages ?? null,
   };
 
   const candidates: CandidateBook[] = [];
@@ -147,7 +149,10 @@ export async function planIsbnEnrichment(
 
   const pruned = pruneCandidates(target, candidates);
   const recorded = [...pruned.survivors, ...pruned.rejected];
-  if (pruned.kind === 'found') return { action: 'shadow', result: 'shadow', candidates: recorded };
+  if (pruned.kind === 'found' && pruned.isbn) {
+    const merged = mergeIsbnIdentifiers(row.identifiers, [pruned.isbn]);
+    return { action: 'write', result: 'found', identifiers: merged.identifiers, added: merged.added, candidates: recorded };
+  }
   if (pruned.kind === 'ambiguous') return { action: 'none', result: 'ambiguous', candidates: recorded };
   return { action: 'none', result: 'none', candidates: recorded };
 }
@@ -244,17 +249,6 @@ export async function backfillIsbnForEdition(
   }
 
   await recordEnrichment(db, uri, plan);
-  if (plan.action === 'shadow') {
-    log.info(
-      {
-        stage: 'isbn-backfill',
-        uri,
-        result: plan.result,
-        candidates: plan.candidates?.filter((candidate) => candidate.accepted),
-      },
-      'isbn shadow match recorded; nothing written',
-    );
-  }
   return { updated: false, reason: plan.result };
 }
 

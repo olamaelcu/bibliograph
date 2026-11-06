@@ -14,10 +14,11 @@
 //   pnpm tsx scripts/backfill-edition-isbns.ts --dry-run
 //   pnpm tsx scripts/backfill-edition-isbns.ts --limit 50
 
-import { sql } from 'drizzle-orm';
+import { and, notInArray, sql } from 'drizzle-orm';
 import { makeWorkerUtils } from 'graphile-worker';
 import { db } from '../src/lib/server/db';
 import { ProgressBar } from './lib/progress';
+import { queuedIsbnBackfillUris } from './lib/queue';
 import { editions } from '../src/lib/server/db/schema';
 
 /**
@@ -64,10 +65,13 @@ function parseArgs(argv: string[]): Options {
 async function run(): Promise<void> {
   const { dryRun, limit } = parseArgs(process.argv.slice(2));
 
+  // A pending job will look the row up anyway; spending this tick's budget on
+  // it would only shorten the reach of the scan.
+  const queued = await queuedIsbnBackfillUris();
   const rows = await db
     .select({ uri: editions.uri, rkey: editions.rkey })
     .from(editions)
-    .where(PENDING)
+    .where(queued.size > 0 ? and(PENDING, notInArray(editions.uri, [...queued])) : PENDING)
     .orderBy(editions.indexedAt)
     .limit(limit);
 

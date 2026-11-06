@@ -102,3 +102,16 @@ Two write paths keep the invariant from decaying: `mergeEditionsInDb` records th
 losing uris before deleting them (inside the transaction), and `ingestEditionBatch`
 skips uris that are aliases, so re-ingesting a merged-away provider record cannot
 resurrect the duplicate under a fresh `tid`.
+
+## ISBN backfill: two passes
+
+`scripts/backfill-edition-isbns.ts` enqueues a `backfill-edition-isbn` job for every
+catalog edition with no ISBN and no `edition_isbn_enrichment` row, skipping rows that
+already have a queued job (the row budget goes to fresh work). The job refetches the
+provider authority (tier 1, deterministic) and, when that has no ISBN, searches
+OpenLibrary and Google Books and writes a single surviving candidate; a tie is
+recorded `ambiguous` and written nowhere.
+
+Rows stamped `shadow` by the older shadow-only tier 2 are not reached by that scan,
+so `scripts/enqueue-shadow-isbns.ts` re-enqueues the ones still missing an ISBN. Once
+written their result becomes `found`, which keeps the second pass idempotent.

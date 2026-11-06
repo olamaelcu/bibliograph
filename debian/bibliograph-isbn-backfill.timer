@@ -6,18 +6,17 @@ Wants=network-online.target
 Requires=bibliograph-migrate.service
 
 [Timer]
-# First pass shortly after boot, then one batch per quarter hour. `OnUnitActiveSec`
-# measures from the previous run rather than the wall clock, so a long batch
-# pushes the next tick instead of stacking runs behind it.
+# First pass shortly after boot, then once a day. The scan is idempotent and
+# skips rows that already have a queued job, so a daily cadence is enough for a
+# backlog that only grows as fast as the catalog is imported.
 OnBootSec=5min
-OnUnitActiveSec=15min
-# Spread across hosts, and allow a minute of scheduling slop: nothing here is
-# time-critical, and a synchronised fleet would hit OpenLibrary together.
-RandomizedDelaySec=60
+OnCalendar=daily
+# Spread across hosts: a synchronised fleet would hit OpenLibrary together.
+RandomizedDelaySec=1h
 AccuracySec=1min
-# Each run processes a bounded, stamped batch, so a tick missed while the host
-# was down needs no catch-up: the next one picks up the same pending rows.
-Persistent=false
+# A run missed while the host was down fires on the next boot; the bounded batch
+# and stamped rows make the catch-up harmless.
+Persistent=true
 Unit=bibliograph-isbn-backfill.service
 
 [Install]

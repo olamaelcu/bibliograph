@@ -17,10 +17,11 @@ Environment=NODE_ENV=production
 EnvironmentFile=-/etc/bibliograph/bibliograph.env
 
 # One bounded batch per tick. The scan only reads unstamped rows and enqueues
-# `backfill-edition-isbn` jobs; `bibliograph-jobs.service` does the fetching, and
-# graphile's jobKey keeps a slow worker from being handed the same row twice.
-# 200 rows per tick drains the ~1.2k backlog in a couple of hours and costs one
-# indexed query when there is nothing left to do.
+# One bounded batch per daily run. The scan only reads unstamped rows without a
+# queued job and enqueues `backfill-edition-isbn` jobs; the worker does the
+# fetching, and graphile's jobKey keeps a slow worker from being handed the same
+# row twice. 200 rows per run costs one indexed query when there is nothing left
+# to do.
 ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx scripts/backfill-edition-isbns.ts --limit 200
 
 # A slow database should not hold the unit open for the next tick.
