@@ -38,6 +38,6 @@ export const actions: Actions = {
     }
 
     cookies.set(LOGIN_NEXT_COOKIE, next, { ...COOKIE_OPTS, secure: url.protocol === 'https:' });
-    redirect(303, authUrl.toString());
+    redirect(303, authUrl.toString(), { external: true });
   },
 };
