@@ -1,3 +1,14 @@
+bibliograph (0.5.13) unstable; urgency=medium
+
+  * The admin-only delete action on `/search` is gone. Deletion lives on the
+    edition detail page (librarian-gated), and a deleted row disappears from
+    every surface — including `com.atproto.repo.getRecord`, whose catalog
+    handlers read Postgres and hash the served value per request, so there is
+    no separate repo record to clean up. Only the lexicon repo (schema CARs)
+    is file-backed, and it never held book records.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 08:19:14 -0500
+
 bibliograph (0.5.12) unstable; urgency=medium
 
   * Librarians can delete an edition from its detail page. The action is

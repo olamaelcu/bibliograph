@@ -1,10 +1,7 @@
 import { searchService } from '$lib/server/xrpc-router';
-import { error, fail, redirect } from '@sveltejs/kit';
-import { deleteEditionAndLinkedWork } from '$lib/server/catalog-delete';
-import { isAdministrator } from '$lib/server/labeler/librarian';
+import { error } from '@sveltejs/kit';
 import { allowRequest } from '$lib/server/rate-limit';
 import type { PageServerLoad } from './$types';
-import { workRkey } from '$lib/edition-votes';
 
 export type SearchKind = 'editions' | 'works' | 'contributors' | 'publishers';
 
@@ -27,7 +24,6 @@ const SEARCH_PAGE_RPM = 10;
 
 export const load: PageServerLoad = async ({
   url,
-  locals,
   getClientAddress,
 }) => {
   // This page calls `searchService` directly in SSR, bypassing the XRPC
@@ -38,8 +34,6 @@ export const load: PageServerLoad = async ({
   if (!allowRequest(getClientAddress(), 'page:/search', SEARCH_PAGE_RPM)) {
     throw error(429, 'Too many searches. Try again in a minute.');
   }
-  const viewerDid = locals.viewer?.did ?? null;
-  const canDelete = viewerDid ? await isAdministrator(viewerDid) : false;
   const rawKind = url.searchParams.get('kind');
   const kind: SearchKind = isKind(rawKind) ? rawKind : 'editions';
   const q = url.searchParams.get('q') ?? undefined;
@@ -70,19 +64,5 @@ export const load: PageServerLoad = async ({
   // about presentation.
   const typed = items.map((item) => ({ ...(item as Record<string, unknown>), $type: ITEM_TYPE[kind] }));
 
-  return { kind, q, items: typed, cursor: nextCursor, total, ids: id, canDelete };
-};
-
-export const actions = {
-  deleteEdition: async ({ locals, request }) => {
-    if (!locals.viewer || !(await isAdministrator(locals.viewer.did))) {
-      redirect(303, '/login?next=/search');
-    }
-    const formData = await request.formData();
-    const uri = String(formData.get('uri') ?? '').trim();
-    if (!uri) return fail(400, { error: 'No record specified.' });
-    const rkey = workRkey(uri);
-    await deleteEditionAndLinkedWork(rkey);
-    return { ok: true, deleted: rkey };
-  },
+  return { kind, q, items: typed, cursor: nextCursor, total, ids: id };
 };
