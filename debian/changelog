@@ -1,3 +1,13 @@
+bibliograph (0.5.4) unstable; urgency=medium
+
+  * The lexicon's `coverUrl` omits a provider's "no cover" placeholder
+    (`…/nophoto/…`): edition records and edition views filter it, so a grey
+    Goodreads placeholder is never served as artwork. The 20,379 editions that
+    stored one need their record CID recomputed — `pnpm db:migrate:identifiers`
+    does that, because the CID is hashed from the same value the API serves.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 00:54:58 -0500
+
 bibliograph (0.5.3) unstable; urgency=medium
 
   * The Bookhive catalog refresh is scheduled: a weekly timer runs

@@ -62,3 +62,31 @@ test("a record metadata change moves the CID", async () => {
   assert.ok(after);
   assert.notEqual(before, after);
 });
+
+test("a provider's 'no cover' placeholder never reaches coverUrl", () => {
+  const placeholder =
+    "https://i.gr-assets.com/images/S/compressed.photo.goodreads.com/nophoto/book/111x148.png";
+  const identifiers: Identifier[] = [{ type: "isbn", value: "9780306406157" }];
+  const stored = editionRecordValue(
+    { ...row, coverImageUrl: placeholder },
+    { contributors: [], identifiers },
+  );
+  const overridden = editionRecordValue(row, {
+    contributors: [],
+    identifiers,
+    coverUrl: placeholder,
+  });
+  assert.ok(stored);
+  assert.ok(overridden);
+  assert.equal(stored.coverUrl, undefined);
+  assert.equal(overridden.coverUrl, undefined);
+});
+
+test("a real cover still becomes coverUrl", () => {
+  const value = editionRecordValue(
+    { ...row, coverImageUrl: "https://example.test/c.jpg" },
+    { contributors: [], identifiers: [{ type: "isbn", value: "9780306406157" }] },
+  );
+  assert.ok(value);
+  assert.equal(value.coverUrl, "https://example.test/c.jpg");
+});

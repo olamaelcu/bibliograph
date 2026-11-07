@@ -1,6 +1,6 @@
 import { cidForLex } from "@atproto/lex-cbor";
 import type { LexMap } from "@atproto/lex-data";
-import { formatToWire, publishedDateFromYear, type Contributor } from "./book-wire";
+import { formatToWire, publishedDateFromYear, usableCoverUrl, type Contributor } from "./book-wire";
 import { displayUrl, identifierFromLegacy, type Identifier, type LegacyIdentifier } from "./identifiers";
 
 /**
@@ -107,7 +107,7 @@ export function editionRecordValue(
 	const pages = overrides.pages === undefined ? row.pages : overrides.pages;
 	if (pages !== null && pages !== undefined) value.pages = pages;
 
-	const coverUrl = overrides.coverUrl === undefined ? row.coverImageUrl : overrides.coverUrl;
+	const coverUrl = usableCoverUrl(overrides.coverUrl === undefined ? row.coverImageUrl : overrides.coverUrl);
 	if (coverUrl) value.coverUrl = coverUrl;
 
 	const description = overrides.description === undefined ? row.description : overrides.description;

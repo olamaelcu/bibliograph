@@ -122,6 +122,20 @@ export function publisherToWire(name: string | null | undefined): { name: string
 }
 
 /**
+ * A provider's "no cover" placeholder is not a cover.
+ *
+ * Goodreads — and the Bookhive catalog derived from it — serves
+ * `…/nophoto/book/…png` for books without artwork. Passing that as `coverUrl`
+ * makes readers (and their image proxies) treat a grey placeholder as real
+ * artwork, so the record omits the field instead; the lexicon makes it
+ * optional.
+ */
+export function usableCoverUrl(url: string | null | undefined): string | undefined {
+	if (!url) return undefined;
+	return /nophoto/i.test(url) ? undefined : url;
+}
+
+/**
  * Build a `defs#editionView` from a stored edition row plus resolved
  * contributor records. `identifiers` must already be canonical and non-empty —
  * `defs#editionView` requires `minLength: 1`.
@@ -146,7 +160,8 @@ export function editionViewFromItem(
 	if (item.subtitle) view.subtitle = item.subtitle;
 	if (item.language) view.language = item.language;
 	if (item.description) view.description = item.description;
-	if (item.coverImageUrl) view.coverUrl = item.coverImageUrl as EditionView['coverUrl'];
+	const coverUrl = usableCoverUrl(item.coverImageUrl);
+	if (coverUrl) view.coverUrl = coverUrl as EditionView['coverUrl'];
 	if (item.pages !== undefined) view.pages = item.pages;
 	const publishedDate = publishedDateFromYear(item.publishedYear);
 	if (publishedDate) view.publishedDate = publishedDate;
