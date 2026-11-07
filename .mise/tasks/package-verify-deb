@@ -161,10 +161,12 @@ WEB="$TMP/bibliograph.service"
 WORKER="$TMP/bibliograph-worker.service"
 MIGRATE="$TMP/bibliograph-migrate.service"
 CATALOG="$TMP/bibliograph-bookhive-catalog.service"
+COVER="$TMP/bibliograph-cover-backfill.service"
 extract usr/lib/systemd/system/bibliograph.service > "$WEB"
 extract usr/lib/systemd/system/bibliograph-worker.service > "$WORKER"
 extract usr/lib/systemd/system/bibliograph-migrate.service > "$MIGRATE"
 extract usr/lib/systemd/system/bibliograph-bookhive-catalog.service > "$CATALOG"
+extract usr/lib/systemd/system/bibliograph-cover-backfill.service > "$COVER"
 
 grep -qF 'StateDirectory=bibliograph' "$WEB" || fail "web unit does not declare StateDirectory"
 grep -qF 'EnvironmentFile=-/etc/bibliograph/bibliograph.env' "$WEB" \
@@ -181,6 +183,8 @@ grep -qF 'Requires=bibliograph-migrate.service' "$WORKER" \
 
 grep -qF 'backfill-bookhive-catalog.ts' "$CATALOG" \
   || fail "catalog refresh unit does not run the walk"
+grep -qF 'backfill-covers.ts' "$COVER" || fail "cover backfill unit does not run the scan"
+grep -qF 'TimeoutStartSec=30min' "$COVER" || fail "cover backfill has no bounded timeout"
 grep -qF 'TimeoutStartSec=4h' "$CATALOG" || fail "catalog refresh has no generous timeout"
 grep -qF 'Type=oneshot' "$MIGRATE" || fail "migrate unit is not oneshot"
 grep -qF 'StartLimitBurst=' "$WORKER" \
@@ -197,7 +201,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
   # extraction dir, so Requires=bibliograph-migrate.service resolves instead of
   # reporting a missing unit. A trailing colon keeps the system paths.
   SYSTEMD_UNIT_PATH="$TMP:" systemd-analyze verify \
-    "$WEB" "$WORKER" "$MIGRATE" "$CATALOG" \
+    "$WEB" "$WORKER" "$MIGRATE" "$CATALOG" "$COVER" \
     > "$TMP/verify.log" 2>&1 || true
   # ExecStart points into /usr/lib/bibliograph, absent on the build host.
   if grep -vE 'is not executable|Command .* is not executable' "$TMP/verify.log" \

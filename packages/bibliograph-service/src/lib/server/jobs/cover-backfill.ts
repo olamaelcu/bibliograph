@@ -135,7 +135,12 @@ export async function backfillCoverForEdition(
   }
 
   const coverUrl = await resolveCoverUrl(row, log, signal);
-  if (!coverUrl) return { updated: false, reason: 'no_cover_found' };
+  if (!coverUrl) {
+    // Stamp the miss: providers answered, there is simply no cover. Without
+    // this the scheduled scan re-asks the same rows every tick.
+    await db.update(editions).set({ coverCheckedAt: new Date() }).where(eq(editions.uri, uri));
+    return { updated: false, reason: 'no_cover_found' };
+  }
 
   const contributors = await wireContributorsFor(db, row.contributors);
   const value = editionRecordValue(row, { contributors, coverUrl });
@@ -143,7 +148,7 @@ export async function backfillCoverForEdition(
   const cid = (await cidForLex(value as unknown as LexMap)).toString();
 
   const updated = await db.update(editions)
-    .set({ coverImageUrl: coverUrl, cid, indexedAt: new Date() })
+    .set({ coverImageUrl: coverUrl, coverCheckedAt: new Date(), cid, indexedAt: new Date() })
     .where(eq(editions.uri, uri))
     .returning({ uri: editions.uri });
 

@@ -36,6 +36,7 @@ function makeRow(uri: string, tid: string, overrides: Partial<EditionRow> = {}):
     createdAt: new Date('2024-01-01T00:00:00Z'),
     indexedAt: new Date('2024-01-02T00:00:00Z'),
     descriptionCheckedAt: null,
+    coverCheckedAt: null,
   };
   return Object.assign(base, overrides);
 }

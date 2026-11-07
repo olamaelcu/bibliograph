@@ -1,3 +1,15 @@
+bibliograph (0.5.7) unstable; urgency=medium
+
+  * The cover backfill is scheduled: a timer runs one bounded scan (1,000
+    rows) every four hours, offset from the daily ISBN/description ticks so the
+    three do not race for the shared Google Books quota. The scan now skips a
+    row whose lookup already concluded — migration 0027 adds
+    `editions.cover_checked_at`, stamped whether or not a cover was found — so
+    a book with no cover upstream is retried after 30 days instead of every
+    tick; a lookup that never reached a provider stays eligible.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 01:40:33 -0500
+
 bibliograph (0.5.6) unstable; urgency=medium
 
   * Provider "no cover" placeholders are filtered where covers enter storage,

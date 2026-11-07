@@ -47,6 +47,9 @@ export const editions = pgTable(
     pages: integer('pages'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull(),
     descriptionCheckedAt: timestamp('description_checked_at', { withTimezone: true }),
+    // Set by the cover backfill when a lookup concluded (found or not), so the
+    // scheduled scan does not re-ask providers about the same cover forever.
+    coverCheckedAt: timestamp('cover_checked_at', { withTimezone: true }),
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

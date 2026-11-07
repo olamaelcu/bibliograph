@@ -1,0 +1,23 @@
+[Unit]
+Description=Run the Bibliograph cover backfill every 4 hours
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+Requires=bibliograph-migrate.service
+
+[Timer]
+# Every four hours, offset from the top of the clock so the daily description
+# (00:00) and ISBN (00:25) ticks do not race this one for the Google Books
+# quota. Rows stamped by a previous tick are skipped for 30 days, so a run with
+# nothing left to do is one indexed query.
+OnBootSec=10min
+OnCalendar=*-*-* 02,06,10,14,18,22:00:00
+RandomizedDelaySec=15min
+AccuracySec=1min
+# A run missed while the host was down fires on the next boot; the bounded batch
+# and stamped rows make the catch-up harmless.
+Persistent=true
+Unit=bibliograph-cover-backfill.service
+
+[Install]
+WantedBy=timers.target

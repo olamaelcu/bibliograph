@@ -21,12 +21,20 @@ import { ProgressBar } from './lib/progress';
 
 const PAGE_SIZE = 100;
 
+/** How long a concluded lookup is trusted before the scan retries it. */
+const RETRY_AFTER_DAYS = 30;
+
 /**
- * Edition needs a cover and has nothing queued. The `NOT EXISTS` is what makes
- * a rerun cheap: without it the scan re-arms every pending job it can see.
+ * Edition needs a cover and has nothing queued.
+ *
+ * The `NOT EXISTS` is what makes a rerun cheap: without it the scan re-arms
+ * every pending job it can see. The stamp check is what keeps a scheduled run
+ * finite: a row whose providers have no cover is not asked again for
+ * `RETRY_AFTER_DAYS`, instead of being re-enqueued every four hours forever.
  */
 const PENDING = and(
   isNull(editions.coverImageUrl),
+  sql`(${editions.coverCheckedAt} IS NULL OR ${editions.coverCheckedAt} < now() - interval '${sql.raw(String(RETRY_AFTER_DAYS))} days')`,
   sql`NOT EXISTS (
     SELECT 1 FROM graphile_worker.jobs j
      WHERE j.key = 'backfill-cover:' || ${editions.uri}
