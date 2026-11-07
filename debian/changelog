@@ -1,3 +1,13 @@
+bibliograph (0.5.2) unstable; urgency=medium
+
+  * `requeue-isbn-enrichment.ts` only retries rows whose verdict is older than
+    `--older-than-days` (default 30). A retry that decides the same way
+    re-stamps the same verdict, so without the guard every run re-asked the
+    whole backlog — the first full pass re-queued 60k rows that had just been
+    checked.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 06 Nov 2026 20:52:41 -0500
+
 bibliograph (0.5.1) unstable; urgency=medium
 
   * The description backfill is scheduled: a daily timer enqueues one bounded

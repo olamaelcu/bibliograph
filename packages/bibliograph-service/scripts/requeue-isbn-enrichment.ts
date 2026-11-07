@@ -11,7 +11,9 @@
 //   --result=none    rows whose search returned no acceptable ISBN
 //
 // Idempotent: a row that gains an ISBN is excluded by the ISBN predicate, and a
-// re-run that decides the same way rewrites the same enrichment row.
+// re-run that decides the same way rewrites the same enrichment row. Rows are
+// only retried once their verdict is `--older-than-days` old (default 30), so
+// repeated runs do not re-ask the same backlog.
 //
 // Run from the package root (an operator does):
 //   node_modules/.bin/tsx scripts/requeue-isbn-enrichment.ts --result=none
@@ -34,6 +36,8 @@ interface Options {
   dryRun: boolean;
   limit: number;
   result: RequeueResult;
+  /** Skip rows checked more recently than this many days. */
+  olderThanDays: number;
 }
 
 function isRequeueResult(value: string): value is RequeueResult {
@@ -43,9 +47,14 @@ function isRequeueResult(value: string): value is RequeueResult {
 function parseArgs(argv: string[]): Options {
   let limit = 5000;
   let result: RequeueResult = 'shadow';
+  let olderThanDays = 30;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === '--dry-run') continue;
+    if (arg.startsWith('--older-than-days=')) {
+      olderThanDays = Number(arg.slice('--older-than-days='.length));
+      continue;
+    }
     if (arg.startsWith('--limit=')) {
       limit = Number(arg.slice('--limit='.length));
       continue;
@@ -64,15 +73,26 @@ function parseArgs(argv: string[]): Options {
     throw new Error(`unknown argument: ${arg}`);
   }
   if (!Number.isFinite(limit) || limit <= 0) throw new Error('--limit must be a positive number');
-  return { dryRun: argv.includes('--dry-run'), limit, result };
+  if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
+    throw new Error('--older-than-days must be a positive number');
+  }
+  return { dryRun: argv.includes('--dry-run'), limit, result, olderThanDays };
 }
 
-/** Editions with the chosen verdict and still no ISBN. */
-function pendingFor(result: RequeueResult) {
+/**
+ * Editions with the chosen verdict, still no ISBN, and not checked recently.
+ *
+ * A retry that decides the same way rewrites the verdict, so without the
+ * recency guard every run would re-ask the whole backlog — a re-stamped `none`
+ * is still `none`.
+ */
+function pendingFor(result: RequeueResult, olderThanDays: number) {
   return sql`
     EXISTS (
       SELECT 1 FROM edition_isbn_enrichment e
-       WHERE e.uri = ${editions.uri} AND e.result = ${result}
+       WHERE e.uri = ${editions.uri}
+         AND e.result = ${result}
+         AND e.checked_at < now() - make_interval(days => ${olderThanDays})
     )
     AND NOT EXISTS (
       SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) AS ident
@@ -82,18 +102,24 @@ function pendingFor(result: RequeueResult) {
 }
 
 async function run(): Promise<void> {
-  const { dryRun, limit, result } = parseArgs(process.argv.slice(2));
+  const { dryRun, limit, result, olderThanDays } = parseArgs(process.argv.slice(2));
 
   const queued = await queuedIsbnBackfillUris();
   const queuedUris = [...queued];
   const rows = await db
     .select({ uri: editions.uri, rkey: editions.rkey })
     .from(editions)
-    .where(queuedUris.length > 0 ? and(pendingFor(result), notInArray(editions.uri, queuedUris)) : pendingFor(result))
+    .where(
+      queuedUris.length > 0
+        ? and(pendingFor(result, olderThanDays), notInArray(editions.uri, queuedUris))
+        : pendingFor(result, olderThanDays),
+    )
     .orderBy(editions.indexedAt)
     .limit(limit);
 
-  console.log(`[requeue-isbn-enrichment] ${rows.length} edition(s) stamped '${result}' still lack an ISBN`);
+  console.log(
+    `[requeue-isbn-enrichment] ${rows.length} edition(s) stamped '${result}' still lack an ISBN (unchecked for ${olderThanDays}+ days)`,
+  );
 
   if (dryRun) {
     console.log('[requeue-isbn-enrichment] dry run: nothing enqueued');
