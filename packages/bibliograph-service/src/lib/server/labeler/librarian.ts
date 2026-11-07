@@ -5,7 +5,7 @@
 // labeler's stream. The label is the single source of truth for the gate — the
 // application row only records how it got there.
 
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { db as defaultDb } from '../db/index';
 import { librarianApplications } from '../db/schema';
 import type { LibrarianApplicationRow } from '../db/schema';
@@ -146,13 +146,59 @@ export async function revokeLibrarian(
   did: string,
   adminDid: string,
   db: DbExecutor = defaultDb,
-): Promise<LibrarianApplicationRow> {
+): Promise<LibrarianApplicationRow | null> {
   await clearLabel(did, LIBRARIAN_LABEL, db);
   const [row] = await db
     .update(librarianApplications)
     .set({ status: 'revoked', decidedAt: new Date(), decidedBy: adminDid })
     .where(eq(librarianApplications.did, did))
     .returning();
-  if (!row) throw new Error(`revoked ${did} but no application row exists`);
+  // A DID granted directly (outside the application queue) may have no row;
+  // the label is already revoked, so that is a warning, not a failure.
+  return row ?? null;
+}
+
+/**
+ * Issue the `librarian` label without a prior application.
+ *
+ * The label is the credential; the row is audit history. An existing
+ * application row is flipped to approved (so the queue stops showing it), and a
+ * missing one is created with the admin's note, which also gives revocation a
+ * row to update later.
+ */
+export async function grantLibrarianDirect(
+  did: string,
+  adminDid: string,
+  note: string | null = null,
+  db: DbExecutor = defaultDb,
+): Promise<LibrarianApplicationRow> {
+  await grantLabel(did, LIBRARIAN_LABEL, db);
+  const [row] = await db
+    .insert(librarianApplications)
+    .values({ did, handle: null, note, status: 'approved', decidedAt: new Date(), decidedBy: adminDid })
+    .onConflictDoUpdate({
+      target: librarianApplications.did,
+      set: {
+        status: 'approved',
+        decidedAt: new Date(),
+        decidedBy: adminDid,
+        ...(note ? { note } : {}),
+      },
+    })
+    .returning();
+  if (!row) throw new Error(`granted ${did} but the application row could not be written`);
   return row;
+}
+
+/** Application rows for a set of DIDs, keyed by DID. */
+export async function applicationsForDids(
+  dids: string[],
+  db: DbExecutor = defaultDb,
+): Promise<Map<string, LibrarianApplicationRow>> {
+  if (dids.length === 0) return new Map();
+  const rows = await db
+    .select()
+    .from(librarianApplications)
+    .where(inArray(librarianApplications.did, dids));
+  return new Map(rows.map((row) => [row.did, row]));
 }

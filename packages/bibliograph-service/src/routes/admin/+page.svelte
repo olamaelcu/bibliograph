@@ -27,6 +27,15 @@
       </span>
     </a>
 
+    <a class="tool" href="/admin/librarians">
+      <span class="title">Librarians</span>
+      <span class="body">
+        Issue the <code>librarian</code> credential to an account by DID or handle,
+        or revoke it. The signed label is what unlocks curation.
+      </span>
+      <span class="meta">Direct issuance</span>
+    </a>
+
     <a class="tool" href="/admin/import/isbn">
       <span class="title">ISBN import</span>
       <span class="body">

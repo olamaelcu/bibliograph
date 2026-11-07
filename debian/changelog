@@ -1,3 +1,14 @@
+bibliograph (0.5.11) unstable; urgency=medium
+
+  * New admin page `/admin/librarians`: issue the `librarian` label directly to
+    an account by DID or handle, and revoke it, without waiting on the
+    application queue. The signed label is still the credential; the page
+    records an audit row and reuses the existing grant/negation path. A handle
+    resolves to its DID before signing, so a typo reports a validation error
+    instead of labelling a stranger.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 08:00:32 -0500
+
 bibliograph (0.5.10) unstable; urgency=medium
 
   * `community.lexicon.book.searchEditions` is a query again. It was a query

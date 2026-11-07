@@ -66,6 +66,28 @@ export async function resolvePds(actor: string, opts?: { signal?: AbortSignal })
   return resolved.pds;
 }
 
+/**
+ * Resolve a handle or DID to the account's DID.
+ *
+ * The admin pages accept either spelling for a target account; `null` means the
+ * identifier did not resolve (unknown handle, malformed input), which the caller
+ * reports as a validation error rather than granting a label to a typo.
+ */
+export async function resolveActorDid(
+  actor: string,
+  opts?: { signal?: AbortSignal },
+): Promise<string | null> {
+  try {
+    const resolved = await actorResolver.resolve(
+      actor as Parameters<typeof actorResolver.resolve>[0],
+      { signal: opts?.signal },
+    );
+    return resolved.did;
+  } catch {
+    return null;
+  }
+}
+
 export interface PdsClient {
   /** ATProto RPC client bound to the user's PDS for anonymous reads. */
   client: Client;
