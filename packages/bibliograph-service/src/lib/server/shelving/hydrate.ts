@@ -11,6 +11,8 @@ import { BOOKHIVE_BOOK_COLLECTION } from '../bookhive/keys';
 import { normalizeBookhiveBook } from '../bookhive/records';
 import { catalogEditionUriFromRkey } from './catalog-uri';
 import { formatViewFor } from '../format-view';
+import { usableCoverUrl } from '../book-wire';
+import { loadContributorRefs } from '../contributor-refs';
 import { displayNameForShelfRkey, shelfViewFromValue } from './shelf-view';
 
 const log = createLogger('web');
@@ -44,7 +46,20 @@ export async function hydrateBookByUri(
   // `resolveEditions` folds a uri retired by a merge onto the book that absorbed
   // it, so a shelving row written before the merge still hydrates.
   const row = (await resolveEditions([uri])).get(uri);
-  return row ? makeBookView(row) : null;
+  if (!row) return null;
+  return makeBookView(row, await contributorNamesFor([row]));
+}
+
+/** The names a book view inlines; rows only store contributor strongRefs. */
+async function contributorNamesFor(
+  rows: ReadonlyArray<typeof editions.$inferSelect>,
+): Promise<Map<string, string>> {
+  const uris = new Set<string>();
+  for (const row of rows) {
+    for (const entry of row.contributors ?? []) uris.add(entry.subject.uri);
+  }
+  const refs = await loadContributorRefs([...uris]);
+  return new Map([...refs].map(([uri, ref]) => [uri, ref.name]));
 }
 
 export async function hydrateBooksByUri(
@@ -55,10 +70,14 @@ export async function hydrateBooksByUri(
   // Keyed by every requested uri *and* the canonical uri of the row it resolved
   // to, so two uris naming the same book answer with one book view.
   const views = new Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>();
-  for (const [uri, row] of await resolveEditions(uris)) {
+  const byUri = await resolveEditions(uris);
+  const names = await contributorNamesFor(
+    [...new Map([...byUri.values()].map((row) => [row.uri, row])).values()],
+  );
+  for (const [uri, row] of byUri) {
     let view = views.get(row.tid);
     if (!view) {
-      view = makeBookView(row);
+      view = makeBookView(row, names);
       views.set(row.tid, view);
     }
     map.set(uri, view);
@@ -66,24 +85,33 @@ export async function hydrateBooksByUri(
   return map;
 }
 
-function makeBookView(row: typeof editions.$inferSelect): NetOlamaelcuLivtetBiblioDefs.BookView {
+function makeBookView(
+  row: typeof editions.$inferSelect,
+  contributorNames: Map<string, string>,
+): NetOlamaelcuLivtetBiblioDefs.BookView {
   return {
     uri: row.uri as never,
     title: row.title,
-    coverUrl: (row.coverImageUrl ?? undefined) as never,
+    // A provider's "no cover" placeholder is not artwork; omit the field.
+    coverUrl: usableCoverUrl(row.coverImageUrl) as never,
     publishDate: row.publishedYear ? `${row.publishedYear}` : undefined,
     format: formatViewFor(row.format) as never,
     pages: row.pages ?? undefined,
-    contributors: (row.contributors ?? []).map((c) => ({
-      bookUri: row.uri as never,
-      contributor: {
-        name: '',
-        uri: c.subject.uri as never,
-        $type: 'net.olamaelcu.livtet.biblio.defs#contributorView' as const,
-      },
-      role: c.role as never,
-      $type: 'net.olamaelcu.livtet.biblio.defs#bookContributorView' as const,
-    })),
+    contributors: (row.contributors ?? [])
+      .map((c) => ({ entry: c, name: contributorNames.get(c.subject.uri)?.trim() ?? '' }))
+      // `defs#contributorView.name` is required and non-empty; a ref whose row
+      // is gone would otherwise publish an invalid contributor.
+      .filter(({ name }) => name !== '')
+      .map(({ entry, name }) => ({
+        bookUri: row.uri as never,
+        contributor: {
+          name,
+          uri: entry.subject.uri as never,
+          $type: 'net.olamaelcu.livtet.biblio.defs#contributorView' as const,
+        },
+        role: entry.role as never,
+        $type: 'net.olamaelcu.livtet.biblio.defs#bookContributorView' as const,
+      })),
     $type: 'net.olamaelcu.livtet.biblio.defs#bookView',
   };
 }

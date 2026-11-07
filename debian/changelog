@@ -1,3 +1,12 @@
+bibliograph (0.5.5) unstable; urgency=medium
+
+  * The biblio book view (`getBooks` / shelf hydration) drops the nophoto
+    placeholder too, and inlines contributor names from the contributor row
+    instead of an empty string — the view used to publish
+    `{ name: '', uri }` for every contributor, which readers rendered blank.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 01:13:37 -0500
+
 bibliograph (0.5.4) unstable; urgency=medium
 
   * The lexicon's `coverUrl` omits a provider's "no cover" placeholder
