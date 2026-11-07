@@ -1,3 +1,13 @@
+bibliograph (0.5.9) unstable; urgency=medium
+
+  * `backfill-covers.ts` accepts `--limit N` as well as `--limit=N`. The unit
+    passes the space-separated form and the script silently ignored it, so the
+    first scheduled tick enqueued the whole 20,548-row backlog instead of the
+    intended 1,000 — one-off, and it stamped every row, so the next tick is a
+    no-op until the 30-day window passes.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 06:50:24 -0500
+
 bibliograph (0.5.8) unstable; urgency=medium
 
   * The cover and catalog refresh oneshots declare `LogsDirectory=bibliograph`.

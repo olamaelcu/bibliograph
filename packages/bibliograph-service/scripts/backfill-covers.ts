@@ -48,8 +48,22 @@ async function main(): Promise<void> {
   }
   const args = process.argv.slice(2);
   const dry = args.includes('--dry');
-  const limitArg = args.find((a) => a.startsWith('--limit='))?.slice('--limit='.length);
-  const hardLimit = limitArg ? Number(limitArg) : undefined;
+  // Accept both `--limit=N` and `--limit N`: the packaged unit passes the
+  // space-separated form, and ignoring it turned a bounded tick into a full
+  // backlog scan.
+  let limitArg: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg.startsWith('--limit=')) {
+      limitArg = arg.slice('--limit='.length);
+      break;
+    }
+    if (arg === '--limit') {
+      limitArg = args[i + 1];
+      break;
+    }
+  }
+  const hardLimit = limitArg === undefined ? undefined : Number(limitArg);
   const log = createLogger('worker');
 
   const [counted] = await db
