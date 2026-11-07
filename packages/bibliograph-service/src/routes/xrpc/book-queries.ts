@@ -24,6 +24,24 @@ import { contributorUrisFor, loadContributorRefs } from '../../lib/server/contri
 import type { SearchService } from '../../lib/server/search/service';
 import type { Identifier } from '../../lib/server/identifiers';
 
+/**
+ * `identifiers` are `defs#identifier` pairs encoded as `<type>:<value>`: query
+ * parameters carry primitives only, so the pair travels as one string. A hint
+ * without both halves is dropped — it names nothing a row can match.
+ */
+function parseIdentifierHints(hints: readonly string[]): Identifier[] {
+  const parsed: Identifier[] = [];
+  for (const hint of hints) {
+    const separator = hint.indexOf(':');
+    if (separator <= 0 || separator === hint.length - 1) continue;
+    parsed.push({
+      type: hint.slice(0, separator),
+      value: hint.slice(separator + 1),
+    });
+  }
+  return parsed;
+}
+
 /** `InvalidQuery`: no nonblank q, title, author, or nonempty identifiers. */
 function invalidQuery(message: string): Response {
   return Response.json({ error: 'InvalidQuery', message }, { status: 400 });
@@ -53,7 +71,7 @@ export function registerBookQueries(
     async handler() {
       const queries: { nsid: string; type: 'query' | 'procedure' }[] = [
         { nsid: 'community.lexicon.book.compatibility', type: 'query' },
-        { nsid: 'community.lexicon.book.searchEditions', type: 'procedure' },
+        { nsid: 'community.lexicon.book.searchEditions', type: 'query' },
         { nsid: 'community.lexicon.book.resolveEditions', type: 'procedure' },
         { nsid: 'community.lexicon.book.searchWorks', type: 'query' },
         { nsid: 'community.lexicon.book.searchContributors', type: 'query' },
@@ -63,12 +81,12 @@ export function registerBookQueries(
     },
   });
 
-  router.addProcedure(CommunityLexiconBookSearchEditions.mainSchema, {
-    async handler({ input }) {
-      const q = input.q?.trim();
-      const title = input.title?.trim();
-      const author = input.author?.trim();
-      const identifiers: Identifier[] = input.identifiers ?? [];
+  router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
+    async handler({ params }) {
+      const q = params.q?.trim();
+      const title = params.title?.trim();
+      const author = params.author?.trim();
+      const identifiers = parseIdentifierHints(params.identifiers ?? []);
       if (!q && !title && !author && identifiers.length === 0) {
         return invalidQuery('one of q, title, author, or identifiers is required');
       }
@@ -76,8 +94,8 @@ export function registerBookQueries(
       // The text sources index a single free-form field, so the structured
       // title/author hints are folded into it, most specific first.
       const text = q ?? ([title, author].filter(Boolean).join(' ') || undefined);
-      const limit = Math.min(input.limit ?? 25, 100);
-      const offset = Math.max(input.offset ?? 0, 0);
+      const limit = Math.min(params.limit ?? 25, 100);
+      const offset = Math.max(params.offset ?? 0, 0);
 
       const result = await searchService.searchEditions({
         q: text,

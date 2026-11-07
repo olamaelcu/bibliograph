@@ -1,3 +1,21 @@
+bibliograph (0.5.10) unstable; urgency=medium
+
+  * `community.lexicon.book.searchEditions` is a query again. It was a query
+    until 0.5.9's canonical-identifier work moved it to a procedure to carry
+    structured `identifiers`; a search is a read, so it must be cacheable and
+    idempotent per the XRPC spec, and clients that GET it were answered with
+    405. The hints now travel as parameters — `q`, `title`, `author`,
+    `identifiers` (each `<type>:<value>`, the canonical pair encoded as one
+    string) — with `offset`/`limit` paging, and the handler parses the pairs.
+  * The compatibility endpoint advertises it as a query again.
+  * The description backfill runs hourly instead of daily: one 1,000-row batch
+    at :40 of every hour (~24k/day, keeping the daily volume near the previous
+    20k) so the 232k-row backlog drains steadily without exceeding the shared
+    Google Books quota. The ISBN (00:25) and cover (even hours, :00) ticks keep
+    their offsets, so the three scans do not race each other.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 07:13:03 -0500
+
 bibliograph (0.5.9) unstable; urgency=medium
 
   * `backfill-covers.ts` accepts `--limit N` as well as `--limit=N`. The unit

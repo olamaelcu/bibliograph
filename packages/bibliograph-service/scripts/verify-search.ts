@@ -57,23 +57,30 @@ function stubGoogleBooks(id: string, title: string): { restore: () => void; call
 }
 
 /**
- * `searchEditions` is a procedure: the hints arrive as a JSON body and the
+ * `searchEditions` is a query: the hints arrive as URL parameters and the
  * response is the `defs#editionResults` envelope. This harness returns the
  * source items unchanged (so the assertions can see which provider answered)
  * rather than mapping them to `defs#editionView`, which is the production
  * handler's job in `routes/xrpc/book-queries.ts`.
  */
 function registerSearchEditions(router: XRPCRouter, svc: SearchService): void {
-  router.addProcedure(CommunityLexiconBookSearchEditions.mainSchema, {
-    async handler({ input }) {
-      const limit = input.limit ?? 20;
+  router.addQuery(CommunityLexiconBookSearchEditions.mainSchema, {
+    async handler({ params }) {
+      const limit = params.limit ?? 20;
+      // `identifiers` travel as `<type>:<value>` strings; the production handler
+      // parses them the same way.
+      const identifiers = (params.identifiers ?? []).flatMap((hint) => {
+        const separator = hint.indexOf(':');
+        if (separator <= 0 || separator === hint.length - 1) return [];
+        return [{ type: hint.slice(0, separator), value: hint.slice(separator + 1) }];
+      });
       const r = await svc.searchEditions({
-        q: input.q,
-        title: input.title,
-        author: input.author,
-        identifiers: input.identifiers,
+        q: params.q,
+        title: params.title,
+        author: params.author,
+        identifiers,
         limit,
-        offset: input.offset ?? 0,
+        offset: params.offset ?? 0,
       });
       return Response.json({
         items: r.items,
