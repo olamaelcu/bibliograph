@@ -7,6 +7,7 @@ import {
 import { submitEditionWorkVote, VoteError } from '$lib/server/edition-work-actions';
 import { PUBLISHER_DID } from '$lib/server/did';
 import { clearLabel, grantLabel, hasLabel, isLibrarian } from '$lib/server/labeler/labels';
+import { deleteEditionAndLinkedWork } from '$lib/server/catalog-delete';
 import { applicationFor, isAdministrator, requestLibrarianAccess } from '$lib/server/labeler/librarian';
 import { CONTROVERSIAL_LABEL } from '$lib/server/labeler/vocabulary';
 import { log, searchService } from '$lib/server/xrpc-router';
@@ -90,6 +91,27 @@ async function castVote(
 export const actions: Actions = {
   linkWork: (event) => castVote('link', event),
   unlinkWork: (event) => castVote('unlink', event),
+
+  /**
+   * Delete this edition from the catalog (librarians only).
+   *
+   * Catalog-level, like a merge: the Postgres row is what every page and
+   * AppView query reads, and dependent rows (votes, labels, enrichment) go with
+   * it. The linked work is deleted only when no other edition still uses it.
+   */
+  deleteEdition: async ({ params, locals }) => {
+    const next = `/editions/${params.rkey}`;
+    if (!locals.viewer) redirect(303, `/login?next=${encodeURIComponent(next)}`);
+    if (!(await isLibrarian(locals.viewer.did))) {
+      return fail(403, { error: 'Only accounts holding the librarian label can delete editions.' });
+    }
+    await deleteEditionAndLinkedWork(params.rkey);
+    log.info(
+      { stage: 'edition-delete', rkey: params.rkey, did: locals.viewer.did },
+      'edition deleted by librarian',
+    );
+    redirect(303, '/');
+  },
 
   /** Flip the `controversial` label on this edition record (administrators only). */
   toggleControversial: async ({ params, locals }) => {

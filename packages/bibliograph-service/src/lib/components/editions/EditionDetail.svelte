@@ -138,6 +138,26 @@
             </form>
           {/if}
         {/if}
+        {#if canCurate}
+          <form
+            method="POST"
+            action="?/deleteEdition"
+            class="delete-form"
+            onsubmit={(event) => {
+              if (!confirm(`Delete ${rkey} from the catalog? This cannot be undone.`)) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <wa-button type="submit" variant="danger" appearance="outlined" size="s"
+              >Delete edition</wa-button
+            >
+            <span class="muted small">
+              Removes the catalog row, its votes and its labels; a linked work goes only when no
+              other edition uses it.
+            </span>
+          </form>
+        {/if}
       </wa-details>
     </wa-callout>
   {/if}
@@ -204,6 +224,13 @@
     gap: var(--wa-space-s);
     align-items: flex-end;
     margin-block-end: var(--wa-space-s);
+  }
+  .delete-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wa-space-s);
+    align-items: center;
+    margin-block-start: var(--wa-space-s);
   }
   .small {
     font-size: var(--wa-font-size-s);

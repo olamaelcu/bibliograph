@@ -1,3 +1,14 @@
+bibliograph (0.5.12) unstable; urgency=medium
+
+  * Librarians can delete an edition from its detail page. The action is
+    librarian-gated on the server (the button renders only for them, behind a
+    confirmation), removes the catalog row together with its votes, labels and
+    ISBN bookkeeping, and deletes the linked work only when no other edition
+    still references it — the same catalog-level deletion the merge tooling
+    performs.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 08:07:36 -0500
+
 bibliograph (0.5.11) unstable; urgency=medium
 
   * New admin page `/admin/librarians`: issue the `librarian` label directly to
