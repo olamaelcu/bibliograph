@@ -1,3 +1,13 @@
+bibliograph (0.5.8) unstable; urgency=medium
+
+  * The cover and catalog refresh oneshots declare `LogsDirectory=bibliograph`.
+    Both scripts log through the worker logger, which writes under
+    /var/log/bibliograph, and `ProtectSystem=strict` made that path read-only —
+    the first cover tick died with EROFS before enqueueing anything. The
+    packaging check now pins the directive.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 01:47:23 -0500
+
 bibliograph (0.5.7) unstable; urgency=medium
 
   * The cover backfill is scheduled: a timer runs one bounded scan (1,000

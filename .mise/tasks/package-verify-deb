@@ -185,6 +185,10 @@ grep -qF 'backfill-bookhive-catalog.ts' "$CATALOG" \
   || fail "catalog refresh unit does not run the walk"
 grep -qF 'backfill-covers.ts' "$COVER" || fail "cover backfill unit does not run the scan"
 grep -qF 'TimeoutStartSec=30min' "$COVER" || fail "cover backfill has no bounded timeout"
+grep -qF 'LogsDirectory=bibliograph' "$COVER" \
+  || fail "cover backfill cannot write its log directory (ProtectSystem=strict)"
+grep -qF 'LogsDirectory=bibliograph' "$CATALOG" \
+  || fail "catalog refresh cannot write its log directory (ProtectSystem=strict)"
 grep -qF 'TimeoutStartSec=4h' "$CATALOG" || fail "catalog refresh has no generous timeout"
 grep -qF 'Type=oneshot' "$MIGRATE" || fail "migrate unit is not oneshot"
 grep -qF 'StartLimitBurst=' "$WORKER" \

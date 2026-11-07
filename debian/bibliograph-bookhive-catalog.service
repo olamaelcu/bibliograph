@@ -30,6 +30,11 @@ SyslogIdentifier=bibliograph-bookhive-catalog
 StateDirectory=bibliograph
 StateDirectoryMode=0750
 
+# The walk logs through the worker logger, which writes under /var/log; with
+# ProtectSystem=strict that path is read-only unless the unit owns it.
+LogsDirectory=bibliograph
+LogsDirectoryMode=0750
+
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
