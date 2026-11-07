@@ -1,3 +1,14 @@
+bibliograph (0.5.6) unstable; urgency=medium
+
+  * Provider "no cover" placeholders are filtered where covers enter storage,
+    not only on the wire: the Bookhive catalog parser treats a nophoto cover
+    as absent (a real thumbnail still wins), and edition ingest drops one
+    before it is stored. The 20,379 editions that already stored a placeholder
+    have `cover_image_url` nulled — no CID change, since the record already
+    omitted the field.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 01:22:24 -0500
+
 bibliograph (0.5.5) unstable; urgency=medium
 
   * The biblio book view (`getBooks` / shelf hydration) drops the nophoto

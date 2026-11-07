@@ -1,3 +1,4 @@
+import { usableCoverUrl } from '../book-wire';
 import type { ContributionEntry, EditionItem, Identifier } from '../search/types';
 import { isbnIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
 import {
@@ -92,7 +93,9 @@ export function parseCatalogBook(value: unknown): CatalogBookRecord | null {
   const rec: CatalogBookRecord = { id, title };
   const authors = str(v.authors);
   if (authors) rec.authors = authors;
-  const cover = str(v.cover) ?? str(v.thumbnail);
+  // Goodreads' "no cover" placeholder is not artwork; treat it as absent and
+  // let the thumbnail (also filtered) decide.
+  const cover = usableCoverUrl(str(v.cover)) ?? usableCoverUrl(str(v.thumbnail));
   if (cover) rec.cover = cover;
   const source = str(v.source);
   if (source) rec.source = source;
@@ -150,7 +153,7 @@ export function catalogBookToEditionItem(
     uri: bhEditionUri(rec.id),
     title: rec.title,
     description: undefined,
-    coverImageUrl: rec.cover,
+    coverImageUrl: usableCoverUrl(rec.cover),
     identifiers: identifiersFor(rec),
     contributors: contributions,
     createdAt: created.toISOString(),

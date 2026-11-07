@@ -9,6 +9,7 @@ import type { EditionItem, WorkItem, Identifier } from '../search/types';
 import { PUBLISHER_DID } from '../did';
 
 import { gbEditionRkey, gbWorkRkey } from '../gb/keys';
+import { usableCoverUrl } from '../book-wire';
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { bhEditionRkey, isHiveId } from '../bookhive/keys';
 import { isbndbEditionRkey, isbndbWorkRkey } from '../isbndb/keys';
@@ -165,7 +166,10 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
       const uri = editionUriFor(item.identifiers);
       if (!uri) continue;
       const rkey = uri.slice(uri.lastIndexOf('/') + 1);
-      const coverImageUrl = item.coverImageUrl ? datacenterCoverUrl(item.coverImageUrl) : undefined;
+      // Providers serve placeholder art as a real URL; never store it as a cover.
+      const coverImageUrl = usableCoverUrl(
+        item.coverImageUrl ? datacenterCoverUrl(item.coverImageUrl) : undefined,
+      );
       const value = editionRecordValue({ ...item, createdAt: new Date(item.createdAt) }, {
         contributors: contributors[index] ?? [],
         coverUrl: coverImageUrl ?? null,

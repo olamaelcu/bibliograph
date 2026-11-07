@@ -47,6 +47,21 @@ test('parseCatalogBook falls back to thumbnail when cover is absent', () => {
   assert.equal(rec?.cover, 'https://example.test/t.jpg');
 });
 
+test('parseCatalogBook treats the nophoto placeholder as absent', () => {
+  const placeholder =
+    'https://i.gr-assets.com/images/S/compressed.photo.goodreads.com/nophoto/book/111x148.png';
+  // A real thumbnail still wins over a placeholder cover.
+  assert.equal(
+    parseCatalogBook({ ...RECORD, cover: placeholder, thumbnail: 'https://example.test/t.jpg' })?.cover,
+    'https://example.test/t.jpg',
+  );
+  // Both placeholder → no cover at all.
+  assert.equal(
+    parseCatalogBook({ ...RECORD, cover: placeholder, thumbnail: placeholder })?.cover,
+    undefined,
+  );
+});
+
 test('parseCatalogBook drops non-numeric ratings instead of coercing', () => {
   assert.equal(parseCatalogBook({ ...RECORD, rating: '3090' })?.rating, undefined);
   assert.equal(parseCatalogBook({ ...RECORD, rating: 3090 })?.rating, 3090);
