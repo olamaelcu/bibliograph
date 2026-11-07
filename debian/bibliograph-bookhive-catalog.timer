@@ -1,0 +1,19 @@
+[Unit]
+Description=Refresh the Bookhive catalog weekly
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+Requires=bibliograph-migrate.service
+
+[Timer]
+# Weekly, Monday shortly after midnight UTC. The walk is a couple of hours of
+# idempotent work, so a missed tick is harmless: the next one re-reads the whole
+# catalog anyway and `Persistent=true` only means it runs soon after boot.
+OnCalendar=weekly
+RandomizedDelaySec=1h
+AccuracySec=1min
+Persistent=true
+Unit=bibliograph-bookhive-catalog.service
+
+[Install]
+WantedBy=timers.target

@@ -51,6 +51,8 @@ override_dh_auto_install:
 		debian/bibliograph-isbn-backfill.timer \
 		debian/bibliograph-description-backfill.service \
 		debian/bibliograph-description-backfill.timer \
+		debian/bibliograph-bookhive-catalog.service \
+		debian/bibliograph-bookhive-catalog.timer \
 		debian/bibliograph/usr/lib/systemd/system/
 
 override_dh_installsystemd:
@@ -62,11 +64,12 @@ override_dh_installsystemd:
 	# `bibliograph-description-backfill.service` are oneshots owned by their
 	# .timer, so only the timers are enabled and started: a oneshot enabled on
 	# its own would run at install time, before the database is ready.
-	dh_installsystemd -Xbibliograph-migrate.service -Xbibliograph-isbn-backfill.service -Xbibliograph-description-backfill.service
+	dh_installsystemd -Xbibliograph-migrate.service -Xbibliograph-isbn-backfill.service -Xbibliograph-description-backfill.service -Xbibliograph-bookhive-catalog.service
 	dh_installsystemd --no-enable --no-start \
 		bibliograph-migrate.service \
 		bibliograph-isbn-backfill.service \
-		bibliograph-description-backfill.service
+		bibliograph-description-backfill.service \
+		bibliograph-bookhive-catalog.service
 
 override_dh_fixperms:
 	dh_fixperms

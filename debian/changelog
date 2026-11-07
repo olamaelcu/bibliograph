@@ -1,3 +1,15 @@
+bibliograph (0.5.3) unstable; urgency=medium
+
+  * The Bookhive catalog refresh is scheduled: a weekly timer runs
+    `backfill-bookhive-catalog.ts` (on-protocol ISBNs and contributor refs), so
+    editions imported before a catalog field existed are refreshed without an
+    operator. One full walk per week, idempotent, 4h timeout.
+  * `requeue-isbn-enrichment.ts --older-than-days=0` disables the retry
+    cooldown, for re-asking the backlog immediately after a search-source
+    change.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 00:01:46 -0500
+
 bibliograph (0.5.2) unstable; urgency=medium
 
   * `requeue-isbn-enrichment.ts` only retries rows whose verdict is older than

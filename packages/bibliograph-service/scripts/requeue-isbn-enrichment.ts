@@ -12,8 +12,8 @@
 //
 // Idempotent: a row that gains an ISBN is excluded by the ISBN predicate, and a
 // re-run that decides the same way rewrites the same enrichment row. Rows are
-// only retried once their verdict is `--older-than-days` old (default 30), so
-// repeated runs do not re-ask the same backlog.
+// only retried once their verdict is `--older-than-days` old (default 30; `0`
+// disables the cooldown), so repeated runs do not re-ask the same backlog.
 //
 // Run from the package root (an operator does):
 //   node_modules/.bin/tsx scripts/requeue-isbn-enrichment.ts --result=none
@@ -73,8 +73,9 @@ function parseArgs(argv: string[]): Options {
     throw new Error(`unknown argument: ${arg}`);
   }
   if (!Number.isFinite(limit) || limit <= 0) throw new Error('--limit must be a positive number');
-  if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
-    throw new Error('--older-than-days must be a positive number');
+  // 0 disables the cooldown (re-ask everything still lacking an ISBN).
+  if (!Number.isFinite(olderThanDays) || olderThanDays < 0) {
+    throw new Error('--older-than-days must be zero or a positive number');
   }
   return { dryRun: argv.includes('--dry-run'), limit, result, olderThanDays };
 }
