@@ -1,3 +1,20 @@
+bibliograph (0.5.19) unstable; urgency=medium
+
+  * `getEditionsByContributor` now filters with jsonb containment
+    (`contributors @> '[{"subject":{"uri":…}}]'`) instead of an `EXISTS` over
+    `jsonb_array_elements`, which no index can serve. Every call that did not find
+    `limit` rows near the top of `editions_created_at_idx` walked the whole 888MB
+    catalog table: measured on lescayes at 11.7s for a contributor with 1008
+    editions, with ten concurrent 34s calls all waiting on DataFileRead.
+  * New `editions_contributors_gin` (GIN, jsonb_path_ops) serves the containment
+    form, the same operator class `editions_identifiers_gin` already uses.
+  * Results are unchanged: containment matched the EXISTS filter exactly on the
+    sampled contributors (24222 and 1008 rows) because each stored element carries
+    `role` and `subject{cid,uri}`, and containment ignores the extra keys.
+  * No other behaviour change; migration 0031 applies on first start.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 12:00:00 -0500
+
 bibliograph (0.5.18) unstable; urgency=medium
 
   * Index pass over the catalog read paths: `contributors (lower(name))` for

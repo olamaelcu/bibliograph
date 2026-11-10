@@ -1950,10 +1950,13 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetEditionsByContributor.mainSchema, {
         .select({ uri: editions.uri })
         .from(editions)
         .where(
-          sql`EXISTS (
-            SELECT 1 FROM jsonb_array_elements(${editions.contributors}) AS c
-            WHERE c->'subject'->>'uri' = ${contributor}
-          )`,
+          // jsonb containment, not an EXISTS over jsonb_array_elements: the
+          // set-returning form cannot use an index, so a caller whose rows are not
+          // near the top of editions_created_at_idx paid for a walk of the whole
+          // 888MB catalog table. editions_contributors_gin (migration 0031) serves
+          // this form. Stored elements also carry `role` and `subject.cid`;
+          // containment matches the subset and ignores those keys.
+          sql`${editions.contributors} @> ${JSON.stringify([{ subject: { uri: contributor } }])}::jsonb`,
         )
         // `created_at` is the catalog record's own stamp (ingest writes
         // `item.createdAt` into it), so this is the same recency the feeds sort

@@ -204,6 +204,13 @@
       "when": 1795172800005,
       "tag": "0030_drop_dead_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795259200005,
+      "tag": "0031_editions_contributors_gin",
+      "breakpoints": true
     }
   ]
 }
