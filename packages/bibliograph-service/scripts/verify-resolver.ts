@@ -1,13 +1,13 @@
 #!/usr/bin/env tsx
 // End-to-end verification: ask the canonical ATProto lexicon resolver to fetch
-// every lex schema we publish. Walks lexicons/net/olamaelcu/livtet/biblio/*.json
+// every record/query lex schema we publish. Walks lexicons/net/olamaelcu/livtet/biblio/*.json
 // as the source of truth.
 //
 // Exits 1 if any NSID fails to resolve.
 //
 // Run after `mise run lex-build` (or before any rsync to prod).
 
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { LexiconSchemaResolver } from '@atcute/lexicon-resolver';
 import { AtprotoWebDidDocumentResolver } from '@atcute/identity-resolver';

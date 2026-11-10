@@ -41,6 +41,14 @@ import {
   forgetVoteByRecordUri,
   ingestVoteRecord,
 } from '../edition-work-votes';
+import {
+  FOLLOW_COLLECTION,
+  followEdgeFromRecord,
+  followEdgesForRecordUris,
+  syncFollowEdge,
+  syncFollowEdges,
+  type FollowEdge,
+} from '../follow-graph';
 
 const db: typeof defaultDb = defaultDb;
 
@@ -420,6 +428,13 @@ export const tapRecordUpsertTask: Task = async (payload, helpers) => {
     // an empty shelf, so the fill has to start here rather than in a report.
     const candidate = catalogUriForMirroredRecord(collection, rkey, row.value);
     if (candidate) await enqueueMissingEditions(new Set([candidate]), log);
+
+    // `follows` is derived state over `records`: keep it in step with the row
+    // just written so "who follows me" never needs a repo scan.
+    if (collection === FOLLOW_COLLECTION) {
+      const edge = followEdgeFromRecord(did, row.value);
+      if (edge) await syncFollowEdge(edge);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-upsert', err, uri }, 'tap upsert failed; writing to DLQ');
@@ -434,7 +449,13 @@ export const tapRecordDeleteTask: Task = async (payload, helpers) => {
   const rkey = uri.split('/').pop() ?? '';
   const log = helpers.logger as unknown as Logger;
   try {
+    // The follow subject is written down only in the record, so read the edge
+    // while the mirror row still exists. Both statements share the try: a
+    // retry recomputes the same edge, which is idempotent.
+    const followEdges =
+      collection === FOLLOW_COLLECTION ? await followEdgesForRecordUris([uri]) : [];
     await db.delete(records).where(eq(records.uri, uri));
+    if (followEdges.length > 0) await syncFollowEdges(followEdges);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-delete', err, uri }, 'tap delete failed; writing to DLQ');
@@ -551,6 +572,16 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
     }
     await enqueueMissingEditions(candidates, log);
 
+    // Follow edges are derived state over `records`: materialize them from the
+    // rows just written so "who follows me" is answerable without a repo scan.
+    const followEdges: FollowEdge[] = [];
+    for (const it of unique) {
+      if ((it.uri.split('/').slice(-2, -1)[0] ?? '') !== FOLLOW_COLLECTION) continue;
+      const edge = followEdgeFromRecord(it.did, it.value);
+      if (edge) followEdges.push(edge);
+    }
+    await syncFollowEdges(followEdges);
+
     // Edition→work votes are only useful in `edition_work_votes`, not in the
     // generic `records` mirror, so materialize them and let consensus decide
     // whether the catalog changes.
@@ -649,9 +680,25 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
       );
     }
 
+    // A follow record's subject is written down only in the record itself, and a
+    // delete event carries just the uri, so the edges for the confirmed rows
+    // have to be read while the mirror still holds them.
+    const deletedFollowEdges = await followEdgesForRecordUris(confirmed);
+
     if (confirmed.length > 0) {
       await db.delete(records).where(inArray(records.uri, confirmed));
     }
+
+    // Recompute after the mirror mutation: a pair whose last record is gone
+    // loses its row, while `revived` records are still in the repo and have to
+    // keep theirs even though the event said delete.
+    const revivedFollowEdges: FollowEdge[] = [];
+    for (const row of revived) {
+      if ((row.uri.split('/').slice(-2, -1)[0] ?? '') !== FOLLOW_COLLECTION) continue;
+      const edge = followEdgeFromRecord(row.did, row.value);
+      if (edge) revivedFollowEdges.push(edge);
+    }
+    await syncFollowEdges([...deletedFollowEdges, ...revivedFollowEdges]);
 
     const voteEditions = new Set<string>();
     for (const uri of confirmed) {

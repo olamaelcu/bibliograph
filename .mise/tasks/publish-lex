@@ -50,6 +50,11 @@ set -a
 set +a
 : "${ATP_SIGNING_KEY:?ATP_SIGNING_KEY must be set in /etc/bibliograph/bibliograph.env}"
 
+# The authority root includes the biblio namespace and the space declarations
+# resolved by Livtet's OAuth scopes.
+LEX_AUTHORITY="${LEX_AUTHORITY:-net/olamaelcu/livtet}"
+export LEX_AUTHORITY
+
 LEX_OUT_DIR="${LEX_OUT_DIR:-/var/lib/bibliograph/lex}"
 export LEX_OUT_DIR
 install -d -o bibliograph -g bibliograph -m 0750 "$LEX_OUT_DIR"
@@ -57,6 +62,7 @@ install -d -o bibliograph -g bibliograph -m 0750 "$LEX_OUT_DIR"
 echo "    signing key: set (${#ATP_SIGNING_KEY} hex chars)"
 echo "    building into $LEX_OUT_DIR"
 ./node_modules/.bin/tsx scripts/build-lex-repo.ts --verify
+./node_modules/.bin/tsx scripts/verify-space-declarations.ts
 
 chown -R bibliograph:bibliograph "$LEX_OUT_DIR"
 chmod 0750 "$LEX_OUT_DIR"

@@ -212,6 +212,37 @@ like before the first publish. Verify end to end with the canonical resolver
 pnpm --filter bibliograph-service exec tsx scripts/verify-resolver.ts
 ```
 
+### Livtet space declarations
+
+The same publisher is the lexicon authority for `net.olamaelcu.livtet.*`, so it
+also publishes the `type: "space"` declarations that an ATProto spaces OAuth
+provider resolves before issuing `space:` scopes:
+
+- `net.olamaelcu.livtet.readingList`
+- `net.olamaelcu.livtet.bookClub`
+- `net.olamaelcu.livtet.clubBookmarks`
+
+`build-lex-repo.ts` defaults `LEX_AUTHORITY` to the authority root
+(`net/olamaelcu/livtet`) and `publish-lex` exports the same default. The
+`@atcute/lex-cli` codegen step deliberately excludes those top-level space
+documents: it does not model the alpha `type: "space"` type, while the static
+publisher stores the declaration verbatim.
+
+Point the authority's DNS at this publisher:
+
+```text
+_lexicon.livtet.olamaelcu.net. 300 IN TXT "did=did:web:biblio.livtet.olamaelcu.net"
+```
+
+The DID document already exposes `#atproto_pds`; exactly one `did=` TXT value
+is required. After publishing and DNS propagation, verify the three records
+through the static publisher before retrying OAuth:
+
+```bash
+LEX_OUT_DIR=/var/lib/bibliograph/lex \
+  pnpm --filter bibliograph-service verify:space
+```
+
 `apt upgrade` treats `/etc/bibliograph/bibliograph.env` as a conffile and prompts
 instead of overwriting local edits. debhelper's generated `postinst` restarts
 both long-running units after an upgrade, which re-runs the migrator.

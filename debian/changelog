@@ -1,3 +1,45 @@
+bibliograph (0.5.16) unstable; urgency=medium
+
+  * Publish Livtet's alpha space declarations from the static lexicon repo:
+    `net.olamaelcu.livtet.readingList`, `bookClub`, and `clubBookmarks`. The
+    publisher now builds the full `net/olamaelcu/livtet` authority, while the
+    `@atcute/lex-cli` codegen step skips the `type: "space"` documents it
+    cannot model. `publish-lex` verifies all three CAR slices before the host
+    serves them.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 08 Nov 2026 17:16:09 -0500
+
+bibliograph (0.5.15) unstable; urgency=medium
+
+  * `net.olamaelcu.livtet.biblio.graph.isFollowing` answers "does `follower`
+    follow `followed`" with one primary-key probe, for the reverse edge a
+    profile needs on every view ("Follows you", "Follow back"). The list
+    queries cannot answer it: a membership test would have to page a whole
+    follower list.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 10:05:31 -0500
+
+bibliograph (0.5.14) unstable; urgency=medium
+
+  * The follow graph is indexable again. `follows` (follower_did → followed_did)
+    comes back in migration 0028 as a derived read index over
+    `net.olamaelcu.livtet.biblio.follow` records, which TAP already mirrors into
+    `records`. The migration seeds it with one `INSERT … SELECT`, and the TAP
+    upsert/delete tasks keep it in step by recomputing a pair from the mirror,
+    so a delete racing an upsert cannot leave a dangling edge.
+  * `net.olamaelcu.livtet.biblio.graph.listFollowers` and `…graph.listFollowees`
+    answer who follows a DID and who that DID follows, keyset-paginated, with an
+    exact `total` so a UI can put a count in a label. Both are public reads: the
+    follow graph is public ATProto data.
+  * `mise run backfill:follows` fills the edges TAP cannot see — followers whose
+    repo this instance never registered — from Constellation, which indexes the
+    whole network. Idempotent, bounded by `--limit`, and driven by
+    `bibliograph-follows-backfill.timer` every hour.
+  * The Constellation `SocialSource` named `biblio.social:follow`, a collection
+    that has never existed; it now names the real `biblio.follow:subject`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 07 Nov 2026 09:48:25 -0500
+
 bibliograph (0.5.13) unstable; urgency=medium
 
   * The admin-only delete action on `/search` is gone. Deletion lives on the

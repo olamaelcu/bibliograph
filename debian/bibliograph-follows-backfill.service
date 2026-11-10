@@ -1,0 +1,62 @@
+[Unit]
+Description=Bibliograph follower-graph backfill (bounded Constellation scan)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+# The `follows` table comes from migration 0028, and a scan would only fill a
+# table that is not there yet.
+Requires=bibliograph-migrate.service
+
+[Service]
+Type=oneshot
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph/packages/bibliograph-service
+
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/bibliograph/bibliograph.env
+
+# TAP already mirrors `net.olamaelcu.livtet.biblio.follow` for every repo it
+# registered, and the worker materializes `follows` from that mirror. What TAP
+# cannot see is a follower whose repo was never registered, so this scan asks
+# Constellation — which indexes the whole network — for the followers of each
+# live session's DID and inserts the ones the mirror is missing.
+#
+# Every insert is ON CONFLICT DO NOTHING, so a rerun with nothing new is a set
+# of read-only queries against the public instance. --limit bounds the work one
+# tick can do; the scan otherwise picks the most recently active sessions first.
+ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx scripts/backfill-follows.ts --limit 500
+
+# A cold tsx start plus up to 500 public-instance round trips fits inside this,
+# but a slow index should not hold the unit open for the next tick.
+TimeoutStartSec=30min
+SuccessExitStatus=143 130
+SyslogIdentifier=bibliograph-follows-backfill
+
+StateDirectory=bibliograph
+StateDirectoryMode=0750
+
+# The script logs through the worker logger, which writes under /var/log; with
+# ProtectSystem=strict that path is read-only unless the unit owns it.
+LogsDirectory=bibliograph
+LogsDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+MemoryDenyWriteExecute=no

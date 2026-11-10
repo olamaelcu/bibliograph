@@ -13,7 +13,12 @@ export type ShelvingSource =
 /** `buzz.bookhive.book` records ref their catalog record through `hiveBookUri`. */
 export type BookhiveSource = typeof BOOKHIVE_BACKLINK_SOURCE;
 export type ReviewSource = 'net.olamaelcu.livtet.biblio.bookReview:book.uri' | BookhiveSource;
-export type SocialSource = 'net.olamaelcu.livtet.biblio.social:follow';
+/**
+ * Follow edges. The collection is `…biblio.follow` and the link is its
+ * `subject`; a `subject` of `at://<did>` makes the following DID resolvable.
+ * `getBacklinks(subject: at://<did>)` therefore lists that DID's followers.
+ */
+export type SocialSource = 'net.olamaelcu.livtet.biblio.follow:subject';
 export type BacklinkSource = ShelvingSource | ReviewSource | SocialSource;
 
 export interface BacklinkRecord {

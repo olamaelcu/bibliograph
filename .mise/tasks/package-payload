@@ -38,9 +38,10 @@ rm -rf packaging/payload
 mkdir -p "$PAYLOAD/$SERVICE"
 cp package.json pnpm-workspace.yaml pnpm-lock.yaml "$PAYLOAD/"
 
-# 3. Everything the runtime needs. drizzle/ is read by the migrator;
-#    scripts/ carries operator tools (key generation) and nothing is executed
-#    from it by the units.
+# 3. Everything the runtime needs. drizzle/ is read by the migrator; the
+#    backfill scripts in scripts/ are executed by their oneshot units
+#    (cover, description, follows, ISBN, bookhive catalog), and the rest are
+#    operator tools (key generation).
 rsync -a --exclude node_modules --exclude .svelte-kit \
   "$SERVICE/package.json" \
   "$SERVICE/server.ts" \

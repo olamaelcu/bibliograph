@@ -5,7 +5,7 @@ pnpm = "11.13.1"
 [env]
 _.file = ".env"
 TAP_ADMIN_PASSWORD = "19b37984434cbe7908fedcc267d535eee21b15a13971eb4c873a00d371f0b493"
-DATABASE_URL = "postgres://bibliograph:bibliograph@localhost:5432/bibliograph"
+DATABASE_URL = "postgres://bibliograph:bibliograph@localhost:15432/bibliograph"
 
 [tasks.containers]
 run = ["docker compose up --detach"]

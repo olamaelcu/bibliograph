@@ -116,28 +116,30 @@ its keyset cursor from the last row.
 `at://…/feed.generator/{following,extended}` are filtered by who the viewer
 follows, so they need the follow graph the reader actually maintains. Those
 edges are `net.olamaelcu.livtet.biblio.follow` records in the **reader's own
-repo** — livtet-service's FollowButton writes them there — and nothing mirrors
-them into `records`: TAP subscribes to `net.olamaelcu.livtet.biblio.*` but the
-consumer only persists `buzz.bookhive.book`.
+repo** — livtet-service's FollowButton writes them there. TAP subscribes to
+`net.olamaelcu.livtet.biblio.*` and mirrors these into `records` like any other
+collection, from which `follows` is materialized (one row per follower →
+followed pair) for the `graph.listFollowers` / `graph.listFollowees` queries.
 
 The feed therefore reads them from the viewer's PDS:
 `com.atproto.repo.listRecords` on `net.olamaelcu.livtet.biblio.follow`, up to
 20 pages of 100, anonymously (the collection is public). `subject` is the
 followed actor's at-uri; the DID is the first path segment.
 
-The PDS read is the **only** source of the follow graph. There is no local
-index: an unreadable repo yields an empty follow set and the feed degrades to
-the general one.
+The feed reads the **repo**, not `follows`, because the repo is authoritative
+and cannot lag: a follow made a second ago counts immediately, and a follow
+written by a repo this TAP instance never registered is still seen. An
+unreadable repo yields an empty follow set and the feed degrades to the general
+one.
 
-There used to be one. A `follows` table, written by a
-`net.olamaelcu.livtet.biblio.graph.follow` procedure that livtet-service called
-after `writeFollowRecord` returned, was meant to keep the graph warm. It never
-did: its DDL was written as `0011_follows.sql` but never entered
-`meta/_journal.json`, and the migrator plans from the journal — so no
-environment ever created the table, every `graph.follow` call failed with
-`42P01`, and the platform swallowed it as a best-effort mirror failure.
-`0021_follows` created it, then the feed moved to the repo as the sole source
-and `0022_drop_follows` removed the table and the procedure with it.
+`follows` exists for the reverse direction, which the PDS cannot answer at all:
+"who follows me" would otherwise mean scanning every repo. It was first created
+as `0011_follows.sql`, which never entered `meta/_journal.json` (the migrator
+plans from the journal) so no environment ever executed it, and
+`0022_drop_follows` retired it. `0028_follows_restore` brings it back with a
+one-time `INSERT … SELECT` over `records`; `scripts/backfill-follows.ts` fills
+gaps from Constellation for repos outside this TAP's subscription; and
+`tapRecordUpsert{,Batch}Task` / `tapRecordDelete{,Batch}Task` keep it in step.
 
 ## "For You" recommendations
 

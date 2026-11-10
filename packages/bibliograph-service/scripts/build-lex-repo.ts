@@ -11,7 +11,7 @@
 //
 // Env vars:
 //   LEX_PUBLISHER_HOSTNAME  (default: biblio.livtet.olamaelcu.net)
-//   LEX_AUTHORITY           (default: net/olamaelcu/livtet/biblio)
+//   LEX_AUTHORITY           (default: net/olamaelcu/livtet)
 //   LEX_ROOT                (default: <package>/lexicons)
 //   LEX_OUT_DIR             (default: <package>/data/lex)
 //   ATP_SIGNING_KEY         (required; 64 hex chars; the K-256 private scalar)
@@ -35,7 +35,7 @@ const PACKAGE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const HOSTNAME = process.env.LEX_PUBLISHER_HOSTNAME ?? 'biblio.livtet.olamaelcu.net';
 const DID = `did:web:${HOSTNAME}`;
 const COLLECTION = 'com.atproto.lexicon.schema' as const;
-const LEX_AUTHORITY = process.env.LEX_AUTHORITY ?? 'net/olamaelcu/livtet/biblio';
+const LEX_AUTHORITY = process.env.LEX_AUTHORITY ?? 'net/olamaelcu/livtet';
 const LEX_ROOT = process.env.LEX_ROOT ?? join(PACKAGE_ROOT, 'lexicons');
 const OUT_DIR = process.env.LEX_OUT_DIR ?? join(PACKAGE_ROOT, '..', '..', 'data', 'lex');
 const PRIVATE_KEY_HEX = process.env.ATP_SIGNING_KEY;
@@ -61,8 +61,10 @@ function lexRecordValue(nsid: string, lex: { defs?: unknown; description?: strin
 async function findLexFiles(): Promise<Array<{ nsid: string; file: string; lex: { defs?: unknown; description?: string } }>> {
   // NSIDs are derived from the path relative to LEX_ROOT (not relative to LEX_AUTHORITY),
   // so a file at `lexicons/net/olamaelcu/livtet/biblio/shelf.json` becomes the NSID
-  // `net.olamaelcu.livtet.biblio.shelf`. Walking is restricted to LEX_AUTHORITY so we
-  // don't accidentally publish lexica outside our authority.
+  // `net.olamaelcu.livtet.biblio.shelf`. Walking is restricted to LEX_AUTHORITY
+  // so we don't accidentally publish lexica outside our authority. The
+  // authority includes both the bibliograph namespace and the space
+  // declarations Livtet's OAuth scopes resolve.
   const baseDir = join(LEX_ROOT, LEX_AUTHORITY);
   const out: Array<{ nsid: string; file: string; lex: { defs?: unknown; description?: string } }> = [];
   async function walk(dir: string): Promise<void> {

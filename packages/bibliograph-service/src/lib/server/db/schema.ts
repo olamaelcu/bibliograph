@@ -366,6 +366,27 @@ export const editionWorkVotes = pgTable(
   }),
 );
 
+// ─── Follow graph ───────────────────────────────────────────────────────────
+// Materialized from `net.olamaelcu.livtet.biblio.follow` records in the
+// follower's own repo (`subject` = the followed actor's at-uri). The repo stays
+// authoritative; this table is a derived read index that answers "who follows
+// me" (leading `followed_did` index) and "who do I follow" (the primary key's
+// leading `follower_did`). `tapRecordUpsertTask` and `tapRecordDeleteTask` keep
+// it in step, and `drizzle/0028_follows_restore.sql` seeds it from `records`.
+
+export const follows = pgTable(
+  'follows',
+  {
+    followerDid: text('follower_did').notNull(),
+    followedDid: text('followed_did').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.followerDid, t.followedDid] }),
+    followedIdx: index('follows_followed_did_idx').on(t.followedDid),
+  }),
+);
+
 // ─── OAuth client persistence ───────────────────────────────────────────────
 // Backing stores for @atproto/oauth-client-node. `value` holds the serialized
 // session/state, including DPoP key material, so it must never be exposed.
@@ -401,6 +422,7 @@ export const webSessions = pgTable(
 );
 
 export type EditionWorkVoteRow = typeof editionWorkVotes.$inferSelect;
+export type FollowRow = typeof follows.$inferSelect;
 export type WebSessionRow = typeof webSessions.$inferSelect;
 
 // ─── Labeler ────────────────────────────────────────────────────────────────

@@ -2755,13 +2755,12 @@ router.addQuery(getFeedSkeletonSchema, {
      * caller can tell an unreadable repo from one that follows nobody — and so a
      * failed read is never memoised as an empty follow set.
      *
-     * This is the only source of the follow graph. TAP mirrors no
-     * `…biblio.follow` records, and the local `follows` table is a best-effort
-     * copy the platform's follow route writes *after* the repo record lands: it
-     * can never hold a follow the repo lacks, and in production it was never
-     * populated at all (see `drizzle/0021_follows.sql`). Reading it therefore
-     * bought nothing and risked resurrecting an edge the reader had removed in
-     * another client.
+     * This is the authoritative source. TAP does mirror `…biblio.follow` records
+     * into `records`, and `follows` is materialized from that mirror
+     * (`follow-graph.ts`), but the mirror only covers repos this TAP instance
+     * registered and can lag an unwatched repo. The feed reads the repo so a
+     * follow made a second ago counts, and so a follow whose repo we never
+     * subscribed to is still seen.
      */
     async function followedDidsFromPds(did: string): Promise<string[] | null> {
       const cached = cachedFollowSet(did);
@@ -3027,6 +3026,8 @@ router.addQuery(getFeedSkeletonSchema, {
 
 // No follow/unfollow procedure lives here. Follow edges are
 // `net.olamaelcu.livtet.biblio.follow` records in the reader's own repo, written
-// by livtet-service; the social feeds read them straight from there
-// (`feedAuthorDids`), so a second, hand-maintained copy in this database had no
-// readers to serve.
+// by livtet-service. `follows` is a derived read index over them (materialized
+// from the TAP mirror by `follow-graph.ts`, seeded by
+// `drizzle/0028_follows_restore.sql`), and the queries that read it are
+// `graph.listFollowers` / `graph.listFollowees`. The feeds still read the repo
+// itself (`feedAuthorDids`), which is authoritative and cannot lag.

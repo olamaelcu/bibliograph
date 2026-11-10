@@ -3,7 +3,11 @@
 // namespaces re-exported there are imported here for typing only.
 import { type XRPCRouter, json } from '@atcute/xrpc-server';
 import type { Logger } from 'pino';
-import { inArray, or, sql } from 'drizzle-orm';
+
+import * as v from '@atcute/lexicons/validations';
+
+
+import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import {
   CommunityLexiconBookCompatibility,
   CommunityLexiconBookResolveEditions,
@@ -16,7 +20,7 @@ import { invalidContributorResponsesTotal } from '../../lib/server/metrics';
 import { validContributorName } from '../../lib/server/search/contributor-name';
 import { editionItemFromRow } from '../../lib/server/search/postgres-source';
 import { db } from '../../lib/server/db';
-import { editions } from '../../lib/server/db/schema';
+import { editions, follows } from '../../lib/server/db/schema';
 import { editionViewFromItem } from '../../lib/server/book-wire';
 import { wireContributors } from '../../lib/server/book-wire';
 import { isResourceUri, type ResourceUri } from '@atcute/lexicons';
@@ -62,11 +66,171 @@ function asResourceUri(uri: string): ResourceUri | undefined {
 
 
 
+// The follow graph is public ATProto data, so neither query needs a viewer
+// token: `did` names whose edges to read. Both are keyset-paginated on the DID
+// being listed — the indexed column for that direction — so a cursor is just
+// the last DID returned.
+const listFollowersSchema = /*#__PURE__*/ v.query(
+  'net.olamaelcu.livtet.biblio.graph.listFollowers',
+  {
+    params: /*#__PURE__*/ v.object({
+      did: /*#__PURE__*/ v.didString(),
+      cursor: /*#__PURE__*/ v.optional(/*#__PURE__*/ v.string()),
+      limit: /*#__PURE__*/ v.optional(
+        /*#__PURE__*/ v.constrain(v.integer(), [v.integerRange(1, 1000)]),
+        100,
+      ),
+    }),
+    output: {
+      type: 'lex',
+      schema: /*#__PURE__*/ v.object({
+        followers: /*#__PURE__*/ v.array(
+          /*#__PURE__*/ v.object({
+            did: /*#__PURE__*/ v.didString(),
+            followedAt: /*#__PURE__*/ v.string(),
+          }),
+        ),
+        // Exact count, independent of `limit` and `cursor`: it is what a
+        // "Followers (n)" tab label needs, and it cannot be derived from a
+        // page.
+        total: /*#__PURE__*/ v.integer(),
+        cursor: /*#__PURE__*/ v.optional(/*#__PURE__*/ v.string()),
+      }),
+    },
+  },
+);
+
+const listFolloweesSchema = /*#__PURE__*/ v.query(
+  'net.olamaelcu.livtet.biblio.graph.listFollowees',
+  {
+    params: /*#__PURE__*/ v.object({
+      did: /*#__PURE__*/ v.didString(),
+      cursor: /*#__PURE__*/ v.optional(/*#__PURE__*/ v.string()),
+      limit: /*#__PURE__*/ v.optional(
+        /*#__PURE__*/ v.constrain(v.integer(), [v.integerRange(1, 1000)]),
+        100,
+      ),
+    }),
+    output: {
+      type: 'lex',
+      schema: /*#__PURE__*/ v.object({
+        followees: /*#__PURE__*/ v.array(
+          /*#__PURE__*/ v.object({
+            did: /*#__PURE__*/ v.didString(),
+            followedAt: /*#__PURE__*/ v.string(),
+          }),
+        ),
+        total: /*#__PURE__*/ v.integer(),
+        cursor: /*#__PURE__*/ v.optional(/*#__PURE__*/ v.string()),
+      }),
+    },
+  },
+);
+
+/**
+ * Whether `follower` follows `followed`. One primary-key probe: the index
+ * answers it without scanning either side, which is what a "follows you" badge
+ * needs on every profile view.
+ */
+const isFollowingSchema = /*#__PURE__*/ v.query(
+  'net.olamaelcu.livtet.biblio.graph.isFollowing',
+  {
+    params: /*#__PURE__*/ v.object({
+      follower: /*#__PURE__*/ v.didString(),
+      followed: /*#__PURE__*/ v.didString(),
+    }),
+    output: {
+      type: 'lex',
+      schema: /*#__PURE__*/ v.object({
+        following: /*#__PURE__*/ v.boolean(),
+      }),
+    },
+  },
+);
+
+/**
+ * How many edges one DID has on the given side. `count(*)` over an indexed
+ * column is cheap, and the cast keeps drizzle from handing back the bigint as a
+ * string, which would serialise as `"8"` instead of `8`.
+ */
+async function followCount(
+  column: typeof follows.followerDid | typeof follows.followedDid,
+  did: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(follows)
+    .where(eq(column, did));
+  return row?.total ?? 0;
+}
+
 export function registerBookQueries(
   router: XRPCRouter,
   log: Logger,
   searchService: SearchService,
 ) {
+  router.addQuery(isFollowingSchema, {
+    async handler({ params }) {
+      const [row] = await db
+        .select({ follower: follows.followerDid })
+        .from(follows)
+        .where(
+          and(
+            eq(follows.followerDid, params.follower),
+            eq(follows.followedDid, params.followed),
+          ),
+        )
+        .limit(1);
+      return json({
+        following: Boolean(row),
+      } as unknown as v.InferXRPCBodyOutput<typeof isFollowingSchema['output']>);
+    },
+  });
+
+  router.addQuery(listFollowersSchema, {
+    async handler({ params }) {
+      const rows = await db
+        .select({ did: follows.followerDid, followedAt: follows.createdAt })
+        .from(follows)
+        .where(
+          and(
+            eq(follows.followedDid, params.did),
+            params.cursor ? gt(follows.followerDid, params.cursor) : undefined,
+          ),
+        )
+        .orderBy(asc(follows.followerDid))
+        .limit(params.limit);
+      const last = rows.at(-1)?.did;
+      return json({
+        followers: rows.map((row) => ({ did: row.did, followedAt: row.followedAt.toISOString() })),
+        total: await followCount(follows.followedDid, params.did),
+        ...(rows.length === params.limit && last ? { cursor: last } : {}),
+      } as unknown as v.InferXRPCBodyOutput<typeof listFollowersSchema['output']>);
+    },
+  });
+
+  router.addQuery(listFolloweesSchema, {
+    async handler({ params }) {
+      const rows = await db
+        .select({ did: follows.followedDid, followedAt: follows.createdAt })
+        .from(follows)
+        .where(
+          and(
+            eq(follows.followerDid, params.did),
+            params.cursor ? gt(follows.followedDid, params.cursor) : undefined,
+          ),
+        )
+        .orderBy(asc(follows.followedDid))
+        .limit(params.limit);
+      const last = rows.at(-1)?.did;
+      return json({
+        followees: rows.map((row) => ({ did: row.did, followedAt: row.followedAt.toISOString() })),
+        total: await followCount(follows.followerDid, params.did),
+        ...(rows.length === params.limit && last ? { cursor: last } : {}),
+      } as unknown as v.InferXRPCBodyOutput<typeof listFolloweesSchema['output']>);
+    },
+  });
+
   router.addQuery(CommunityLexiconBookCompatibility.mainSchema, {
     async handler() {
       const queries: { nsid: string; type: 'query' | 'procedure' }[] = [
