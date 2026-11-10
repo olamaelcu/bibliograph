@@ -253,9 +253,7 @@ export const publishers = pgTable(
     indexedAt: timestamp('indexed_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    didIdx: index('publishers_did_idx').on(t.did),
     indexedAtIdx: index('publishers_indexed_at_idx').on(t.indexedAt),
-    nameIdx: index('publishers_name_idx').on(t.name),
     // Note: self-FK on imprintOfUri is declared in the migration (drizzle-kit
     // can't infer types for self-referencing tables).
   }),
@@ -285,7 +283,6 @@ export const records = pgTable(
   (t) => ({
     collectionIdx: index('records_collection_idx').on(t.collection),
     didCollectionIdx: index('records_did_collection_idx').on(t.did, t.collection),
-    indexedAtIdx: index('records_indexed_at_idx').on(t.indexedAt),
     recordCreatedAtIdx: index('records_record_created_at_idx').on(t.recordCreatedAt.desc(), t.uri.desc()),
     // The shelving and review reads filter on jsonb paths, not columns:
     // `listBooksOnShelf`/`listShelvesWithBooks` match `value->>'shelf'`,
