@@ -1,3 +1,20 @@
+bibliograph (0.5.18) unstable; urgency=medium
+
+  * Index pass over the catalog read paths: `contributors (lower(name))` for
+    the resolver probe (was a sequential scan, on every search enrichment),
+    `labels (val)` for the seniority evaluation, `editions (cover_checked_at)`
+    for the cover backfill's pending scan, and a composite
+    `records (did, collection, record_created_at DESC, uri DESC)` for the
+    social feeds, measured to serve the skeleton in one index-only scan.
+  * The two indexes with zero/low all-time `idx_scan` on production are
+    dropped: `publishers_did_idx` (0) and `records_indexed_at_idx` (4).
+    `publishers_name_idx` never existed and is removed from schema.ts;
+    `editions_search_idx` (tsvector GIN) was already dropped in 0005.
+  * No behaviour change beyond the migrator; production applies both
+    migrations on first start.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 00:03:10 -0500
+
 bibliograph (0.5.17) unstable; urgency=medium
 
   * The static PDS surface now speaks its lexicons: `identity.resolveDid` and
