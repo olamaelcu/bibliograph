@@ -15,7 +15,7 @@ Every call below is a read; nothing was written to any repository.
 | `GET .../com.atproto.repo.describeRepo?repo=<did>` | `200`; `handle: bookhive.buzz`, `handleIsCorrect: true`; collections include `buzz.bookhive.book`, `buzz.bookhive.buzz`, `buzz.bookhive.catalogBook`. |
 | `GET .../buzz.bookhive.getProfile?handle=nickthesick` | `401 AuthMissing` — the profile query is authed, so an appview can never call it anonymously. Bibliograph does not (README: TAP mirror + Constellation backlinks), which is the right call. |
 | `GET https://bookhive.buzz/` | **HTTP 521** (Cloudflare, origin down), 16-byte plain-text body, while the PDS above answered 200. |
-| `GET .../com.atproto.repo.listRecords?collection=buzz.bookhive.catalogBook` | `200`, records carry `$type` and optional blobs; format matches `lexicons/catalogBook.json`. |
+| `GET .../com.atproto.repo.listRecords?collection=buzz.bookhive.catalogBook` | `200`, records carry `$type` and optional blobs; format matches BookHive's published `buzz.bookhive.catalogBook` lexicon (no copy of that lexicon ships in this repo). |
 | `GET .../com.atproto.repo.listRecords?collection=buzz.bookhive.book` | `200` — and the **whole collection in the BookHive repo is 19 records**. Users' books live in *their own* repos, so `@bookhive.buzz` is the catalog plus a handful of leftovers; enumerating reviews from this repo was never an option and the TAP mirror + Constellation backlinks are the only route. All four status tokens appear: `#reading` 2, `#wantToRead` 12, `#finished` 3, `#abandoned` 2. |
 
 Two operational facts fall out of that: the **appview origin and the PDS fail independently** (so
@@ -33,9 +33,9 @@ percentages are how many of those 1000 values carry the field.
 | Field | Present | Bibliograph target | Current mapping (`bookhive/catalog.ts`) |
 | --- | --- | --- | --- |
 | `id`, `title`, `authors`, `createdAt` | 100 % | edition rkey `bh.{id}`, `title`, `contributors`, `created_at` | mapped — `authors` becomes `contributors` only where the name matches a catalog contributor (`scripts/ingest-bookhive-catalog.ts:38-87`) |
-| `cover`, `thumbnail` | 100 % | `editions.cover_image_url` | mapped — `cover` preferred, `thumbnail` fallback (`catalog.ts:78`) |
-| `source`, `sourceId`, `sourceUrl` | 100 % | `bookhive` + `goodreads` identifiers | mapped, but only when `source.toLowerCase() === 'goodreads'` (`catalog.ts:96`) |
-| `rating` (×1000, e.g. `3090`) | 100 % | — | deliberately dropped (documented in `catalog.ts:1-30`) |
+| `cover`, `thumbnail` | 100 % | `editions.cover_image_url` | mapped — `cover` preferred, `thumbnail` fallback (`catalog.ts:98`) |
+| `source`, `sourceId`, `sourceUrl` | 100 % | `bookhive` + `goodreads` identifiers | mapped, but only when `source.toLowerCase() === 'goodreads'` (`catalog.ts:124`) |
+| `rating` (×1000, e.g. `3090`) | 100 % | — | deliberately dropped (documented in `catalog.ts:13-30`) |
 | `ratingsCount` | 100 % | — | ignored |
 | `identifiers` `{hiveId, isbn10, isbn13, goodreadsId}` | 99.0 % | `editions.identifiers` | mapped to `defs#identifier` — `isbn13`/`isbn10` through `isbnIdentifier` (`identifiers.ts`, always hyphenless ISBN-13), plus `bookhive.buzz`/`goodreads.com` |
 | `description` | 95.4 % | `editions.description` | **ignored** — and the description backfill then spends upstream calls re-deriving it |
@@ -45,7 +45,7 @@ percentages are how many of those 1000 values carry the field.
 | `publicationYear` | 57.3 % | `editions.published_year` | **ignored** |
 | `language` | 57.0 % | `editions.language` | **ignored** |
 | `publisher` | 56.4 % | `editions.publisher_uri` (strongRef) | **ignored** — BookHive has a name string, and the lexicon wants a ref to a publisher record |
-| `numPages` | 55.1 % | `community.lexicon.book.edition#pages` | **no target at all** — the lexicon field exists but `editions` has no `pages` column |
+| `numPages` | 55.1 % | `community.lexicon.book.edition#pages` | **ignored** — the lexicon and `editions.pages` (`schema.ts:47`) exist, but `catalog.ts` never reads `numPages` |
 | `authorBio` | 46.0 % | `contributors.bio` | ignored |
 | `series` | 36.6 % | — | ignored; see the discrepancy note |
 | `secondaryAuthors` | 4.9 % | `editions.contributors` roles | ignored |
@@ -65,14 +65,14 @@ percentages are how many of those 1000 values carry the field.
 3. `description` → `editions.description`, which also removes those editions from
    `jobs/description-backfill.ts`'s scan.
 4. `language`, `publicationYear` → existing columns.
-5. `numPages` → needs an `editions.pages` column before the lexicon's `pages` field can be served
-   at all: today `getRecord` and the stored CID omit a field the lexicon declares.
+5. `numPages` → `editions.pages` is the one remaining free win: the column and the lexicon
+   field are both live; the mapping in `catalog.ts` just does not read `numPages` yet.
 
 ### Discrepancies to document, not to model
 
 - `series` is a **JSON string**, not a series name:
   `"{\"title\":\"B.P.R.D.\",\"position\":\"\",\"webUrl\":\"https://www.goodreads.com/series/55298-b-p-r-d\"}"`.
-  `lexicons/catalogBook.json` types it as `string` "Series name"; the payload is Goodreads'
+  BookHive's published `buzz.bookhive.catalogBook` lexicon types it as `string` "Series name" (no copy ships in this repo); the payload is Goodreads'
   serialised object. No column until the lexicon and the payload agree.
 - `publisher` is a display name, so it cannot become `editions.publisher_uri` without minting a
   publisher record per name — the same gap that keeps `authors` out of `contributors` unless the
@@ -88,7 +88,7 @@ during this check), re-encoding it and serving it ourselves, in exchange for a f
 already fills from a CDN and already refreshes through `jobs/cover-backfill.ts`. The ID-keyed
 image pattern BookHive uses is worth copying — and Bibliograph already has it:
 `getImageForBook` resolves `editions.cover_image_url` at request time and enqueues a backfill when
-it is missing (`xrpc-router.ts:812-844`), which is BookHive's `coverImageUrl(hiveId)` idea without
+it is missing (`xrpc-router.ts:1001-1046`), which is BookHive's `coverImageUrl(hiveId)` idea without
 depending on BookHive being up.
 
 ## Field mapping: `buzz.bookhive.book` → `bookReview` / shelving
@@ -98,11 +98,11 @@ rewrites it and derives both views at read time in `bookhive/records.ts`.
 
 | `book` field | Target | Current | Note |
 | --- | --- | --- | --- |
-| `hiveBookUri` | the Constellation subject, then edition `bh.{hiveId}` | mapped (`records.ts:51-59`), `hiveId` fallback | 18 of 19 records in the live sample carried it; the fallback is what covers the rest |
+| `hiveBookUri` | the Constellation subject, then edition `bh.{hiveId}` | mapped (`subjectFor` at `records.ts:60-68`), `hiveId` fallback | 18 of 19 records in the live sample carried it; the fallback is what covers the rest |
 | `status` | `defs#readingStatus` on the shelf view | mapped (`records.ts:30-34`) onto `reading`/`read`/`to-read`/`dnf` | the live tokens are the full nsids (`buzz.bookhive.defs#wantToRead`, …), so the map keys are right |
-| `stars` (1–10) | `bookReview.rating` (1–10) | mapped (`records.ts:76`), range-checked | same scale; only the display conversion is missing |
+| `stars` (1–10) | `bookReview.rating` (1–10) | mapped (`records.ts:105`), range-checked | same scale; only the display conversion is missing |
 | `review` | `bookReview.text` | mapped, empty string → no review | `bookReview` also requires `book` and `createdAt`, which the router fills when it builds the `reviewView` |
-| `createdAt` | `bookReview.createdAt` | mapped (`records.ts:70`) | a review is dated by *record creation*, not `finishedAt`; a book finished months after being added shows the wrong date |
+| `createdAt` | `bookReview.createdAt` | mapped (`records.ts:100`/`:108`) | a review is dated by *record creation*, not `finishedAt`; a book finished months after being added shows the wrong date |
 | `startedAt`, `finishedAt` | `bookShelfMetadata.startedAt` / `.finishedAt` | mapped onto the shelving view | a review is still dated by `createdAt`; the reading dates travel on the shelf metadata so goal progress and streaks use the day the book was actually read |
 | `bookProgress` | — | dropped | no progress surface in the appview |
 | `previousReads` | — | dropped | decision below |
@@ -113,9 +113,10 @@ rewrites it and derives both views at read time in `bookhive/records.ts`.
 
 ## Bugs found while mapping
 
-1. **`splitAuthors` splits the wrong separator.** `bookhive/catalog.ts:56` splits on
-   `;`/`and`/`&`/`,`, but BookHive's `authors` is *tab*-separated — `lexicons/catalogBook.json`
-   says "tab separated" and BookHive's own `core/authors.ts` parses on `\t`. Observed:
+1. **`splitAuthors` splits the wrong separator.** `bookhive/catalog.ts:74` splits on
+   `;`/`and`/`&`/`,` (the regex is at `:77`), but BookHive's `authors` is *tab*-separated —
+   BookHive's published `buzz.bookhive.catalogBook` lexicon says "tab separated" and
+   BookHive's own `core/authors.ts` parses on `\t`. Observed:
    `"Ann Leckie\tBecky Chambers"` → `["Ann Leckie\tBecky Chambers"]` (one author, tab intact),
    and `"Smith, John"` → `["Smith","John"]` (one author turned into two). The ingest script
    feeds exactly that output to a lowercased name lookup
@@ -129,7 +130,7 @@ rewrites it and derives both views at read time in `bookhive/records.ts`.
    silently rather than logged.
 3. **The rating scale is already correct — do not "fix" it.** `bookReview.rating` is `integer,
    minimum 1, maximum 10` (`lexicons/net/olamaelcu/livtet/biblio/bookReview.json`), the same scale
-   as BookHive's `stars`, so `records.ts:76` passing `stars` through is right. What is missing is
+   as BookHive's `stars`, so `records.ts:105` passing `stars` through is right. What is missing is
    the *display* conversion at the UI edge — import `core/rating.ts`'s `starsToDisplayRating`
    (÷2, so 1–10 → 0.5–5) rather than converting on ingest, which would make Bibliograph's stored
    record disagree with BookHive's for the same review.
@@ -138,7 +139,7 @@ rewrites it and derives both views at read time in `bookhive/records.ts`.
 
 `buzz.bookhive.book#previousReads` exists live (`core/bookLifecycle.ts` archives a read when a
 finished book goes back to Reading) and no Bibliograph surface consumes it:
-`normalizeBookhiveBook` (`bookhive/records.ts:62-81`) derives only review text, stars, timestamp
+`normalizeBookhiveBook` (`bookhive/records.ts:92-125`) derives only review text, stars, timestamp
 and shelf. Bibliograph has no `reviews` table to hang a `previous_reads` column on — reviews are
 read through from `records` — and `getShelvingOfBook`/`getReviewsByBook` are per-book projections
 with no history view.
@@ -155,4 +156,4 @@ the year counter without the rotation would produce a number that silently ignor
 | --- | --- |
 | `core/hiveId.ts` `isHiveId`/`asHiveId` | narrow a wire value instead of casting it; the comment there records `/books/null` reaching the database through an `as HiveId` |
 | `lib/errors.ts` `errorMessage`/`toErrorPayload`/`truncateForLog` | one bounded shape for an unknown throw; Bibliograph re-derives it as `err instanceof Error ? err.message : String(err)` at five separate sites in `jobs/handlers.ts` (249, 331, 405, 469, 518) before writing `error_message` |
-| `core/cacheHeaders.ts` | one signed-in/signed-out caching rule — Bibliograph sets no `Cache-Control` at all |
+| `core/cacheHeaders.ts` | one signed-in/signed-out caching rule — Bibliograph only gives unauthenticated GET XRPC responses `public, max-age=60, stale-while-revalidate=300`; no rule for authenticated or non-GET responses |

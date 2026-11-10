@@ -1,57 +1,77 @@
 # Book Reviews Feed Implementation
 
 ## Overview
-Implemented an ATProto feed generator using Constellation to expose reviews made of editions via `net.olamaelcu.livtet.bookReview` as a consumable feed for ATProto clients.
+Implemented an ATProto feed generator using Constellation to expose content made
+of editions as a consumable feed for ATProto clients. The generator is
+`net.olamaelcu.livtet.biblio.feed.generator`; callers hit
+`com.atproto.feed.getFeedSkeleton` / `com.atproto.feed.describeFeedGenerator`
+(the endpoints are `com.atproto.*`, not `app.bsky.*`). Nothing about the
+pre-`biblio` review NSID is read any more; the pre-`biblio` collection is
+deliberately not mirrored.
 
 ## Implementation Summary
 
 ### 1. Constellation Client Extension (`packages/bibliograph-service/src/lib/server/constellation/client.ts`)
-- Added `ReviewSource = 'net.olamaelcu.livtet.bookReview:book'`
-- Extended `GetBacklinksParams.source` to accept `ShelvingSource | ReviewSource`
+- `ReviewSource = 'net.olamaelcu.livtet.biblio.bookReview:book.uri' | BookhiveSource`
+  where `BookhiveSource = 'buzz.bookhive.book:hiveBookUri'`
+- `GetBacklinksParams.source` accepts `BacklinkSource = ShelvingSource | ReviewSource | SocialSource`
 - This enables the feed to query reviews via Constellation backlinks
 
 ### 2. DID Document Service (`packages/bibliograph-service/src/lib/server/did.ts`)
-- Added `#atproto_feed` service entry to DID document:
+- The DID document carries a `#atproto_feed` entry:
   - `id: '#atproto_feed'`
   - `type: 'AtprotoFeedGenerator'`
   - `serviceEndpoint: `${PROTO}://${HOSTNAME}``
 
-### 3. ATProto Feed Generator Endpoints (`packages/bibliograph-service/src/lib/server/xrpc-router.ts`)
+### 3. ATProto Feed Generator (`packages/bibliograph-service/src/lib/server/xrpc-router.ts`)
 
-#### Describe Feed Generator (`app.bsky.feed.describeFeedGenerator`)
-- Registers feed generator metadata endpoint
-- Returns publisher DID and feed URI: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed/reviews`
-- Display name: "Book Reviews"
-- Description: "Reviews of editions using net.olamaelcu.livtet.bookReview"
+#### Describe Feed Generator (`com.atproto.feed.describeFeedGenerator`)
+Returns the publisher DID and five feeds (display names as registered):
 
-#### Get Feed Skeleton (`app.bsky.feed.getFeedSkeleton`)
-- Returns paginated skeleton feed posts for reviews
-- **DB-first approach**: Queries `net.olamaelcu.livtet.bookReview` and `net.olamaelcu.livtet.biblio.bookReview` collections
-- **Constellation merge**: If feed URI contains a subject (edition), merges constellation backlinks with DB results using `getBacklinks({source:'net.olamaelcu.livtet.bookReview:book'})`
-- Returns array of `{post: reviewURI, reason?: description}` with cursor for pagination
+| rkey | displayName | requiresAuth |
+| --- | --- | --- |
+| `public` | Bibliograph Static Feed | no |
+| `dynamic` | Bibliograph Dynamic Feed | yes (JWT) |
+| `following` | Bibliograph Following Feed | yes |
+| `extended` | Bibliograph Extended Network | yes |
+| `recommendations` | Bibliograph For You | yes |
+
+#### Get Feed Skeleton (`com.atproto.feed.getFeedSkeleton`)
+Dispatches on the rkey in the `feed` param
+(`at://<did>/net.olamaelcu.livtet.biblio.feed.generator/<rkey>`):
+- `public` (alias `static`), `following`, `extended` — newest-first pages over
+  `FEED_COLLECTIONS = [net.olamaelcu.livtet.biblio.bookReview, net.olamaelcu.livtet.biblio.bookShelving, buzz.bookhive.book]`
+  from the mirror. Social feeds additionally filter by the viewer's follow set
+  (PDS-authoritative; see below).
+- `dynamic` — requires a service JWT (`requireFeedAuth`); per-DID rate limit, 429 + `retry-after: 60`.
+- `recommendations` — requires auth; per-DID rate limit; ranked catalog page, no cursor (see "For You" below).
+- `edition/{rkey}` — Constellation-first: merges `net.olamaelcu.livtet.biblio.bookReview:book.uri`
+  backlinks for the edition (plus `buzz.bookhive.book:hiveBookUri` Bookhive reviews),
+  falling back to the mirror only when backlinks are empty.
+- Returns `{feed, cursor?, skeleton: [{post, reason?}]}`; `reason` is the book
+  at-uri for reviews, `shelving:<shelf-rkey>|<book-uri>` for shelving, and
+  `bookhive:<shelf-rkey>|<edition-uri>` for Bookhive records (pipe-separated,
+  not `+`).
 
 ### 4. Feed URI Pattern
-- General feed URI: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed/reviews`
-- Subject-specific feed (optional): `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed/reviews/${editionRkey}`
+- `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/{public|dynamic|following|extended|recommendations}`
+- Edition-specific: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/edition/{rkey}`
 
 ### 5. Compatibility
-- Existing `getReviewsByBook` handler unchanged
-- Constellation backlinks support both shelving and review sources
-- Feed gracefully falls back to DB-only pagination when Constellation queries fail
+- `getReviewsByBook` handler unchanged
+- Feed gracefully falls back to DB-only pagination when Constellation queries fail (edition feed only)
 
 ## Verification Commands
 
-Run these commands against a running bibliograph service:
-
 ```bash
 # Describe feed generator metadata
-curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/app.bsky.feed.describeFeedGenerator'
+curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.feed.describeFeedGenerator'
 
-# Get feed skeleton (general reviews)
-curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/app.bsky.feed.getFeedSkeleton?feed=at://did:web:biblio.livtet.olamaelcu.net/net.olamaelcu.livtet.biblio.feed/reviews&limit=5'
+# Get feed skeleton (public feed)
+curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.feed.getFeedSkeleton?feed=at://did:web:biblio.livtet.olamaelcu.net/net.olamaelcu.livtet.biblio.feed.generator/public&limit=5'
 
-# Get feed skeleton for specific edition (if Constellation backlink exists)
-curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/app.bsky.feed.getFeedSkeleton?feed=at://did:web:biblio.livtet.olamaelcu.net/net.olamaelcu.livtet.biblio.feed/reviews/abc123&limit=5'
+# Get feed skeleton for a specific edition
+curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.feed.getFeedSkeleton?feed=at://did:web:biblio.livtet.olamaelcu.net/net.olamaelcu.livtet.biblio.feed.generator/edition/abc123&limit=5'
 ```
 
 
@@ -63,9 +83,9 @@ status, so it is mirrored through TAP and rendered by collection:
 
 | Collection | `reason` |
 | --- | --- |
-| `net.olamaelcu.livtet.bookReview`, `net.olamaelcu.livtet.biblio.bookReview` | the reviewed book at-uri |
-| `net.olamaelcu.livtet.biblio.bookShelving` | `shelving:<shelf-rkey>` + `<book-uri>` |
-| `buzz.bookhive.book` | `bookhive:<shelf-rkey>` + `<bh-edition-uri>` |
+| `net.olamaelcu.livtet.biblio.bookReview` | the reviewed book at-uri |
+| `net.olamaelcu.livtet.biblio.bookShelving` | `shelving:<shelf-rkey>\|<book-uri>` |
+| `buzz.bookhive.book` | `bookhive:<shelf-rkey>\|<edition-uri>` |
 
 The edition-specific feed additionally merges Bookhive reviews of the same
 edition through Constellation source `buzz.bookhive.book:hiveBookUri`, resolving
@@ -98,19 +118,6 @@ record without a `createdAt` gets a blank key, which sorts after every dated one
 under `desc`, so the order stays total and `listRecentShelving` can always take
 its keyset cursor from the last row.
 
-## Technical Details
-
-### Schema Definitions
-- Feed generator endpoints use inline valibot schemas from `@atcute/lexicons/validations`
-- Schemas include proper NSID, parameter validation, and XRPC output types
-- Follows existing bibliograph code patterns
-
-### Data Sources
-1. **Database**: Direct queries to `records` table for book reviews
-2. **Constellation**: Backlink queries for edition-specific reviews
-3. **Fallback**: DB-only pagination ensures reliability
-4. **Reader PDS**: the follow graph behind `following` and `extended` (below)
-
 ## Social feeds and the follow graph
 
 `at://…/feed.generator/{following,extended}` are filtered by who the viewer
@@ -134,7 +141,7 @@ one.
 
 `follows` exists for the reverse direction, which the PDS cannot answer at all:
 "who follows me" would otherwise mean scanning every repo. It was first created
-as `0011_follows.sql`, which never entered `meta/_journal.json` (the migrator
+as `0021_follows.sql`, which never entered `meta/_journal.json` (the migrator
 plans from the journal) so no environment ever executed it, and
 `0022_drop_follows` retired it. `0028_follows_restore` brings it back with a
 one-time `INSERT … SELECT` over `records`; `scripts/backfill-follows.ts` fills
@@ -211,24 +218,6 @@ empty follow set.
 - An unreadable or unresolvable PDS degrades the social feeds to the general
   feed — never to an error
 
-## Future Considerations
-
-### Feed Declaration Record
-- A feed declaration record in the lex repo could provide canonical AT-URI
-- Optional but recommended for production feed discovery
-
-### Enhanced Constellation Integration
-- Could pre-process Constellation backlink results for better merging with DB data
-- Could support more complex edition-based filtering
-
-### Performance Optimizations
-- Pagination caching for general feed requests
-- Pre-compiled edition-to-review mappings
-
-## Files Modified
-
-1. `packages/bibliograph-service/src/lib/server/constellation/client.ts`
-2. `packages/bibliograph-service/src/lib/server/did.ts`
-3. `packages/bibliograph-service/src/lib/server/xrpc-router.ts`
-
-All changes are backward compatible and follow existing bibliograph code patterns.
+## Open item
+- No `feed.generator` declaration record is published for any of the six rkeys
+  yet; `describeFeedGenerator` is discovery enough for now.

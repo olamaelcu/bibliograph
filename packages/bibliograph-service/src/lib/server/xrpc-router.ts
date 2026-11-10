@@ -54,7 +54,8 @@ import type { Logger } from 'pino';
 import { pdsClient, resolvePds } from './pds/resolve.js';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { cidForLex, decode as cborDecode } from '@atproto/lex-cbor';
-import type { LexMap } from '@atproto/lex-data';
+import { BlockMap, blocksToCarFile } from '@atproto/repo';
+import type { Cid, LexMap } from '@atproto/lex-data';
 import { getDidDocument, PUBLISHER_DID, PUBLISHER_HOSTNAME } from './did';
 import { PostgresSource } from './search/postgres-source';
 import { GoogleBooksEnricher } from './search/google-books-enricher';
@@ -303,7 +304,7 @@ router.addQuery(ComAtprotoIdentityResolveDid.mainSchema, {
   async handler({ params }) {
     const id = resolveDid(params.did);
     if (!id) return notFoundResponse('DidNotFound', `DID "${params.did}" is not hosted by this PDS`);
-    return json({ did: id.did } as unknown as ComAtprotoIdentityResolveDid.$output);
+    return json({ didDoc: getDidDocument() } as unknown as ComAtprotoIdentityResolveDid.$output);
   },
 });
 
@@ -319,7 +320,7 @@ router.addQuery(ComAtprotoIdentityResolveIdentity.mainSchema, {
     return json({
       did: id.did,
       handle: id.handle,
-      didDoc: undefined,
+      didDoc: getDidDocument(),
     } as unknown as ComAtprotoIdentityResolveIdentity.$output);
   },
 });
@@ -360,7 +361,18 @@ router.addQuery(ComAtprotoLexiconResolveLexicon.mainSchema, {
 });
 
 router.addQuery(ComAtprotoSyncGetRepo.mainSchema, {
-  async handler() {
+  async handler({ params }) {
+    if (!resolveDid(params.did)) {
+      return notFoundResponse('RepoNotFound', `repo "${params.did}" is not hosted`);
+    }
+    if (params.since !== undefined) {
+      // Never silently ignore `since`: answering with the full repo would look
+      // like a valid diff to the client and corrupt its local mirror.
+      return new Response(
+        JSON.stringify({ error: 'InvalidRequest', message: 'since is not supported by this static publisher' }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      );
+    }
     const file = await readFullRepoCar();
     if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
     return carResponse(file.body);
@@ -368,12 +380,16 @@ router.addQuery(ComAtprotoSyncGetRepo.mainSchema, {
 });
 
 router.addQuery(ComAtprotoSyncGetRepoStatus.mainSchema, {
-  async handler() {
+  async handler({ params }) {
+    if (!resolveDid(params.did)) {
+      return notFoundResponse('RepoNotFound', `repo "${params.did}" is not hosted`);
+    }
     const commit = await readLatestCommit();
     if (!commit) return notFoundResponse('RepoNotFound', 'no full.car published yet');
     return json({
-      did: process.env.LEX_PUBLISHER_DID ?? PUBLISHER_DID,
+      did: PUBLISHER_DID,
       rev: commit.rev,
+      active: true,
     } as unknown as ComAtprotoSyncGetRepoStatus.$output);
   },
 });
@@ -398,13 +414,27 @@ router.addQuery(ComAtprotoSyncGetLatestCommit.mainSchema, {
 });
 
 router.addQuery(ComAtprotoSyncGetBlocks.mainSchema, {
-  async handler() {
-    // Static-file publisher: returns the full repo CAR; callers can CAR-trim
-    // themselves. The canonical lexicon resolver does not call this endpoint
-    // directly; it's here for protocol completeness.
+  async handler({ params }) {
+    if (!resolveDid(params.did)) {
+      return notFoundResponse('RepoNotFound', `repo "${params.did}" is not hosted`);
+    }
     const file = await readFullRepoCar();
     if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
-    return carResponse(file.body);
+    const parsed = await readCar(file.body);
+    // `blocks.get` takes a Cid, so index the parsed repo by its string form and
+    // let unknown CIDs fall through: the lexicon allows omitting missing blocks.
+    const byString = new Map<string, Cid>();
+    for (const cid of parsed.blocks.cids()) byString.set(cid.toString(), cid);
+    const subset = new BlockMap();
+    for (const cidStr of params.cids) {
+      const cid = byString.get(cidStr);
+      if (!cid) continue;
+      const bytes = parsed.blocks.get(cid);
+      if (bytes) subset.set(cid, bytes);
+    }
+    // Response CAR carries no root: `blocksToCarFile` emits a valid empty-roots
+    // CARv1 header for `null`, which is what a block-set response is.
+    return carResponse(await blocksToCarFile(null, subset));
   },
 });
 
@@ -536,6 +566,40 @@ router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
   },
 });
 
+// `handleIsCorrect` is a network assertion (the handle must resolve back to the
+// DID it was published with), so it is probed at most once per window and a
+// failed probe serves the last known answer: describeRepo must never fail
+// because this host could not reach its own well-known document.
+const HANDLE_CHECK_TTL_MS = 5 * 60_000;
+let handleCheck: { value: boolean; at: number } | null = null;
+let handleCheckFailureLoggedAt = 0;
+
+async function checkHandleIsCorrect(): Promise<boolean> {
+  const now = Date.now();
+  if (handleCheck && now - handleCheck.at < HANDLE_CHECK_TTL_MS) return handleCheck.value;
+  try {
+    const res = await fetch(`https://${PUBLISHER_HOSTNAME}/.well-known/atproto-did`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) throw new Error(`well-known returned ${res.status}`);
+    const served = (await res.text()).trim();
+    const expected = getDidDocument().id;
+    const value = served === expected;
+    if (!value) {
+      log.warn({ served, expected }, 'handle does not resolve back to this DID; reporting handleIsCorrect=false');
+    }
+    handleCheck = { value, at: now };
+    return value;
+  } catch (err) {
+    if (handleCheck) return handleCheck.value;
+    if (now - handleCheckFailureLoggedAt >= HANDLE_CHECK_TTL_MS) {
+      handleCheckFailureLoggedAt = now;
+      log.warn({ err, host: PUBLISHER_HOSTNAME }, 'handle check failed; assuming handleIsCorrect=true');
+    }
+    return true;
+  }
+}
+
 router.addQuery(ComAtprotoRepoDescribeRepo.mainSchema, {
   async handler({ params }) {
     const id = params.repo.startsWith('did:')
@@ -550,7 +614,7 @@ router.addQuery(ComAtprotoRepoDescribeRepo.mainSchema, {
       did: didDoc.id,
       didDoc: didDoc as unknown as Record<string, unknown>,
       handle,
-      handleIsCorrect: true,
+      handleIsCorrect: await checkHandleIsCorrect(),
       collections: [LEX_COLLECTION],
     } as unknown as ComAtprotoRepoDescribeRepo.$output);
   },
@@ -2523,9 +2587,10 @@ const FEED_REVIEW_COLLECTIONS = [REVIEW_COLLECTION];
 // they read as either kind of activity depending on the record.
 const FEED_COLLECTIONS = [...FEED_REVIEW_COLLECTIONS, SHELVING_COLLECTION, BOOKHIVE_BOOK_COLLECTION];
 
-// Follow edges are written to each reader's own repo by livtet-service. TAP
-// mirrors bookhive books only, so there is no local mirror of this collection:
-// the feed reads it straight from the reader's PDS.
+// Follow edges are written to each reader's own repo by livtet-service. The
+// feed reads it straight from the reader's PDS (the repo is authoritative and
+// cannot lag); TAP also mirrors it (`net.olamaelcu.livtet.biblio.*`), which is
+// what the `follows` table for the graph queries is materialized from.
 const FOLLOW_COLLECTION = 'net.olamaelcu.livtet.biblio.follow';
 /** Pages of 100 records. A bound keeps a pathological repo cheap to scan. */
 const FOLLOW_SCAN_PAGES = 20;

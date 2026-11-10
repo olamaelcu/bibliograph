@@ -37,7 +37,10 @@ const DID = `did:web:${HOSTNAME}`;
 const COLLECTION = 'com.atproto.lexicon.schema' as const;
 const LEX_AUTHORITY = process.env.LEX_AUTHORITY ?? 'net/olamaelcu/livtet';
 const LEX_ROOT = process.env.LEX_ROOT ?? join(PACKAGE_ROOT, 'lexicons');
-const OUT_DIR = process.env.LEX_OUT_DIR ?? join(PACKAGE_ROOT, '..', '..', 'data', 'lex');
+// The usage comment above advertises `--out=<dir>`; honor it so an exploratory
+// build cannot silently overwrite the published CARs in `data/lex`.
+const OUT_ARG = process.argv.find((arg) => arg.startsWith('--out='))?.slice('--out='.length);
+const OUT_DIR = OUT_ARG || process.env.LEX_OUT_DIR || join(PACKAGE_ROOT, '..', '..', 'data', 'lex');
 const PRIVATE_KEY_HEX = process.env.ATP_SIGNING_KEY;
 
 function nsidFromPath(path: string): string {
@@ -145,9 +148,10 @@ async function writePerRecordSlices(
 }
 
 async function deterministicRev(lexFiles: Array<{ nsid: string; lex: { defs?: unknown; description?: string } }>): Promise<string> {
-  // ATProto TID format: [234567abcdefghijklmnopqrstuvwxyz]{13}
-  // (base32-sortable alphabet; excludes 0/1/i/o/l which are confusing).
-  // Hash the canonical lex set, then base32-encode 13 chars from the digest.
+  // The served `rev` must be a valid TID: 13 chars of base32-sortable
+  // (`[234567abcdefghij][234567abcdefghijklmnopqrstuvwxyz]{12}`), i.e. 63 bits
+  // with the top bit clear. Hash the canonical lex set, then emit the first 8
+  // digest bytes as 13 base32 chars MSB-first.
   const { createHash } = await import('node:crypto');
   const h = createHash('sha256');
   for (const { nsid, lex } of lexFiles) {
@@ -156,17 +160,14 @@ async function deterministicRev(lexFiles: Array<{ nsid: string; lex: { defs?: un
     h.update(JSON.stringify({ defs: lex.defs ?? {}, description: lex.description }));
     h.update('\n');
   }
-  // Take 13 chars (13 * 5 = 65 bits, so we need ~9 bytes from sha256).
-  // Hex (4 bits each) → map each nibble to 2 chars from base32-sortable alphabet.
   const ALPHA = '234567abcdefghijklmnopqrstuvwxyz';
-  const hex = h.digest('hex').slice(0, 13);
+  const digest = h.digest();
+  const v = digest.readBigUInt64BE(0) & 0x7fffffffffffffffn;
   let out = '';
-  for (let i = 0; i < hex.length; i += 2) {
-    const v = parseInt(hex.slice(i, i + 2), 16);
-    out += ALPHA[(v >> 3) & 31];
-    if (out.length < 13) out += ALPHA[v & 31];
-  }
-  return out.slice(0, 13);
+  // First char carries the top 4 bits (63 bits = 4 + 12 * 5 bits = 13 chars).
+  out += ALPHA[Number((v >> 60n) & 0x0fn)];
+  for (let shift = 55n; shift >= 0n; shift -= 5n) out += ALPHA[Number((v >> shift) & 0x1fn)];
+  return out;
 }
 
 async function main(): Promise<void> {

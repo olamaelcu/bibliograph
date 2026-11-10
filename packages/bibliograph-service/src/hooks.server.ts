@@ -52,8 +52,22 @@ export const handle: import('@sveltejs/kit/hooks').Handle = async ({ event, reso
   }
   if (event.url.pathname === '/xrpc/' || event.url.pathname.startsWith('/xrpc/')) {
     const res = await router.fetch(event.request);
+    // Public reads are cacheable; anything authenticated, non-GET, failed, or
+    // already carrying its own directive (the CAR responses) is not touched.
+    // Header-only wrapper: the body stream is reused as-is.
+    const cacheable =
+      event.request.method === 'GET' &&
+      !event.request.headers.has('authorization') &&
+      res.status === 200 &&
+      !res.headers.has('cache-control');
+    if (!cacheable) {
+      end({ status: String(res.status) });
+      return res;
+    }
+    const headers = new Headers(res.headers);
+    headers.set('cache-control', 'public, max-age=60, stale-while-revalidate=300');
     end({ status: String(res.status) });
-    return res;
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
   }
   const res = await resolve(event);
   end({ status: String(res.status) });

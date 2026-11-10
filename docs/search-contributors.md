@@ -2,7 +2,7 @@
 
 ## XRPC Query Schema
 
-**Endpoint**: `POST /xrpc/community.lexicon.book.searchContributors`
+**Endpoint**: `GET /xrpc/community.lexicon.book.searchContributors`
 
 ### Parameters
 
@@ -73,7 +73,7 @@ The contributor record requires:
 
 Based on the codebase:
 1. **`searchEditions`** - inlines contributors on each `editionView` as `{name, role, identifiers?, ref?}`
-2. **`searchWork`** - inlines contributors on each work record, same shape
+2. **`searchWorks`** - inlines contributors on each work record, same shape
 3. **`searchContributors`** - dedicated endpoint for finding contributors
 
 `searchContributors` has no remote catalog source: it reads `contributors`
@@ -121,7 +121,7 @@ Closed at four layers, all keyed off one predicate,
 |---|---|---|
 | Database | `contributors_name_non_empty` CHECK (`btrim(name) <> ''`), migration `0010` | Empty/whitespace names cannot be written |
 | SQL read | `PostgresSource.searchContributors` | `btrim(name) <> ''` predicate, so `items` and `total` agree |
-| Service | `SearchService.searchContributors` | Drops invalid names from local **and** remote results before merge and before `syncIngestContributors` |
+| Service | `SearchService.searchContributors` | Drops invalid names from the local result set before returning (contributors have no remote source; `mergeItems` and `syncIngest*` exist only for editions and works) |
 | XRPC handler | `routes/xrpc/book-queries.ts` | Final filter + `invalid_contributor_responses_total{nsid=…searchContributors,reason=empty_name}` |
 
 Live data is already clean — 2639 rows locally and 410 sampled over the wire had
@@ -139,9 +139,8 @@ response — both come from local cache columns:
 | contributors | `contributors.image_url` | none — `community.lexicon.book.contributor` has no image field |
 
 `ContributorItem.imageUrl` is filled by `PostgresSource.mapContributorRow` and
-survives the remote/local merge in `SearchService.mergeItems`, because
-OL-derived items carry no `imageUrl` key and so cannot overwrite the cached one.
-The column itself is populated by the `backfill-contributor-image` job
+passes straight through to the response — there is no remote contributor item to
+clobber it. The column itself is populated by the `backfill-contributor-image` job
 (`pnpm backfill:contributor-images`); until that has run for a contributor, its
 row renders text-only.
 

@@ -7,8 +7,8 @@
 // which matters, because a labeler's `#atproto_labeler` service endpoint is an
 // origin with no path, so the stream has to live on this host.
 //
-// Run with `tsx server.ts` (tsx is a runtime dependency, and the container
-// already uses it for the migrator).
+// Run with `tsx server.ts` (tsx is a runtime dependency, and the packaged
+// `bibliograph-migrate` and `bibliograph-worker` units use it too).
 
 import http from 'node:http';
 import process from 'node:process';

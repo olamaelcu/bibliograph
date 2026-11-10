@@ -118,7 +118,7 @@ the index stops advancing. The web process is unaffected.
 ## Install and operate
 
 ```bash
-apt-get install -y ./bibliograph_0.1.0_amd64.deb
+apt-get install -y ./bibliograph_0.5.16_amd64.deb
 $EDITOR /etc/bibliograph/bibliograph.env   # fill in the REQUIRED entries
 systemctl restart bibliograph bibliograph-worker
 systemctl status bibliograph bibliograph-worker
@@ -368,7 +368,7 @@ rationale for what replaced it.
 
 ```bash
 apt-get update && apt-get install -y --only-upgrade bibliograph
-apt-get install -y bibliograph=0.1.0   # rollback is a version pin
+apt-get install -y bibliograph=0.5.15   # rollback is a version pin
 apt-mark hold bibliograph
 ```
 

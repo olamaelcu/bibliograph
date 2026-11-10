@@ -34,7 +34,7 @@ both directions:
 
 - **Catalog → editions.** `buzz.bookhive.catalogBook` records are ingested as
   `community.lexicon.book.edition` rows keyed `bh.{hiveId}`
-  (`pnpm ingest:bookhive`), carrying the catalog record's at-uri as a `bookhive`
+  (`pnpm --filter bibliograph-service ingest:bookhive`), carrying the catalog record's at-uri as a `bookhive`
   identifier (plus the `goodreads` id when that is the upstream source).
 - **User records → reviews and shelving.** A `buzz.bookhive.book` record holds
   the review text, a 1–10 star rating and a reading status
@@ -107,12 +107,12 @@ can vote on which work an edition belongs to.
   a single dissenter cannot overwrite an established link. Set the threshold to
   `1` to let one account curate a small or private catalog.
 - A decision is stamped `editions.work_link_source = 'consensus'`, and the
-  automatic reconciler (`pnpm backfill:works`) skips those rows — otherwise a
+  automatic reconciler (`pnpm --filter bibliograph-service backfill:works`) skips those rows — otherwise a
   nightly run would silently undo a voted unlink.
 - The reconciler has no work catalogue to consult any more: a run leaves
   `work_uri` NULL and reports each orphan as deferred, rather than inventing a
   work from the edition's own fields, so an unlinked edition means the catalog
-  genuinely does not know its work. `pnpm backfill:works --shard=<index>/<count>`
+  genuinely does not know its work. `pnpm --filter bibliograph-service backfill:works --shard=<index>/<count>`
   walks one slice of the table, for splitting a large catalog across several
   processes, and phase 2 re-verifies the CID of every already-linked work.
   `edition_work_backfill` rows written by earlier builds are still honoured —
@@ -177,7 +177,7 @@ anything is signed.
 | Label | Subject | Behavior | Issued by |
 | --- | --- | --- | --- |
 | `librarian` | account | `none`/`inform`, default ignore | admin approval of an application |
-| `senior-librarian` | account | `none`/`inform`, default ignore | `pnpm labels:seniority`, automatically |
+| `senior-librarian` | account | `none`/`inform`, default ignore | `pnpm --filter bibliograph-service labels:seniority`, automatically |
 | `administrator` | account | `none`/`inform`, default ignore | an existing administrator |
 | `controversial` | record (edition/work) | `none`/`inform`, default warn | administrators, from the record page |
 
