@@ -192,6 +192,10 @@ export const works = pgTable(
   (t) => ({
     didIdx: index('works_did_idx').on(t.did),
     indexedAtIdx: index('works_indexed_at_idx').on(t.indexedAt),
+    // The "For You" feed joins works by shared subjects. Default `jsonb_ops`
+    // (not `jsonb_path_ops`) because the feed pre-filters with `subjects ?|`,
+    // which only the default operator class can answer.
+    subjectsIdx: index('works_subjects_gin').using('gin', t.subjects),
   }),
 );
 
@@ -254,6 +258,9 @@ export const publishers = pgTable(
   },
   (t) => ({
     indexedAtIdx: index('publishers_indexed_at_idx').on(t.indexedAt),
+    // `searchPublishers` filters `name ILIKE '%q%'`; 0005 created the trigram
+    // indexes for editions/works/contributors only.
+    nameTrgmIdx: index('publishers_name_trgm').using('gin', sql`name gin_trgm_ops`),
     // Note: self-FK on imprintOfUri is declared in the migration (drizzle-kit
     // can't infer types for self-referencing tables).
   }),
@@ -293,6 +300,24 @@ export const records = pgTable(
     shelfUriIdx: index('records_shelf_uri_idx').on(sql`(value->>'shelf')`),
     bookUriIdx: index('records_book_uri_idx').on(sql`(value->'book'->>'uri')`),
     hiveBookUriIdx: index('records_hivebook_idx').on(sql`(value->>'hiveBookUri')`),
+    // The Bookhive reads fold the legacy `hiveId` shape through a coalesce (see
+    // `shelving/shelf-rows.ts` bookhiveSubjectSql), which the bare expression
+    // index above cannot serve: that predicate scanned all of `records`.
+    hiveBookSubjectIdx: index('records_hivebook_subject_idx')
+      .on(sql`(coalesce(value->>'hiveBookUri', 'at://did:plc:enu2j5xjlqsjaylv3du4myh4/buzz.bookhive.catalogBook/' || (value->>'hiveId')))`)
+      .where(sql`${t.collection} = 'buzz.bookhive.book'`),
+    // `listShelvesWithBooks` previews one Bookhive shelf at a time by status.
+    bookhiveStatusIdx: index('records_bookhive_status_idx')
+      .on(t.did, sql`(value->>'status')`)
+      .where(sql`${t.collection} = 'buzz.bookhive.book' AND (value->>'status') IS NOT NULL`),
+    // `getReviewsByBook` ORs three shapes for the review's book; only the
+    // `value->'book'->>'uri'` form above is indexed today.
+    reviewBookLegacyIdx: index('records_review_book_legacy_idx')
+      .on(sql`(value->>'book')`)
+      .where(sql`${t.collection} = 'net.olamaelcu.livtet.biblio.bookReview'`),
+    reviewBookRefIdx: index('records_review_book_ref_idx')
+      .on(sql`(value->'book'->>'ref')`)
+      .where(sql`${t.collection} = 'net.olamaelcu.livtet.biblio.bookReview'`),
   }),
 );
 
@@ -359,7 +384,9 @@ export const editionWorkVotes = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.editionUri, t.voterDid] }),
-    editionIdx: index('edition_work_votes_edition_idx').on(t.editionUri),
+    // `forgetVoteByRecordUri` deletes by `record_uri`; the composite primary
+    // key already covers `edition_uri` lookups.
+    recordUriIdx: index('edition_work_votes_record_uri_idx').on(t.recordUri),
   }),
 );
 
@@ -445,7 +472,7 @@ export const labels = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    subjectIdx: index('labels_subject_idx').on(t.uri),
+    // The (uri, val) composite serves every `uri`-only lookup as a prefix.
     subjectValIdx: index('labels_subject_val_idx').on(t.uri, t.val),
   }),
 );
@@ -499,3 +526,25 @@ export const googleBooksCache = pgTable(
 );
 
 export type GoogleBooksCacheRow = typeof googleBooksCache.$inferSelect;
+
+// ISBNdb responses, cached exactly like Google Books above and for the same
+// reasons. `key` is over method + normalized request + body, so the bulk
+// `POST /books` question and a single `GET /book/{isbn}` never collide. A NULL
+// body is a negative entry (upstream has no such ISBN).
+export const isbndbCache = pgTable(
+  'isbndb_cache',
+  {
+    /** sha256 over method + cache-normalized request + body (see isbndbCacheEntry). */
+    key: text('key').primaryKey(),
+    /** What was asked, for audit. Never carries the API key (it is a header). */
+    request: text('request').notNull(),
+    body: jsonb('body'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    expiresAtIdx: index('isbndb_cache_expires_at_idx').on(t.expiresAt),
+  }),
+);
+
+export type IsbndbCacheRow = typeof isbndbCache.$inferSelect;

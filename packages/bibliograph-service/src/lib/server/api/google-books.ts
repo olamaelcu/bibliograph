@@ -1,14 +1,14 @@
 import type { Logger } from 'pino';
-import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { searchProviderRequestsTotal, googleBooksCacheTotal } from '../metrics';
 import { googleBooksBreaker } from './breakers';
+import { requestJson } from '../http/client';
 import type { EditionItem, WorkItem, SearchQuery, SearchResult, Identifier } from '../search/types';
 import { toGbLangRestrict } from '../search/language';
 import { gbEditionUri, gbWorkUri } from '../gb/keys';
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { gbCacheEntry, gbCacheGet, gbCachePut } from '../gb/cache';
-import { resolveContributorsByName } from './contributor-name-resolver';
+import { prefetchContributors, type ContributorResolver } from './contributor-name-resolver';
 import { isbnIdentifier, isbnValueFromIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
 
 const BASE = 'https://www.googleapis.com/books/v1/volumes';
@@ -84,7 +84,7 @@ export function googleBooksDescription(
   return descriptionFromGb(info, fallback);
 }
 
-export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger): Promise<EditionItem | null> {
+export async function mapGbToEdition(v: GbVolume, createdAt: string, resolver: ContributorResolver): Promise<EditionItem | null> {
   const info = v.volumeInfo;
   if (!info?.title || !v.id) return null;
   const ids: Identifier[] = [makeGbVolumeIdentifier(v.id)];
@@ -97,7 +97,7 @@ export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger
   if (info.canonicalVolumeLink) {
     ids.push(providerIdentifier('googlebooks-canonical', info.canonicalVolumeLink));
   }
-  const contributors = await resolveContributorsByName(info.authors ?? [], 'googlebooks', log);
+  const contributors = await resolver.resolve(info.authors ?? []);
   return {
     uri: gbEditionUri(v.id),
     title: info.title,
@@ -114,7 +114,7 @@ export async function mapGbToEdition(v: GbVolume, createdAt: string, log: Logger
   };
 }
 
-export async function mapGbToWork(v: GbVolume, createdAt: string, log: Logger): Promise<WorkItem | null> {
+export async function mapGbToWork(v: GbVolume, createdAt: string, resolver: ContributorResolver): Promise<WorkItem | null> {
   const info = v.volumeInfo;
   if (!info?.title || !v.id) return null;
   const ids: Identifier[] = [makeGbVolumeIdentifier(v.id)];
@@ -125,7 +125,7 @@ export async function mapGbToWork(v: GbVolume, createdAt: string, log: Logger): 
   }
   const subjects = (info.categories ?? [])
     .flatMap((c) => c.split('/').map((s) => s.trim()).filter(Boolean));
-  const contributors = await resolveContributorsByName(info.authors ?? [], 'googlebooks', log);
+  const contributors = await resolver.resolve(info.authors ?? []);
   return {
     uri: gbWorkUri(v.id),
     title: info.title,
@@ -198,7 +198,7 @@ function upstreamStatus(err: unknown): number | undefined {
  * costs nothing upstream, so there is no reason to withhold it while the breaker
  * is open.
  */
-async function gbFetch<T>(url: string, log: Logger, signal: AbortSignal): Promise<T | null> {
+async function gbFetch<T>(url: string, log: Logger, signal?: AbortSignal): Promise<T | null> {
   const entry = gbCacheEntry(url);
   const cached = await gbCacheGet<T>(entry.key, log);
   if (cached.found) {
@@ -211,17 +211,9 @@ async function gbFetch<T>(url: string, log: Logger, signal: AbortSignal): Promis
     return null;
   }
   try {
-    const body = await withRetry(async () => {
-      const res = await fetch(url, { signal });
-      if (!res.ok) {
-        let body = '';
-        try { body = (await res.json()).error?.message ?? await res.text(); } catch { /* ignore */ }
-        const err = new Error(`googlebooks ${res.status}: ${body.slice(0, 200)}`) as Error & { status: number };
-        err.status = res.status;
-        throw err;
-      }
-      return (await res.json()) as T;
-    }, log);
+    // The transport supplies the 3s budget; this path is on every search and
+    // shelf hydration, so a hung quota answer must not hold the response.
+    const body = await withRetry(() => requestJson<T>(url, { signal }), log);
     googleBooksBreaker.recordSuccess();
     searchProviderRequestsTotal.inc({ provider: 'googlebooks', status: 'success' });
     await gbCachePut(entry, body, log);
@@ -258,26 +250,34 @@ export async function searchEditions(
     return { items: [], total: 0 };
   }
   const limit = Math.min(query.limit, 40);
-  const startIndex = decodeGbCursor(query.cursor);
+  // Google Books pages by `startIndex` alone: a caller that pages with `offset`
+  // (the XRPC searchEditions handler does) was served page 1 forever.
+  const startIndex = query.cursor ? decodeGbCursor(query.cursor) : Math.min(query.offset ?? 0, 1000);
   const url = buildGbUrl(query.q, limit, startIndex, key, pickGbLangRestrict(query.lang));
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  const data = await gbFetch<GbSearchResponse>(url, log, signal);
+  const data = await gbFetch<GbSearchResponse>(url, log, externalSignal);
   if (!data) {
     return { items: [], total: 0, degraded: { upstream: 'googlebooks', reason: 'fetch_failed' } };
   }
   const createdAt = new Date().toISOString();
-  const items: EditionItem[] = [];
-  for (const v of data.items ?? []) {
-    const mapped = await mapGbToEdition(v, createdAt, log);
-    if (mapped) items.push(mapped);
-  }
+  // Volumes map independently: no ordering, no shared state. Mapping them
+  // concurrently keeps a page from costing one round trip per volume.
+  // Every author on the page resolves in one prefetch, so the concurrent map
+  // below never queues on the contributor table.
+  const resolver = await prefetchContributors(
+    (data.items ?? []).flatMap((v) => v.volumeInfo?.authors ?? []),
+    'googlebooks',
+    log,
+  );
+  const items = (
+    await Promise.all((data.items ?? []).map((v) => mapGbToEdition(v, createdAt, resolver)))
+  ).filter((item): item is EditionItem => item !== null);
   const fetchedCount = data.items?.length ?? 0;
   const nextStart = startIndex + fetchedCount;
   const cursor = data.totalItems !== undefined && nextStart < data.totalItems && fetchedCount > 0
     ? encodeGbCursor(nextStart)
     : undefined;
   log.info({ stage: 'google-books-source', q: query.q, items: items.length, total: data.totalItems, cursor: !!cursor }, 'googlebooks ok');
-  return { items, total: data.totalItems ?? 0, cursor };
+  return { items, total: data.totalItems ?? 0, cursor, hasMore: cursor !== undefined };
 }
 
 export async function searchWorks(
@@ -297,26 +297,28 @@ export async function searchWorks(
     return { items: [], total: 0 };
   }
   const limit = Math.min(query.limit, 40);
-  const startIndex = decodeGbCursor(query.cursor);
+  const startIndex = query.cursor ? decodeGbCursor(query.cursor) : Math.min(query.offset ?? 0, 1000);
   const url = buildGbUrl(query.q, limit, startIndex, key);
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  const data = await gbFetch<GbSearchResponse>(url, log, signal);
+  const data = await gbFetch<GbSearchResponse>(url, log, externalSignal);
   if (!data) {
     return { items: [], total: 0, degraded: { upstream: 'googlebooks', reason: 'fetch_failed' } };
   }
   const createdAt = new Date().toISOString();
-  const items: WorkItem[] = [];
-  for (const v of data.items ?? []) {
-    const mapped = await mapGbToWork(v, createdAt, log);
-    if (mapped) items.push(mapped);
-  }
+  const resolver = await prefetchContributors(
+    (data.items ?? []).flatMap((v) => v.volumeInfo?.authors ?? []),
+    'googlebooks',
+    log,
+  );
+  const items = (
+    await Promise.all((data.items ?? []).map((v) => mapGbToWork(v, createdAt, resolver)))
+  ).filter((item): item is WorkItem => item !== null);
   const fetchedCount = data.items?.length ?? 0;
   const nextStart = startIndex + fetchedCount;
   const cursor = data.totalItems !== undefined && nextStart < data.totalItems && fetchedCount > 0
     ? encodeGbCursor(nextStart)
     : undefined;
   log.info({ stage: 'google-books-source', q: query.q, items: items.length, total: data.totalItems, cursor: !!cursor }, 'googlebooks ok');
-  return { items, total: data.totalItems ?? 0, cursor };
+  return { items, total: data.totalItems ?? 0, cursor, hasMore: cursor !== undefined };
 }
 
 export async function enrichEditions(
@@ -338,7 +340,7 @@ export async function enrichEditions(
   let matched = 0;
   let missing = 0;
 
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+  const signal = externalSignal;
 
   let cursor = 0;
   async function worker(): Promise<void> {
@@ -351,6 +353,14 @@ export async function enrichEditions(
       if (!isbn) {
         out[i] = item;
         missing++;
+        continue;
+      }
+      // Skip-if-complete: the only fields this enricher writes are description,
+      // pages and cover. When all three are already present there is nothing to
+      // merge, and the lookup would spend quota to prove it — the search paths
+      // call this on every result of every distinct query.
+      if (item.description && item.coverImageUrl && item.pages !== undefined) {
+        out[i] = item;
         continue;
       }
       const url = `${BASE}?q=isbn:${encodeURIComponent(isbn)}&key=${encodeURIComponent(key ?? '')}`;
@@ -405,8 +415,8 @@ export async function getEditionByVolumeId(
   const key = process.env.GOOGLE_BOOKS_API_KEY;
   const suffix = key ? `?key=${encodeURIComponent(key)}` : '';
   const url = `${BASE}/${encodeURIComponent(volumeId)}${suffix}`;
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  const volume = await gbFetch<GbVolume>(url, log, signal);
+  const volume = await gbFetch<GbVolume>(url, log, externalSignal);
   if (!volume) return null;
-  return mapGbToEdition(volume, new Date().toISOString(), log);
+  const resolver = await prefetchContributors(volume.volumeInfo?.authors ?? [], 'googlebooks', log);
+  return mapGbToEdition(volume, new Date().toISOString(), resolver);
 }

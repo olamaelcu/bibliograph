@@ -280,12 +280,22 @@ export async function queryLabels(
     conditions.push(or(...input.sources.map((s) => eq(labels.src, s))));
   }
 
-  const rows = await db
-    .select()
+  const ranked = db
+    .selectDistinctOn([labels.uri, labels.val])
     .from(labels)
-    .where(and(...conditions))
+    .where(
+      and(
+        ...conditions,
+        // The cursor belongs in the predicate, not in a post-scan JS filter: the
+        // scan is capped at MAX_SCAN, so filtering after the cap served the same
+        // first window forever once a subject set outgrew it.
+        input.cursor !== undefined ? gt(labels.seq, input.cursor) : undefined,
+      ),
+    )
+    // Newest row per (uri, val): the tuple DISTINCT ON requires as its prefix.
     .orderBy(labels.uri, labels.val, desc(labels.cts), desc(labels.seq))
     .limit(MAX_SCAN);
+  const rows = await ranked;
 
   // Keep the newest row per (uri, val), then drop negated/expired ones.
   const newest = new Map<string, LabelRow>();
@@ -299,8 +309,7 @@ export async function queryLabels(
   );
 
   active.sort((a, b) => a.seq - b.seq);
-  const afterCursor = input.cursor ? active.filter((row) => row.seq > input.cursor!) : active;
-  const page = afterCursor.slice(0, limit);
+  const page = active.slice(0, limit);
 
   return {
     labels: page,

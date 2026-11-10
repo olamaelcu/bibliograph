@@ -7,6 +7,7 @@ import { db as defaultDb } from '../db/index';
 import { editions, works, records, ingestDeadLetter, tapDeadLetter } from '../db/schema';
 import type { EditionItem, WorkItem, Identifier } from '../search/types';
 import { PUBLISHER_DID } from '../did';
+import { mapWithConcurrency } from '../pds/fanout';
 
 import { gbEditionRkey, gbWorkRkey } from '../gb/keys';
 import { usableCoverUrl } from '../book-wire';
@@ -25,7 +26,12 @@ import { backfillIsbnForEdition } from './isbn-backfill';
 import { fetchEditionForUri } from '../shelving/edition-fetch';
 import { aliasedEditionUris } from '../edition-lookup';
 import { catalogUriForMirroredRecord } from '../shelving/pending-editions';
-import { enqueueShelvingEditionBackfill } from './enqueue';
+import {
+  MAX_TAP_ATTEMPTS,
+  enqueueRecordDeleteItems,
+  enqueueRecordUpsertItems,
+  enqueueShelvingEditionBackfills,
+} from './enqueue';
 import { pdsClient } from '../pds/resolve';
 import {
   dedupeByUri,
@@ -39,7 +45,9 @@ import {
   applyConsensus,
   consensusThreshold,
   forgetVoteByRecordUri,
-  ingestVoteRecord,
+  parseEditionWorkVote,
+  upsertVotes,
+  type EditionWorkVote,
 } from '../edition-work-votes';
 import {
   FOLLOW_COLLECTION,
@@ -144,6 +152,39 @@ async function writeTapDLQ(
   });
 }
 
+interface TapDLQRow {
+  repoDid: string;
+  collection: string;
+  rkey: string;
+  payload: unknown;
+}
+
+/** One insert for a whole failed batch: the per-item loop ran 100 dead letters serially. */
+async function writeTapDLQBatch(rows: readonly TapDLQRow[], errorMessage: string, attempts: number): Promise<void> {
+  if (rows.length === 0) return;
+  await db.insert(tapDeadLetter).values(
+    rows.map((row) => ({
+      repoDid: row.repoDid,
+      collection: row.collection,
+      rkey: row.rkey || 'unknown',
+      payload: row.payload as never,
+      errorMessage,
+      attempts,
+    })),
+  );
+}
+
+async function writeIngestDLQBatch(
+  rows: ReadonlyArray<{ uri: string; payload: unknown }>,
+  errorMessage: string,
+  attempts: number,
+): Promise<void> {
+  if (rows.length === 0) return;
+  await db.insert(ingestDeadLetter).values(
+    rows.map((row) => ({ uri: row.uri, payload: row.payload as never, errorMessage, attempts })),
+  ).onConflictDoNothing();
+}
+
 // -- per-item tasks (kept for backward compat; new code prefers batch tasks) --
 
 export const ingestEditionTask: Task = async (payload, helpers) => {
@@ -169,10 +210,11 @@ export const ingestWorkBatchTask: Task = async (payload, helpers) => {
 export async function ingestEditionBatch(items: EditionItem[], log: Logger, attempts: number): Promise<void> {
   try {
     const contributors = await wireContributorsForAll(db, items.map((item) => item.contributors));
-    const allRows: unknown[] = [];
-    for (const [index, item] of items.entries()) {
+    // Rows are independent of each other (uri, record value, CID), so build them
+    // concurrently: a 20-item ingest used to hash one record at a time.
+    const rowOrNull = await Promise.all(items.map(async (item, index): Promise<unknown | null> => {
       const uri = editionUriFor(item.identifiers);
-      if (!uri) continue;
+      if (!uri) return null;
       const rkey = uri.slice(uri.lastIndexOf('/') + 1);
       // Providers serve placeholder art as a real URL; never store it as a cover.
       const coverImageUrl = usableCoverUrl(
@@ -182,9 +224,9 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
         contributors: contributors[index] ?? [],
         coverUrl: coverImageUrl ?? null,
       });
-      if (!value) continue;
+      if (!value) return null;
       const cid = await cidForLex(value as unknown as LexMap);
-      allRows.push({
+      return {
         uri,
         cid: cid.toString(),
         did: PUBLISHER_DID,
@@ -201,8 +243,9 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
         contributors: item.contributors,
         identifiers: item.identifiers,
         createdAt: new Date(item.createdAt),
-      });
-    }
+      };
+    }));
+    const allRows = rowOrNull.filter((row) => row !== null);
     if (allRows.length === 0) return;
     // A record whose edition uri a librarian merge retired must not come back as
     // a fresh row with a fresh `tid`: that would resurrect the duplicate the
@@ -227,22 +270,34 @@ export async function ingestEditionBatch(items: EditionItem[], log: Logger, atte
         contributors: sql`excluded.contributors`,
         indexedAt: new Date(),
       },
+      // The CID is a hash of the record: if it did not change there is nothing to
+      // write. Without this guard every search rewrote each result row (and its
+      // TOAST and GIN entries) with identical content, which on a read-heavy
+      // catalogue is pure bloat and WAL.
+      setWhere: sql`${editions.cid} <> excluded.cid`,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'ingest-edition-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
-    for (const item of items) {
-      const uri = editionUriFor(item.identifiers) ?? 'at://unknown/community.lexicon.book.edition/unknown';
-      await writeIngestDLQ(uri, item, message, attempts);
-    }
+    // Rethrow until the retry budget is spent: every TAP task used to dead-letter
+    // and return success on its first failure, so graphile never retried and
+    // nothing read these tables.
+    if (attempts < MAX_TAP_ATTEMPTS) throw err;
+    await writeIngestDLQBatch(
+      items.map((item) => ({
+        uri: editionUriFor(item.identifiers) ?? 'at://unknown/community.lexicon.book.edition/unknown',
+        payload: item,
+      })),
+      message,
+      attempts,
+    );
   }
 }
 
 async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number): Promise<void> {
   try {
     const contributors = await wireContributorsForAll(db, items.map((item) => item.contributors));
-    const allRows: unknown[] = [];
-    for (const [index, item] of items.entries()) {
+    const rowOrNull = await Promise.all(items.map(async (item, index): Promise<unknown | null> => {
       const source = identifySource(item.identifiers);
       let uri: string | undefined;
       let rkey: string | undefined;
@@ -251,23 +306,23 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
           rkey = gbWorkRkey(source.gbId);
           uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
         } catch {
-          continue;
+          return null;
         }
       } else if (source?.kind === 'isbndb') {
         try {
           rkey = isbndbWorkRkey(source.isbndbIsbn);
           uri = `at://${PUBLISHER_DID}/community.lexicon.book.work/${rkey}`;
         } catch {
-          continue;
+          return null;
         }
       }
-      if (!uri || !rkey) continue;
+      if (!uri || !rkey) return null;
       const value = workRecordValue(
         { ...item, uri, createdAt: new Date(item.createdAt) },
         contributors[index] ?? [],
       );
       const cid = await cidForLex(value as unknown as LexMap);
-      allRows.push({
+      return {
         uri,
         cid: cid.toString(),
         did: PUBLISHER_DID,
@@ -281,8 +336,9 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
         identifiers: item.identifiers,
         description: item.description ?? null,
         createdAt: new Date(item.createdAt),
-      });
-    }
+      };
+    }));
+    const allRows = rowOrNull.filter((row) => row !== null);
     if (allRows.length === 0) return;
     await db.insert(works).values(allRows as never).onConflictDoUpdate({
       target: works.uri,
@@ -294,13 +350,19 @@ async function ingestWorkBatch(items: WorkItem[], log: Logger, attempts: number)
         contributors: sql`excluded.contributors`,
         indexedAt: new Date(),
       },
+      // Same reason as the edition upsert: an unchanged CID means an unchanged
+      // record, and a search must not rewrite rows it only read.
+      setWhere: sql`${works.cid} <> excluded.cid`,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'ingest-work-batch', err, count: items.length }, 'batch ingest failed; writing to DLQ');
-    for (const item of items) {
-      await writeIngestDLQ('at://unknown/community.lexicon.book.work/unknown', item, message, attempts);
-    }
+    if (attempts < MAX_TAP_ATTEMPTS) throw err;
+    await writeIngestDLQBatch(
+      items.map((item) => ({ uri: 'at://unknown/community.lexicon.book.work/unknown', payload: item })),
+      message,
+      attempts,
+    );
   }
 }
 
@@ -361,7 +423,9 @@ async function enqueueMissingEditions(candidates: Set<string>, log: Logger): Pro
       (await db.select({ uri: editions.uri }).from(editions).where(inArray(editions.uri, uris))).map((row) => row.uri),
     );
     const missing = uris.filter((uri) => !known.has(uri));
-    for (const uri of missing) await enqueueShelvingEditionBackfill(uri);
+    // One statement per chunk instead of one transaction per record: a TAP page
+    // can name a hundred missing editions.
+    await enqueueShelvingEditionBackfills(missing);
     if (missing.length > 0) {
       log.info({ stage: 'enqueue-missing-editions', missing: missing.length, seen: uris.length }, 'queued catalog fills');
     }
@@ -438,6 +502,7 @@ export const tapRecordUpsertTask: Task = async (payload, helpers) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-upsert', err, uri }, 'tap upsert failed; writing to DLQ');
+    if (helpers.job.attempts < MAX_TAP_ATTEMPTS) throw err;
     await writeTapDLQ(did, collection, rkey, payload, message, helpers.job.attempts);
   }
 };
@@ -459,6 +524,7 @@ export const tapRecordDeleteTask: Task = async (payload, helpers) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-delete', err, uri }, 'tap delete failed; writing to DLQ');
+    if (helpers.job.attempts < MAX_TAP_ATTEMPTS) throw err;
     await writeTapDLQ(did, collection, rkey, payload, message, helpers.job.attempts);
     return;
   }
@@ -556,16 +622,42 @@ async function readRepoRecord(
 export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
   const items = payload as Array<{ uri: string; did: string; rkey: string; value: Record<string, unknown> }>;
   const log = helpers.logger as unknown as Logger;
+  // One row per uri: a batch that names the same uri twice fails the whole
+  // statement (`ON CONFLICT DO UPDATE command cannot affect row a second
+  // time`), which used to dead-letter every record in it.
+  const unique = dedupeByUri(items ?? []);
   try {
-    if (items.length === 0) return;
-    // One row per uri: a batch that names the same uri twice fails the whole
-    // statement (`ON CONFLICT DO UPDATE command cannot affect row a second
-    // time`), which used to dead-letter every record in it.
-    const unique = dedupeByUri(items);
-    await upsertMirrorRows(unique);
+    if (unique.length === 0) return;
+
+    // A create/update event may carry a cid and no decoded record. The
+    // single-record task fetches such a body back; this path used to mirror `{}`,
+    // which no listing can render from and which makes an author-keyed read treat
+    // the uri as already served. Recover a bounded number, leave the rest for a
+    // redelivery.
+    const withBody = unique.filter((it) => Object.keys(it.value).length > 0);
+    const missingBody = unique.filter((it) => Object.keys(it.value).length === 0);
+    const recovered = (
+      await mapWithConcurrency(
+        missingBody.slice(0, MAX_BODY_RECOVERIES_PER_BATCH),
+        4,
+        withRecordBody,
+      )
+    ).filter((row): row is MirrorRowInput => row !== null);
+    if (missingBody.length > 0) {
+      log.warn(
+        {
+          stage: 'tap-record-upsert-batch.no-body',
+          missing: missingBody.length,
+          recovered: recovered.length,
+        },
+        'events carried no record body; mirroring only the recoverable ones',
+      );
+    }
+    const rows = [...withBody, ...recovered];
+    await upsertMirrorRows(rows);
 
     const candidates = new Set<string>();
-    for (const it of unique) {
+    for (const it of rows) {
       const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
       const uri = catalogUriForMirroredRecord(collection, it.rkey, it.value);
       if (uri) candidates.add(uri);
@@ -575,7 +667,7 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
     // Follow edges are derived state over `records`: materialize them from the
     // rows just written so "who follows me" is answerable without a repo scan.
     const followEdges: FollowEdge[] = [];
-    for (const it of unique) {
+    for (const it of rows) {
       if ((it.uri.split('/').slice(-2, -1)[0] ?? '') !== FOLLOW_COLLECTION) continue;
       const edge = followEdgeFromRecord(it.did, it.value);
       if (edge) followEdges.push(edge);
@@ -586,20 +678,26 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
     // generic `records` mirror, so materialize them and let consensus decide
     // whether the catalog changes.
     const voteEditions = new Set<string>();
-    for (const it of unique) {
+    const votes: EditionWorkVote[] = [];
+    for (const it of rows) {
       const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
       if (collection !== EDITION_WORK_LINK_COLLECTION) continue;
-      const editionUri = await ingestVoteRecord(it.uri, it.did, it.value);
-      if (editionUri) voteEditions.add(editionUri);
+      const vote = parseEditionWorkVote(it.uri, it.did, it.value);
+      if (!vote) continue;
+      votes.push(vote);
+      voteEditions.add(vote.editionUri);
     }
-    for (const editionUri of voteEditions) {
-      await applyConsensus(editionUri, consensusThreshold());
-    }
+    await upsertVotes(votes);
+    // Consensus is a handful of queries per edition; a page that mentions many
+    // editions ran them strictly one after another.
+    await mapWithConcurrency([...voteEditions], 4, (editionUri) =>
+      applyConsensus(editionUri, consensusThreshold()),
+    );
 
     log.info(
       {
         stage: 'tap-record-upsert-batch',
-        count: unique.length,
+        count: rows.length,
         received: items.length,
         voteEditions: voteEditions.size,
       },
@@ -608,18 +706,27 @@ export const tapRecordUpsertBatchTask: Task = async (payload, helpers) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-upsert-batch', err, count: items.length }, 'batch upsert failed; writing to DLQ');
-    for (const it of items) {
-      const collection = it.uri.split('/').slice(-2, -1)[0] ?? '';
-      const rkey = it.uri.split('/').pop() ?? '';
-      await db.insert(tapDeadLetter).values({
-        repoDid: it.did,
-        collection,
-        rkey: rkey || 'unknown',
-        payload: it as never,
-        errorMessage: message,
-        attempts: helpers.job.attempts,
-      });
+    // A second failure means one record is poisoning the batch. Hand them to the
+    // single-record task so the healthy ones land and only the offender burns its
+    // own attempts; then rethrow, because the batch itself still failed.
+    if (helpers.job.attempts === 2) {
+      await enqueueRecordUpsertItems(unique);
+      log.warn(
+        { stage: 'tap-record-upsert-batch', count: unique.length },
+        'batch failed twice; split into per-record jobs',
+      );
     }
+    if (helpers.job.attempts < MAX_TAP_ATTEMPTS) throw err;
+    await writeTapDLQBatch(
+      unique.map((it) => ({
+        repoDid: it.did,
+        collection: it.uri.split('/').slice(-2, -1)[0] ?? '',
+        rkey: it.uri.split('/').pop() ?? '',
+        payload: it,
+      })),
+      message,
+      helpers.job.attempts,
+    );
   }
 };
 
@@ -640,15 +747,11 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
     // Bounded concurrency: one PDS read per uri, eight in flight. Sequential
     // reads turned a 100-record batch into tens of seconds of job time, which
     // is exactly the backlog this has to drain.
-    for (let start = 0; start < uris.length; start += DELETE_CONFIRM_CONCURRENCY) {
-      const chunk = uris.slice(start, start + DELETE_CONFIRM_CONCURRENCY);
-      const answers = await Promise.all(
-        chunk.map(async (uri) => {
-          const parts = parseRecordUri(uri);
-          return { uri, parts, answer: parts ? await readRepoRecord(parts) : null };
-        }),
-      );
-      for (const { uri, parts, answer } of answers) {
+    const answers = await mapWithConcurrency(uris, DELETE_CONFIRM_CONCURRENCY, async (uri) => {
+      const parts = parseRecordUri(uri);
+      return { uri, parts, answer: parts ? await readRepoRecord(parts) : null };
+    });
+    for (const { uri, parts, answer } of answers) {
         if (!parts) {
           // Not addressable, so nothing better to do than drop the row.
           confirmed.push(uri);
@@ -665,7 +768,6 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
           throw new Error(`could not confirm deletion of ${uri}`);
         }
         revived.push({ uri, did: parts.did, rkey: parts.rkey, value: answer.value });
-      }
     }
 
     if (revived.length > 0) {
@@ -706,9 +808,9 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
       const editionUri = await forgetVoteByRecordUri(uri);
       if (editionUri) voteEditions.add(editionUri);
     }
-    for (const editionUri of voteEditions) {
-      await applyConsensus(editionUri, consensusThreshold());
-    }
+    await mapWithConcurrency([...voteEditions], 4, (editionUri) =>
+      applyConsensus(editionUri, consensusThreshold()),
+    );
     log.info(
       {
         stage: 'tap-record-delete-batch',
@@ -721,19 +823,23 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.error({ stage: 'tap-record-delete-batch', err, count: uris.length }, 'batch delete failed; writing to DLQ');
-    for (const uri of uris) {
-      const collection = uri.split('/').slice(-2, -1)[0] ?? '';
-      const did = uri.split('/').slice(-3, -2)[0] ?? '';
-      const rkey = uri.split('/').pop() ?? '';
-      await db.insert(tapDeadLetter).values({
-        repoDid: did,
-        collection,
-        rkey: rkey || 'unknown',
-        payload: { uri } as never,
-        errorMessage: message,
-        attempts: helpers.job.attempts,
-      });
+    // See the upsert batch: split on the second failure so one unconfirmable
+    // record cannot hold back the rest of the page, then retry this batch.
+    if (helpers.job.attempts === 2) {
+      await enqueueRecordDeleteItems(uris);
+      log.warn({ stage: 'tap-record-delete-batch', count: uris.length }, 'batch failed twice; split into per-record jobs');
     }
+    if (helpers.job.attempts < MAX_TAP_ATTEMPTS) throw err;
+    await writeTapDLQBatch(
+      uris.map((uri) => ({
+        repoDid: uri.split('/').slice(-3, -2)[0] ?? '',
+        collection: uri.split('/').slice(-2, -1)[0] ?? '',
+        rkey: uri.split('/').pop() ?? '',
+        payload: { uri },
+      })),
+      message,
+      helpers.job.attempts,
+    );
   }
 };
 

@@ -101,7 +101,18 @@ export interface SearchQuery {
 export interface SearchResult<T> {
   items: T[];
   cursor?: string;
-  total: number;
+  /**
+   * Total matches for the query, when the source could produce one cheaply.
+   * Absent on continuation pages (`offset > 0` or a cursor), where recomputing
+   * it would re-run an unindexable `count(*)` over every match to restate a
+   * number the caller already has.
+   */
+  total?: number;
+  /**
+   * Whether at least one more page exists. Sources that page by cursor set this
+   * from the cursor; Postgres sets it from a `limit + 1` fetch.
+   */
+  hasMore?: boolean;
   /**
    * Set when an upstream call failed but partial data is still being returned.
    * Lets the XRPC handler decide between 502 UpstreamUnavailable (total miss)

@@ -13,11 +13,11 @@
 // Requires DATABASE_URL (for the catalog writes and author name resolution).
 //
 
-import { inArray, sql } from 'drizzle-orm';
+
 import type { Logger } from 'pino';
 import { db } from '../src/lib/server/db/index';
-import { resolveContributorsByName } from '../src/lib/server/api/contributor-name-resolver';
-import { contributors } from '../src/lib/server/db/schema';
+import { prefetchContributors } from '../src/lib/server/api/contributor-name-resolver';
+
 import { createLogger } from '../src/lib/server/logger';
 import { syncIngestEditions } from '../src/lib/server/jobs/handlers';
 import {
@@ -45,19 +45,12 @@ async function contributionsFor(names: string[], log: Logger): Promise<Map<strin
   const wanted = [...new Set(names.map((n) => n.trim().toLowerCase()).filter((n) => n !== ''))];
   const byName = new Map<string, ContributionEntry[]>();
   if (wanted.length === 0) return byName;
-  const rows = await db
-    .select({ uri: contributors.uri, cid: contributors.cid, name: contributors.name })
-    .from(contributors)
-    .where(inArray(sql`lower(${contributors.name})`, wanted));
-  for (const row of rows) {
-    const key = row.name.trim().toLowerCase();
-    const list = byName.get(key) ?? [];
-    list.push({ subject: { uri: row.uri, cid: row.cid }, role: 'author' });
-    byName.set(key, list);
-  }
+  // One prefetch answers the whole page: the resolver finds each name by its
+  // deterministic stub uri first, then by a case-insensitive name match, and
+  // stubs the rest in a single multi-row upsert.
+  const resolver = await prefetchContributors(wanted, 'bookhive', log);
   for (const name of wanted) {
-    if (byName.has(name)) continue;
-    const entries = await resolveContributorsByName([name], 'bookhive', log);
+    const entries = await resolver.resolve([name]);
     if (entries.length > 0) byName.set(name, entries);
   }
   return byName;

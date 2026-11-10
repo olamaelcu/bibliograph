@@ -15,35 +15,43 @@ import type { Actions, PageServerLoad } from './$types';
 
 const CANDIDATE_LIMIT = 8;
 
-export const load: PageServerLoad = async ({ params, locals }) => {
-  const record = await loadRecord('editions', params.rkey);
+export const load: PageServerLoad = async ({ params, locals, parent }) => {
   const editionUri = editionUriForRkey(params.rkey, PUBLISHER_DID);
 
-  // Curation rights come from the labeler, not from being signed in.
+  // Curation rights come from the labeler, not from being signed in, and the
+  // administrator bit is the layout's own query. Everything here is independent,
+  // so the page costs two round-trip waves instead of five.
   const viewerDid = locals.viewer?.did ?? null;
-  const [canCurate, application, controversial, canLabel] = await Promise.all([
+  const [record, canCurate, application, controversial, { viewerIsAdmin }] = await Promise.all([
+    loadRecord('editions', params.rkey),
     viewerDid ? isLibrarian(viewerDid) : Promise.resolve(false),
     viewerDid ? applicationFor(viewerDid) : Promise.resolve(null),
     hasLabel(editionUri, CONTROVERSIAL_LABEL),
-    viewerDid ? isAdministrator(viewerDid) : Promise.resolve(false),
+    parent(),
   ]);
+  const canLabel = viewerIsAdmin;
 
   if (record.notFound) {
     return { ...record, workStatus: null, candidates: [], canCurate, application, controversial, canLabel };
   }
 
-  const workStatus = await getEditionWorkStatus(editionUri, locals.viewer?.did ?? null);
-
-  // Offer near matches by title so linking does not require pasting a URI.
-  let candidates: Array<{ uri: string; title: string; year?: number }> = [];
-  if ('title' in record.value && record.value.title) {
-    try {
-      const result = await searchService.searchWorks({ q: record.value.title, limit: CANDIDATE_LIMIT });
-      candidates = result.items.map((w) => ({ uri: w.uri, title: w.title, year: w.firstPublishedYear }));
-    } catch (err) {
-      log.warn({ err, rkey: params.rkey }, 'work candidate search failed; continuing without suggestions');
-    }
-  }
+  // `candidates` is only rendered for a curator (EditionDetail hides the linking
+  // block otherwise), yet the search used to fan out to Google Books, enrich
+  // through ISBNdb and Wikidata and sync-ingest the results for every visitor.
+  const recordTitle = 'title' in record.value ? record.value.title : undefined;
+  const candidateQuery = canCurate ? recordTitle : undefined;
+  const [workStatus, candidates] = await Promise.all([
+    getEditionWorkStatus(editionUri, viewerDid),
+    candidateQuery
+      ? searchService
+          .searchWorks({ q: candidateQuery, limit: CANDIDATE_LIMIT })
+          .then((result) => result.items.map((w) => ({ uri: w.uri, title: w.title, year: w.firstPublishedYear })))
+          .catch((err: unknown) => {
+            log.warn({ err, rkey: params.rkey }, 'work candidate search failed; continuing without suggestions');
+            return [] as Array<{ uri: string; title: string; year?: number }>;
+          })
+      : Promise.resolve([] as Array<{ uri: string; title: string; year?: number }>),
+  ]);
 
   return { ...record, workStatus, candidates, canCurate, application, controversial, canLabel };
 };

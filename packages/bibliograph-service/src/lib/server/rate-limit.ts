@@ -16,6 +16,20 @@ interface Bucket {
 
 const buckets = new Map<string, Bucket>();
 
+/**
+ * Buckets are swept once the map outgrows this, dropping entries untouched for a
+ * minute. The map only ever grew before: every `ip::nsid` (and `did:…` from feed
+ * auth) was retained for the process lifetime.
+ */
+const SWEEP_THRESHOLD = 10_000;
+const SWEEP_IDLE_MS = 60_000;
+
+function sweepBuckets(now: number): void {
+  for (const [key, bucket] of buckets) {
+    if (now - bucket.lastRefill > SWEEP_IDLE_MS) buckets.delete(key);
+  }
+}
+
 function isPdsNsid(nsid: string): boolean {
   return nsid.startsWith('com.atproto.');
 }
@@ -41,6 +55,7 @@ function takeTokens(
 
   let bucket = buckets.get(key);
   if (!bucket) {
+    if (buckets.size >= SWEEP_THRESHOLD) sweepBuckets(now);
     bucket = { tokens: capacity, lastRefill: now };
     buckets.set(key, bucket);
   }

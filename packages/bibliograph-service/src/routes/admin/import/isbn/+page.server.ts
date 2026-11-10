@@ -25,6 +25,17 @@ function cleanIsbn(q: string): string {
   return q.replace(/[-\s]/g, '');
 }
 
+/** The `?selected=` book the ISBN import echoes back, or null when it is not one. */
+function parseSelected(raw: string | null): EditionItem | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as EditionItem | null;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 /** `identifier.type` is a global token (`isbn`, …) or a provider domain. */
 const TYPE_PATTERN = /^[a-z0-9][a-z0-9.-]*$/;
 
@@ -62,9 +73,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 
   const q = url.searchParams.get('q') || '';
   const selectedStr = url.searchParams.get('selected');
-  // `selected` round-trips through the URL, so a bookmarked link can still
-  // carry the pre-migration `{ uri, resource }` pairs; normalise either shape.
-  const selectedJson: EditionItem | null = selectedStr ? JSON.parse(selectedStr) : null;
+  // `selected` round-trips through the URL, so a bookmarked link can still carry
+  // the pre-migration `{ uri, resource }` pairs; normalise either shape. A
+  // truncated or hand-edited parameter is not a selection: parsing it used to
+  // throw inside the load and answer a 500 page.
+  const selectedJson: EditionItem | null = parseSelected(selectedStr);
   const selected: EditionItem | null = selectedJson
     ? { ...selectedJson, identifiers: rowIdentifiers(selectedJson.identifiers) }
     : null;

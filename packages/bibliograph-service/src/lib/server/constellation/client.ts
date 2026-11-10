@@ -1,11 +1,10 @@
 import { BOOKHIVE_BACKLINK_SOURCE } from '../bookhive/records';
 import { createLogger } from '../logger';
+import { request } from '../http/client';
 
 const log = createLogger('web');
 
 export const CONSTELLATION_URL = process.env.CONSTELLATION_URL ?? 'https://constellation.microcosm.blue';
-export const CONSTELLATION_TIMEOUT_MS = 5_000;
-export const CONSTELLATION_USER_AGENT = 'bibliograph/0.1.0 (+https://biblio.livtet.olamaelcu.net)';
 
 export type ShelvingSource =
   | 'net.olamaelcu.livtet.biblio.bookShelving:book.uri'
@@ -48,15 +47,14 @@ export async function getBacklinks(params: GetBacklinksParams): Promise<Backlink
   if (params.did) url.searchParams.set('did', params.did);
   if (params.cursor) url.searchParams.set('cursor', params.cursor);
 
-  const signal = params.signal ?? AbortSignal.timeout(CONSTELLATION_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': CONSTELLATION_USER_AGENT,
-      },
-      signal,
+    // Backlinks are read on the request path (a book's shelvers/reviews), so the
+    // transport's 3s budget applies: a slow Constellation degrades to "no
+    // backlinks" instead of holding the response.
+    res = await request(url.toString(), {
+      headers: { accept: 'application/json' },
+      signal: params.signal,
     });
   } catch (err) {
     log.warn({ err, subject: params.subject, source: params.source }, 'constellation: fetch failed');

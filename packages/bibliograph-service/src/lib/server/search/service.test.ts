@@ -9,7 +9,7 @@ import type { GoogleBooksSource } from './google-books-source';
 import type { GoogleBooksEnricher } from './google-books-enricher';
 import type { GoodreadsSource } from './goodreads-source';
 import type { WikidataEditionEnricher } from './wikidata-enricher';
-import type { AuthorWikipediaEnricher } from './wikipedia-enricher';
+
 import type { IsbndbEnricher, IsbndbWorkEnricher } from './isbndb-enricher';
 import type {
   SearchQuery,
@@ -68,16 +68,6 @@ function makeFakeGoogleBooks(): { enrich: GoogleBooksEnricher['enrich']; capture
   };
 }
 
-function makeFakeAuthorWiki(): { enrich: AuthorWikipediaEnricher['enrich']; captures: (EditionItem | WorkItem)[] } {
-  const captures: (EditionItem | WorkItem)[] = [];
-  return {
-    captures,
-    enrich: (async (items: (EditionItem | WorkItem)[], _log: Logger) => {
-      captures.push(...items);
-      return items;
-    }) as AuthorWikipediaEnricher['enrich'],
-  };
-}
 
 function makeFakeWikidataEdition(): { enrich: WikidataEditionEnricher['enrich']; captures: (EditionItem | WorkItem)[] } {
   const captures: (EditionItem | WorkItem)[] = [];
@@ -158,7 +148,6 @@ function buildDeps(
     googleBooks: { enrich: makeFakeGoogleBooks().enrich } as GoogleBooksEnricher,
     isbndbEnricher: makeFakeIsbndbEnricher(),
     isbndbWorkEnricher: makeFakeIsbndbWorkEnricher() as unknown as IsbndbWorkEnricher,
-    authorWikipedia: makeFakeAuthorWiki() as unknown as AuthorWikipediaEnricher,
     wikidataEdition: makeFakeWikidataEdition() as unknown as WikidataEditionEnricher,
   };
 }
@@ -216,7 +205,6 @@ test('searchEditions: a postgres-only match is returned without running the remo
 
 test('searchEditions: Google Books items run the whole edition enricher chain', async () => {
   const gb = makeFakeGoogleBooks();
-  const aw = makeFakeAuthorWiki();
   const wd = makeFakeWikidataEdition();
   const gbSource = {
     searchEditions: async () => ({ items: [baseEdition], total: 1 }),
@@ -226,7 +214,6 @@ test('searchEditions: Google Books items run the whole edition enricher chain', 
     {
       ...buildDeps({ gb: gbSource }),
       googleBooks: { enrich: gb.enrich } as GoogleBooksEnricher,
-      authorWikipedia: aw as unknown as AuthorWikipediaEnricher,
       wikidataEdition: wd as unknown as WikidataEditionEnricher,
     },
     log,
@@ -235,7 +222,6 @@ test('searchEditions: Google Books items run the whole edition enricher chain', 
   const r = await svc.searchEditions({ limit: 10 });
   assert.equal(r.items.length, 1);
   assert.equal(gb.captures.length, 1, 'Google Books enricher should run on GB results');
-  assert.equal(aw.captures.length, 1, 'author Wikipedia enricher should run on GB results');
   assert.equal(wd.captures.length, 1, 'Wikidata enricher should run on GB results');
 });
 

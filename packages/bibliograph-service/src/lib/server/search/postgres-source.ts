@@ -90,15 +90,77 @@ interface CursorRow {
 type DbExecutor = typeof defaultDb;
 export type { DbExecutor };
 
+/** Columns each mapper reads, so a page never fetches a TOASTed column it drops. */
+type SelectProjection = Record<string, PgColumn | SQL | SQL.Aliased>;
+
+const EDITION_COLUMNS: SelectProjection = {
+  uri: editions.uri,
+  title: editions.title,
+  subtitle: editions.subtitle,
+  publishedYear: editions.publishedYear,
+  place: editions.place,
+  language: editions.language,
+  description: editions.description,
+  coverImageUrl: editions.coverImageUrl,
+  format: editions.format,
+  pages: editions.pages,
+  identifiers: editions.identifiers,
+  contributors: editions.contributors,
+  createdAt: editions.createdAt,
+  indexedAt: editions.indexedAt,
+};
+
+const WORK_COLUMNS: SelectProjection = {
+  uri: works.uri,
+  title: works.title,
+  subtitle: works.subtitle,
+  originalLanguage: works.originalLanguage,
+  firstPublishedYear: works.firstPublishedYear,
+  subjects: works.subjects,
+  description: works.description,
+  identifiers: works.identifiers,
+  contributors: works.contributors,
+  createdAt: works.createdAt,
+  indexedAt: works.indexedAt,
+};
+
+const CONTRIBUTOR_COLUMNS: SelectProjection = {
+  uri: contributors.uri,
+  name: contributors.name,
+  aliases: contributors.aliases,
+  bio: contributors.bio,
+  bornYear: contributors.bornYear,
+  diedYear: contributors.diedYear,
+  linkedDid: contributors.linkedDid,
+  imageUrl: contributors.imageUrl,
+  identifiers: contributors.identifiers,
+  createdAt: contributors.createdAt,
+  indexedAt: contributors.indexedAt,
+};
+
+const PUBLISHER_COLUMNS: SelectProjection = {
+  uri: publishers.uri,
+  name: publishers.name,
+  imprintOfUri: publishers.imprintOfUri,
+  imprintOfCid: publishers.imprintOfCid,
+  foundingDate: publishers.foundingDate,
+  closingDate: publishers.closingDate,
+  identifiers: publishers.identifiers,
+  createdAt: publishers.createdAt,
+  indexedAt: publishers.indexedAt,
+};
+
 export class PostgresSource {
   constructor(private readonly log: Logger, private readonly db: DbExecutor = defaultDb) { }
 
   searchEditions(query: SearchQuery): Promise<SearchResult<EditionItem>> {
-    return this.runSearch<EditionItem>(editions as unknown as SearchTable, editions.title, this.mapEditionRow, query, 'edition');
+    return this.runSearch<EditionItem>(editions as unknown as SearchTable, editions.title, this.mapEditionRow, query, 'edition', EDITION_COLUMNS);
   }
 
   searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
-    return this.runSearch<WorkItem>(works as unknown as SearchTable, works.title, this.mapWorkRow, query, 'work');
+    // The work/contributor/publisher result envelopes require a `total`, so they
+    // keep paying for it on every page; the editions envelope does not.
+    return this.runSearch<WorkItem>(works as unknown as SearchTable, works.title, this.mapWorkRow, query, 'work', WORK_COLUMNS, undefined, true);
   }
 
   searchContributors(query: SearchQuery): Promise<SearchResult<ContributorItem>> {
@@ -111,12 +173,14 @@ export class PostgresSource {
       this.mapContributorRow,
       query,
       'contributor',
+      CONTRIBUTOR_COLUMNS,
       sql`btrim(${contributors.name}) <> ''`,
+      true,
     );
   }
 
   searchPublishers(query: SearchQuery): Promise<SearchResult<PublisherItem>> {
-    return this.runSearch<PublisherItem>(publishers as unknown as SearchTable, publishers.name, this.mapPublisherRow, query, 'publisher');
+    return this.runSearch<PublisherItem>(publishers as unknown as SearchTable, publishers.name, this.mapPublisherRow, query, 'publisher', PUBLISHER_COLUMNS, undefined, true);
   }
 
   private async runSearch<TItem>(
@@ -125,7 +189,9 @@ export class PostgresSource {
     mapRow: (row: Record<string, unknown>) => TItem,
     query: SearchQuery,
     kind: 'edition' | 'work' | 'contributor' | 'publisher',
+    columns: SelectProjection,
     basePredicate?: SQL,
+    alwaysCount = false,
   ): Promise<SearchResult<TItem>> {
     const indexedAt = table.indexedAt;
     const uri = table.uri;
@@ -181,23 +247,37 @@ export class PostgresSource {
     const where = filterConds.length > 0
       ? (cursorCond ? and(...filterConds, cursorCond) : and(...filterConds)) : cursorCond;
 
-    let total = 0;
-    if (filterConds.length > 0) {
-      const countResult = await this.db.select({ count: sql<number>`count(*) as count` }).from(table as unknown as PgTable).where(and(...filterConds)).orderBy().limit(1);
-      total = Number(countResult[0]?.count ?? 0);
-    }
+    // A total is only produced on the first page: `count(*)` over an
+    // `ILIKE '%q%'` set has to materialise every match (measured 459 ms for
+    // `%the%` against a 1.8 ms page), and a continuation cannot change it. The
+    // count and the page are independent, so they run together.
+    const wantCount = alwaysCount || ((query.offset ?? 0) === 0 && !query.cursor);
+    const countQuery = wantCount && filterConds.length > 0
+      ? this.db
+          .select({ count: sql<number>`count(*)` })
+          .from(table as unknown as PgTable)
+          .where(and(...filterConds))
+      : undefined;
 
-    const base = this.db.select().from(table as unknown as PgTable);
-    const rawRows = await (where !== undefined ? base.where(where) : base)
-      .orderBy(desc(indexedAt), asc(uri))
-      .offset(query.offset ?? 0)
-      .limit(query.limit);
-    const rows = rawRows as Array<Record<string, unknown>>;
+    const base = this.db.select(columns).from(table as unknown as PgTable);
+    const [rawRows, countResult] = await Promise.all([
+      (where !== undefined ? base.where(where) : base)
+        .orderBy(desc(indexedAt), asc(uri))
+        .offset(query.offset ?? 0)
+        .limit(query.limit + 1),
+      countQuery,
+    ]);
+    const hasMore = rawRows.length > query.limit;
+    const rows = (hasMore ? rawRows.slice(0, query.limit) : rawRows) as unknown as Array<Record<string, unknown>>;
     const items = rows.map(mapRow);
-    const last = rows.length === query.limit ? rows[rows.length - 1] as unknown as CursorRow : null;
+    const last = hasMore ? rows[rows.length - 1] as unknown as CursorRow : null;
     const cursor = last ? encodeCursor(last.indexedAt, last.uri) : undefined;
-    this.log.info({ stage: 'postgres-source', kind, items: items.length, total, did: PUBLISHER_DID }, 'postgres ok');
-    return { items, cursor, total };
+    const total = countResult ? Number(countResult[0]?.count ?? 0) : undefined;
+    this.log.info(
+      { stage: 'postgres-source', kind, items: items.length, total: total ?? null, hasMore, did: PUBLISHER_DID },
+      'postgres ok',
+    );
+    return { items, cursor, total, hasMore };
   }
 
   private mapEditionRow(r: Record<string, unknown>): EditionItem {

@@ -5,7 +5,7 @@ import {
   fetchGoodreadsSearch,
   type GoodreadsSearchHit,
 } from "../api/goodreads";
-import { resolveContributorsByName } from "../api/contributor-name-resolver";
+import { prefetchContributors } from "../api/contributor-name-resolver";
 import { goodreadsBookUrl, grEditionUri } from "../gr/keys";
 import { isbnFromQuery } from "../api/isbndb";
 import { providerIdentifier } from "../identifiers";
@@ -51,11 +51,12 @@ export async function fetchGoodreadsEdition(
 ): Promise<EditionItem | null> {
   const book = await fetchGoodreadsBookById(id, signal);
   if (!book?.title) return null;
-  const contributors = await resolveContributorsByName(
+  const resolver = await prefetchContributors(
     book.contributors.map((contributor) => contributor.name),
     "goodreads",
     log,
   );
+  const contributors = await resolver.resolve(book.contributors.map((contributor) => contributor.name));
   return {
     uri: grEditionUri(id),
     title: book.title,
@@ -86,12 +87,15 @@ export class GoodreadsSource {
       if (!result) return { items: [], total: 0 };
       const createdAt = new Date().toISOString();
       const items: EditionItem[] = [];
+      // One prefetch for the page, then a map read per hit: resolving inside
+      // the loop cost 1–2 round trips per hit.
+      const resolver = await prefetchContributors(
+        result.hits.flatMap((hit) => hit.authors),
+        "goodreads",
+        this.log,
+      );
       for (const hit of result.hits) {
-        const contributors = await resolveContributorsByName(
-          hit.authors,
-          "goodreads",
-          this.log,
-        );
+        const contributors = await resolver.resolve(hit.authors);
         items.push(mapHit(hit, contributors, createdAt));
       }
       this.log.info(

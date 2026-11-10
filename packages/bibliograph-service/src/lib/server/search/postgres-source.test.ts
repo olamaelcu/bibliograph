@@ -151,7 +151,8 @@ test('searchEditions applies q filter when provided', async () => {
 
   assert.equal(cap.table, editions, 'queries editions table');
   assert.equal(cap.whereCalled, true, 'where() called when q present');
-  assert.equal(cap.limit, 10, 'limit forwarded');
+  // One extra row is fetched so `hasMore` needs no second count query.
+  assert.equal(cap.limit, 11, 'limit + 1 forwarded');
   assert.equal(result.items[0]?.title, 'Test Edition');
 });
 
@@ -215,13 +216,17 @@ test('searchEditions round-trips v2 cursor when page is full', async () => {
   const fullPage = [
     makeEditionRow({ uri: 'at://x/edition/r1', indexedAt: new Date('2024-03-01T00:00:00Z') }),
     makeEditionRow({ uri: 'at://x/edition/r2', indexedAt: new Date('2024-02-01T00:00:00Z') }),
+    // The extra row the query fetches to prove a next page exists.
+    makeEditionRow({ uri: 'at://x/edition/r3', indexedAt: new Date('2024-01-01T00:00:00Z') }),
   ];
   const fakeDb = createFakeDb(fullPage, cap);
   const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchEditions({ limit: 2 });
 
-  assert.ok(result.cursor, 'cursor emitted when rows.length === limit');
+  assert.equal(result.items.length, 2, 'page is capped at limit');
+  assert.equal(result.hasMore, true);
+  assert.equal(result.cursor !== undefined, true, 'cursor emitted when a further row exists');
   const decoded = decodeV2Cursor(result.cursor!);
   assert.equal(decoded.v, 2);
   assert.equal(decoded.u, 'at://x/edition/r2');
@@ -342,12 +347,14 @@ test('searchContributors emits v2 cursor on full page', async () => {
   const fullPage = [
     makeContributorRow({ uri: 'at://x/c/r1', indexedAt: new Date('2024-03-01T00:00:00Z') }),
     makeContributorRow({ uri: 'at://x/c/r2', indexedAt: new Date('2024-02-01T00:00:00Z') }),
+    makeContributorRow({ uri: 'at://x/c/r3', indexedAt: new Date('2024-01-01T00:00:00Z') }),
   ];
   const fakeDb = createFakeDb(fullPage, cap);
   const src = new PostgresSource(silentLog, fakeDb);
 
   const result = await src.searchContributors({ limit: 2 });
 
+  assert.equal(result.items.length, 2);
   assert.ok(result.cursor);
   const decoded = decodeV2Cursor(result.cursor!);
   assert.equal(decoded.v, 2);

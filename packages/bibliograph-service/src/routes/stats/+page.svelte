@@ -1,4 +1,6 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/badge/badge.js";
+  import "@awesome.me/webawesome/dist/components/card/card.js";
   import type { Counts } from "$lib/server/stats";
 
   let { data }: { data: { counts: Counts } } = $props();

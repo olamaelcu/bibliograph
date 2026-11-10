@@ -1,6 +1,7 @@
 import { usableCoverUrl } from '../book-wire';
 import type { ContributionEntry, EditionItem, Identifier } from '../search/types';
 import { isbnIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
+import { request } from '../http/client';
 import {
   BOOKHIVE_CATALOG_COLLECTION,
   BOOKHIVE_DID,
@@ -192,9 +193,12 @@ export async function fetchCatalogBook(
   url.searchParams.set('collection', BOOKHIVE_CATALOG_COLLECTION);
   url.searchParams.set('rkey', hiveId);
 
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
-    signal: signal ?? AbortSignal.timeout(BOOKHIVE_TIMEOUT_MS),
+  // Catalog pagination is a bulk backfill, not a request-path call, so it keeps
+  // the looser budget instead of the transport's 3s default.
+  const res = await request(url.toString(), {
+    headers: { accept: 'application/json' },
+    signal,
+    timeoutMs: BOOKHIVE_TIMEOUT_MS,
   });
   if (res.status === 400) {
     // `getRecord` reports an absent record as 400 RecordNotFound.
@@ -220,10 +224,10 @@ export async function fetchCatalogBooksPage(params: {
   url.searchParams.set('limit', String(Math.min(params.limit ?? BOOKHIVE_PAGE_SIZE, BOOKHIVE_PAGE_SIZE)));
   if (params.cursor) url.searchParams.set('cursor', params.cursor);
 
-  const signal = params.signal ?? AbortSignal.timeout(BOOKHIVE_TIMEOUT_MS);
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json' },
-    signal,
+  const res = await request(url.toString(), {
+    headers: { accept: 'application/json' },
+    signal: params.signal,
+    timeoutMs: BOOKHIVE_TIMEOUT_MS,
   });
   if (!res.ok) {
     throw new Error(`bookhive listRecords failed: ${res.status} ${res.statusText}`);

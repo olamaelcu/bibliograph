@@ -6,7 +6,6 @@ import { IsbndbSource } from './isbndb-source';
 import { GoodreadsSource } from './goodreads-source';
 import { GoogleBooksEnricher } from './google-books-enricher';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './isbndb-enricher';
-import { AuthorWikipediaEnricher } from './wikipedia-enricher';
 import { WikidataEditionEnricher } from './wikidata-enricher';
 import { isbnFromQuery } from '../api/isbndb';
 import { syncIngestEditions, syncIngestWorks } from '../jobs/handlers';
@@ -21,11 +20,20 @@ export interface SearchServiceDeps {
   googleBooks: GoogleBooksEnricher;
   isbndbEnricher: IsbndbEnricher;
   isbndbWorkEnricher: IsbndbWorkEnricher;
-  authorWikipedia: AuthorWikipediaEnricher;
   wikidataEdition: WikidataEditionEnricher;
 }
 
 type ItemLike = { uri: string };
+
+/** The largest of the totals a source actually produced, or undefined if none did. */
+function maxDefined(values: ReadonlyArray<number | undefined>): number | undefined {
+  let best: number | undefined;
+  for (const value of values) {
+    if (value === undefined) continue;
+    if (best === undefined || value > best) best = value;
+  }
+  return best;
+}
 
 export class SearchService {
   private readonly fallbackLog: Logger;
@@ -76,29 +84,36 @@ export class SearchService {
 
     const [pg, gb, gr] = await Promise.all([
       this.deps.postgres.searchEditions(query),
-      this.deps.googleBooksSource.searchEditions(query, AbortSignal.timeout(15_000)),
-      this.deps.goodreadsSource?.searchEditions(query, AbortSignal.timeout(15_000)) ??
+      this.deps.googleBooksSource.searchEditions(query),
+      this.deps.goodreadsSource?.searchEditions(query) ??
         Promise.resolve({ items: [], total: 0 } as SearchResult<EditionItem>),
     ]);
 
     const editionEnrichers: ReadonlyArray<Enricher<EditionItem>> = [
       this.deps.googleBooks,
       this.deps.isbndbEnricher,
-      this.deps.authorWikipedia,
       this.deps.wikidataEdition,
     ];
 
-    const remote = await this.resolveRemoteEditions(query, gb, log, editionEnrichers);
-    let grItems = gr.items;
-    if (grItems.length > 0) {
-      grItems = await this.runEnrichers(grItems, editionEnrichers, log);
-      const seenTitles = new Set(remote.items.map((item) => this.titleKey(item.title)));
-      grItems = grItems.filter((item) => !seenTitles.has(this.titleKey(item.title)));
-    }
+    // The Goodreads items and the Google/ISBNdb items are disjoint sets, so the
+    // two provider fan-outs enrich in parallel; only the de-duplication below
+    // needs both answers.
+    const [remote, grEnriched] = await Promise.all([
+      this.resolveRemoteEditions(query, gb, log, editionEnrichers),
+      gr.items.length > 0
+        ? this.runEnrichers(gr.items, editionEnrichers, log)
+        : Promise.resolve(gr.items),
+    ]);
+    const seenTitles = new Set(remote.items.map((item) => this.titleKey(item.title)));
+    const grItems = grEnriched.filter((item) => !seenTitles.has(this.titleKey(item.title)));
     const remoteItems = [...remote.items, ...grItems].slice(0, query.limit);
-    const merged = this.mergeItems(remoteItems, pg.items);
+    // The page is `limit` long: merging local rows on top of a full remote page
+    // used to return up to twice the requested size while callers paged by
+    // `offset += limit`.
+    const merged = this.mergeItems(remoteItems, pg.items).slice(0, query.limit);
     const cursor = remote.cursor ?? pg.cursor;
-    const total = Math.max(remote.total ?? 0, gr.total, remoteItems.length, pg.total ?? 0);
+    const total = maxDefined([remote.total, gr.total, pg.total]);
+    const hasMore = Boolean(remote.hasMore || gr.hasMore || pg.hasMore);
     const degraded = remote.degraded ?? gr.degraded;
 
     if (remoteItems.length > 0) {
@@ -116,11 +131,12 @@ export class SearchService {
       remoteSource: remote.source,
       localCount: pg.items.length,
       mergedCount: merged.length,
-      total,
+      total: total ?? null,
+      hasMore,
       degraded: !!degraded,
     }, 'search done');
 
-    return { items: merged, cursor, total, degraded };
+    return { items: merged, cursor, total, hasMore, degraded };
   }
 
   async searchWorks(query: SearchQuery): Promise<SearchResult<WorkItem>> {
@@ -137,9 +153,10 @@ export class SearchService {
     ];
 
     const remote = await this.resolveRemoteWorks(query, gb, log, workEnrichers);
-    const merged = this.mergeItems(remote.items, pg.items);
+    const merged = this.mergeItems(remote.items, pg.items).slice(0, query.limit);
     const cursor = remote.cursor ?? pg.cursor;
-    const total = remote.total ?? pg.total ?? 0;
+    const total = maxDefined([remote.total, pg.total]);
+    const hasMore = Boolean(remote.hasMore || pg.hasMore);
 
     if (remote.items.length > 0) {
       try {
@@ -155,11 +172,12 @@ export class SearchService {
       remoteSource: remote.source,
       localCount: pg.items.length,
       mergedCount: merged.length,
-      total,
+      total: total ?? null,
+      hasMore,
       degraded: !!remote.degraded,
     }, 'search done');
 
-    return { items: merged, cursor, total, degraded: remote.degraded };
+    return { items: merged, cursor, total, hasMore, degraded: remote.degraded };
   }
 
   private async resolveRemoteEditions(
@@ -167,12 +185,13 @@ export class SearchService {
     gb: SearchResult<EditionItem>,
     log: Logger,
     enrichers: ReadonlyArray<Enricher<EditionItem>>,
-  ): Promise<{ items: EditionItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | null; degraded?: SearchResult<EditionItem>['degraded'] }> {
+  ): Promise<{ items: EditionItem[]; cursor?: string; total?: number; hasMore?: boolean; source: 'googlebooks' | 'isbndb' | null; degraded?: SearchResult<EditionItem>['degraded'] }> {
     if (gb.items.length > 0) {
       return {
         items: await this.runEnrichers(gb.items, enrichers, log),
         cursor: gb.cursor,
         total: gb.total,
+        hasMore: gb.hasMore,
         source: 'googlebooks',
         degraded: gb.degraded,
       };
@@ -180,13 +199,14 @@ export class SearchService {
     let degraded = gb.degraded;
 
     if (isbnFromQuery(query.q)) {
-      const ib = await this.deps.isbndbSource.searchEditions(query, AbortSignal.timeout(15_000));
+      const ib = await this.deps.isbndbSource.searchEditions(query);
       degraded = degraded ?? ib.degraded;
       if (ib.items.length > 0) {
         return {
           items: await this.runEnrichers(ib.items, enrichers, log),
           cursor: ib.cursor,
           total: ib.total,
+          hasMore: ib.hasMore,
           source: 'isbndb',
           degraded,
         };
@@ -200,12 +220,13 @@ export class SearchService {
     gb: SearchResult<WorkItem>,
     log: Logger,
     enrichers: ReadonlyArray<Enricher<WorkItem>>,
-  ): Promise<{ items: WorkItem[]; cursor?: string; total?: number; source: 'googlebooks' | 'isbndb' | null; degraded?: SearchResult<WorkItem>['degraded'] }> {
+  ): Promise<{ items: WorkItem[]; cursor?: string; total?: number; hasMore?: boolean; source: 'googlebooks' | 'isbndb' | null; degraded?: SearchResult<WorkItem>['degraded'] }> {
     if (gb.items.length > 0) {
       return {
         items: await this.runEnrichers(gb.items, enrichers, log),
         cursor: gb.cursor,
         total: gb.total,
+        hasMore: gb.hasMore,
         source: 'googlebooks',
         degraded: gb.degraded,
       };
@@ -213,13 +234,14 @@ export class SearchService {
     let degraded = gb.degraded;
 
     if (isbnFromQuery(query.q)) {
-      const ib = await this.deps.isbndbSource.searchWorks(query, AbortSignal.timeout(15_000));
+      const ib = await this.deps.isbndbSource.searchWorks(query);
       degraded = degraded ?? ib.degraded;
       if (ib.items.length > 0) {
         return {
           items: await this.runEnrichers(ib.items, enrichers, log),
           cursor: ib.cursor,
           total: ib.total,
+          hasMore: ib.hasMore,
           source: 'isbndb',
           degraded,
         };

@@ -7,7 +7,6 @@ import { editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
 import { googleBooksBreaker } from '../api/breakers';
 import { withRetry } from '../api/retry';
-import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { getBookByIsbn } from '../api/isbndb';
@@ -25,7 +24,7 @@ function gbCoverFromLinks(links: Record<string, string> | undefined): string | u
   return large ? datacenterCoverUrl(large.replace(/^http:/, 'https:')) : undefined;
 }
 
-async function fetchGbByIsbn(isbn: string, log: Logger, signal: AbortSignal): Promise<string | undefined> {
+async function fetchGbByIsbn(isbn: string, log: Logger, signal?: AbortSignal): Promise<string | undefined> {
   const key = process.env.GOOGLE_BOOKS_API_KEY;
   if (!key) return undefined;
   if (!googleBooksBreaker.canCall()) {
@@ -54,7 +53,7 @@ async function fetchGbByIsbn(isbn: string, log: Logger, signal: AbortSignal): Pr
   }
 }
 
-async function fetchGbByVolumeId(volumeId: string, log: Logger, signal: AbortSignal): Promise<string | undefined> {
+async function fetchGbByVolumeId(volumeId: string, log: Logger, signal?: AbortSignal): Promise<string | undefined> {
   const key = process.env.GOOGLE_BOOKS_API_KEY;
   if (!key) return undefined;
   if (!googleBooksBreaker.canCall()) {
@@ -86,7 +85,7 @@ async function fetchGbByVolumeId(volumeId: string, log: Logger, signal: AbortSig
 export async function resolveCoverUrl(
   row: EditionRow,
   log: Logger,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   const rkey = row.rkey;
 
@@ -123,7 +122,7 @@ export async function backfillCoverForEdition(
   rkey: string,
   log: Logger,
   db: Db = defaultDb,
-  signal: AbortSignal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  signal?: AbortSignal,
 ): Promise<{ updated: boolean; coverUrl?: string; reason: string }> {
   const rows = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
   const row = rows[0];

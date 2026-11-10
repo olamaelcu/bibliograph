@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/button/button.js";
   // Librarian-access states, verbatim from the pre-redesign page: the same three
   // branches, the same copy, the same action. Kept in one component because every
   // redesign option has to render it somewhere.

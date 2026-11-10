@@ -1,7 +1,8 @@
 import { createLogger } from './logger';
 import { getTapQueueDepth } from './jobs/depth';
 import { googleBooksBreaker, wikipediaBreaker, isbndbBreaker, wikidataBreaker, commonsBreaker } from './api/breakers';
-import { Pool } from 'pg';
+import { sql } from 'drizzle-orm';
+import { db } from './db';
 
 const log = createLogger('health');
 
@@ -23,14 +24,11 @@ export async function computeHealth(): Promise<HealthStatus> {
   let dbReachable = false;
   let dbLatency = -1;
   try {
-    const url = process.env.DATABASE_URL;
     const start = Date.now();
-    if (url) {
-      const pool = new Pool({ connectionString: url, max: 1 });
-      await pool.query('SELECT 1');
-      await pool.end();
-      dbReachable = true;
-    }
+    // The shared pool, not a handshake of its own: a fresh `Pool` per probe paid a
+    // full TCP + auth round trip and abandoned a connection afterwards.
+    await db.execute(sql`select 1`);
+    dbReachable = true;
     dbLatency = Date.now() - start;
   } catch (err) {
     log.error({ err }, 'database health check failed');

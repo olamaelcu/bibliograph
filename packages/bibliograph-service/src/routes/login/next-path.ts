@@ -8,6 +8,10 @@ export const LOGIN_NEXT_COOKIE = 'bib_login_next';
 
 export function safeNextPath(raw: string | null | undefined): string {
   if (!raw) return '/';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
+  // `//host` is off-site, and `\` is normalised to `/` by browsers, so `/\host`
+  // leaves the origin too. Control characters would be smuggled into `Location`.
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\') || /[\u0000-\u001f\u007f]/.test(raw)) {
+    return '/';
+  }
   return raw;
 }

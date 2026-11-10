@@ -12,15 +12,17 @@ function workUri(rkey: string): string {
   return `at://${PUBLISHER_DID}/${COLLECTION}/${rkey}`;
 }
 
-export const load: PageServerLoad = async ({ params, locals }) => {
-  const record = await loadRecord('works', params.rkey);
+export const load: PageServerLoad = async ({ params, parent }) => {
   const uri = workUri(params.rkey);
-  const viewerDid = locals.viewer?.did ?? null;
-  const [controversial, canLabel] = await Promise.all([
+  // The record read and the label read are independent, and the administrator
+  // check is the layout's: it already ran once for this request (the labeler
+  // query is one per page view without this).
+  const [record, controversial, { viewerIsAdmin }] = await Promise.all([
+    loadRecord('works', params.rkey),
     hasLabel(uri, CONTROVERSIAL_LABEL),
-    viewerDid ? isAdministrator(viewerDid) : Promise.resolve(false),
+    parent(),
   ]);
-  return { ...record, controversial, canLabel };
+  return { ...record, controversial, canLabel: viewerIsAdmin };
 };
 
 export const actions: Actions = {

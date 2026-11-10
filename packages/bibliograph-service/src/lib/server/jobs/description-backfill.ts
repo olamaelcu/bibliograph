@@ -7,7 +7,6 @@ import { editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
 import { googleBooksBreaker, isbndbBreaker } from '../api/breakers';
 import { withRetry } from '../api/retry';
-import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import {
   googleBooksDescription,
@@ -45,7 +44,7 @@ interface GbVolumeShape {
 async function fetchGbByVolumeId(
   volumeId: string,
   log: Logger,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<GbVolumeShape | null> {
   const key = process.env.GOOGLE_BOOKS_API_KEY;
   if (!key) return null;
@@ -81,7 +80,7 @@ async function fetchGbByVolumeId(
 async function fetchGbByIsbn(
   isbn: string,
   log: Logger,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<GbVolumeShape | null> {
   const key = process.env.GOOGLE_BOOKS_API_KEY;
   if (!key) return null;
@@ -115,7 +114,7 @@ async function fetchGbByIsbn(
 export async function resolveDescription(
   row: EditionRow,
   log: Logger,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   if (isGbRkey(row.rkey)) {
     try {
@@ -163,7 +162,7 @@ export async function backfillDescriptionForEdition(
   uri: string,
   log: Logger,
   db: Db = defaultDb,
-  signal: AbortSignal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  signal?: AbortSignal,
 ): Promise<{ updated: boolean; description?: string; reason: string }> {
   const rows = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
   const row = rows[0];

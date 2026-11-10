@@ -1,4 +1,7 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/badge/badge.js";
+  import "@awesome.me/webawesome/dist/components/button/button.js";
+  import "@awesome.me/webawesome/dist/components/copy-button/copy-button.js";
   let {
     data,
   }: {

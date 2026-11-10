@@ -1,3 +1,69 @@
+bibliograph (0.5.20) unstable; urgency=medium
+
+  * One HTTP transport (`lib/server/http/client.ts`) for every outbound call,
+    with a 3s default budget in place of the per-provider 5-15s ones. A hung
+    provider now fails into its breaker and the caller's fallback instead of
+    holding an XRPC response. Paths that are not on a request (Goodreads
+    scraping, Bookhive catalog pagination) keep an explicit looser budget.
+  * ISBNdb responses are cached in Postgres for 24h the same way Google Books
+    already were (`isbndb_cache`, migration 0032): the key is method +
+    normalized request + body, and a NULL body is a remembered 404. Every cold
+    search used to pay a `POST /books` per ISBN set.
+  * Enrichment skips work that cannot change anything: the Google Books
+    per-edition ISBN lookup is skipped when description, pages and cover are
+    present, and ISBNdb's bulk set excludes items that already have all six
+    fields it writes.
+  * Parallelised independent calls: Google Books volume mapping, ISBNdb bulk
+    chunks, Wikipedia chunks, ingest row/CID construction, and the Goodreads
+    branch of `searchEditions`, which used to serialise behind the
+    Google/ISBNdb branch.
+  * Ingest only rewrites a row whose CID changed (`setWhere`). Every search
+    used to update each result row with identical content, rewrites included —
+    dead tuples, TOAST churn and WAL on a read-heavy catalogue.
+  * `getImageForContributor` is implemented: it serves the stored portrait
+    (`contributors.image_url`, filled by the Wikidata/Commons backfill) and
+    enqueues that backfill once when the row has never been checked, instead
+    of answering an empty body to every caller.
+  * Removed the `AuthorWikipediaEnricher` no-op and its
+    `enrichAuthorsOnWorksOrEditions`; author bios are resolved by
+    `contributor-bio-backfill`.
+  * Pagination is correct end to end: `searchEditions` passes its `offset` to
+    Google Books, which pages by `startIndex` alone (every page past the first
+    re-fetched and re-enriched page one); `getShelvingOfBook` accepted `cursor`
+    without applying it and re-served its first page forever; `listShelfItems`
+    restarted the PDS scan on a `tap:` continuation; `hasMore` was true for
+    every non-empty result and `resolveEditions` reported its page length as
+    `total`.
+  * Search no longer pays for a total it cannot use: `count(*)` over an
+    `ILIKE '%q%'` set measured 459ms against a 1.8ms page query, and ran on
+    every page. It is issued only on first pages, beside the page fetch, and
+    only for the envelopes that require it, so `total` is absent after page one.
+  * Contributor names resolve once per page — one query by slug-derived uri,
+    one by `lower(name)`, one multi-row upsert for the stubs — instead of 1–3
+    round trips per author (40–120 per Google Books page).
+  * Index pass two (`0033`): the Bookhive shelving predicate folds the legacy
+    `hiveId` through a `coalesce` that `records_hivebook_idx` cannot serve
+    (147k rows filtered, 200ms → index scan, 0.04ms), plus Bookhive status, the
+    two legacy review refs, `publishers.name` trigram, the vote table's
+    `record_uri` and `works.subjects` for the "For You" feed. Two indexes that
+    only cost write time are dropped.
+  * Request-path fan-outs are bounded rather than serial: Constellation/PDS
+    backlink reads, per-shelf PDS reads and the worker's delete-confirm loop run
+    through `mapWithConcurrency` instead of one round trip per record.
+  * TAP failures are retried. A batch write that threw used to write a dead
+    letter and return success, so graphile never retried and nothing read the
+    table; the tasks now rethrow until `MAX_TAP_ATTEMPTS`, split a batch into
+    per-record jobs on the second failure, and write one multi-row dead letter on
+    the last. `MAX_BODY_RECOVERIES_PER_BATCH` is used at last: a body-less event
+    is recovered or left unwritten instead of mirrored as `{}`.
+  * The web shell stops repeating work: `/image/*` skips the session lookup,
+    `/stats/counts` is memoized for 30s (`public, max-age=30`) instead of four
+    `count(*)` scans per 5s poll, record pages reuse the layout's administrator
+    check, and the edition page runs its work-candidate search only for a
+    curator instead of every visitor.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 18:30:00 -0500
+
 bibliograph (0.5.19) unstable; urgency=medium
 
   * `getEditionsByContributor` now filters with jsonb containment

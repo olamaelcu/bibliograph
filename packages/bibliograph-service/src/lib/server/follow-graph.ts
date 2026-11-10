@@ -11,7 +11,7 @@
 // statements, so the cost stays bounded and a delete racing an upsert cannot
 // leave an edge pointing at a record that is gone.
 
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import { db as defaultDb } from './db/index';
 import { follows, records } from './db/schema';
 
@@ -58,44 +58,77 @@ function recordCreatedAt(value: unknown, fallback: Date): Date {
  * left loses its row, one that still has a record gets it back.
  */
 export async function syncFollowEdge(edge: FollowEdge, db: Db = defaultDb): Promise<void> {
-  const subject = `at://${edge.followedDid}`;
-  const [survivor] = await db
-    .select({ value: records.value, createdAt: records.createdAt })
+  await syncFollowEdges([edge], db);
+}
+
+/**
+ * `syncFollowEdge` over a batch: one survivor probe, one insert, one delete.
+ *
+ * The per-edge version cost two statements per edge, run serially, and both TAP
+ * batch tasks call this with a whole page of follow records.
+ */
+export async function syncFollowEdges(edges: readonly FollowEdge[], db: Db = defaultDb): Promise<void> {
+  if (edges.length === 0) return;
+  // One row per pair: a page can name the same follow twice (a rewritten rkey),
+  // and the statements below must not touch one pair twice.
+  const pairs = new Map<string, FollowEdge>();
+  for (const edge of edges) pairs.set(`${edge.followerDid}\u0000${edge.followedDid}`, edge);
+  const list = [...pairs.values()];
+
+  const survivors = await db
+    .select({ did: records.did, value: records.value, createdAt: records.createdAt })
     .from(records)
     .where(
       and(
         eq(records.collection, FOLLOW_COLLECTION),
-        eq(records.did, edge.followerDid),
-        sql`${records.value} ->> 'subject' = ${subject}`,
+        inArray(records.did, [...new Set(list.map((edge) => edge.followerDid))]),
+        inArray(
+          sql`${records.value} ->> 'subject'`,
+          [...new Set(list.map((edge) => `at://${edge.followedDid}`))],
+        ),
       ),
-    )
-    .limit(1);
+    );
 
-  if (survivor) {
-    await db
-      .insert(follows)
-      .values({
+  const survivorByPair = new Map<string, { value: unknown; createdAt: Date }>();
+  for (const row of survivors) {
+    const value = row.value;
+    if (!value || typeof value !== 'object' || !('subject' in value)) continue;
+    const followedDid = didFromFollowSubject(value.subject);
+    if (!followedDid) continue;
+    const key = `${row.did}\u0000${followedDid}`;
+    if (!survivorByPair.has(key)) survivorByPair.set(key, row);
+  }
+
+  const inserts: Array<{ followerDid: string; followedDid: string; createdAt: Date }> = [];
+  const deletes: FollowEdge[] = [];
+  for (const edge of list) {
+    const survivor = survivorByPair.get(`${edge.followerDid}\u0000${edge.followedDid}`);
+    if (survivor) {
+      inserts.push({
         followerDid: edge.followerDid,
         followedDid: edge.followedDid,
         createdAt: recordCreatedAt(survivor.value, survivor.createdAt),
-      })
-      .onConflictDoNothing();
-    return;
+      });
+    } else {
+      deletes.push(edge);
+    }
   }
 
-  await db
-    .delete(follows)
-    .where(
-      and(
-        eq(follows.followerDid, edge.followerDid),
-        eq(follows.followedDid, edge.followedDid),
+  if (inserts.length > 0) {
+    await db.insert(follows).values(inserts).onConflictDoNothing();
+  }
+  if (deletes.length > 0) {
+    await db.delete(follows).where(
+      or(
+        ...deletes.map((edge) =>
+          and(
+            eq(follows.followerDid, edge.followerDid),
+            eq(follows.followedDid, edge.followedDid),
+          ),
+        ),
       ),
     );
-}
-
-/** `syncFollowEdge` over a batch, skipping pairs that name no identity. */
-export async function syncFollowEdges(edges: readonly FollowEdge[], db: Db = defaultDb): Promise<void> {
-  for (const edge of edges) await syncFollowEdge(edge, db);
+  }
 }
 
 /**

@@ -18,7 +18,17 @@ export interface TapStats {
 const CACHE_TTL_MS = 1000;
 const REQUEST_TIMEOUT_MS = 2_000;
 
-let cached: { value: TapStats; fetchedAt: number } | null = null;
+/**
+ * A failed read is cached too, for longer.
+ *
+ * A TAP build without `/stats/outbox-buffer`, or one whose stats endpoint is
+ * erroring, used to answer "no answer" without caching it, so the consumer asked
+ * again for every event — two requests with a 2 s timeout each inside the socket
+ * read loop this module exists to keep free.
+ */
+const FAILURE_TTL_MS = 10_000;
+
+let cached: { value: TapStats | null; fetchedAt: number } | null = null;
 
 function endpoint(baseUrl: string, path: string): string {
   const url = new URL(baseUrl);
@@ -53,7 +63,9 @@ export async function fetchTapStats(
   options: { fetch?: typeof globalThis.fetch; now?: number } = {},
 ): Promise<TapStats | null> {
   const now = options.now ?? Date.now();
-  if (cached && now - cached.fetchedAt < CACHE_TTL_MS) return cached.value;
+  if (cached && now - cached.fetchedAt < (cached.value === null ? FAILURE_TTL_MS : CACHE_TTL_MS)) {
+    return cached.value;
+  }
 
   const fetchImpl = options.fetch ?? globalThis.fetch;
   try {
@@ -61,11 +73,15 @@ export async function fetchTapStats(
       readNumber(baseUrl, '/stats/outbox-buffer', 'outbox_buffer', fetchImpl),
       readNumber(baseUrl, '/stats/resync-buffer', 'resync_buffer', fetchImpl),
     ]);
-    if (outboxBuffer === null) return null;
+    if (outboxBuffer === null) {
+      cached = { value: null, fetchedAt: now };
+      return null;
+    }
     const value: TapStats = { outboxBuffer, resyncBuffer: resyncBuffer ?? 0 };
     cached = { value, fetchedAt: now };
     return value;
   } catch {
+    cached = { value: null, fetchedAt: now };
     return null;
   }
 }

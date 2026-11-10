@@ -49,8 +49,12 @@ export const RECOMMENDATION_LIMIT = 30;
  * upstream quiet.
  */
 const LIBRARY_TTL_MS = 60_000;
+/** Uris per `tidsFor` statement, well inside the bind-parameter ceiling. */
+const TID_CHUNK = 500;
 const LIBRARY_CACHE_MAX = 512;
 const libraryCache = new Map<string, { value: ViewerLibrary; expiresAt: number }>();
+/** Readers whose library scan is in flight, so two feeds share one scan. */
+const inflightLibrary = new Map<string, Promise<ViewerLibrary | null>>();
 
 /** The reader's shelf, as book URIs, split by what the books mean to them. */
 export interface ViewerLibrary {
@@ -179,7 +183,17 @@ function rememberLibrary(did: string, value: ViewerLibrary): void {
 export async function readViewerLibrary(did: string): Promise<ViewerLibrary | null> {
   const cached = cachedLibrary(did);
   if (cached) return cached;
+  // Single-flight: a miss costs up to three bounded PDS scans, and a screen with
+  // two feed components asked for the same reader twice, so both paid for it and
+  // only the second answer was ever cached.
+  const running = inflightLibrary.get(did);
+  if (running) return running;
+  const load = scanViewerLibrary(did).finally(() => inflightLibrary.delete(did));
+  inflightLibrary.set(did, load);
+  return load;
+}
 
+async function scanViewerLibrary(did: string): Promise<ViewerLibrary | null> {
   const [shelving, shelfItems, reviews] = await Promise.all([
     listPdsValues(did, SHELVING_COLLECTION),
     listPdsValues(did, SHELF_ITEM_COLLECTION),
@@ -232,14 +246,37 @@ async function tidsFor(
   exec: DbExecutor,
 ): Promise<Set<string>> {
   if (uris.length === 0) return new Set();
-  const result = await exec.execute<{ tid: string }>(sql`
-    SELECT COALESCE(e.tid, a.tid) AS tid
-    FROM unnest(ARRAY[${sql.join(uris.map((uri) => sql`${uri}`), sql`, `)}]) AS input(uri)
-    LEFT JOIN editions e ON e.uri = input.uri
-    LEFT JOIN edition_aliases a ON a.uri = input.uri
-    WHERE COALESCE(e.tid, a.tid) IS NOT NULL
+  // A reader's shelf can be thousands of uris; one `unnest(ARRAY[...])` of that
+  // size exceeds Postgres' bind-parameter ceiling, so ask in chunks.
+  const tids = new Set<string>();
+  for (let i = 0; i < uris.length; i += TID_CHUNK) {
+    const chunk = uris.slice(i, i + TID_CHUNK);
+    const result = await exec.execute<{ tid: string }>(sql`
+      SELECT COALESCE(e.tid, a.tid) AS tid
+      FROM unnest(ARRAY[${sql.join(chunk.map((uri) => sql`${uri}`), sql`, `)}]) AS input(uri)
+      LEFT JOIN editions e ON e.uri = input.uri
+      LEFT JOIN edition_aliases a ON a.uri = input.uri
+      WHERE COALESCE(e.tid, a.tid) IS NOT NULL
+    `);
+    for (const row of result.rows) tids.add(row.tid);
+  }
+  return tids;
+}
+
+/** The distinct, normalised subjects of the works behind `seedUris`. */
+async function seedSubjectsFor(
+  seedUris: readonly string[],
+  exec: DbExecutor,
+): Promise<string[]> {
+  const result = await exec.execute<{ subject: string }>(sql`
+    SELECT DISTINCT lower(btrim(subject)) AS subject
+    FROM editions e
+    JOIN works w ON w.uri = e.work_uri
+    CROSS JOIN LATERAL jsonb_array_elements_text(w.subjects) AS subject
+    WHERE e.uri IN (${sql.join(seedUris.map((uri) => sql`${uri}`), sql`, `)})
+      AND btrim(subject) <> ''
   `);
-  return new Set(result.rows.map((row) => row.tid));
+  return result.rows.map((row) => row.subject);
 }
 
 /**
@@ -258,6 +295,17 @@ async function candidateHits(
   exec: DbExecutor,
 ): Promise<RecommendationHit[]> {
   if (seedUris.length === 0) return [];
+  // The subjects the seeds share, read first so the scored query can pre-filter
+  // `works` through the `works_subjects_gin` index. Without it the query decoded
+  // every work's jsonb array (twice per feed request) and only then joined.
+  const seedSubjects = await seedSubjectsFor(seedUris, exec);
+  if (seedSubjects.length === 0) return [];
+  // One containment arm per subject: a constant array literal on the right is
+  // what lets the GIN index answer it (a parameterised array would not be).
+  const subjectFilter = sql.join(
+    seedSubjects.map((subject) => sql`w.subjects @> ${JSON.stringify([subject])}::jsonb`),
+    sql` OR `,
+  );
   const result = await exec.execute<{
     uri: string;
     tid: string;
@@ -282,7 +330,8 @@ async function candidateHits(
       FROM works w
       CROSS JOIN LATERAL jsonb_array_elements_text(w.subjects) AS subject
       JOIN seed_subjects ss ON ss.subject = lower(btrim(subject))
-      WHERE w.uri NOT IN (SELECT work_uri FROM seed_works)
+      WHERE (${subjectFilter})
+        AND w.uri NOT IN (SELECT work_uri FROM seed_works)
         -- A work with no edition is not a recommendation. Filtering here keeps
         -- the LIMIT below counting only books the join can actually return:
         -- capping the works instead let link-less works fill every slot.

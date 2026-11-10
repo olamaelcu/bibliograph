@@ -189,21 +189,26 @@ export function registerBookQueries(
 
   router.addQuery(listFollowersSchema, {
     async handler({ params }) {
-      const rows = await db
-        .select({ did: follows.followerDid, followedAt: follows.createdAt })
-        .from(follows)
-        .where(
-          and(
-            eq(follows.followedDid, params.did),
-            params.cursor ? gt(follows.followerDid, params.cursor) : undefined,
-          ),
-        )
-        .orderBy(asc(follows.followerDid))
-        .limit(params.limit);
+      // The total answers a tab label, so it is a first-page cost only, and it
+      // runs beside the page instead of after it.
+      const [rows, total] = await Promise.all([
+        db
+          .select({ did: follows.followerDid, followedAt: follows.createdAt })
+          .from(follows)
+          .where(
+            and(
+              eq(follows.followedDid, params.did),
+              params.cursor ? gt(follows.followerDid, params.cursor) : undefined,
+            ),
+          )
+          .orderBy(asc(follows.followerDid))
+          .limit(params.limit),
+        params.cursor ? undefined : followCount(follows.followedDid, params.did),
+      ]);
       const last = rows.at(-1)?.did;
       return json({
         followers: rows.map((row) => ({ did: row.did, followedAt: row.followedAt.toISOString() })),
-        total: await followCount(follows.followedDid, params.did),
+        ...(total !== undefined ? { total } : {}),
         ...(rows.length === params.limit && last ? { cursor: last } : {}),
       } as unknown as v.InferXRPCBodyOutput<typeof listFollowersSchema['output']>);
     },
@@ -211,21 +216,24 @@ export function registerBookQueries(
 
   router.addQuery(listFolloweesSchema, {
     async handler({ params }) {
-      const rows = await db
-        .select({ did: follows.followedDid, followedAt: follows.createdAt })
-        .from(follows)
-        .where(
-          and(
-            eq(follows.followerDid, params.did),
-            params.cursor ? gt(follows.followedDid, params.cursor) : undefined,
-          ),
-        )
-        .orderBy(asc(follows.followedDid))
-        .limit(params.limit);
+      const [rows, total] = await Promise.all([
+        db
+          .select({ did: follows.followedDid, followedAt: follows.createdAt })
+          .from(follows)
+          .where(
+            and(
+              eq(follows.followerDid, params.did),
+              params.cursor ? gt(follows.followedDid, params.cursor) : undefined,
+            ),
+          )
+          .orderBy(asc(follows.followedDid))
+          .limit(params.limit),
+        params.cursor ? undefined : followCount(follows.followerDid, params.did),
+      ]);
       const last = rows.at(-1)?.did;
       return json({
         followees: rows.map((row) => ({ did: row.did, followedAt: row.followedAt.toISOString() })),
-        total: await followCount(follows.followerDid, params.did),
+        ...(total !== undefined ? { total } : {}),
         ...(rows.length === params.limit && last ? { cursor: last } : {}),
       } as unknown as v.InferXRPCBodyOutput<typeof listFolloweesSchema['output']>);
     },
@@ -303,13 +311,13 @@ export function registerBookQueries(
         items.push(editionViewFromItem(item, contributorRefs));
       }
 
-      // `limit` is the maximum per page, but the search service merges remote
-      // sources on top of the local page, so the merged list can exceed it.
-      const truncated = result.items.length > items.length;
       return json({
         items,
-        hasMore: truncated || result.items.length >= limit,
-        ...(result.total > 0 ? { total: result.total } : {}),
+        // Page-fullness comes from the sources, not from a post-filter count:
+        // `items` drops editions without identifiers, and the service already
+        // caps the merged page at `limit`.
+        hasMore: result.hasMore === true,
+        ...(result.total !== undefined && result.total > 0 ? { total: result.total } : {}),
       });
     },
   });
@@ -336,9 +344,12 @@ export function registerBookQueries(
         .where(where)
         .orderBy(editions.indexedAt, editions.uri)
         .offset(offset)
-        .limit(limit);
+        .limit(limit + 1);
 
-      const items = rows.map((row) => editionItemFromRow(row as unknown as Record<string, unknown>));
+      // One extra row answers `hasMore` without a second count query.
+      const hasMore = rows.length > limit;
+      const page = hasMore ? rows.slice(0, limit) : rows;
+      const items = page.map((row) => editionItemFromRow(row as unknown as Record<string, unknown>));
       const contributorRefs = await loadContributorRefs(
         contributorUrisFor(items.flatMap((item) => item.contributors ?? [])),
       );
@@ -351,8 +362,7 @@ export function registerBookQueries(
 
       return json({
         items: views,
-        hasMore: rows.length >= limit,
-        total: rows.length,
+        hasMore,
       });
     },
   });
@@ -381,7 +391,11 @@ export function registerBookQueries(
         description: r.description,
         createdAt: r.createdAt,
       }));
-      return json({ items, cursor: result.cursor, total: result.total });
+      return json({
+        items,
+        cursor: result.cursor,
+        total: result.total ?? 0,
+      });
     },
   });
 
@@ -417,7 +431,11 @@ export function registerBookQueries(
           identifiers: r.identifiers,
           createdAt: r.createdAt,
         }));
-        return json({ items, cursor: result.cursor, total: result.total });
+        return json({
+          items,
+          cursor: result.cursor,
+          total: result.total ?? 0,
+        });
       } catch (e) {
         console.error('CONTRIBUTOR_HANDLER_ERR:', e, (e as Error)?.stack);
         throw e;
@@ -446,7 +464,11 @@ export function registerBookQueries(
           createdAt: r.createdAt,
         };
       });
-      return json({ items, cursor: result.cursor, total: result.total });
+      return json({
+        items,
+        cursor: result.cursor,
+        total: result.total ?? 0,
+      });
     },
   });
 }

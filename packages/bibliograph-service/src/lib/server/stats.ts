@@ -33,3 +33,28 @@ export async function fetchCounts(db: DbExecutor = defaultDb): Promise<Counts> {
     generatedAt: new Date().toISOString(),
   };
 }
+/**
+ * How long a count tuple stands.
+ *
+ * `/stats` polls `/stats/counts` every five seconds from every open tab, and each
+ * poll ran four `count(*)` scans: 42.7 ms on `editions` alone against the local
+ * catalogue, so ten idle tabs meant millions of rows scanned per second for a
+ * number that moves at human pace.
+ */
+const COUNTS_TTL_MS = 30_000;
+
+let cachedCounts: { at: number; counts: Counts } | undefined;
+
+/** Cached counts for the page load and the polling endpoint. */
+export async function fetchCountsCached(db: DbExecutor = defaultDb): Promise<Counts> {
+  const now = Date.now();
+  if (cachedCounts && now - cachedCounts.at < COUNTS_TTL_MS) return cachedCounts.counts;
+  const counts = await fetchCounts(db);
+  cachedCounts = { at: now, counts };
+  return counts;
+}
+
+/** Test hook: forget the memoized tuple. */
+export function resetCountsCacheForTesting(): void {
+  cachedCounts = undefined;
+}

@@ -1,4 +1,10 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/button/button.js";
+  import "@awesome.me/webawesome/dist/components/callout/callout.js";
+  import "@awesome.me/webawesome/dist/components/details/details.js";
+  import "@awesome.me/webawesome/dist/components/option/option.js";
+  import "@awesome.me/webawesome/dist/components/progress-ring/progress-ring.js";
+  import "@awesome.me/webawesome/dist/components/select/select.js";
   // Edition detail view.
   //
   // Hero, then the vote dock that sticks under the site header while you read,

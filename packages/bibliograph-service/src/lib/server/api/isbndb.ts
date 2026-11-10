@@ -1,11 +1,13 @@
 import type { Logger } from 'pino';
-import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { searchProviderRequestsTotal } from '../metrics';
 import { isbndbBreaker } from './breakers';
+import { HttpError, requestJson } from '../http/client';
+import { isbndbCacheEntry, isbndbCacheGet, isbndbCachePut } from '../isbndb/cache';
+import { isbndbCacheTotal } from '../metrics';
 import type { EditionItem, WorkItem, Identifier, SearchQuery, SearchResult } from '../search/types';
 import { isbndbEditionUri, isbndbWorkUri } from '../isbndb/keys';
-import { resolveContributorsByName } from './contributor-name-resolver';
+import { prefetchContributors, type ContributorResolver } from './contributor-name-resolver';
 import { normalizeBookFormat } from '../format-view';
 import { isbnIdentifier, isbnValueFromIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
 
@@ -87,11 +89,11 @@ function makeIdentifiers(b: IsbndbBook, primary: string): Identifier[] {
   return uniqueIdentifiers(ids);
 }
 
-async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, log: Logger): Promise<EditionItem | null> {
+async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, resolver: ContributorResolver): Promise<EditionItem | null> {
   if (!b.title) return null;
   const primary = primaryIsbn(b);
   if (!primary) return null;
-  const contributors = await resolveContributorsByName(b.authors ?? [], 'isbndb', log);
+  const contributors = await resolver.resolve(b.authors ?? []);
   return {
     uri: isbndbEditionUri(primary),
     title: b.title,
@@ -108,12 +110,12 @@ async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, log: Logger)
   };
 }
 
-async function mapIsbndbToWork(b: IsbndbBook, createdAt: string, log: Logger): Promise<WorkItem | null> {
+async function mapIsbndbToWork(b: IsbndbBook, createdAt: string, resolver: ContributorResolver): Promise<WorkItem | null> {
   if (!b.title) return null;
   const primary = primaryIsbn(b);
   if (!primary) return null;
   const subjects = (b.subjects ?? []).filter((s): s is string => typeof s === 'string');
-  const contributors = await resolveContributorsByName(b.authors ?? [], 'isbndb', log);
+  const contributors = await resolver.resolve(b.authors ?? []);
   return {
     uri: isbndbWorkUri(primary),
     title: b.title,
@@ -141,42 +143,51 @@ export function isbnFromQuery(q: string | undefined): string | null {
   return /^\d{10}(\d{3})?$/.test(raw) ? raw : null;
 }
 
-function parseRetryAfter(header: string | null): number | undefined {
-  if (!header) return undefined;
-  const m = /^"(?:rate|daily)";\s*r=(\d+);\s*t=(\d+)/.exec(header);
-  if (m && m[2] !== undefined) return Number(m[2]) * 1000;
-  const secs = Number(header);
-  return Number.isFinite(secs) && secs > 0 ? secs * 1000 : undefined;
-}
-
-async function isbndbFetch<T>(url: string, log: Logger, signal: AbortSignal, init?: RequestInit): Promise<T | null> {
+async function isbndbFetch<T>(
+  url: string,
+  log: Logger,
+  signal: AbortSignal | undefined,
+  init?: { method?: string; headers?: Record<string, string>; body?: string },
+): Promise<T | null> {
+  const method = init?.method ?? 'GET';
+  const body = init?.body ?? '';
+  // Cache first, breaker second: a remembered answer costs nothing upstream, so
+  // there is no reason to withhold it while the breaker is open.
+  const entry = isbndbCacheEntry(url, method, body);
+  const cached = await isbndbCacheGet<T>(entry.key, log);
+  if (cached.found) {
+    isbndbCacheTotal.inc({ result: cached.body === null ? 'negative' : 'hit' });
+    log.debug({ stage: 'isbndb-source', request: entry.request, negative: cached.body === null }, 'isbndb cache hit');
+    return cached.body;
+  }
   if (!isbndbBreaker.canCall()) {
     log.warn({ stage: 'isbndb-source', breaker: isbndbBreaker.getState() }, 'breaker open; skipping fetch');
     return null;
   }
-  const headers = { ...init?.headers, Authorization: process.env.ISBNDB_API_KEY ?? '' };
   try {
-    const body = await withRetry(async () => {
-      const res = await fetch(url, { ...init, headers, signal });
-      if (!res.ok) {
-        let body = '';
-        try { body = await res.text(); } catch { /* ignore */ }
-        const err = new Error(`isbndb ${res.status}: ${body.slice(0, 200)}`) as Error & { status: number; retryAfterMs?: number };
-        err.status = res.status;
-        const retryAfter = parseRetryAfter(res.headers.get('ratelimit'));
-        if (res.status === 429 && retryAfter !== undefined) err.retryAfterMs = retryAfter;
-        throw err;
-      }
-      return (await res.json()) as T;
-    }, log, {
-      maxAttempts: 3,
-      retryOn: (status) => status === 429 || (status >= 500 && status < 600),
-    });
+    const result = await withRetry(
+      () => requestJson<T>(url, {
+        method,
+        headers: { Authorization: process.env.ISBNDB_API_KEY ?? '', ...init?.headers },
+        body: init?.body,
+        signal,
+      }),
+      log,
+      {
+        maxAttempts: 3,
+        retryOn: (status) => status === 429 || (status >= 500 && status < 600),
+      },
+    );
     isbndbBreaker.recordSuccess();
     searchProviderRequestsTotal.inc({ provider: 'isbndb', status: 'success' });
-    return body;
+    await isbndbCachePut(entry, result, log);
+    return result;
   } catch (err) {
     isbndbBreaker.recordFailure();
+    // A 404 is an answer, not an outage: remember it for a day so a delisted
+    // ISBN stops being re-queried on every hydration. Transient failures stay
+    // uncached, or one bad minute upstream would be replayed all day.
+    if (err instanceof HttpError && err.status === 404) await isbndbCachePut(entry, null, log);
     log.error({ stage: 'isbndb-source', err, url }, 'isbndb fetch failed');
     searchProviderRequestsTotal.inc({ provider: 'isbndb', status: 'failure' });
     return null;
@@ -204,17 +215,17 @@ export async function searchEditions(
   if (!isbn) {
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'non_isbn_query' } };
   }
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await isbndbFetch<IsbndbSingleResponse>(
     `${BASE}/book/${encodeURIComponent(isbn)}`,
     log,
-    signal,
+    externalSignal,
   );
   if (!data || !data.book) {
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'fetch_failed' } };
   }
   const createdAt = new Date().toISOString();
-  const mapped = await mapIsbndbToEdition(data.book, createdAt, log);
+  const resolver = await prefetchContributors(data.book.authors ?? [], 'isbndb', log);
+  const mapped = await mapIsbndbToEdition(data.book, createdAt, resolver);
   return { items: mapped ? [mapped] : [], total: mapped ? 1 : 0 };
 }
 
@@ -235,32 +246,38 @@ export async function searchWorks(
   if (!isbn) {
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'non_isbn_query' } };
   }
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   const data = await isbndbFetch<IsbndbSingleResponse>(
     `${BASE}/book/${encodeURIComponent(isbn)}`,
     log,
-    signal,
+    externalSignal,
   );
   if (!data || !data.book) {
     return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'fetch_failed' } };
   }
   const createdAt = new Date().toISOString();
-  const mapped = await mapIsbndbToWork(data.book, createdAt, log);
+  const resolver = await prefetchContributors(data.book.authors ?? [], 'isbndb', log);
+  const mapped = await mapIsbndbToWork(data.book, createdAt, resolver);
   return { items: mapped ? [mapped] : [], total: mapped ? 1 : 0 };
 }
 
-async function bulkLookupByIsbn(isbns: string[], log: Logger, signal: AbortSignal): Promise<Map<string, IsbndbBook>> {
+async function bulkLookupByIsbn(isbns: string[], log: Logger, signal?: AbortSignal): Promise<Map<string, IsbndbBook>> {
   const out = new Map<string, IsbndbBook>();
   if (isbns.length === 0) return out;
   const CHUNK = 100;
-  for (let i = 0; i < isbns.length; i += CHUNK) {
-    const chunk = isbns.slice(i, i + CHUNK);
-    const res = await isbndbFetch<IsbndbListResponse>(
-      `${BASE}/books`,
-      log,
-      signal,
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isbns: chunk }) },
-    );
+  const chunks: string[][] = [];
+  for (let i = 0; i < isbns.length; i += CHUNK) chunks.push(isbns.slice(i, i + CHUNK));
+  // Chunks are independent requests (100 ISBNs each), so ask for them
+  // concurrently instead of paying one round trip per chunk in sequence.
+  const responses = await Promise.all(
+    chunks.map((chunk) =>
+      isbndbFetch<IsbndbListResponse>(`${BASE}/books`, log, signal, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ isbns: chunk }),
+      }),
+    ),
+  );
+  for (const res of responses) {
     if (!res || !res.data) continue;
     for (const book of res.data) {
       const primary = primaryIsbn(book);
@@ -285,6 +302,20 @@ async function enrichEditionsInternal(
   const isbns: string[] = [];
   const seen = new Set<string>();
   for (const item of items) {
+    // Skip-if-complete: ISBNdb only writes description, cover, publishedYear,
+    // language, pages and format, so an item that already has all six would
+    // spend a bulk slot (and quota) to change nothing. This runs on every
+    // search result of every distinct query.
+    if (
+      item.description &&
+      item.coverImageUrl &&
+      item.publishedYear &&
+      item.language &&
+      item.pages !== undefined &&
+      item.format
+    ) {
+      continue;
+    }
     const isbn = isbnFromIdentifiers(item);
     if (isbn && !seen.has(isbn)) {
       isbns.push(isbn);
@@ -292,8 +323,7 @@ async function enrichEditionsInternal(
     }
   }
   if (isbns.length === 0) return [...items];
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  const lookup = await bulkLookupByIsbn(isbns, log, signal);
+  const lookup = await bulkLookupByIsbn(isbns, log, externalSignal);
   return items.map((item) => {
     const isbn = isbnFromIdentifiers(item);
     if (!isbn) return item;
@@ -356,8 +386,7 @@ export async function enrichWorks(
     }
   }
   if (isbns.length === 0) return [...items];
-  const signal = externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  const lookup = await bulkLookupByIsbn(isbns, log, signal);
+  const lookup = await bulkLookupByIsbn(isbns, log, externalSignal);
   return items.map((item) => {
     let enriched = item;
     let matched: IsbndbBook | undefined;
@@ -390,8 +419,7 @@ export async function getBookByIsbn(isbn: string, log: Logger, signal?: AbortSig
   if (!process.env.ISBNDB_API_KEY) return null;
   const clean = isbnFromQuery(isbn);
   if (!clean) return null;
-  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
-  const res = await isbndbFetch<IsbndbSingleResponse>(`${BASE}/book/${encodeURIComponent(clean)}`, log, s);
+  const res = await isbndbFetch<IsbndbSingleResponse>(`${BASE}/book/${encodeURIComponent(clean)}`, log, signal);
   return res?.book ?? null;
 }
 
@@ -409,5 +437,6 @@ export async function getEditionByIsbn(
 ): Promise<EditionItem | null> {
   const book = await getBookByIsbn(isbn, log, signal);
   if (!book) return null;
-  return mapIsbndbToEdition(book, new Date().toISOString(), log);
+  const resolver = await prefetchContributors(book.authors ?? [], 'isbndb', log);
+  return mapIsbndbToEdition(book, new Date().toISOString(), resolver);
 }

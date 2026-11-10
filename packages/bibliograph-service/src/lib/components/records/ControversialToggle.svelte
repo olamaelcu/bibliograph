@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/button/button.js";
   // Admin-only toggle for the `controversial` label. Shared by the edition and
   // work pages, which expose the same `?/toggleControversial` action.
   let {

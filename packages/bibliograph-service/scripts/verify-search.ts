@@ -23,7 +23,6 @@ import { GoogleBooksEnricher } from '../src/lib/server/search/google-books-enric
 import { GoogleBooksSource } from '../src/lib/server/search/google-books-source.js';
 import { IsbndbEnricher, IsbndbWorkEnricher } from '../src/lib/server/search/isbndb-enricher.js';
 import { IsbndbSource } from '../src/lib/server/search/isbndb-source.js';
-import { AuthorWikipediaEnricher } from '../src/lib/server/search/wikipedia-enricher.js';
 import { WikidataEditionEnricher } from '../src/lib/server/search/wikidata-enricher.js';
 
 import { SearchService, type SearchServiceDeps } from '../src/lib/server/search/service.js';
@@ -84,8 +83,8 @@ function registerSearchEditions(router: XRPCRouter, svc: SearchService): void {
       });
       return Response.json({
         items: r.items,
-        hasMore: r.items.length >= limit,
-        ...(r.total > 0 ? { total: r.total } : {}),
+        hasMore: r.hasMore === true,
+        ...(r.total !== undefined && r.total > 0 ? { total: r.total } : {}),
       });
     },
   });
@@ -109,7 +108,6 @@ function buildService(): SearchServiceDeps {
     googleBooks: new GoogleBooksEnricher(),
     isbndbEnricher: new IsbndbEnricher(),
     isbndbWorkEnricher: new IsbndbWorkEnricher(),
-    authorWikipedia: new AuthorWikipediaEnricher(),
     wikidataEdition: new WikidataEditionEnricher(),
   };
 }

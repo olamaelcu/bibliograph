@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/callout/callout.js";
   // Post-action feedback for form actions: the failure message, or a success
   // line supplied by the caller (a vote and a label toggle do not say the same
   // thing).

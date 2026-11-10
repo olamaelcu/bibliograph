@@ -3,7 +3,6 @@ import { commonsBreaker, wikidataBreaker } from '../api/breakers';
 import { UpstreamDeferred } from '../api/deferred';
 import { fetchJson } from '../api/fetch-json';
 import { withRetry } from '../api/retry';
-import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 
 /**
  * Resolve a contributor image into its url + license/artist metadata.
@@ -57,8 +56,6 @@ export interface ResolveOptions {
 export type ContributorImageResolver = (
   opts: ResolveOptions,
 ) => Promise<ResolvedContributorImage | undefined>;
-
-const s = (signal?: AbortSignal) => signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
 
 export async function resolveContributorImage(
   opts: ResolveOptions,
@@ -127,7 +124,7 @@ async function findAuthorQid(
   }
   const url = `${WIKIDATA_API}?action=wbsearchentities&search=${encodeURIComponent(name)}&language=en&type=item&limit=5&format=json`;
   type SearchResponse = { search?: WikidataSearchHit[] };
-  const raw = await fetchJson<SearchResponse>(url, log, s(signal), WIKIDATA_FETCH);
+  const raw = await fetchJson<SearchResponse>(url, log, signal, WIKIDATA_FETCH);
   if (!raw) throw new UpstreamDeferred('wikidata', 'request-failed');
   const target = normalizeName(name);
   for (const hit of raw.search ?? []) {
@@ -148,7 +145,7 @@ async function fetchPhotoFilename(
     throw new UpstreamDeferred('wikidata', 'breaker-open');
   }
   const url = `https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`;
-  const raw = await fetchJson<WikidataEntity>(url, log, s(signal), WIKIDATA_FETCH);
+  const raw = await fetchJson<WikidataEntity>(url, log, signal, WIKIDATA_FETCH);
   if (!raw) throw new UpstreamDeferred('wikidata', 'request-failed');
   const entity = raw.entities?.[qid];
   if (!entity) return undefined;
@@ -196,7 +193,7 @@ async function fetchCommonsExtMetadata(
   const url = `${COMMONS_API}?action=query&titles=${encodeURIComponent(`File:${filename}`)}&prop=imageinfo&iiprop=extmetadata&format=json`;
   type QueryResponse = { query?: { pages?: Record<string, { imageinfo?: Array<{ extmetadata?: CommonsExtMetadata }> }> } };
   const raw = await withRetry<QueryResponse | null>(
-    () => fetchJson<QueryResponse>(url, log, s(signal), COMMONS_FETCH),
+    () => fetchJson<QueryResponse>(url, log, signal, COMMONS_FETCH),
     log,
   );
   if (!raw) throw new UpstreamDeferred('commons', 'request-failed');

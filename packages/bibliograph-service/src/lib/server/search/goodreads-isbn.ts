@@ -4,7 +4,7 @@ import {
   fetchGoodreadsBookById,
   fetchGoodreadsSearch,
 } from '../api/goodreads';
-import { resolveContributorsByName } from '../api/contributor-name-resolver';
+import { prefetchContributors } from '../api/contributor-name-resolver';
 import { isbnIdentifier } from '../identifiers';
 import { grEditionUri } from '../gr/keys';
 import type { EditionItem } from './types';
@@ -32,12 +32,17 @@ export async function searchGoodreadsIsbnCandidates(
     if (!result) return [];
     const createdAt = new Date().toISOString();
 
+    const resolver = await prefetchContributors(
+      result.hits.slice(0, limit).flatMap((hit) => hit.authors),
+      'goodreads',
+      log,
+    );
     const resolved = await Promise.all(
       result.hits.slice(0, limit).map(async (hit): Promise<EditionItem | null> => {
         const book = await fetchGoodreadsBookById(hit.id, signal).catch(() => null);
         const isbn = isbnIdentifier(book?.isbn13 ?? book?.isbn10 ?? '');
         if (!book || !isbn) return null;
-        const contributors = await resolveContributorsByName(hit.authors, 'goodreads', log);
+        const contributors = await resolver.resolve(hit.authors);
         return {
           uri: grEditionUri(hit.id),
           title: book.title ?? hit.title,

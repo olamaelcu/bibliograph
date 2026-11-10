@@ -5,7 +5,6 @@ import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { contributors } from '../db/schema';
 import type { ContributorRow } from '../db/schema';
-import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { enrichContributorBios } from '../api/wikipedia';
 import { rowIdentifiers } from '../edition-record';
 import { contributorRecordValue } from '../book-records';
@@ -17,13 +16,12 @@ export async function resolveContributorBio(
   log: Logger,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
-  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   // Primary: Wikipedia by contributor name.
   // The column types are nullable; the enricher's inputs are optional. Absent and
   // null mean the same thing to it, so normalize rather than spread the null
   // through a type that has no room for it.
   const identifiers = rowIdentifiers(row.identifiers);
-  const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear ?? undefined, diedYear: row.diedYear ?? undefined, linkedDid: row.linkedDid ?? undefined, identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, s);
+  const bio = await enrichContributorBios([{ name: row.name, bio: undefined, aliases: row.aliases, bornYear: row.bornYear ?? undefined, diedYear: row.diedYear ?? undefined, linkedDid: row.linkedDid ?? undefined, identifiers, createdAt: row.createdAt.toISOString(), uri: row.uri }], log, signal);
   const wikiBio = bio[0]?.bio;
   return wikiBio;
 }
@@ -32,7 +30,7 @@ export async function backfillBioForContributor(
   uri: string,
   log: Logger,
   db: Db = defaultDb,
-  signal: AbortSignal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  signal?: AbortSignal,
 ): Promise<{ updated: boolean; bio?: string; reason: string }> {
   const rows = await db.select().from(contributors).where(eq(contributors.uri, uri)).limit(1);
   const row = rows[0];

@@ -32,7 +32,8 @@ The same three issues, as they stand now:
   (`src/hooks.server.ts`); non-GET, authorized requests, and responses that set
   their own `cache-control` are left untouched. Pages and `.well-known/*` still
   have no shared rule: each route sets what it sets (`.well-known/*`, `/image/*`,
-  `/stats/counts` (`no-store`), and the CAR routes do set their own).
+  `/stats/counts` (`public, max-age=30`, matching the 30 s count memo behind it),
+  and the CAR routes do set their own).
 
 `src/lib/server/data/` does not exist; `xrpc-router.ts` is ~3,000 lines and is
 the XRPC registry.

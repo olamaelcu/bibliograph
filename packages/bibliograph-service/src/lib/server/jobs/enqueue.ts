@@ -3,7 +3,20 @@ import type { EditionItem, WorkItem, ContributorItem } from '../search/types.ts'
 
 type IngestItem = EditionItem | WorkItem | ContributorItem;
 
+/**
+ * How many times graphile retries one TAP job before it is treated as dead.
+ *
+ * The TAP tasks used to dead-letter and return success, so nothing was ever
+ * retried and nothing read the dead-letter table. They now rethrow, and this cap
+ * is what keeps a genuinely poison batch from retrying for hours: on the last
+ * attempt the handler writes its dead-letter rows and finishes.
+ */
+export const MAX_TAP_ATTEMPTS = 5;
+
 let utilsPromise: Promise<WorkerUtils> | undefined;
+
+/** Jobs per `addJobs` call: graphile inserts the chunk in one statement. */
+const ENQUEUE_CHUNK = 1_000;
 
 async function getUtils(): Promise<WorkerUtils> {
   if (!utilsPromise) {
@@ -39,12 +52,12 @@ export async function enqueueRecordUpsert(
   value: Record<string, unknown>,
 ): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('tap-record-upsert', { uri, did, rkey, value });
+  await utils.addJob('tap-record-upsert', { uri, did, rkey, value }, { maxAttempts: MAX_TAP_ATTEMPTS });
 }
 
 export async function enqueueRecordDelete(uri: string): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('tap-record-delete', { uri });
+  await utils.addJob('tap-record-delete', { uri }, { maxAttempts: MAX_TAP_ATTEMPTS });
 }
 
 export interface TapRecordUpsertItem {
@@ -57,13 +70,48 @@ export interface TapRecordUpsertItem {
 export async function enqueueRecordUpsertBatch(items: TapRecordUpsertItem[]): Promise<void> {
   if (items.length === 0) return;
   const utils = await getUtils();
-  await utils.addJob('tap-record-upsert-batch', items);
+  await utils.addJob('tap-record-upsert-batch', items, { maxAttempts: MAX_TAP_ATTEMPTS });
 }
 
 export async function enqueueRecordDeleteBatch(uris: string[]): Promise<void> {
   if (uris.length === 0) return;
   const utils = await getUtils();
-  await utils.addJob('tap-record-delete-batch', uris);
+  await utils.addJob('tap-record-delete-batch', uris, { maxAttempts: MAX_TAP_ATTEMPTS });
+}
+
+/**
+ * Split a failing batch into per-record jobs.
+ *
+ * One unreadable record used to poison the whole hundred-event batch. Once the
+ * batch task has failed twice it hands every record to the single-record task, so
+ * the healthy ones land and only the offender burns its own attempts. `addJobs`
+ * writes them in one transaction per chunk instead of one `addJob` round trip
+ * each.
+ */
+export async function enqueueRecordUpsertItems(items: TapRecordUpsertItem[]): Promise<void> {
+  if (items.length === 0) return;
+  const utils = await getUtils();
+  const jobs = items.map((item) => ({
+    identifier: 'tap-record-upsert',
+    payload: item,
+    maxAttempts: MAX_TAP_ATTEMPTS,
+  }));
+  for (let i = 0; i < jobs.length; i += ENQUEUE_CHUNK) {
+    await utils.addJobs(jobs.slice(i, i + ENQUEUE_CHUNK));
+  }
+}
+
+export async function enqueueRecordDeleteItems(uris: string[]): Promise<void> {
+  if (uris.length === 0) return;
+  const utils = await getUtils();
+  const jobs = uris.map((uri) => ({
+    identifier: 'tap-record-delete',
+    payload: { uri },
+    maxAttempts: MAX_TAP_ATTEMPTS,
+  }));
+  for (let i = 0; i < jobs.length; i += ENQUEUE_CHUNK) {
+    await utils.addJobs(jobs.slice(i, i + ENQUEUE_CHUNK));
+  }
 }
 
 export async function enqueueCoverBackfill(uri: string, rkey: string): Promise<void> {
@@ -101,5 +149,36 @@ export async function enqueueShelvingEditionBackfill(uri: string): Promise<void>
   await utils.addJob('backfill-shelving-edition', { uri }, {
     jobKey: `backfill-shelving-edition:${uri}`,
     maxAttempts: 3,
+  });
+}
+
+/** `enqueueShelvingEditionBackfill` for a whole page, in one statement per chunk. */
+export async function enqueueShelvingEditionBackfills(uris: readonly string[]): Promise<void> {
+  if (uris.length === 0) return;
+  const utils = await getUtils();
+  const jobs = uris.map((uri) => ({
+    identifier: 'backfill-shelving-edition',
+    payload: { uri },
+    jobKey: `backfill-shelving-edition:${uri}`,
+    maxAttempts: 3,
+  }));
+  for (let i = 0; i < jobs.length; i += ENQUEUE_CHUNK) {
+    await utils.addJobs(jobs.slice(i, i + ENQUEUE_CHUNK));
+  }
+}
+
+/**
+ * Resolve one contributor's portrait through the Wikidata/Commons resolver and
+ * store it on the contributor row, where `getImageForContributor` reads it.
+ *
+ * The jobKey is what makes a page of portraits cheap: every tile renders the
+ * same call, and without dedupe each render would enqueue another lookup for a
+ * contributor the resolver has nothing for.
+ */
+export async function enqueueContributorImageBackfill(uri: string): Promise<void> {
+  const utils = await getUtils();
+  await utils.addJob('backfill-contributor-image', { uri }, {
+    jobKey: `backfill-contributor-image:${uri}`,
+    maxAttempts: 5,
   });
 }

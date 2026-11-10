@@ -1,4 +1,5 @@
 import { normalizeBookFormat, type BookFormat } from "../format-view";
+import { request } from "../http/client";
 
 /**
  * Last-resort format/page-count lookup through Goodreads.
@@ -25,8 +26,8 @@ export class GoodreadsBlockedError extends Error {
   }
 }
 
+/** Only a backfill script calls this (see above), so it keeps a looser budget than the 3s request default. */
 const FETCH_TIMEOUT_MS = 10_000;
-const UA = "Bibliograph/0.1 (+https://biblio.livtet.olamaelcu.net)";
 
 export interface GoodreadsFormat {
   url: string;
@@ -446,8 +447,6 @@ async function fetchText(
   jar: CookieJar,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   try {
     let current = url;
     // Goodreads answers a cookieless request with a 302 back to the same URL,
@@ -457,12 +456,12 @@ async function fetchText(
       const cookie = [...jar]
         .map(([name, value]) => `${name}=${value}`)
         .join("; ");
-      const res = await fetch(current, {
-        signal: combined,
+      const res = await request(current, {
+        signal,
+        timeoutMs: FETCH_TIMEOUT_MS,
         redirect: "manual",
         headers: {
           accept: "text/html",
-          "user-agent": UA,
           ...(cookie.length > 0 ? { cookie } : {}),
         },
       });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { pino } from 'pino';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { enrichEditions, searchEditions, getBookByIsbn } from './isbndb';
 import { isbndbBreaker } from './breakers';
 import { db } from '../db';
@@ -19,6 +19,14 @@ function stubFetch(impl: (url: string, init?: RequestInit) => Promise<Response>)
 function resetBreaker() {
   isbndbBreaker.recordSuccess();
 }
+
+// The response cache (migration 0032) is keyed by method + URL + body, and these
+// cases ask about the same ISBNs, so a previous case's answer would be replayed
+// instead of the stub being called. Each case starts from an empty cache; the
+// Google Books suite gets the same isolation from its unique query strings.
+test.beforeEach(async () => {
+  await db.execute(sql`delete from isbndb_cache`);
+});
 
 const baseItem: EditionItem = {
   uri: 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.edition/isbndb.9780123456789',

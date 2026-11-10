@@ -2,8 +2,7 @@ import type { Logger } from 'pino';
 import { withRetry } from './retry';
 import { searchProviderRequestsTotal } from '../metrics';
 import type { CircuitBreaker } from './breaker';
-
-const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
+import { requestJson } from '../http/client';
 
 /**
  * The upstream a request belongs to: its own breaker, metric label and log
@@ -20,11 +19,15 @@ export interface FetchJsonOptions {
  * GET `url` as JSON under a breaker, recording success/failure on it and
  * counting the request per provider. Returns null when the breaker is open or
  * the request failed: deciding what a null means is the caller's job.
+ *
+ * The transport (timeout, user agent, status classification) comes from
+ * `../http/client`; retry and the breaker stay here because they are per
+ * provider.
  */
 export async function fetchJson<T>(
   url: string,
   log: Logger,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   opts: FetchJsonOptions,
 ): Promise<T | null> {
   const { breaker, provider, stage } = opts;
@@ -34,18 +37,9 @@ export async function fetchJson<T>(
   }
   const start = performance.now();
   try {
-    const body = await withRetry(async () => {
-      const res = await fetch(url, { headers: { 'user-agent': UA }, signal });
-      const durationMs = Math.round((performance.now() - start) * 100) / 100;
-      if (!res.ok) {
-        const text = await res.text();
-        const err = new Error(`${provider} ${res.status}: ${text.slice(0, 200)}`) as Error & { status: number };
-        (err as Error & { status: number }).status = res.status;
-        throw err;
-      }
-      log.info({ stage, url, durationMs }, `${provider} ok`);
-      return res.json() as Promise<T>;
-    }, log);
+    const body = await withRetry(() => requestJson<T>(url, { signal }), log);
+    const durationMs = Math.round((performance.now() - start) * 100) / 100;
+    log.info({ stage, url, durationMs }, `${provider} ok`);
     breaker.recordSuccess();
     searchProviderRequestsTotal.inc({ provider, status: 'success' });
     return body;

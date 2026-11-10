@@ -44,6 +44,15 @@ export const googleBooksCacheTotal = new Counter({
   registers: [metricsRegistry],
 });
 
+// ISBNdb response cache, same labels as the Google Books one so a dashboard
+// can compare hit rates per provider.
+export const isbndbCacheTotal = new Counter({
+  name: 'isbndb_cache_total',
+  help: 'ISBNdb response cache lookups and stores',
+  labelNames: ['result'] as const,
+  registers: [metricsRegistry],
+});
+
 export const searchLatencyMs = new Histogram({
   name: 'search_latency_ms',
   help: 'Search XRPC handler latency in ms',

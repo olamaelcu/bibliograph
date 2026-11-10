@@ -6,7 +6,6 @@ import { db as defaultDb } from '../db/index';
 import { works } from '../db/schema';
 import type { WorkRow } from '../db/schema';
 import { googleBooksBreaker, isbndbBreaker } from '../api/breakers';
-import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { isIsbndbRkey } from '../isbndb/keys';
 import { getEditionByVolumeId } from '../api/google-books';
@@ -23,11 +22,10 @@ export async function resolveWorkDescription(
   log: Logger,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
-  const s = signal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   if (isGbRkey(row.rkey)) {
     try {
       const volId = volumeIdFromGbRkey(row.rkey);
-      const item = await getEditionByVolumeId(volId, log, s);
+      const item = await getEditionByVolumeId(volId, log, signal);
       if (item?.description) return item.description;
     } catch {
       // fall through
@@ -37,7 +35,7 @@ export async function resolveWorkDescription(
   const isbn = isbnFromIdentifiers(rowIdentifiers(row.identifiers));
   if (isbn && isIsbndbRkey(row.rkey)) {
     try {
-      const book = await getBookByIsbn(isbn, log, s);
+      const book = await getBookByIsbn(isbn, log, signal);
       const desc = book ? isbndbDescription(book) : undefined;
       if (desc) return desc;
     } catch {
@@ -55,7 +53,7 @@ export async function backfillDescriptionForWork(
   uri: string,
   log: Logger,
   db: Db = defaultDb,
-  signal: AbortSignal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  signal?: AbortSignal,
 ): Promise<{ updated: boolean; description?: string; reason: string }> {
   const rows = await db.select().from(works).where(eq(works.uri, uri)).limit(1);
   const row = rows[0];

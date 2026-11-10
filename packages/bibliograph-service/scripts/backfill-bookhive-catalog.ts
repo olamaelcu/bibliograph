@@ -26,7 +26,7 @@ import { db } from '../src/lib/server/db';
 import { editions } from '../src/lib/server/db/schema';
 import { fetchCatalogBooksPage, splitAuthors } from '../src/lib/server/bookhive/catalog';
 import { bhEditionRkey } from '../src/lib/server/bookhive/keys';
-import { resolveContributorsByName } from '../src/lib/server/api/contributor-name-resolver';
+import { prefetchContributors } from '../src/lib/server/api/contributor-name-resolver';
 import { createLogger } from '../src/lib/server/logger';
 import { mergeIsbnIdentifiers } from '../src/lib/server/isbn/merge';
 import { editionRecordValueForCid } from '../src/lib/server/isbn/record-value';
@@ -104,6 +104,13 @@ async function run(): Promise<void> {
         .where(inArray(editions.rkey, [...byRkey.keys()]));
       matched += rows.length;
 
+      // Every author this page could need, resolved in one pass: the row loop
+      // below then reads the map instead of querying per edition.
+      const resolver = await prefetchContributors(
+        rows.flatMap((row) => (row.contributors.length === 0 ? byRkey.get(row.rkey)?.authors ?? [] : [])),
+        'bookhive',
+        log,
+      );
       for (const row of rows) {
         if (limit !== undefined && written >= limit) break;
         const fields = byRkey.get(row.rkey);
@@ -115,7 +122,7 @@ async function run(): Promise<void> {
         let contributors: ContributionEntry[] = row.contributors;
         let contributorsChanged = false;
         if (row.contributors.length === 0 && fields.authors.length > 0) {
-          const resolved = await resolveContributorsByName(fields.authors, 'bookhive', log);
+          const resolved = await resolver.resolve(fields.authors);
           if (resolved.length > 0) {
             contributors = resolved;
             contributorsChanged = true;

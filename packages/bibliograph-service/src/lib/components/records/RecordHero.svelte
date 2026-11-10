@@ -1,4 +1,8 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/animated-image/animated-image.js";
+  import "@awesome.me/webawesome/dist/components/avatar/avatar.js";
+  import "@awesome.me/webawesome/dist/components/badge/badge.js";
+  import "@awesome.me/webawesome/dist/components/tag/tag.js";
   // Hero band shared by the record detail pages: optional poster, tracker-style
   // kicker, headline, chips and a byline of contributor avatars.
   import { initialsFromUri, type Chip, type Person } from "$lib/record-page";
@@ -29,7 +33,8 @@
       {#if poster.animated}
         <wa-animated-image src={poster.src} alt=""></wa-animated-image>
       {:else}
-        <img src={poster.src} alt="" loading="lazy" />
+        <!-- The LCP element on a record page: it must not wait for layout. -->
+        <img src={poster.src} alt="" fetchpriority="high" decoding="async" />
       {/if}
     </div>
   {/if}
@@ -89,6 +94,12 @@
     border-radius: var(--wa-border-radius-m);
     border: 1px solid var(--wa-form-control-border-color);
     box-shadow: 0 12px 28px -22px rgb(0 0 0 / 60%);
+  }
+  /* A book cover's shape is known before its bytes arrive, so reserve it: without
+     this the hero reflows the grid when the image lands. */
+  .poster img {
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
   }
   .kicker {
     margin: 0;

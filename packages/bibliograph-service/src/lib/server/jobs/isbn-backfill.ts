@@ -5,8 +5,7 @@ import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { contributors, editionIsbnEnrichment, editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
-import { UPSTREAM_TIMEOUT_MS } from '../api/timeout';
-import { resolveContributorsByName } from '../api/contributor-name-resolver';
+import { prefetchContributors } from '../api/contributor-name-resolver';
 import { searchOpenLibraryEditionsByTitle } from '../api/open-library-search';
 import { isbnIdentifier } from '../identifiers';
 import { searchGoodreadsIsbnCandidates } from '../search/goodreads-isbn';
@@ -172,7 +171,7 @@ export async function planIsbnEnrichment(
 export function defaultIsbnDeps(
   log: Logger,
   db: Db = defaultDb,
-  signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  signal?: AbortSignal,
 ): IsbnEnrichmentDeps {
   return {
     fetchGbEdition: (volumeId) => getEditionByVolumeId(volumeId, log, signal),
@@ -181,8 +180,14 @@ export function defaultIsbnDeps(
       const hits = await searchOpenLibraryEditionsByTitle(q, log, signal);
       const createdAt = new Date().toISOString();
       const items: EditionItem[] = [];
+      // One prefetch for the whole hit list instead of one lookup per hit.
+      const resolver = await prefetchContributors(
+        hits.flatMap((hit) => hit.authors),
+        'openlibrary',
+        log,
+      );
       for (const hit of hits) {
-        const contributorEntries = await resolveContributorsByName(hit.authors, 'openlibrary', log);
+        const contributorEntries = await resolver.resolve(hit.authors);
         items.push({
           uri: `https://openlibrary.org${hit.key}`,
           title: hit.title,

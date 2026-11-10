@@ -16,6 +16,10 @@ function needsViewer(pathname: string): boolean {
   return !(
     pathname.startsWith('/xrpc/') ||
     pathname.startsWith('/_app/') ||
+    // Cover bytes render no layout and cannot use a viewer, but neither
+    // `/image/cover?url=…` nor `/image/bookhive/{did}/{cid}` matches the asset
+    // extension allowlist, so every cover cost a `web_sessions` lookup.
+    pathname.startsWith('/image/') ||
     pathname.startsWith('/.well-known/') ||
     pathname.startsWith('/oauth-client-metadata.json') ||
     pathname === '/health' ||

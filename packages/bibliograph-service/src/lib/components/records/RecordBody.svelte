@@ -1,4 +1,7 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/avatar/avatar.js";
+  import "@awesome.me/webawesome/dist/components/card/card.js";
+  import "@awesome.me/webawesome/dist/components/tag/tag.js";
   // The metadata card shared by the record detail pages: free text, optional
   // tags, then one list per column. Callers describe their columns as data, so a
   // new record kind means new data, not new markup.
@@ -37,7 +40,9 @@
         <h2>{column.title}</h2>
         {#if column.items.length > 0}
           <ul>
-            {#each column.items as item (item.text)}
+            <!-- Two rows can legitimately share a label (duplicate identifiers),
+                 and a keyed each throws on a duplicate key. -->
+            {#each column.items as item, index (item.text + '#' + index)}
               <li>
                 {#if item.initials}
                   <wa-avatar

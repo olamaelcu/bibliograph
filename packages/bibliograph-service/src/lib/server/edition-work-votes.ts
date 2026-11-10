@@ -11,7 +11,7 @@
 // database, which matters because a wrong rule here silently rewrites the
 // catalog.
 
-import { and, asc, count, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { db as defaultDb } from './db/index';
 import { editionWorkVotes, editions, works } from './db/schema';
 import type { DbExecutor } from './stats';
@@ -155,37 +155,84 @@ export function decideConsensus(
 }
 
 export async function tallyVotes(editionUri: string, db: DbExecutor = defaultDb): Promise<VoteTally> {
-  const linkRows = await db
-    .select({ workUri: editionWorkVotes.workUri, c: count() })
+  // One statement. This used to be three aggregates over the same slice, run
+  // back to back on every edition page and after every vote: the left join
+  // answers "does this work still exist" in the same pass that counts.
+  const rows = await db
+    .select({
+      workUri: editionWorkVotes.workUri,
+      action: editionWorkVotes.action,
+      workExists: sql<boolean>`(${works.uri} IS NOT NULL)`,
+      c: count(),
+    })
     .from(editionWorkVotes)
-    .innerJoin(works, eq(works.uri, editionWorkVotes.workUri))
-    .where(and(eq(editionWorkVotes.editionUri, editionUri), eq(editionWorkVotes.action, 'link')))
-    .groupBy(editionWorkVotes.workUri)
-    .orderBy(desc(count()), asc(editionWorkVotes.workUri));
+    .leftJoin(works, eq(works.uri, editionWorkVotes.workUri))
+    .where(eq(editionWorkVotes.editionUri, editionUri))
+    .groupBy(editionWorkVotes.workUri, editionWorkVotes.action, sql`(${works.uri} IS NOT NULL)`);
 
-  const [unlinkRow] = await db
-    .select({ c: count() })
-    .from(editionWorkVotes)
-    .where(and(eq(editionWorkVotes.editionUri, editionUri), eq(editionWorkVotes.action, 'unlink')));
+  const links: Array<{ workUri: string; count: number }> = [];
+  let unlinkCount = 0;
+  let ignoredUnknownWork = 0;
+  for (const row of rows) {
+    const votes = Number(row.c);
+    if (row.action === 'unlink') {
+      unlinkCount += votes;
+      continue;
+    }
+    if (row.action !== 'link' || !row.workUri) continue;
+    // A link to a work the catalog does not hold is ignored by the rule, but
+    // reported, so an operator can see votes that will never count.
+    if (row.workExists) links.push({ workUri: row.workUri, count: votes });
+    else ignoredUnknownWork += votes;
+  }
+  // Most-agreed first, then by uri: the order the previous `orderBy` produced.
+  links.sort((a, b) => b.count - a.count || a.workUri.localeCompare(b.workUri));
 
-  const [totalLinkRow] = await db
-    .select({ c: count() })
-    .from(editionWorkVotes)
-    .where(
-      and(
-        eq(editionWorkVotes.editionUri, editionUri),
-        eq(editionWorkVotes.action, 'link'),
-        isNotNull(editionWorkVotes.workUri),
-      ),
-    );
+  return { links, unlinkCount, ignoredUnknownWork };
+}
 
-  const countedLinks = linkRows.reduce((sum, row) => sum + Number(row.c), 0);
-
-  return {
-    links: linkRows.map((row) => ({ workUri: row.workUri as string, count: Number(row.c) })),
-    unlinkCount: Number(unlinkRow?.c ?? 0),
-    ignoredUnknownWork: Number(totalLinkRow?.c ?? 0) - countedLinks,
-  };
+/**
+ * Insert or replace a whole batch of votes in one statement.
+ *
+ * The TAP batch path used to call `ingestVoteRecord` per record: up to 100 serial
+ * upserts per event page, each its own transaction. A batch that names the same
+ * (edition, voter) pair twice would fail the statement's own conflict clause, so
+ * the last write for a pair wins here.
+ */
+export async function upsertVotes(
+  votes: readonly EditionWorkVote[],
+  now: Date = new Date(),
+  db: DbExecutor = defaultDb,
+): Promise<void> {
+  if (votes.length === 0) return;
+  const byPair = new Map(
+    votes.map((vote) => [
+      `${vote.editionUri}\u0000${vote.voterDid}`,
+      {
+        editionUri: vote.editionUri,
+        voterDid: vote.voterDid,
+        action: vote.action,
+        workUri: vote.workUri ?? null,
+        workCid: vote.workCid ?? null,
+        recordUri: vote.recordUri,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]),
+  );
+  await db
+    .insert(editionWorkVotes)
+    .values([...byPair.values()])
+    .onConflictDoUpdate({
+      target: [editionWorkVotes.editionUri, editionWorkVotes.voterDid],
+      set: {
+        action: sql`excluded.action`,
+        workUri: sql`excluded.work_uri`,
+        workCid: sql`excluded.work_cid`,
+        recordUri: sql`excluded.record_uri`,
+        updatedAt: now,
+      },
+    });
 }
 
 /** Insert or replace a voter's vote. One row per (edition, voter). */

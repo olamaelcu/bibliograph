@@ -1,8 +1,8 @@
 import type { Logger } from 'pino';
-import { UPSTREAM_TIMEOUT_MS } from './timeout';
 import { withRetry } from './retry';
 import { wikidataBreaker } from './breakers';
 import { searchProviderRequestsTotal } from '../metrics';
+import { requestJson } from '../http/client';
 import { identifierKey, PROVIDER_IDENTIFIER_DOMAINS, providerIdentifier, type Identifier } from '../identifiers';
 
 /**
@@ -15,7 +15,6 @@ import { identifierKey, PROVIDER_IDENTIFIER_DOMAINS, providerIdentifier, type Id
  * about at all: there is nothing to join on.
  */
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
-const UA = 'Bibliograph/0.1 (https://biblio.livtet.olamaelcu.net)';
 
 /** Max `VALUES` bindings per query: keeps each query inside Wikidata's ~15s budget. */
 const CHUNK_SIZE = 50;
@@ -138,26 +137,26 @@ async function fetchChunk(
   const start = performance.now();
   try {
     const body = await throttled(() =>
-      withRetry(async () => {
-        const res = await fetch(SPARQL_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'user-agent': UA,
-            accept: 'application/sparql-results+json',
-            'content-type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({ query: buildQuery(qids) }).toString(),
-          signal: externalSignal ?? AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          const err = new Error(`wikidata ${res.status}: ${text.slice(0, 200)}`) as Error & { status: number };
-          err.status = res.status;
-          throw err;
-        }
-        return (await res.json()) as SparqlResponse;
-      }, log),
+      withRetry(
+        () =>
+          requestJson<SparqlResponse>(SPARQL_ENDPOINT, {
+            method: 'POST',
+            headers: {
+              accept: 'application/sparql-results+json',
+              'content-type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({ query: buildQuery(qids) }).toString(),
+            signal: externalSignal,
+          }),
+        log,
+      ),
     );
+
+    if (!body) {
+      wikidataBreaker.recordFailure();
+      searchProviderRequestsTotal.inc({ provider: 'wikidata', status: 'failure' });
+      return resolved;
+    }
 
     const found = parseCandidates(body.results?.bindings ?? []);
     for (const [qid, candidate] of found) resolved.set(qid, { qid, identifiers: toIdentifiers(candidate) });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/callout/callout.js";
   let { data, form }: { data: { next: string; error: string | null }; form?: { error?: string; handle?: string } } = $props();
   const error = $derived(form?.error ?? data.error);
 </script>

@@ -52,6 +52,8 @@ import { invalidContributorResponsesTotal } from './metrics';
 import { accessLog } from './access-log';
 import type { Logger } from 'pino';
 import { pdsClient, resolvePds } from './pds/resolve.js';
+import { stat } from 'node:fs/promises';
+import { mapWithConcurrency } from './pds/fanout';
 import { readCar, MemoryBlockstore, MST, formatDataKey, parseObjByDef, def } from '@atproto/repo';
 import { cidForLex, decode as cborDecode } from '@atproto/lex-cbor';
 import { BlockMap, blocksToCarFile } from '@atproto/repo';
@@ -64,7 +66,7 @@ import { IsbndbSource } from './search/isbndb-source';
 import { GoodreadsSource } from './search/goodreads-source';
 import { IsbndbEnricher, IsbndbWorkEnricher } from './search/isbndb-enricher';
 import { WikidataEditionEnricher } from './search/wikidata-enricher';
-import { AuthorWikipediaEnricher } from './search/wikipedia-enricher';
+
 import { SearchService } from './search/service';
 import { eq, inArray, and, gt, sql } from 'drizzle-orm';
 import { db } from './db';
@@ -120,7 +122,7 @@ import {
   isBhRkey,
 } from './bookhive/keys';
 import { BOOKHIVE_BACKLINK_SOURCE, normalizeBookhiveBook, shelfForBookhiveStatus } from './bookhive/records';
-import { enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
+import { enqueueContributorImageBackfill, enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
 import { contributorRecordValue, publisherRecordValue, workRecordValue } from './book-records';
 import { contributorUrisFor, loadContributorRefs } from './contributor-refs';
 import { wireContributors } from './book-wire';
@@ -146,7 +148,6 @@ const goodreadsSource = new GoodreadsSource(log);
 const googleBooksEnricher = new GoogleBooksEnricher();
 const isbndbEnricher = new IsbndbEnricher();
 const isbndbWorkEnricher = new IsbndbWorkEnricher();
-const authorWikipediaEnricher = new AuthorWikipediaEnricher();
 const wikidataEditionEnricher = new WikidataEditionEnricher();
 const searchService = new SearchService(
   {
@@ -157,7 +158,6 @@ const searchService = new SearchService(
     googleBooks: googleBooksEnricher,
     isbndbEnricher,
     isbndbWorkEnricher,
-    authorWikipedia: authorWikipediaEnricher,
     wikidataEdition: wikidataEditionEnricher,
   },
   log,
@@ -173,8 +173,12 @@ function rateLimitMiddleware(log: Logger) {
     const nsid = m?.[1] ?? null;
     if (!nsid) return next(request);
     const ip =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
       request.headers.get('x-real-ip') ??
+      // The last hop is the one our own proxy appended; the first is whatever the
+      // caller sent (`debian/bibliograph-platform.nginx` uses
+      // `$proxy_add_x_forwarded_for`). Keying on the first hop let any client
+      // mint a fresh bucket per request and skip the limiter entirely.
+      request.headers.get('x-forwarded-for')?.split(',').at(-1)?.trim() ??
       '0.0.0.0';
     if (!allowRequest(ip, nsid)) {
       log.warn({ ip, nsid }, 'rate limited');
@@ -413,23 +417,57 @@ router.addQuery(ComAtprotoSyncGetLatestCommit.mainSchema, {
   },
 });
 
+/** Shape `readCar` resolves to; the package exports the function without a name for it. */
+interface ParsedCar {
+  roots: Cid[];
+  blocks: BlockMap;
+}
+
+/** The parsed repo plus the cid index `sync.getBlocks` answers from. */
+interface ParsedRepoIndex {
+  parsed: ParsedCar;
+  byString: Map<string, Cid>;
+}
+
+let parsedRepo: (ParsedRepoIndex & {
+  key: string;
+}) | undefined;
+
+/**
+ * The published repo CAR, parsed once per build.
+ *
+ * `sync.getBlocks` re-read and re-parsed every block of `full.car` on each call —
+ * decompressing the whole repo and mapping all of its cids — to answer for the
+ * handful the caller asked about. The artifact only changes when the lexicon repo
+ * is rebuilt, so the parse is cached under the file's size and mtime.
+ */
+async function parsedFullRepo(): Promise<ParsedRepoIndex | null> {
+  const file = await readFullRepoCar();
+  if (!file) return null;
+  const stats = await stat(fullRepoPath()).catch(() => null);
+  const key = stats ? `${stats.size}:${stats.mtimeMs}` : String(file.body.byteLength);
+  if (parsedRepo?.key === key) return parsedRepo;
+  const parsed = await readCar(file.body);
+  // `blocks.get` takes a Cid, so index the parsed repo by its string form and let
+  // unknown CIDs fall through: the lexicon allows omitting missing blocks.
+  const byString = new Map<string, Cid>();
+  for (const cid of parsed.blocks.cids()) byString.set(cid.toString(), cid);
+  parsedRepo = { key, parsed, byString };
+  return parsedRepo;
+}
+
 router.addQuery(ComAtprotoSyncGetBlocks.mainSchema, {
   async handler({ params }) {
     if (!resolveDid(params.did)) {
       return notFoundResponse('RepoNotFound', `repo "${params.did}" is not hosted`);
     }
-    const file = await readFullRepoCar();
-    if (!file) return notFoundResponse('RepoNotFound', 'no full.car published yet');
-    const parsed = await readCar(file.body);
-    // `blocks.get` takes a Cid, so index the parsed repo by its string form and
-    // let unknown CIDs fall through: the lexicon allows omitting missing blocks.
-    const byString = new Map<string, Cid>();
-    for (const cid of parsed.blocks.cids()) byString.set(cid.toString(), cid);
+    const repo = await parsedFullRepo();
+    if (!repo) return notFoundResponse('RepoNotFound', 'no full.car published yet');
     const subset = new BlockMap();
     for (const cidStr of params.cids) {
-      const cid = byString.get(cidStr);
+      const cid = repo.byString.get(cidStr);
       if (!cid) continue;
-      const bytes = parsed.blocks.get(cid);
+      const bytes = repo.parsed.blocks.get(cid);
       if (bytes) subset.set(cid, bytes);
     }
     // Response CAR carries no root: `blocksToCarFile` emits a valid empty-roots
@@ -517,20 +555,20 @@ async function serveBookRecordFromDb(
   const cid = await cidForLex(value as unknown as LexMap);
   return json({ uri, cid: cid.toString(), value } as unknown as ComAtprotoRepoGetRecord.$output);
 }
-
+/** Collections `com.atproto.repo.getRecord` answers from Postgres instead of the CAR. */
+const BOOK_COLLECTIONS: Record<string, true> = {
+  'community.lexicon.book.edition': true,
+  'community.lexicon.book.work': true,
+  'community.lexicon.book.contributor': true,
+  'community.lexicon.book.publisher': true,
+};
 
 router.addQuery(ComAtprotoRepoGetRecord.mainSchema, {
   async handler({ params }) {
     if (!resolveDid(params.repo)) {
       return notFoundResponse('RepoNotFound', `repo "${params.repo}" is not hosted`);
     }
-    const BOOK_COLLECTIONS = new Set([
-      'community.lexicon.book.edition',
-      'community.lexicon.book.work',
-      'community.lexicon.book.contributor',
-      'community.lexicon.book.publisher',
-    ]);
-    if (BOOK_COLLECTIONS.has(params.collection)) {
+    if (BOOK_COLLECTIONS[params.collection]) {
       return await serveBookRecordFromDb(params.repo, params.collection, params.rkey);
     }
     if (params.collection !== LEX_COLLECTION) {
@@ -627,6 +665,16 @@ router.addQuery(ComAtprotoRepoDescribeRepo.mainSchema, {
 // is a follow-up — these first two are simple on-read hydrations.
 
 const PDS_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * How many per-record PDS reads one request keeps in flight.
+ *
+ * The backlink tiers fan out one read per record, and a sequential loop turned a
+ * full page into that many serial round trips. Six is conservative on purpose:
+ * a shared PDS rate-limits aggressive callers, and the tier only runs when the
+ * local mirror cannot answer.
+ */
+const PDS_FETCH_CONCURRENCY = 6;
 
 interface PdsRecordResponse {
   uri: string;
@@ -963,22 +1011,23 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelves.mainSchema, {
       }
 
       const offset = resume?.tier === 'tap' ? Number.parseInt(resume.value, 10) || 0 : 0;
-      const cacheRows = await db
-        .select()
-        .from(records)
-        .where(
-          and(
-            eq(records.did, did as string),
-            eq(records.collection, 'net.olamaelcu.livtet.biblio.shelf'),
-          ),
-        )
-        // Offset paging needs a total order to be stable across requests.
-        .orderBy(newestRecordFirst())
-        .limit(limit + 1)
-        .offset(offset);
       // Mirror fallback for a failed PDS scan, and the source for legacy
-      // `tap:` continuations.
+      // `tap:` continuations. The query belongs inside this branch: a first page
+      // whose PDS scan succeeded used to run it only to discard the rows.
       if (!pdsSucceeded && (!resume || resume.tier === 'tap')) {
+        const cacheRows = await db
+          .select()
+          .from(records)
+          .where(
+            and(
+              eq(records.did, did as string),
+              eq(records.collection, 'net.olamaelcu.livtet.biblio.shelf'),
+            ),
+          )
+          // Offset paging needs a total order to be stable across requests.
+          .orderBy(newestRecordFirst())
+          .limit(limit + 1)
+          .offset(offset);
         const hasMore = cacheRows.length > limit;
         const merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
         shelves = merged.map((row) => shelfViewFromValue(row.uri, row.value));
@@ -1113,7 +1162,44 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
 
 router.addQuery(NetOlamaelcuLivtetBiblioGetImageForContributor.mainSchema, {
   async handler({ params }) {
-    return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForContributor.$output);
+    const uri = params.uri as string;
+    // Same shape check as getEditionsByContributor: a caller passing an author
+    // name, or another collection's uri, gets a clear answer instead of an
+    // empty body it cannot tell apart from "this author has no portrait".
+    if (!uri.startsWith('at://') || !uri.includes(`/${CONTRIBUTOR_COLLECTION}/`)) {
+      return Response.json(
+        { error: 'InvalidContributor', message: `not a ${CONTRIBUTOR_COLLECTION} at-uri: ${uri}` },
+        { status: 400 },
+      );
+    }
+    const rows = await db
+      .select({
+        uri: contributors.uri,
+        imageUrl: contributors.imageUrl,
+        imageCheckedAt: contributors.imageCheckedAt,
+      })
+      .from(contributors)
+      .where(eq(contributors.uri, uri))
+      .limit(1);
+    const row = rows[0];
+    if (!row) {
+      return Response.json({ error: 'RecordNotFound', message: `no contributor at ${uri}` }, { status: 404 });
+    }
+    if (row.imageUrl) return json({ url: row.imageUrl } as NetOlamaelcuLivtetBiblioGetImageForContributor.$output);
+    // Nothing stored yet: ask the resolver once (deduped by jobKey) and answer
+    // empty so the client renders initials until the portrait exists. A row the
+    // resolver already stamped as checked is NOT re-enqueued — that is what
+    // keeps a contributor with no portrait from costing a Commons lookup per
+    // page render.
+    if (!row.imageCheckedAt) {
+      void enqueueContributorImageBackfill(row.uri).catch((err) => {
+        log.warn(
+          { err, uri: row.uri, stage: 'getImageForContributor.enqueue' },
+          'contributor image backfill enqueue failed',
+        );
+      });
+    }
+    return json({} as NetOlamaelcuLivtetBiblioGetImageForContributor.$output);
   },
 });
 
@@ -1122,6 +1208,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
     const bookUri = params.book as string;
     const { did, limit = 50, cursor } = params;
     try {
+      // The lexicon declares `cursor`, so a paging caller sends one. Without
+      // applying it here the mirror re-read the same first page forever; the
+      // offset keeps the mirror's order total by sorting on the record uri.
+      const offset = Number.parseInt(cursor ?? '0', 10) || 0;
       const cacheRows = await db
         .select()
         .from(records)
@@ -1132,6 +1222,8 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
             sql`${records.value}->'book'->>'uri' = ${bookUri}`,
           ),
         )
+        .orderBy(records.uri)
+        .offset(offset)
         .limit(limit + 1);
       const hasMore = cacheRows.length > limit;
       let merged = hasMore ? cacheRows.slice(0, limit) : cacheRows;
@@ -1147,10 +1239,17 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
         if (backlinks.records.length > 0) {
           tier = 'constellation';
           const seen = new Set(merged.map((r) => r.uri));
-          for (const bl of backlinks.records) {
-            if (seen.has(bl.uri)) continue;
-            const row = await fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
-            if (row) merged.push(row);
+          // One read per record, a bounded number in flight: the loop used to
+          // pay a full PDS round trip, serially, for every backlink.
+          const wanted = backlinks.records
+            .filter((bl) => !seen.has(bl.uri))
+            .slice(0, Math.max(limit - merged.length, 0));
+          const rows = await mapWithConcurrency(wanted, PDS_FETCH_CONCURRENCY, (bl) =>
+            fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS)),
+          );
+          for (const row of rows) {
+            if (!row) continue;
+            merged.push(row);
             if (merged.length >= limit) break;
           }
           if (backlinks.cursor && merged.length >= limit) {
@@ -1207,17 +1306,24 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetShelvingOfBook.mainSchema, {
           limit,
         });
         const seen = new Set(merged.map((r) => r.uri));
-        for (const ref of backlinks.records) {
-          if (seen.has(ref.uri) || merged.length >= limit) continue;
-          const row = await fetchBookhiveBookRecord(ref.uri, ref.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
+        const wanted = backlinks.records
+          .filter((ref) => !seen.has(ref.uri))
+          .slice(0, Math.max(limit - merged.length, 0));
+        const rows = await mapWithConcurrency(wanted, PDS_FETCH_CONCURRENCY, (ref) =>
+          fetchBookhiveBookRecord(ref.uri, ref.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS)),
+        );
+        for (const row of rows) {
           if (!row) continue;
           if (!normalizeBookhiveBook(row.value).shelf) continue;
           merged.push(row);
+          if (merged.length >= limit) break;
         }
       }
 
       const bookShelves = await hydrateBookShelves(merged, bookUri);
-      const outCursor = tier === 'tap' && hasMore ? String(merged.length) : undefined;
+      // The offset advances by what this page actually returned, not by `limit`:
+      // hydration drops rows whose edition left the catalog.
+      const outCursor = tier === 'tap' && hasMore ? String(offset + merged.length) : undefined;
       return json({ bookShelves, cursor: outCursor } as NetOlamaelcuLivtetBiblioGetShelvingOfBook.$output);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1383,12 +1489,14 @@ router.addQuery(NetOlamaelcuLivtetBiblioListBooksOnShelf.mainSchema, {
           limit,
           cursor: atCursor,
         });
-        const rows: Array<typeof records.$inferSelect> = [];
-        for (const bl of backlinks.records) {
-          if (rows.length >= limit) break;
-          const row = await fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
-          if (row) rows.push(row);
-        }
+        const fetched = await mapWithConcurrency(
+          backlinks.records.slice(0, limit),
+          PDS_FETCH_CONCURRENCY,
+          (bl) => fetchBookShelvingRecord(bl.uri, bl.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS)),
+        );
+        const rows = fetched
+          .filter((row): row is typeof records.$inferSelect => row !== null)
+          .slice(0, limit);
         return { rows, cursor: backlinks.cursor };
       };
 
@@ -1599,11 +1707,14 @@ async function hydrateShelfItemsForBook(
     hydrateBooksByUri([bookUri]),
   ]);
 
-  for (const shelfUri of shelfUris) {
-    if (shelfMap.has(shelfUri)) continue;
-    const fromPds = await fetchShelfViewFromPds(shelfUri, did);
-    shelfMap.set(shelfUri, fromPds ?? shelfViewFromValue(shelfUri, undefined));
-  }
+  // One read per shelf that the mirror does not hold, bounded in flight.
+  const missingShelfUris = shelfUris.filter((uri) => !shelfMap.has(uri));
+  const pdsShelves = await mapWithConcurrency(missingShelfUris, PDS_FETCH_CONCURRENCY, (uri) =>
+    fetchShelfViewFromPds(uri, did),
+  );
+  missingShelfUris.forEach((uri, index) => {
+    shelfMap.set(uri, pdsShelves[index] ?? shelfViewFromValue(uri, undefined));
+  });
 
   let bookView = bookMap.get(bookUri);
   if (!bookView) {
@@ -1695,7 +1806,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioListShelfItems.mainSchema, {
       // to the mirror until its TAP delete is consumed, so a removed book would
       // otherwise remain on the shelf on every immediate reload. The mirror
       // stays the fallback when the PDS scan cannot answer.
-      if (!resume || resume.tier === 'tap') {
+      // Only a first page scans the PDS. A `tap:` continuation belongs to the
+      // mirror, and re-entering the scan restarted it from page one and handed
+      // the caller a duplicate page tagged with a `pds:` cursor.
+      if (!resume) {
         try {
           const { rows, cursor: next } = await scanPds();
           return json({
@@ -2454,9 +2568,13 @@ async function collectBookhiveReviews(params: {
     limit: params.limit,
   });
   const reviews: BookReviewView[] = [];
-  for (const ref of backlinks.records) {
+  const fetched = await mapWithConcurrency(
+    backlinks.records.slice(0, params.limit),
+    PDS_FETCH_CONCURRENCY,
+    (ref) => fetchBookhiveBookRecord(ref.uri, ref.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS)),
+  );
+  for (const row of fetched) {
     if (reviews.length >= params.limit) break;
-    const row = await fetchBookhiveBookRecord(ref.uri, ref.did, AbortSignal.timeout(PDS_READ_TIMEOUT_MS));
     if (!row) continue;
     if (!normalizeBookhiveBook(row.value).review) continue;
     reviews.push(reviewViewFromBookhiveRow(row, params.bookUri));
@@ -2891,10 +3009,6 @@ router.addQuery(getFeedSkeletonSchema, {
       return [...out];
     }
 
-    function dbToFeedPaginated(offset: number, limit: number) {
-      return { offset, limit };
-    }
-
     // ── Helper: paginate DB records ───────────────────────────────────
     async function paginateFromDb(offsetNum: number, limitNum: number) {
       const rows = await db
@@ -2918,8 +3032,11 @@ router.addQuery(getFeedSkeletonSchema, {
       const viewerDid = await viewerDidFromRequest(request, 'com.atproto.feed.getFeedSkeleton');
       let feed: Array<{ post: string; reason?: string }> = [];
       let outCursor: string | undefined;
+      /** How many authors the viewer follows here; 0 means "show the network feed". */
+      let followedCount = 0;
       if (viewerDid && (feedType === 'following' || feedType === 'extended')) {
         const ids = await feedAuthorDids(viewerDid, feedType);
+        followedCount = ids.length;
         if (ids.length > 0) {
           const reviewRows = await db.select().from(records).where(
             and(
@@ -2933,7 +3050,10 @@ router.addQuery(getFeedSkeletonSchema, {
           feed = dbToFeed(page);
         }
       }
-      if (feed.length === 0) {
+      // The network fallback belongs to a viewer who follows nobody. An empty
+      // page of a followed-users feed is the end of that feed: answering it with
+      // the global feed (and a global cursor) makes the client paginate forever.
+      if (offset === 0 && followedCount === 0) {
         const result = await paginateFromDb(offset, limit);
         feed = result.feed;
         outCursor = result.cursor;
@@ -2992,8 +3112,10 @@ router.addQuery(getFeedSkeletonSchema, {
         feed = dbToFeed(page);
       }
 
-      // Fallback to general feed if no followed authors or no results
-      if (feed.length === 0) {
+      // Fallback to the general feed only when the viewer follows nobody. An
+      // exhausted page of the personalised feed must stay empty, or a paging
+      // client is handed unrelated reviews it never terminates on.
+      if (offset === 0 && followingDids.length === 0) {
         const result = await paginateFromDb(offset, limit);
         feed = result.feed;
         outCursor = result.cursor;

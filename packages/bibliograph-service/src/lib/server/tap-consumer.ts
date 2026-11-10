@@ -95,6 +95,19 @@ export async function runTapConsumer(log: Logger): Promise<void> {
   let lastFlushAt = Date.now();
   let flushing = false;
 
+  // The backlog is a per-tick reading, not a per-event one: it costs an HTTP
+  // round trip plus a queue-depth query, and both were awaited inside the socket
+  // read loop for every event of every batch.
+  let backlogReading = 0;
+  let backlogReadAt = 0;
+  async function currentBacklog(): Promise<number> {
+    const now = Date.now();
+    if (now - backlogReadAt < TAP_BATCH_INTERVAL_MS) return backlogReading;
+    backlogReading = await tapBacklog();
+    backlogReadAt = now;
+    return backlogReading;
+  }
+
   async function flushBuffers(): Promise<void> {
     if (upsertBuffer.length === 0 && deleteBuffer.length === 0) return;
     if (flushing) return;
@@ -207,7 +220,7 @@ export async function runTapConsumer(log: Logger): Promise<void> {
       // are behind — `/channel` has no cursor, so an unacked event is precisely
       // what waits — and our job table is the backstop for a build that does not
       // publish stats.
-      const backlog = await tapBacklog();
+      const backlog = await currentBacklog();
       if (backlog > TAP_QUEUE_DEPTH_THRESHOLD) {
         log.warn({ stage: 'tap-consumer', backlog, threshold: TAP_QUEUE_DEPTH_THRESHOLD }, 'backlog over threshold; skipping event (TAP will redeliver)');
         continue;

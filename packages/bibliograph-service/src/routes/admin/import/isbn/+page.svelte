@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/callout/callout.js";
   import type { EditionItem, Identifier } from '$lib/server/search/types';
 
   let {

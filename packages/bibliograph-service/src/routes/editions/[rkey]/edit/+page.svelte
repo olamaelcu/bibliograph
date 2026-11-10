@@ -1,4 +1,8 @@
 <script lang="ts">
+  import "@awesome.me/webawesome/dist/components/button/button.js";
+  import "@awesome.me/webawesome/dist/components/callout/callout.js";
+  import "@awesome.me/webawesome/dist/components/checkbox/checkbox.js";
+  import "@awesome.me/webawesome/dist/components/textarea/textarea.js";
   // Editing is a librarian-only operation; the server load already refused
   // anonymous visitors and accounts without the "librarian" label.
   // `community.lexicon.book.defs#identifier`: `type` is a global token (`isbn`)

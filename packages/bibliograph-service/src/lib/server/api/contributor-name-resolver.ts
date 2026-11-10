@@ -1,5 +1,5 @@
 import type { Logger } from 'pino';
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { cidForLex } from '@atproto/lex-cbor';
 import type { LexMap } from '@atproto/lex-data';
 import { db } from '../db';
@@ -47,45 +47,36 @@ function identifierFor(name: string, source: ContributorSource): Identifier {
   return providerIdentifier(source, `${source}://contributor/${slugify(name)}`);
 }
 
-async function lookupByName(
-  name: string,
-  source: ContributorSource,
-): Promise<{ uri: string; cid: string } | null> {
-  // Match by slug-derived rkey: the slug function is deterministic on
-  // trimmed/lowercase input, so this hits the same row we'd stub-create.
-  const rkey = rkeyFor(name, source);
-  const uri = uriFor(rkey);
-  const [row] = await db
-    .select({ uri: contributors.uri, cid: contributors.cid })
-    .from(contributors)
-    .where(eq(contributors.uri, uri))
-    .limit(1);
-  if (row) return row;
-  // Fall back to case-insensitive name match across sources so a Google
-  // Books author and the same-named ISBNdb author resolve to the same row
-  // when a real-OL equivalent already exists.
-  const [nameRow] = await db
-    .select({ uri: contributors.uri, cid: contributors.cid })
-    .from(contributors)
-    .where(sql`lower(${contributors.name}) = lower(${name})`)
-    .limit(1);
-  return nameRow ?? null;
+interface ResolvedRef {
+  uri: string;
+  cid: string;
 }
 
-async function stubContributor(
+/** Bind-parameter ceiling for one `= any(...)` list; Postgres allows 65,535. */
+const NAME_CHUNK = 1_000;
+
+function chunked<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * The row a stub contributor would persist, and the cid derived from it.
+ *
+ * `cidForLex` is computed over the lexicon-shaped value so the strongRef the
+ * caller publishes matches what the ingest path stores for the same record.
+ * `createdAt` is truncated to second precision so two concurrent stubs for one
+ * name hash to the same cid instead of fighting each other on write.
+ */
+async function buildStub(
   name: string,
   source: ContributorSource,
-  log: Logger,
-): Promise<{ uri: string; cid: string }> {
+): Promise<{ ref: ResolvedRef; row: typeof contributors.$inferInsert }> {
   const rkey = rkeyFor(name, source);
   const uri = uriFor(rkey);
   const identifier = identifierFor(name, source);
-  // Second-precision createdAt so two concurrent stubs for the same name
-  // hash to the same cid and don't fight each other on disk.
   const createdAt = new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
-
-  // cidForLex is computed over the lexicon-shaped value so the persisted
-  // strongRef matches what ingestContributorBatch will store on disk.
   const value = {
     $type: 'community.lexicon.book.contributor' as const,
     name,
@@ -98,78 +89,202 @@ async function stubContributor(
     createdAt,
   };
   const cid = (await cidForLex(value as unknown as LexMap)).toString();
-
-  // Synchronous upsert so the next resolveContributorsByName call for the
-  // same name hits the DB row instead of stubbing a fresh one. Fire-and-
-  // forget queue ingestion handles the PDS write + indexedAt refresh.
-  try {
-    await db
-      .insert(contributors)
-      .values({
-        uri,
-        cid,
-        did: PUBLISHER_DID,
-        rkey,
-        name,
-        aliases: [],
-        linkedDid: null,
-        bio: null,
-        bornYear: null,
-        diedYear: null,
-        identifiers: [identifier],
-        createdAt: new Date(createdAt),
-      })
-      .onConflictDoUpdate({
-        target: contributors.uri,
-        set: { cid, name, identifiers: [identifier], indexedAt: new Date() },
-      });
-  } catch (err) {
-    log.warn(
-      { stage: 'resolve-name-contributor', uri, err: String(err) },
-      'stub contributor upsert failed; continuing with computed cid',
-    );
-  }
-
-  return { uri, cid };
+  return {
+    ref: { uri, cid },
+    row: {
+      uri,
+      cid,
+      did: PUBLISHER_DID,
+      rkey,
+      name,
+      aliases: [],
+      linkedDid: null,
+      bio: null,
+      bornYear: null,
+      diedYear: null,
+      identifiers: [identifier],
+      createdAt: new Date(createdAt),
+    },
+  };
 }
 
 /**
- * Resolve a list of plain-text author names (from Google Books, ISBNdb,
- * Goodreads, OpenLibrary search or the Bookhive catalog — none of which exposes
- * stable author IDs) into `ContributionEntry` strongRefs that point at
- * `community.lexicon.book.contributor` records in biblio.
- *
- * Each name is looked up by deterministic slug-derived rkey, then by
- * case-insensitive `name` match across sources. On miss a stub contributor
- * row is computed (cid derived via `cidForLex`) and upserted synchronously; its
- * uri+cid is returned. The row is what serving and matching read — the current
- * ingest path persists records in Postgres, and no queue task publishes
- * contributors (the OpenLibrary-fed ingest was removed in 0.4.0).
- *
- * The function never throws: malformed/empty inputs are skipped with a warn
- * log so the surrounding edition/work build can still succeed.
+ * Resolve one name on its own: the same three phases the prefetch runs for a
+ * page, for the rare caller that names an author the prefetch never saw.
  */
-export async function resolveContributorsByName(
+async function resolveOne(
+  name: string,
+  source: ContributorSource,
+  log: Logger,
+): Promise<ResolvedRef> {
+  const uri = uriFor(rkeyFor(name, source));
+  const [byUri] = await db
+    .select({ uri: contributors.uri, cid: contributors.cid })
+    .from(contributors)
+    .where(eq(contributors.uri, uri))
+    .limit(1);
+  if (byUri) return byUri;
+
+  const [byName] = await db
+    .select({ uri: contributors.uri, cid: contributors.cid })
+    .from(contributors)
+    .where(sql`lower(${contributors.name}) = lower(${name})`)
+    .limit(1);
+  if (byName) return byName;
+
+  const stub = await buildStub(name, source);
+  try {
+    await db
+      .insert(contributors)
+      .values(stub.row)
+      .onConflictDoUpdate({
+        target: contributors.uri,
+        set: {
+          cid: stub.ref.cid,
+          name,
+          identifiers: stub.row.identifiers,
+          indexedAt: new Date(),
+        },
+      });
+  } catch (err) {
+    log.warn(
+      { stage: 'resolve-name-contributor', uri: stub.ref.uri, err: String(err) },
+      'stub contributor upsert failed; continuing with computed cid',
+    );
+  }
+  return stub.ref;
+}
+
+/**
+ * Resolves names already carried by a `ContributorResolver`, each of which the
+ * prefetch answered in a bound number of queries for the whole page.
+ */
+export interface ContributorResolver {
+  resolve(names: readonly string[]): Promise<ContributionEntry[]>;
+}
+
+/**
+ * Resolve a whole page of plain-text author names in one pass.
+ *
+ * Names arrive from Google Books, ISBNdb, Goodreads, OpenLibrary search and the
+ * Bookhive catalog — none of which exposes stable author IDs — so each is looked
+ * up by its deterministic slug-derived rkey, then by case-insensitive `name`
+ * across sources, and stubbed (with a lexicon-derived cid) when neither hits.
+ *
+ * Doing this per name cost 1–3 round trips each: a 40-volume Google Books page
+ * issued 40–120 of them before any enrichment ran, all against a pool of ten.
+ * This function answers the same question with one query per key shape plus one
+ * multi-row upsert for the stubs, and the returned resolver is then a map read.
+ *
+ * The prefetch never throws: malformed/empty names are skipped, and a failed
+ * stub write logs and still answers with the computed cid, so the surrounding
+ * edition/work build can succeed.
+ */
+export async function prefetchContributors(
   names: readonly string[],
   source: ContributorSource,
   log: Logger,
-): Promise<ContributionEntry[]> {
-  const entries: ContributionEntry[] = [];
+): Promise<ContributorResolver> {
+  /** lower(name) → the name as first seen, so the stub keeps its spelling. */
+  const wanted = new Map<string, string>();
   for (const raw of names) {
     const name = raw?.trim();
     if (!name) continue;
-    try {
-      let resolved = await lookupByName(name, source);
-      if (!resolved) {
-        resolved = await stubContributor(name, source, log);
+    const key = name.toLowerCase();
+    if (!wanted.has(key)) wanted.set(key, name);
+  }
+
+  const resolved = new Map<string, ResolvedRef>();
+  if (wanted.size > 0) {
+    // Pass 1: the deterministic rkey means the uri alone identifies the row.
+    const uriByKey = new Map<string, string>();
+    for (const [key, name] of wanted) uriByKey.set(key, uriFor(rkeyFor(name, source)));
+    const uriRows = await db
+      .select({ uri: contributors.uri, cid: contributors.cid })
+      .from(contributors)
+      .where(inArray(contributors.uri, [...uriByKey.values()]));
+    const cidByUri = new Map(uriRows.map((row) => [row.uri, row.cid]));
+    const pending: string[] = [];
+    for (const [key, uri] of uriByKey) {
+      const cid = cidByUri.get(uri);
+      if (cid !== undefined) resolved.set(key, { uri, cid });
+      else pending.push(key);
+    }
+
+    // Pass 2: a case-insensitive name match across sources, so a Google Books
+    // author and the same-named ISBNdb author share the row that already exists.
+    for (const chunk of chunked(pending, NAME_CHUNK)) {
+      const nameRows: Array<{ uri: string; cid: string; name: string }> = [];
+      for (const part of chunked(chunk, NAME_CHUNK)) {
+        nameRows.push(
+          ...(await db
+            .select({ uri: contributors.uri, cid: contributors.cid, name: contributors.name })
+            .from(contributors)
+            .where(inArray(sql`lower(${contributors.name})`, part))),
+        );
       }
-      entries.push({ subject: resolved, role: 'author' });
-    } catch (err) {
-      log.warn(
-        { stage: 'resolve-name-contributor', name, err: String(err) },
-        'skip malformed contributor name',
-      );
+      const byName = new Map(nameRows.map((row) => [row.name.toLowerCase(), row]));
+      for (const key of chunk) {
+        const hit = byName.get(key);
+        if (hit) resolved.set(key, { uri: hit.uri, cid: hit.cid });
+      }
+    }
+
+    // Pass 3: stub whatever is left, in one upsert. The rows are written
+    // synchronously so the next page's prefetch reads them instead of stubbing
+    // again; a failure is logged and the computed cid still answers.
+    const stubs = await Promise.all(
+      [...wanted].filter(([key]) => !resolved.has(key)).map(async ([key, name]) => ({ key, ...(await buildStub(name, source)) })),
+    );
+    for (const stub of stubs) resolved.set(stub.key, stub.ref);
+    if (stubs.length > 0) {
+      try {
+        await db
+          .insert(contributors)
+          .values(stubs.map((stub) => stub.row))
+          .onConflictDoUpdate({
+            target: contributors.uri,
+            set: {
+              cid: sql`excluded.cid`,
+              name: sql`excluded.name`,
+              identifiers: sql`excluded.identifiers`,
+              indexedAt: new Date(),
+            },
+          });
+      } catch (err) {
+        log.warn(
+          { stage: 'resolve-name-contributor', count: stubs.length, err: String(err) },
+          'stub contributor upsert failed; continuing with computed cids',
+        );
+      }
     }
   }
-  return entries;
+
+  return {
+    async resolve(list: readonly string[]): Promise<ContributionEntry[]> {
+      const entries: ContributionEntry[] = [];
+      for (const raw of list) {
+        const name = raw?.trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        let ref = resolved.get(key);
+        if (!ref) {
+          // A caller passed a name the prefetch never saw. Resolve just that one
+          // rather than dropping the author: a missing contributor is a wrong
+          // record, and this path is rare by construction.
+          try {
+            ref = await resolveOne(name, source, log);
+          } catch (err) {
+            log.warn(
+              { stage: 'resolve-name-contributor', name, err: String(err) },
+              'skip malformed contributor name',
+            );
+            continue;
+          }
+        }
+        entries.push({ subject: { uri: ref.uri, cid: ref.cid }, role: 'author' });
+      }
+      return entries;
+    },
+  };
 }

@@ -211,6 +211,20 @@
       "when": 1795259200005,
       "tag": "0031_editions_contributors_gin",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795345600005,
+      "tag": "0032_isbndb_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795432000005,
+      "tag": "0033_perf_indexes_round2",
+      "breakpoints": true
     }
   ]
 }

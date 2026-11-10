@@ -1,7 +1,6 @@
 import type { Logger } from 'pino';
 import { fetchJson } from './fetch-json';
 import { openLibraryBreaker } from './breakers';
-import { UPSTREAM_TIMEOUT_MS } from './timeout';
 
 /** Work search: title → the works a title could mean, with author names. */
 const WORK_SEARCH_URL = 'https://openlibrary.org/search.json';
@@ -47,7 +46,7 @@ function stringList(value: unknown): string[] {
 async function editionsForWork(
   workKey: string,
   log: Logger,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<OlEditionDoc[]> {
   const url = new URL(`https://openlibrary.org${workKey}/editions.json`);
   url.searchParams.set('limit', String(EDITIONS_PER_WORK));
@@ -72,7 +71,7 @@ async function editionsForWork(
 export async function searchOpenLibraryEditionsByTitle(
   query: string,
   log: Logger,
-  signal: AbortSignal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  signal?: AbortSignal,
   limit = 8,
 ): Promise<OlEditionHit[]> {
   const trimmed = query.trim();
