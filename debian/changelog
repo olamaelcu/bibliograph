@@ -1,3 +1,24 @@
+bibliograph (0.5.21) unstable; urgency=medium
+
+  * `net.olamaelcu.livtet.biblio.searchActors` exposes the reader directory the
+    Livtet search page needs: accounts the AppView holds at least one record
+    for, filtered by handle/display-name substring, exact DID, and an
+    OR-semantics `hasRecords` list of collections. Both predicates run in one
+    WHERE, so pagination and `hasMore` are correct at the page boundary.
+  * `actors` (migration `0034`) is the read model behind it: a table, not a
+    view, because no mirrored record carries a handle or a profile. Seeded from
+    `records` and resolved through `app.bsky.actor.getProfiles` by
+    `backfill:actors` (`bibliograph-actors-backfill.timer`, daily).
+  * Ingestion gap, unchanged on purpose: Livtet writes its profile to
+    `net.olamaelcu.livtet.actor.profile`, which is outside TAP's collection
+    filter and the consumer's `net.olamaelcu.livtet.biblio.*` prefix. Naming
+    that collection in `hasRecords` therefore answers empty, and the lexicon
+    says so. The actor directory carries Bluesky-resolved identity meanwhile.
+  * `getActorProfile` now reads `net.olamaelcu.livtet.actor.profile/self`
+    instead of the `…biblio.actorProfile` collection nothing writes.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 19:00:00 -0500
+
 bibliograph (0.5.20) unstable; urgency=medium
 
   * One HTTP transport (`lib/server/http/client.ts`) for every outbound call,

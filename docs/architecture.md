@@ -38,6 +38,37 @@ The same three issues, as they stand now:
 `src/lib/server/data/` does not exist; `xrpc-router.ts` is ~3,000 lines and is
 the XRPC registry.
 
+## Reader directory (`searchActors`)
+
+`net.olamaelcu.livtet.biblio.searchActors` answers from `actors` — `(did,
+handle, display_name, description, avatar_cid, updated_at)` — added by migration
+0034 and filled by `scripts/backfill-actors.ts`
+(`debian/bibliograph-actors-backfill.{service,timer}`, daily). Its `q` predicate
+and the `hasRecords` EXISTS probe share one WHERE on that table, so
+`ORDER BY`/`LIMIT`/`OFFSET` apply after filtering and a page is never a short
+slice of an over-fetched set.
+
+It is a table rather than a view over `records` because none of the filterable
+fields exist in the mirror. No book record carries a handle, and the profile
+collection is not ingested: `tap-consumer.ts` admits only
+`net.olamaelcu.livtet.biblio.*` plus `buzz.bookhive.book`, while Livtet writes
+its profile to `net.olamaelcu.livtet.actor.profile`
+(`livtet-service/src/lib/actor/index.ts`), and the TAP server is configured with
+`TAP_COLLECTION_FILTERS=net.olamaelcu.livtet.biblio.*`. A view would answer
+every text query with nothing and every row with a null handle.
+
+**Ingestion gap:** `net.olamaelcu.livtet.actor.profile` is therefore absent from
+`records`, so `searchActors?hasRecords=net.olamaelcu.livtet.actor.profile`
+answers an empty page, and `actors` holds Bluesky-resolved identity
+(`app.bsky.actor.getProfiles`, DID-document `alsoKnownAs` for the rest) rather
+than the record Livtet wrote. Closing it needs both a TAP filter change and the
+consumer's `NET_PREFIX` widened; the endpoint says so in the `hasRecords`
+description until then.
+
+`getActorProfile` reads `net.olamaelcu.livtet.actor.profile/self`
+(`xrpc-router.ts`), matching what Livtet writes. It previously named
+`net.olamaelcu.livtet.biblio.actorProfile`, a collection no service writes.
+
 ## The edition record shape (the invariant)
 
 `lib/server/edition-record.ts` is the only place the edition record shape is

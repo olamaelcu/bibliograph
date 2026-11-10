@@ -225,6 +225,13 @@
       "when": 1795432000005,
       "tag": "0033_perf_indexes_round2",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795518400005,
+      "tag": "0034_actors",
+      "breakpoints": true
     }
   ]
 }

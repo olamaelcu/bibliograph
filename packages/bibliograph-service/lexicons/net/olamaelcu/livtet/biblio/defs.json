@@ -44,6 +44,11 @@
           "maxGraphemes": 256,
           "description": "Short bio of the actor."
         },
+        "avatar": {
+          "type": "string",
+          "format": "uri",
+          "description": "Avatar image URL for the actor, when known. Absent for an actor whose avatar has not been resolved."
+        },
         "bsky": {
           "type": "ref",
           "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",

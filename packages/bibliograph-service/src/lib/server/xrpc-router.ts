@@ -16,6 +16,7 @@ import {
 } from '@atcute/atproto';
 import {
   NetOlamaelcuLivtetBiblioGetActorProfile,
+  NetOlamaelcuLivtetBiblioSearchActors,
   NetOlamaelcuLivtetBiblioGetReadingGoal,
   NetOlamaelcuLivtetBiblioGetShelf,
   NetOlamaelcuLivtetBiblioGetBookOnShelf,
@@ -78,6 +79,12 @@ import { fetchEditionForUri } from './shelving/edition-fetch';
 import { ingestEditionBatch } from './jobs/handlers';
 import type { EditionItem } from './search/types';
 import { getBacklinks, type BacklinkPage } from './constellation/client';
+import {
+  searchActors,
+  SEARCH_ACTORS_MAX_COLLECTIONS,
+  SEARCH_ACTORS_MAX_Q,
+  SEARCH_ACTORS_MIN_Q,
+} from './actor-directory';
 import {
   collectShelverDids,
   SHELVING_BACKLINK_SOURCE,
@@ -809,7 +816,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetActorProfile.mainSchema, {
       raw = await client.get('com.atproto.repo.getRecord', {
         params: {
           repo: params.did,
-          collection: 'net.olamaelcu.livtet.biblio.actorProfile',
+          // Livtet writes the profile to `...actor.profile/self`
+          // (`livtet-service/src/lib/actor/index.ts`), not to the older
+          // `...biblio.actorProfile` this read used to name.
+          collection: 'net.olamaelcu.livtet.actor.profile',
           rkey: 'self',
         },
         signal: AbortSignal.timeout(PDS_READ_TIMEOUT_MS),
@@ -829,6 +839,39 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetActorProfile.mainSchema, {
       return Response.json({ profile: null });
     }
     return json({ profile: record.value as NetOlamaelcuLivtetBiblioGetActorProfile.$output['profile'] } as unknown as NetOlamaelcuLivtetBiblioGetActorProfile.$output);
+  },
+});
+
+router.addQuery(NetOlamaelcuLivtetBiblioSearchActors.mainSchema, {
+  async handler({ params }) {
+    const q = params.q?.trim();
+    if (q !== undefined && (q.length < SEARCH_ACTORS_MIN_Q || q.length > SEARCH_ACTORS_MAX_Q)) {
+      return Response.json(
+        { error: 'InvalidQuery', message: `q must be ${SEARCH_ACTORS_MIN_Q}-${SEARCH_ACTORS_MAX_Q} characters` },
+        { status: 400 },
+      );
+    }
+    const hasRecords = params.hasRecords ?? [];
+    if (hasRecords.length > SEARCH_ACTORS_MAX_COLLECTIONS) {
+      return Response.json(
+        { error: 'InvalidQuery', message: `hasRecords accepts at most ${SEARCH_ACTORS_MAX_COLLECTIONS} collections` },
+        { status: 400 },
+      );
+    }
+
+    // `q` and `hasRecords` are applied by `searchActors` inside one WHERE, so
+    // this page is never a short slice of an over-fetched, later-trimmed set.
+    const result = await searchActors({
+      q,
+      hasRecords,
+      offset: params.offset,
+      limit: params.limit,
+    });
+    return json({
+      actors: result.actors,
+      hasMore: result.hasMore,
+      ...(result.total !== undefined ? { total: result.total } : {}),
+    } as NetOlamaelcuLivtetBiblioSearchActors.$output);
   },
 });
 // Shelving and image queries

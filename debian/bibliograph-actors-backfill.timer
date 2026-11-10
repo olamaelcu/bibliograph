@@ -1,0 +1,23 @@
+[Unit]
+Description=Run the Bibliograph reader-directory backfill daily
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target bibliograph-migrate.service
+Wants=network-online.target
+Requires=bibliograph-migrate.service
+
+[Timer]
+# Daily at 04:30, a quiet slot: the other ticks own :40 (description, hourly),
+# :20 (follows, hourly), even hours at :00 (cover) and daily (ISBN).
+OnBootSec=10min
+OnCalendar=*-*-* 04:30:00
+# Spread across hosts: a synchronised fleet would hit the public AppView
+# together.
+RandomizedDelaySec=30min
+AccuracySec=1min
+# A run missed while the host was down fires on the next boot; the backfill is
+# idempotent, so the catch-up costs one extra pass.
+Persistent=true
+Unit=bibliograph-actors-backfill.service
+
+[Install]
+WantedBy=timers.target

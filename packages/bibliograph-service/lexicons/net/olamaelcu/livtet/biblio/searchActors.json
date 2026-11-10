@@ -1,0 +1,76 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.searchActors",
+  "description": "Search the AppView's reader directory. An actor is listed once the AppView has mirrored at least one record authored by it; handles, display names and avatars come from the AppView's own `actors` read model, not from a live PDS read. This operation does not write user records.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Search the AppView's reader directory. An actor is listed once the AppView has mirrored at least one record authored by it; handles, display names and avatars come from the AppView's own `actors` read model, not from a live PDS read. This operation does not write user records.",
+      "parameters": {
+        "type": "params",
+        "required": [],
+        "properties": {
+          "q": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 200,
+            "description": "Case-insensitive substring matched against the actor's handle or display name, or an exact DID. Pagination is applied after this filter, so a page is never short because matches were trimmed."
+          },
+          "hasRecords": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "nsid"
+            },
+            "maxLength": 8,
+            "description": "Restrict to actors owning at least one mirrored record in ANY of these collections (OR semantics). The predicate runs in the same WHERE as `q`, before ordering and pagination. `net.olamaelcu.livtet.actor.profile` is not mirrored by the AppView today, so naming it matches nobody; see the ingestion note in `docs/architecture.md`."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Number of matching actors to skip. Actors are ordered by `coalesce(handle, did), did`, so pages are stable while that key holds."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "Maximum number of actors to return in this page."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["actors", "hasMore"],
+          "properties": {
+            "actors": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.defs#actorView"
+              }
+            },
+            "hasMore": {
+              "type": "boolean",
+              "description": "True when another page exists. Read from `LIMIT limit+1`, so it is correct at the boundary without a second count."
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Matching actors across all pages. Returned on the first page only, from a count issued beside the page query."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidQuery",
+          "description": "`q` was supplied but is shorter than 3 or longer than 200 characters after trimming, or `hasRecords` names more than 8 collections."
+        }
+      ]
+    }
+  }
+}

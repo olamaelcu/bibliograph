@@ -411,6 +411,38 @@ export const follows = pgTable(
   }),
 );
 
+// ─── Reader directory ───────────────────────────────────────────────────────
+// One row per DID whose records the mirror holds, carrying the identity fields
+// `searchActors` filters on. This cannot be a view over `records`: handle,
+// display name, bio and avatar are not in any record body the mirror ingests
+// (the profile collection sits outside TAP's collection filter), and resolving
+// them per request would put a network round trip behind every page. A table
+// keeps the `q` and `hasRecords` predicates in one local WHERE.
+//
+// `scripts/backfill-actors.ts` seeds the DIDs from `records` and resolves the
+// rest through app.bsky.actor.getProfiles, falling back to the DID document's
+// `alsoKnownAs` for the handle. `updated_at` is the last resolution attempt, so
+// a run only revisits rows that are actually stale.
+
+export const actors = pgTable(
+  'actors',
+  {
+    did: text('did').primaryKey(),
+    handle: text('handle'),
+    displayName: text('display_name'),
+    description: text('description'),
+    avatarCid: text('avatar_cid'),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // `searchActors` matches both fields with `ILIKE '%q%'`, which no btree
+    // index can serve; the trigram GINs are the same shape 0005 gave
+    // editions/works/contributors.
+    handleTrgmIdx: index('actors_handle_trgm').using('gin', sql`handle gin_trgm_ops`),
+    displayNameTrgmIdx: index('actors_display_name_trgm').using('gin', sql`display_name gin_trgm_ops`),
+  }),
+);
+
 // ─── OAuth client persistence ───────────────────────────────────────────────
 // Backing stores for @atproto/oauth-client-node. `value` holds the serialized
 // session/state, including DPoP key material, so it must never be exposed.
