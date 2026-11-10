@@ -1,3 +1,26 @@
+bibliograph (0.5.17) unstable; urgency=medium
+
+  * The static PDS surface now speaks its lexicons: `identity.resolveDid` and
+    `identity.resolveIdentity` return the required `didDoc`, `getRepoStatus`
+    returns `active`, `getBlocks` honours `cids` (returning only the requested
+    blocks, not the whole repo), and `sync.getRepo` rejects a foreign `did`.
+    `sync.getRepo?since=` answers a loud `InvalidRequest` instead of the full
+    repo. `describeRepo.handleIsCorrect` is probed from the well-known route
+    (5-minute cache, last-known on failure) rather than hardcoded `true`.
+  * Unauthenticated GET XRPC responses now ship
+    `public, max-age=60, stale-while-revalidate=300` at the router boundary;
+    non-GET, authorized, or already-`cache-control` responses are untouched.
+  * The lex builder emits a TID-valid deterministic `rev` (top bit masked,
+    base32-sortable), taking effect at the next `publish-lex`. The builder
+    also now honours the advertised `--out=<dir>` so verification builds
+    cannot overwrite the published CARs.
+  * Homepage lists the recommendations feed; docs are back in line with the
+    code (README `--filter` prefixes, five-feed documentation, GET for
+    searchContributors, updated anchors and paths). No account registration
+    remains possible and none was added.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 09 Nov 2026 22:51:40 -0500
+
 bibliograph (0.5.16) unstable; urgency=medium
 
   * Publish Livtet's alpha space declarations from the static lexicon repo:
