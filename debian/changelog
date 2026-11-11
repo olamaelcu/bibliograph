@@ -1,3 +1,28 @@
+bibliograph (0.5.24) unstable; urgency=medium
+
+  * Viewer-facing feeds served over XRPC now drop authors the viewer blocks —
+    and authors who block the viewer — using marco.jazco.dev's public
+    follow/block graph (`Relationships`, one call per page over at most 100
+    candidates). Applies to the `following`, `extended` and `dynamic` feeds
+    and to the network fallback page, for authenticated viewers only;
+    anonymous callers are unchanged. `lib/server/marco.ts` treats an account
+    as blocked only when its `block` entry carries `outUri`/`inUri`, since
+    marco names every follow and block even where no record exists.
+  * "For You" recommendations gain a third candidate source: editions the
+    viewer's network mutuals shelved or reviewed, ranked by distinct mutual
+    count against the local shelving/review mirror. The mutual list is
+    marco's `Intersect` of follow OUT∩IN (5-minute cache, 256-DID cap) and
+    merges in after active reads and past reads, so a reader with an empty
+    shelf now gets an answer instead of nothing.
+  * `MARCO_URL` selects the instance (default `https://marco.jazco.dev`; an
+    explicitly empty value disables marco entirely) and `MARCO_TIMEOUT_MS`
+    sets the per-call timeout (default 800 ms). Caveat: the public instance
+    sees (viewer DID, candidate DID) pairs. Every marco failure logs and
+    degrades to no annotation — unfiltered feeds, unsupplemented
+    recommendations — and never errors a request.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 22:38:49 -0500
+
 bibliograph (0.5.23) unstable; urgency=medium
 
   * Any XRPC read that serves books or contributors now heals what it returns.
