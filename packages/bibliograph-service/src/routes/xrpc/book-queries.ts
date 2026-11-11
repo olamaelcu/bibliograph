@@ -4,9 +4,6 @@
 import { type XRPCRouter, json } from '@atcute/xrpc-server';
 import type { Logger } from 'pino';
 
-import * as v from '@atcute/lexicons/validations';
-
-
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import {
   CommunityLexiconBookCompatibility,
@@ -17,6 +14,7 @@ import {
   CommunityLexiconBookSearchWorks,
 } from '../../lib/server/lexicons/index.js';
 import { invalidContributorResponsesTotal } from '../../lib/server/metrics';
+import * as v from '@atcute/lexicons/validations';
 import { validContributorName } from '../../lib/server/search/contributor-name';
 import { editionItemFromRow } from '../../lib/server/search/postgres-source';
 import { db } from '../../lib/server/db';
@@ -167,6 +165,36 @@ async function followCount(
     .where(eq(column, did));
   return row?.total ?? 0;
 }
+
+// Clients replaying a pre-0.5.26 uncompressed cursor resend >256-char values
+// and atcute's param validation rejected them before the cursor decoder's
+// inflate fallback could run — every replay 400-ed and Livtet backed off
+// permanently. The wire contract stays at 256 (vendored lexicons and their
+// published copies untouched); this only makes *ingress* lenient. Do not carry
+// this into the vendored lexicons or anything published.
+const LEGACY_CURSOR_MAX = 1024;
+const lenientCursor = v.optional(
+  v.constrain(v.string(), [v.stringLength(0, LEGACY_CURSOR_MAX)]),
+);
+
+interface LenientQuery {
+  nsid: string;
+  output: unknown;
+  params: { shape: Record<string, unknown> };
+}
+
+/** Rewrap a generated book-search schema with a looser cursor cap, same NSID/output. */
+function withLenientCursor<T>(query: T): T {
+  const q = query as unknown as LenientQuery;
+  return v.query(q.nsid as `${string}.${string}.${string}`, {
+    params: v.object({ ...q.params.shape, cursor: lenientCursor }),
+    output: q.output as Parameters<typeof v.query>[1] extends { output?: infer O } ? O : never,
+  }) as unknown as T;
+}
+
+const SearchWorksLenient = withLenientCursor(CommunityLexiconBookSearchWorks.mainSchema);
+const SearchContributorsLenient = withLenientCursor(CommunityLexiconBookSearchContributors.mainSchema);
+const SearchPublishersLenient = withLenientCursor(CommunityLexiconBookSearchPublishers.mainSchema);
 
 export function registerBookQueries(
   router: XRPCRouter,
@@ -385,7 +413,7 @@ export function registerBookQueries(
     },
   });
 
-  router.addQuery(CommunityLexiconBookSearchWorks.mainSchema, {
+  router.addQuery(SearchWorksLenient, {
     async handler({ params }) {
       const result = await searchService.searchWorks({
         q: params.q,
@@ -421,7 +449,7 @@ export function registerBookQueries(
     },
   });
 
-  router.addQuery(CommunityLexiconBookSearchContributors.mainSchema, {
+  router.addQuery(SearchContributorsLenient, {
     async handler({ params }) {
       try {
         const result = await searchService.searchContributors({
@@ -466,7 +494,7 @@ export function registerBookQueries(
     },
   });
 
-  router.addQuery(CommunityLexiconBookSearchPublishers.mainSchema, {
+  router.addQuery(SearchPublishersLenient, {
     async handler({ params }) {
       const result = await searchService.searchPublishers({
         q: params.q,
