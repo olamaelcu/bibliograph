@@ -1,3 +1,17 @@
+bibliograph (0.5.26) unstable; urgency=high
+
+  * Fix: search cursors could exceed the lexicon's 256-character cap. The
+    base64url payload carries an AT-URI, so contributors with long Goodreads
+    slugs produced cursors over the limit; the atcute validator rejected them
+    with 400, the catalog stopped paging, and Livtet read that as a
+    bad-request and backed off permanently. `encodeCursor`/`decodeCursor` in
+    `lib/server/search/postgres-source.ts` now deflate the JSON payload
+    (~149 bytes typical) and fall back to plain base64 on inflate failure, so
+    cursors already handed out keep working. A regression test covers the
+    long-slug case and asserts the 256-character cap.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 23:44:49 -0500
+
 bibliograph (0.5.25) unstable; urgency=high
 
   * Fix: the "For You" recommendations feed returned empty for every viewer
