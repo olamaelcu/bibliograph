@@ -5,8 +5,7 @@ import { CatalogUnavailableError } from '$lib/server/catalog/db';
 import { resolveEditions, searchEditions, type Identifier } from '$lib/server/catalog/editions';
 import {
   enqueueResolveMiss,
-  enqueueSearchHydration,
-  hydrationAvailable
+  enqueueSearchHydration
 } from '$lib/server/catalog/jobs';
 
 // An NSID is at least three labels: authority, name, and at least one more.
@@ -110,12 +109,7 @@ async function handleResolve(request: Request): Promise<Response> {
       unmatched.map((identifier) => enqueueResolveMiss(identifier))
     );
 
-    // Pending means work is queued, not that an enqueue call this time was
-    // accepted: the TTL mark dedupes repeats while the first job is still
-    // outstanding. Without a worker nothing will hydrate, so it is false.
-    const pending = unmatched.length > 0 && (await hydrationAvailable());
-
-    return json({ ...results, pending });
+    return json(results);
   } catch (error) {
     return catalogFailure(error);
   }
@@ -152,12 +146,10 @@ async function handleSearch(request: Request): Promise<Response> {
   try {
     const results = await searchEditions({ q, title, author, identifiers, offset, limit });
     // Discovery only hydrates when the local catalog has nothing for the query.
-    let pending = false;
     if (results.items.length === 0) {
       await enqueueSearchHydration({ q, title, author, identifiers });
-      pending = await hydrationAvailable();
     }
-    return json({ ...results, pending });
+    return json(results);
   } catch (error) {
     return catalogFailure(error);
   }

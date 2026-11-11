@@ -61,8 +61,7 @@ does not have that gap because it indexes the record it just wrote in the same r
 `resolveEditions` and `searchEditions` are the other exception: they read the catalog tables, not
 `happyview_records`, and they never write catalog rows. Provider fan-out (Google Books, ISBNdb,
 Goodreads) runs asynchronously in the worker (`catalog.resolve` / `catalog.search`), not in the
-request; the response is the local catalog only, with `pending` reporting whether background
-hydration is queued.
+request; the response is the local catalog only and says nothing about that queued work.
 
 **Catalog dependency.** Book-rendering views join `public.appview_book_lua`, the catalog read model:
 
@@ -125,16 +124,12 @@ link back to the record; clients derive display routes such as
 `/book/<did>/<rkey>` from it. Stored identifiers follow it unchanged (`issuer`/`value`, no
 bookkeeping columns).
 
-`editionResults` (`{ items, hasMore, total?, pending }`) also carries `pending`, which is present on
-every response from the two catalog procedures and is always a boolean. `true` means background
-hydration — provider resolution or search — is outstanding for this request and may add editions
-matching it; the client should re-call later (with the same body) until `pending` is `false`.
-`false` means no catalog hydration is outstanding, so an immediate re-call is not expected to
-change the result. There is no ETag, conditional-request, stream, or subscription signal: polling
-is the only mechanism, and `pending` says nothing about whether anything will be found. It
-describes queued/outstanding work, not worker liveness: `hydrationAvailable()` only proves the job
-table and `catalog_enqueue_marks` are installed, so a stopped worker leaves `pending` true until
-the worker resumes and drains the queue.
+`editionResults` is exactly the upstream envelope: `{ items, hasMore, total? }`, with no
+`pending`/`degraded` field, so a response cannot tell a client that catalog hydration is
+outstanding. The two catalog procedures still queue `catalog.resolve` / `catalog.search` work for
+unmatched input, and that work may add editions matching a later identical request, but the only
+way to learn about it is to re-call: there is no ETag, conditional-request, stream, or
+subscription signal. Queued work is not a promise that anything will be found.
 
 ## Inventory
 
@@ -319,7 +314,7 @@ edge, read the catalog tables, and answer `503 ServiceUnavailable` when `DATABAS
 the query fails. Both cap `identifiers` at 100 entries and clamp `offset`/`limit`; a duplicate
 `(issuer, value)` pair is collapsed before the query. Identifier comparison is exact — no
 normalization — per the lexicon. Both may queue background hydration instead of writing catalog
-rows; `pending` in the response reports whether that work is outstanding (see above).
+rows; the response does not report whether that work is outstanding (see above).
 
 #### `community.lexicon.media.book.resolveEditions`
 
@@ -329,12 +324,11 @@ paged by `offset`/`limit`, with `LIMIT limit + 1` deciding `hasMore`; `total` is
 first page only. No match is an empty page (the lexicon declares no errors). Every item is an
 `editionView` whose `identifiers` begin with the atproto URI identifier.
 
-`pending` is `true` exactly when at least one supplied identifier had no matching edition in this
-response and the hydration queue is installed. It stays `true` when this call's enqueue was
-suppressed by the TTL mark, because the earlier job is still outstanding; it is `false` when every
-identifier matched, or when the hydration queue is not installed (nothing can hydrate). Pending
-reports queued work, not worker liveness: a stopped worker leaves it `true` until it resumes. It is
-not a promise that the provider will resolve the identifier.
+Each identifier with no matching edition in the response is enqueued as a `catalog.resolve` job
+(deduplicated by a TTL mark, so a repeat while the first job is still outstanding does not queue
+again). The response carries no flag for this: the client can only re-call with the same body
+later. Queued work is not a promise that the provider will resolve the identifier, and a stopped
+worker leaves the work outstanding without any response signal.
 
 #### `community.lexicon.media.book.searchEditions`
 
@@ -347,12 +341,10 @@ then `indexed_at DESC, uri ASC`. Provider search and ingestion happen asynchrono
 as gap-fill); newly ingested editions appear in later calls. The ranking above is this catalog's
 relevance order, which the lexicon allows providers to define.
 
-`pending` is `true` only when the local result was empty and the hydration queue is installed (a
-repeated query is deduplicated by its TTL mark, so this call may not have enqueued again); a
-non-empty local page always reports `pending: false`. As with
-`resolveEditions`, the flag describes queued work, not an expected hit: an empty page that reports
-`pending: true` may still be empty on every later call. The availability check is table presence,
-not worker liveness, so a stopped worker leaves `pending` true until it resumes.
+Hydration is queued only when the local result is empty, and a repeated query is deduplicated by
+its TTL mark. The response carries no flag for it, so a client can only re-call with the same body
+later; an empty page may stay empty on every later call. As with `resolveEditions`, there is no
+signal for worker liveness or for a stopped worker.
 
 ### Follow
 
@@ -495,7 +487,7 @@ a PDS with a different shape are not found by them.
   publishes editions out of band. A client that writes records to its own PDS directly is indexed
   only when a backfill or reconcile runs, not per request.
 - Provider hydration is worker work, not request-path work: the edge queues `catalog.resolve` /
-  `catalog.search` (deduplicated by a TTL mark) and reports `pending`; `packages/worker` then
+  `catalog.search` (deduplicated by a TTL mark); `packages/worker` then
   queries Google Books, then ISBNdb for an ISBN only when Google Books is empty, then Goodreads as
   gap-fill, and ingests candidates through the identifier bag. New editions queue in `pds_outbox`
   and the worker's `pds-publish` cron task drains it with `com.atproto.repo.applyWrites`. Neither
@@ -503,8 +495,9 @@ a PDS with a different shape are not found by them.
   API keys and consent, and the local dev PDS cannot host the `did:web` publisher, so live PDS
   publishing needs a provisioned publisher account (`PDS_URL`, publisher DID,
   `PDS_ACCOUNT_PASSWORD` or `PDS_ACCESS_TOKEN`). Without a provisioned publisher the worker still
-  hydrates and rows queue in `pds_outbox`; without the hydration queue installed `pending` is
-  always `false`.
+  hydrates and rows queue in `pds_outbox`. `editionResults` has no `pending`/`degraded` field (as
+  upstream defines it), so a client cannot be told via the response that work is outstanding; it
+  can only re-call. Without the hydration queue installed the edge skips enqueueing.
 - No cache headers are set by the edge, and no cache-control is relayed from HappyView.
 - No works/contributors/publishers records, no feed generator, and no label or lexicon endpoints on
   this surface.

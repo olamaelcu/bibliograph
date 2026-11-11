@@ -16,7 +16,7 @@ commit the gitlink.
 
 | File | Type | Status in this repo |
 | --- | --- | --- |
-| `lexicons/defs.json` (`community.lexicon.media.book.defs`) | defs | upstream copy; our `happyview/lexicons/community/lexicon/media/book/defs.json` is identical at this pin **plus the local `editionResults#pending` extension** (see below) |
+| `lexicons/defs.json` (`community.lexicon.media.book.defs`) | defs | upstream copy; our `happyview/lexicons/community/lexicon/media/book/defs.json` is identical to it at this pin |
 | `lexicons/review.json` (`community.lexicon.media.book.review`) | record | identical to our deployed copy |
 | `lexicons/edition.json` (`community.lexicon.media.book.edition`) | record | **not present** in `happyview/lexicons`; the catalog publisher owns this record type |
 | `lexicons/resolveEditions.json` | procedure (read-only) | served by the edge; see below |
@@ -25,23 +25,6 @@ commit the gitlink.
 Both new methods are `type: procedure` with a JSON body and `application/json` output, but they are
 **read-only**: `resolveEditions` has no declared errors, `searchEditions` declares
 `InvalidQuery` for a blank cross-field input. Neither takes an attestation or writes a record.
-
-## Local lexicons extension: `editionResults#pending`
-
-The upstream working set has no field for asynchronous hydration, so our copy of
-`community.lexicon.media.book.defs` adds one to `editionResults`:
-
-```json
-"pending": {
-  "type": "boolean",
-  "description": "True when background hydration (provider resolution or search) is outstanding for this result and the caller should re-call later; false when no further work is queued. Pending work may still find nothing: it is not a promise that more editions exist."
-}
-```
-
-It is optional: the required array stays `[items, hasMore]`. This is a local extension awaiting
-upstream adoption — the vendored submodule is pinned and untouched, and `generate-catalog.mjs` reads
-`happyview/lexicons` first (de-duplicating by NSID), so the local copy is what the edge and the
-public page use. Remove the note and the field once the working group adopts it upstream.
 
 ## They cannot live in HappyView
 
@@ -99,12 +82,9 @@ protocol namespace; identifier comparison stays exact and no normalization is ap
   ISBN-normalize).
 - Results are ordered `editions.indexed_at ASC, edition uri ASC`, `LIMIT limit + 1` decides
   `hasMore`, and `offset` pages. `total` is counted on the first page only.
-- Returns `editionResults { items, hasMore, total, pending }`; no match is an empty page, not `404`.
-  `pending` is true when any supplied identifier is unmatched locally and the hydration queue is
-  installed (it stays true while an earlier job is still deduplicated by its TTL mark), and false
-  when every identifier matched or the hydration queue is not installed. This is table presence,
-  not worker liveness: a stopped worker leaves `pending` true until it resumes and drains the
-  queue.
+- Returns `editionResults { items, hasMore, total? }`; no match is an empty page, not `404`.
+  Unmatched identifiers queue `catalog.resolve` work (deduplicated by a TTL mark), but the
+  response has no field reporting it: a client learns of new editions only by re-calling.
 
 ## `searchEditions`
 
@@ -114,11 +94,9 @@ protocol namespace; identifier comparison stays exact and no normalization is ap
   for `author`; `q` matches title, description, contributor names and identifier values.
 - Local ranking (provider-defined per the lexicon): identifier exact > title > author > broad text,
   then `indexed_at DESC, uri ASC`, with `LIMIT limit + 1` and `offset`.
-- `pending` is true only when the local result was empty and the hydration queue is installed (a
-  repeated query is deduplicated by its TTL mark, so this call may not have enqueued again); a
-  non-empty local page reports `false`. It means work is outstanding,
-  not that the provider will find a match, and not that a worker is currently consuming: a stopped
-  worker leaves it true until it resumes.
+- An empty local result queues `catalog.search` work (a repeated query is deduplicated by its TTL
+  mark); the response does not report that. Queued work does not mean the provider will find a
+  match, and it is not a signal about worker liveness.
 
 ## Provider hydration (worker)
 
@@ -138,8 +116,9 @@ queues work and `packages/worker` performs it:
   batches; the worker schedules it every minute plus a boot drain, and one publisher runs at a
   time;
 - the TTL mark keeps repeated requests from hot-looping. Resolution is still eventual: the client
-  re-calls and gets the edition once the worker has ingested and published it. Our local `pending`
-  extension (above) signals that work is queued; `degraded` remains unimplemented.
+  re-calls and gets the edition once the worker has ingested and published it. `editionResults`
+  has no `pending`/`degraded` field (as upstream defines it), so the response cannot tell a client
+  that work is outstanding; re-calling is the only way.
 
 Honest limits:
 
@@ -171,8 +150,7 @@ Honest limits:
 - Contract tests should validate responses against the vendored schemas; `editionResults` requires
   `items` and `hasMore`, `total` is optional. CI must initialise the submodule and fail if the pin is
   missing.
-- Open items to raise upstream: adopt our `editionResults#pending` extension (or an equivalent
-  `degraded` signal) for asynchronous resolution; array bounds use `minLength` instead of `minItems`;
-  `editionView` carries no CID, while
+- Open items to raise upstream: an asynchronous-hydration signal for `editionResults`; array bounds
+  use `minLength` instead of `minItems`; `editionView` carries no CID, while
   writes such as `shelf.addItem` need `{ uri, cid }` strongRefs, so a resolving client still has to
   fetch the record for the CID.

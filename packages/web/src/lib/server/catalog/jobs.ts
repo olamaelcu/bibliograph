@@ -10,10 +10,8 @@ let readiness: { ok: boolean; checkedAt: number } | undefined;
 /**
  * Hydration is optional: a deployment without the worker (or without its
  * support table) keeps serving the catalog and simply skips enqueueing.
- * It also tells readers whether `pending` can ever clear: with no queue,
- * nothing will hydrate, so outstanding identifiers stay outstanding.
  */
-export async function hydrationAvailable(): Promise<boolean> {
+async function workerReady(): Promise<boolean> {
   if (readiness && (readiness.ok || Date.now() - readiness.checkedAt < 60_000)) {
     return readiness.ok;
   }
@@ -63,7 +61,7 @@ async function enqueue(
   ttlMs: number
 ): Promise<boolean> {
   try {
-    if (!(await hydrationAvailable())) return false;
+    if (!(await workerReady())) return false;
     const pool = catalogPool();
 
     const claim = await pool.query(

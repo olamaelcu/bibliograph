@@ -352,10 +352,6 @@
           "type": "boolean",
           "description": "Whether more matching editions remain after this page. Must be false for an empty page."
         },
-        "pending": {
-          "type": "boolean",
-          "description": "True when background hydration (provider resolution or search) is outstanding for this result and the caller should re-call later; false when no further work is queued. Pending work may still find nothing: it is not a promise that more editions exist."
-        },
         "total": {
           "type": "integer",
           "minimum": 0,
