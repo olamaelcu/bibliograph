@@ -65,12 +65,14 @@ before the script runs (`401 XRPC procedures require DPoP authentication`), and 
 carries the edition's atproto URI as an identifier:
 
 ```json
-{ "issuer": "atproto", "value": "at://did:plc:e2x3ihw2ntxt7pcgzmtu3abi/community.lexicon.media.book/gb.efdyneVzATwC" }
+{ "issuer": "atproto", "value": "at://did:plc:e2x3ihw2ntxt7pcgzmtu3abi/community.lexicon.media.book/3n22xzi7cyz23" }
 ```
 
 It is first in `identifiers`, exactly once, and stored identifiers follow unchanged (`issuer` and
 `value` only — no bookkeeping columns leak). Clients derive display routes from it, e.g.
-`/book/did:plc:e2x3ihw2ntxt7pcgzmtu3abi/gb.efdyneVzATwC`. `atproto` is the issuer token for the
+`/book/did:plc:e2x3ihw2ntxt7pcgzmtu3abi/3n22xzi7cyz23`. The record key is always a TID minted by
+`editions_next_tid()` (13 characters from atproto's base32-sortable alphabet), never a
+provider-prefixed key. `atproto` is the issuer token for the
 protocol namespace; identifier comparison stays exact and no normalization is applied on read.
 
 ## `resolveEditions`
@@ -106,17 +108,28 @@ queues work and `packages/worker` performs it:
 - the edge enqueue path is `packages/web/src/lib/server/catalog/jobs.ts`: missing identifiers and
   empty searches queue via the worker's job table with a stable `job_key` and a TTL mark in
   `catalog_enqueue_marks`, so concurrent identical calls collapse;
-- `catalog.resolve` / `catalog.search` (`lib/tasks.js`, `lib/providers`) use Google Books first;
-  for an ISBN, ISBNdb only when Google Books returns nothing; Goodreads as gap-fill and identifier
-  fallback, with candidates merged and de-duplicated;
+- `catalog.resolve` / `catalog.search` (`lib/tasks.js`, `lib/providers`) try ISBNdb → Google Books
+  → Goodreads and stop at the first provider that returns candidates: for an ISBN, ISBNdb by ISBN,
+  then Google Books by ISBN, then Goodreads by identifier; for a text search, an ISBNdb search (by
+  ISBN when the input carries one, otherwise by the query text), then Google Books, then Goodreads.
+  A `googlebooks` or `goodreads` identifier resolves directly against its own provider only (no
+  cross-provider cascade). Candidates from one provider are merged and de-duplicated. Without
+  `ISBNDB_API_KEY` the chain starts at Google Books.
+- each task ingests at most 50 candidates (`CANDIDATES_PER_TASK` in `lib/tasks.js`). Google Books
+  search requests its API maximum of 40 results; ISBNdb search requests `pageSize=50` (the API
+  default is 20, capped at 100), so a single provider call may return fewer than 50 and the cap is
+  an upper bound, not a target;
 - `catalog.isbn` backs `searchEditions` ISBN identifiers: it calls ISBNdb directly by ISBN, even
-  when the local catalog already answered, and ingests up to three candidates. Without
+  when the local catalog already answered, and ingests up to 50 candidates. Without
   `ISBNDB_API_KEY` (so no ISBNdb provider) it logs a warning and falls back to the normal
-  `catalog.resolve` provider chain, so hydration still happens without claiming an ISBNdb call;
+  `catalog.resolve` provider chain; a configured ISBNdb that returns no record also falls back to
+  that chain (ISBNdb is asked again there and answers from its cache), so hydration still happens
+  either way and the direct-lookup contract is not silently skipped;
 - `lib/ingest.js` ingests via the identifier bag, minting new rows under the publisher authority
-  (`ATP_SERVICE_DID`, else `did:web:<ATP_SERVICE_HOST>`) with `editions_next_tid()` or a
-  provider-prefixed rkey and extending the identifier bag of an existing edition; the edition
-  trigger queues `pds_outbox`;
+  (`ATP_SERVICE_DID`, else `did:web:<ATP_SERVICE_HOST>`) with a TID rkey from
+  `editions_next_tid()` and extending the identifier bag of an existing edition. The rkey is never
+  derived from a provider id: a new identifier bag mints a new TID, while any stored identifier
+  pair updates its edition in place. The edition trigger queues `pds_outbox`;
 - `pds-publish` (`lib/publish.js`) drains `pds_outbox` with `com.atproto.repo.applyWrites` in
   batches; the worker schedules it every minute plus a boot drain, and one publisher runs at a
   time;

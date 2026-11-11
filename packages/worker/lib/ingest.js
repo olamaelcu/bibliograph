@@ -1,24 +1,5 @@
 const COLLECTION = 'community.lexicon.media.book';
 
-function rkeySafe(value) {
-  const cleaned = String(value).replace(/[^A-Za-z0-9._:~-]/g, '-').slice(0, 400);
-  return cleaned === '' ? null : cleaned;
-}
-
-/** Provider-prefixed rkeys keep the edition addressable from its source id. */
-export function rkeyForCandidate(candidate) {
-  const byIssuer = (issuer) =>
-    candidate.identifiers.find((identifier) => identifier.issuer === issuer)?.value;
-
-  const googlebooks = byIssuer('googlebooks');
-  if (googlebooks) return rkeySafe(`gb.${googlebooks}`);
-  const isbn = byIssuer('isbn13');
-  if (isbn) return rkeySafe(`isbn.${isbn}`);
-  const goodreads = byIssuer('goodreads');
-  if (goodreads) return rkeySafe(`gr.${goodreads}`);
-  return null;
-}
-
 function editionUri(publisherDid, rkey) {
   return `at://${publisherDid}/${COLLECTION}/${rkey}`;
 }
@@ -60,13 +41,14 @@ async function nextTid(client) {
 async function insertEdition(client, uri, rkey, candidate) {
   const title = candidate.title;
   const series = candidate.series ? JSON.stringify(candidate.series) : null;
-  await client.query(
+  const inserted = await client.query(
     `INSERT INTO editions (
        uri, rkey, title, subtitle, language, published_date, format, pages,
        duration_seconds, chapters, series, book_edition, description, cover_url,
        created_at, indexed_at
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, now(), now())
-     ON CONFLICT (uri) DO NOTHING`,
+     ON CONFLICT (uri) DO NOTHING
+     RETURNING uri`,
     [
       uri,
       rkey,
@@ -84,6 +66,7 @@ async function insertEdition(client, uri, rkey, candidate) {
       candidate.coverUrl ?? null
     ]
   );
+  return inserted.rowCount > 0;
 }
 
 async function fillMissingFields(client, uri, candidate) {
@@ -214,19 +197,16 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
       let created = false;
 
       if (!uri) {
-        let rkey = rkeyForCandidate(candidate);
-        if (rkey) {
-          const existing = await client.query('SELECT uri FROM editions WHERE rkey = $1 LIMIT 1', [
-            rkey
-          ]);
-          uri = existing.rows[0]?.uri;
-        }
-        if (!uri) {
-          rkey ??= await nextTid(client);
+        // Identity is the identifier bag, never the rkey: every new edition
+        // mints a TID. A retry only covers the astronomically unlikely TID
+        // collision, where the microsecond/sequence pair is already taken.
+        for (let attempt = 0; !uri && attempt < 5; attempt += 1) {
+          const rkey = await nextTid(client);
           uri = editionUri(authority, rkey);
-          await insertEdition(client, uri, rkey, candidate);
-          created = true;
+          created = await insertEdition(client, uri, rkey, candidate);
+          if (!created) uri = undefined;
         }
+        if (!uri) throw new Error('could not mint a unique edition rkey (TID collision)');
       }
 
       if (!created) await fillMissingFields(client, uri, candidate);

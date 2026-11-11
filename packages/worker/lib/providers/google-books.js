@@ -95,7 +95,8 @@ export function createGoogleBooks({ pool, apiKey, baseUrl, fetchImpl = fetch }) 
       const text = parts.join(' ') || (isbn ? `isbn:${isbn}` : '');
       if (!text) return [];
 
-      const params = new URLSearchParams({ q: text, maxResults: '10', printType: 'books' });
+      // 40 is volumes.list's maximum page size; the worker caps ingestion itself.
+      const params = new URLSearchParams({ q: text, maxResults: '40', printType: 'books' });
       if (apiKey) params.set('key', apiKey);
       return candidates(await query(`${baseUrl}/volumes?${params}`));
     }

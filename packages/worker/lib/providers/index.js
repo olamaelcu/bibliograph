@@ -34,8 +34,9 @@ export function createProviders({ pool, env = process.env, fetchImpl = fetch } =
     } else if (ISBN_ISSUERS.has(issuer)) {
       const isbn = normalizeIsbn13(identifier.value);
       if (!isbn) return [];
-      candidates = await google.byIsbn(isbn);
-      if (candidates.length === 0 && isbndb) candidates = await isbndb.byIsbn(isbn);
+      // ISBNdb owns the ISBN space; Google and Goodreads are fallbacks.
+      if (isbndb) candidates = await isbndb.byIsbn(isbn);
+      if (candidates.length === 0) candidates = await google.byIsbn(isbn);
       if (candidates.length === 0) candidates = await goodreads.byIdentifier(isbn);
     }
 
@@ -43,9 +44,6 @@ export function createProviders({ pool, env = process.env, fetchImpl = fetch } =
   }
 
   async function search(input) {
-    const candidates = await google.search(input);
-    if (candidates.length > 0) return mergeCandidates(candidates).slice(0, 10);
-
     const isbn = input.identifiers?.find((identifier) => ISBN_ISSUERS.has(identifier.issuer))
       ?.value;
     const text =
@@ -54,11 +52,15 @@ export function createProviders({ pool, env = process.env, fetchImpl = fetch } =
         .join(' ') || (isbn ? normalizeIsbn13(isbn) : undefined);
 
     if (isbndb && text) {
-      const fromIsbndb = await isbndb.search((isbn && normalizeIsbn13(isbn)) || text);
-      if (fromIsbndb.length > 0) return mergeCandidates(fromIsbndb).slice(0, 10);
+      const isbn13 = isbn ? normalizeIsbn13(isbn) : null;
+      const fromIsbndb = isbn13 ? await isbndb.byIsbn(isbn13) : await isbndb.search(text);
+      if (fromIsbndb.length > 0) return mergeCandidates(fromIsbndb);
     }
 
-    if (text) return mergeCandidates(await goodreads.search(text)).slice(0, 10);
+    const fromGoogle = await google.search(input);
+    if (fromGoogle.length > 0) return mergeCandidates(fromGoogle);
+
+    if (text) return mergeCandidates(await goodreads.search(text));
     return [];
   }
 

@@ -337,9 +337,10 @@ otherwise `400 InvalidQuery`. The catalog pass ORs the supplied hints: exact ide
 `title ILIKE`, contributor name for `author`, and for `q` a broader match over title, description,
 contributor names and identifier values. Local ranking is `identifier > title > author > text`,
 then `indexed_at DESC, uri ASC`. Provider search and ingestion happen asynchronously in the worker
-(`catalog.search`, Google Books then ISBNdb for an ISBN when Google Books is empty, then Goodreads
-as gap-fill); newly ingested editions appear in later calls. The ranking above is this catalog's
-relevance order, which the lexicon allows providers to define.
+(`catalog.search`: ISBNdb first, then Google Books when ISBNdb is empty, then Goodreads as
+gap-fill, stopping at the first provider that returns candidates and ingesting at most 50 of them);
+newly ingested editions appear in later calls. The ranking above is this catalog's relevance
+order, which the lexicon allows providers to define.
 
 Hydration is queued only when the local result is empty, and a repeated query is deduplicated by
 its TTL mark. The response carries no flag for it, so a client can only re-call with the same body
@@ -474,7 +475,7 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 | `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
 | `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
 | `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
-| `community.lexicon.media.book.edition` | `any` — provider-prefixed (`gb.`/`isbn.`/`gr.`) or `tid`; the lexicon declares `tid` | `title`, `identifiers`, `contributors`, `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
+| `community.lexicon.media.book.edition` | `tid` — always a TID minted by `editions_next_tid()`; never provider-prefixed | `title`, `identifiers`, `contributors`, `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
 
 The record keys are part of the contract: the queries resolve records by them. `bookStatus` derives
 from the edition URI, `shelfItem` from the shelf and edition rkeys, `readingGoal` and
@@ -495,8 +496,9 @@ a PDS with a different shape are not found by them.
   only when a backfill or reconcile runs, not per request.
 - Provider hydration is worker work, not request-path work: the edge queues `catalog.resolve` /
   `catalog.search` (deduplicated by a TTL mark); `packages/worker` then
-  queries Google Books, then ISBNdb for an ISBN only when Google Books is empty, then Goodreads as
-  gap-fill, and ingests candidates through the identifier bag. New editions queue in `pds_outbox`
+  queries ISBNdb first, then Google Books when ISBNdb is empty, then Goodreads as gap-fill, and
+  ingests up to 50 candidates through the identifier bag; new editions get a TID rkey. New
+  editions queue in `pds_outbox`
   and the worker's `pds-publish` cron task drains it with `com.atproto.repo.applyWrites`. Neither
   the providers nor the publisher are verified live in this environment: Google Books/ISBNdb need
   API keys and consent, and the local dev PDS cannot host the `did:web` publisher, so live PDS

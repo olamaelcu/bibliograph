@@ -31,12 +31,14 @@ contributor/publisher/identifier arrays exist only in two places:
 That keeps a contributor rename or merge to one row instead of every edition
 that credits it.
 
-New editions get a provider-prefixed rkey from
-`packages/worker/lib/ingest.js` (`gb.<googlebooks id>`, `isbn.<isbn13>`,
-`gr.<goodreads id>`), falling back to `editions_next_tid()` only when the
-candidate carries no provider identifier; if the derived rkey already exists,
-that edition is reused. Identity lookup is the identifier bag: an ingest that
-finds any stored pair updates that edition in place.
+New editions always get a TID rkey from `editions_next_tid()` (a 13-character
+base32-sortable `[234567abcdefghijklmnopqrstuvwxyz]` string), minted in
+`packages/worker/lib/ingest.js`; the rkey is never derived from a provider id or
+an ISBN. Identity is the identifier bag: an ingest first looks up
+`edition_identifiers` and updates any edition that owns one of the incoming
+`(issuer, value)` pairs in place, adding the new pairs. Two different identifier
+bags therefore mint two different TIDs, while re-resolving the same identifier
+always lands on the same edition URI.
 
 ## Publication
 
@@ -82,10 +84,20 @@ and skips enqueueing.
 
 | Task | Trigger | Work |
 | --- | --- | --- |
-| `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest into the identifier bag |
-| `catalog.search` | edge on a catalog search (`job_key` deduped, 1 h TTL) | provider search → ingest up to ten candidates |
-| `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to three candidates; falls back to the normal resolve chain when ISBNdb is unconfigured |
+| `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest up to 50 candidates into the identifier bag |
+| `catalog.search` | edge on a catalog search (`job_key` deduped, 1 h TTL) | provider search → ingest up to 50 candidates |
+| `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to 50 candidates; falls back to the resolve chain when ISBNdb is unconfigured or returns nothing |
 | `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
+
+Provider precedence is ISBNdb → Google Books → Goodreads for ISBN lookups, and
+ISBNdb → Google Books → Goodreads for text searches, stopping at the first
+provider that returns candidates (no fan-out merge across providers). When
+`ISBNDB_API_KEY` is unset the chain starts at Google Books. `googlebooks` and
+`goodreads` identifiers still resolve directly against their own provider.
+`CANDIDATES_PER_TASK = 50` in `packages/worker/lib/tasks.js` bounds each task;
+Google Books asks for its maximum page (`maxResults=40`) and ISBNdb search asks
+for `pageSize=50` (the API's default is 20), so a single provider call can be
+shorter than the cap.
 
 `pds-publish` claims at most 25 ready rows for its configured publisher DID per
 batch with `FOR UPDATE SKIP LOCKED` and a five-minute lease, so several worker

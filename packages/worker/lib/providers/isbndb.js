@@ -60,7 +60,8 @@ export function createIsbndb({ pool, apiKey, baseUrl, fetchImpl = fetch }) {
     },
 
     async search(text) {
-      const body = await query(`${baseUrl}/books/${encodeURIComponent(text)}`);
+      // pageSize is documented for /books/{query}; the API caps it at 100.
+      const body = await query(`${baseUrl}/books/${encodeURIComponent(text)}?pageSize=50`);
       return (body?.books ?? []).map(candidateFromIsbndb).filter(Boolean);
     }
   };

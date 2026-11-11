@@ -387,7 +387,8 @@ test('a did:plc publisher authority mints and drains an edition', async () => {
   assert.ok(write, 'applyWrites must be called');
   assert.equal(write.headers.authorization, 'Bearer test-access-jwt');
   assert.equal(write.body.repo, PLC_PUBLISHER_DID);
-  assert.equal(write.body.writes[0].rkey, 'gb.plc-publish-authority');
+  // New editions always mint a TID, never a provider-prefixed rkey.
+  assert.match(write.body.writes[0].rkey, /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/);
   assert.equal(write.body.writes[0].value.title, 'A did:plc Edition');
 
   const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri LIKE $1', [

@@ -3,6 +3,9 @@ import { publisherConfigError, resolvePublisherConfig } from './pds.js';
 import { createIngest } from './ingest.js';
 import { isbn13 as normalizeIsbn13 } from './util.js';
 
+/** Upper bound on editions one catalog task ingests; providers may return fewer. */
+export const CANDIDATES_PER_TASK = 50;
+
 function validIdentifier(identifier) {
   return (
     identifier !== null &&
@@ -44,7 +47,7 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
       }
 
       const candidates = await providers.resolve(identifier);
-      const ingested = await ingestCandidates(candidates, 3);
+      const ingested = await ingestCandidates(candidates, CANDIDATES_PER_TASK);
       helpers.logger.info(
         `catalog.resolve ${identifier.issuer}:${identifier.value}: ` +
           `${candidates.length} candidate(s), ${ingested} ingested`
@@ -69,7 +72,7 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         author: typeof payload.author === 'string' ? payload.author : undefined,
         identifiers
       });
-      const ingested = await ingestCandidates(candidates, 10);
+      const ingested = await ingestCandidates(candidates, CANDIDATES_PER_TASK);
       helpers.logger.info(
         `catalog.search: ${candidates.length} candidate(s), ${ingested} ingested`
       );
@@ -82,10 +85,10 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         return;
       }
 
-      // A direct by-ISBN lookup beats the generic fan-out, but only when
-      // ISBNdb is configured; otherwise fall back to the normal resolve chain.
+      // A direct by-ISBN lookup beats the generic fan-out; an empty result falls
+      // back to the resolve chain, which itself starts with ISBNdb (cache hit).
       const isbndb = providers?.providers?.isbndb;
-      let candidates;
+      let candidates = [];
       if (isbndb) {
         candidates = await isbndb.byIsbn(isbn);
       } else {
@@ -93,10 +96,12 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
           `catalog.isbn: ISBNdb is not configured (ISBNDB_API_KEY unset); ` +
             `falling back to the resolve chain for ${isbn}`
         );
+      }
+      if (candidates.length === 0) {
         candidates = await providers.resolve({ issuer: 'isbn13', value: isbn });
       }
 
-      const ingested = await ingestCandidates(candidates, 3);
+      const ingested = await ingestCandidates(candidates, CANDIDATES_PER_TASK);
       helpers.logger.info(
         `catalog.isbn ${isbn}: ${candidates.length} candidate(s), ${ingested} ingested`
       );

@@ -104,11 +104,50 @@ let server;
 let baseUrl;
 let isbndbRequests = 0;
 
+const TID_ALPHABET = '234567abcdefghijklmnopqrstuvwxyz';
+
+function assertTid(rkey) {
+  assert.equal(typeof rkey, 'string');
+  assert.equal(rkey.length, 13, `${rkey} is not a 13-char TID`);
+  for (const char of rkey) {
+    assert.ok(TID_ALPHABET.includes(char), `${rkey} has a non-base32-sortable character`);
+  }
+}
+
+/** Build a checksum-valid ISBN-13 so `candidateFromIsbndb` accepts it. */
+function isbn13For(index) {
+  const base = `97800000${String(index).padStart(4, '0')}`;
+  let sum = 0;
+  for (let position = 0; position < 12; position += 1) {
+    sum += Number(base[position]) * (position % 2 ? 3 : 1);
+  }
+  return `${base}${(10 - (sum % 10)) % 10}`;
+}
+
+const isbndbOrderBook = {
+  title: 'ISBNdb First Volume',
+  authors: ['Isbn Order Author'],
+  publisher: 'Isbn Order Press',
+  isbn13: isbn13For(900)
+};
+
+const CAP_BOOKS = Array.from({ length: 60 }, (_, index) => ({
+  title: `Cap Volume ${index}`,
+  isbn13: isbn13For(index)
+}));
+
+let googleRequests = 0;
+let goodreadsRequests = 0;
+
 async function cleanupHydrationRows(pool, host) {
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
   await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
-  await pool.query("DELETE FROM contributors WHERE name IN ('Isbn Test Author', 'Ursula K. Le Guin')");
-  await pool.query("DELETE FROM publishers WHERE name IN ('Isbn Direct Press', 'Ace')");
+  await pool.query(
+    "DELETE FROM contributors WHERE name IN ('Isbn Test Author', 'Ursula K. Le Guin', 'Isbn Order Author')"
+  );
+  await pool.query(
+    "DELETE FROM publishers WHERE name IN ('Isbn Direct Press', 'Ace', 'Isbn Order Press')"
+  );
   await pool.query('DELETE FROM isbndb_cache WHERE key LIKE $1', [`${baseUrl}/isbndb/%`]);
   await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${baseUrl}/%`]);
 }
@@ -122,8 +161,10 @@ before(async () => {
     };
 
     if (url.pathname === '/google/volumes') {
+      googleRequests += 1;
       const query = url.searchParams.get('q');
       if (query === 'isbn:9781111111111') send(plcBody);
+      else if (query === 'google-fills') send(googleBody);
       else send(query?.startsWith('isbn:') ? googleBody : { totalItems: 0, items: [] });
       return;
     }
@@ -132,16 +173,34 @@ before(async () => {
       send({ book: isbndbBook });
       return;
     }
+    if (url.pathname === '/isbndb/book/9780441478125') {
+      // A configured ISBNdb that has no record for the ISBN.
+      isbndbRequests += 1;
+      send({ book: null });
+      return;
+    }
+    if (url.pathname === '/isbndb/books/isbndb-first') {
+      isbndbRequests += 1;
+      send({ books: [isbndbOrderBook] });
+      return;
+    }
+    if (url.pathname === '/isbndb/books/cap-test') {
+      isbndbRequests += 1;
+      send({ books: CAP_BOOKS });
+      return;
+    }
     if (url.pathname.startsWith('/isbndb/')) {
       isbndbRequests += 1;
-      send({ book: { title: 'Unused' } });
+      send({ books: [] });
       return;
     }
     if (url.pathname.startsWith('/goodreads/search')) {
+      goodreadsRequests += 1;
       send(goodreadsSearchHtml, 'text/html');
       return;
     }
     if (url.pathname.startsWith('/goodreads/book/show/')) {
+      goodreadsRequests += 1;
       send(goodreadsBookHtml, 'text/html');
       return;
     }
@@ -234,7 +293,11 @@ test('resolve hydrates the catalog from provider results', async () => {
       "SELECT uri, rkey, title, pages, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
     assert.equal(edition.rowCount, 1);
-    assert.equal(edition.rows[0].rkey, 'gb.efdyneVzATwC');
+    assertTid(edition.rows[0].rkey);
+    assert.equal(
+      edition.rows[0].uri,
+      `at://did:web:test.example/community.lexicon.media.book/${edition.rows[0].rkey}`
+    );
     assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
     assert.equal(edition.rows[0].pages, 304);
     assert.equal(edition.rows[0].cover_url, 'https://books.example/cover.jpg');
@@ -264,14 +327,19 @@ test('resolve hydrates the catalog from provider results', async () => {
     ]);
 
     // Idempotent: a second resolution updates in place, never duplicates.
+    const firstUri = edition.rows[0].uri;
     await tasks['catalog.resolve'](
       { identifier: { issuer: 'isbn13', value: '9780441478125' } },
       helpers
     );
-    const count = await pool.query(
+    const after = await pool.query(
       "SELECT count(*)::int AS n FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
-    assert.equal(count.rows[0].n, 1);
+    assert.equal(after.rows[0].n, 1);
+    const same = await pool.query(
+      "SELECT uri FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
+    );
+    assert.equal(same.rows[0].uri, firstUri, 'identity is the identifier bag, not the rkey');
   } finally {
     await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:web:test.example/%'");
@@ -311,7 +379,7 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
     ]);
     assert.equal(edition.rowCount, 1);
     assert.ok(edition.rows[0].uri.startsWith(prefix), edition.rows[0].uri);
-    assert.equal(edition.rows[0].rkey, 'gb.plcAuthorityVolume');
+    assertTid(edition.rows[0].rkey);
     assert.equal(edition.rows[0].title, 'PLC Authority Edition');
 
     const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
@@ -320,15 +388,27 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
     assert.deepEqual(outbox.rows, [
       { collection: 'community.lexicon.media.book.edition', op: 'create' }
     ]);
+
+    // A different identifier bag mints a different TID under the same authority.
+    await tasks['catalog.resolve']({ identifier: { issuer: 'goodreads', value: '18423' } }, helpers);
+    const editions = await pool.query(
+      'SELECT rkey FROM editions WHERE uri LIKE $1 ORDER BY rkey',
+      [`at://${publisherDid}/%`]
+    );
+    assert.equal(editions.rowCount, 2);
+    for (const row of editions.rows) assertTid(row.rkey);
+    assert.equal(new Set(editions.rows.map((row) => row.rkey)).size, 2);
   } finally {
     await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
     await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+    await pool.query("DELETE FROM contributors WHERE name = 'Ursula K. Le Guin'");
+    await pool.query("DELETE FROM publishers WHERE name = 'Ace'");
     await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${baseUrl}/%`]);
     await pool.end();
   }
 });
 
-test('search falls back to Goodreads when Google finds nothing', async () => {
+test('search falls back to Goodreads when ISBNdb is unconfigured and Google finds nothing', async () => {
   const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
   const providers = createProviders({
     pool,
@@ -351,7 +431,7 @@ test('search falls back to Goodreads when Google finds nothing', async () => {
       "SELECT rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
     assert.equal(edition.rowCount, 1);
-    assert.equal(edition.rows[0].rkey, 'gr.18423');
+    assertTid(edition.rows[0].rkey);
     assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
     assert.equal(edition.rows[0].cover_url, 'https://img.example/18423.jpg');
   } finally {
@@ -387,7 +467,7 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
       "SELECT uri, rkey, title, pages, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
     );
     assert.equal(edition.rowCount, 1);
-    assert.equal(edition.rows[0].rkey, 'isbn.9780306406157');
+    assertTid(edition.rows[0].rkey);
     assert.equal(edition.rows[0].title, 'Direct Hydration Volume');
     assert.equal(edition.rows[0].pages, 200);
     assert.equal(edition.rows[0].cover_url, 'https://img.example/direct.jpg');
@@ -437,13 +517,173 @@ test('catalog.isbn falls back to the resolve chain without ISBNdb', async () => 
       "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-fallback.example/%'"
     );
     assert.equal(edition.rowCount, 1);
-    assert.equal(edition.rows[0].rkey, 'gb.efdyneVzATwC');
+    assertTid(edition.rows[0].rkey);
     assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
 
     // Without a key the fallback never reaches ISBNdb.
     assert.equal(isbndbRequests, 0);
   } finally {
     await cleanupHydrationRows(pool, 'isbn-fallback.example');
+    await pool.end();
+  }
+});
+
+test('catalog.isbn falls back to the resolve chain when ISBNdb has no record', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  const providers = createProviders({
+    pool,
+    env: {
+      ISBNDB_API_KEY: 'test-key',
+      ISBNDB_BASE_URL: `${baseUrl}/isbndb`,
+      GOOGLE_BOOKS_BASE_URL: `${baseUrl}/google`,
+      GOODREADS_BASE_URL: `${baseUrl}/goodreads`
+    }
+  });
+  const tasks = createTasks({ pool, providers, publisherHost: 'isbn-empty.example' });
+  const helpers = { logger: { info() {}, warn() {}, error() {} } };
+
+  try {
+    await cleanupHydrationRows(pool, 'isbn-empty.example');
+    isbndbRequests = 0;
+    googleRequests = 0;
+
+    await tasks['catalog.isbn']({ isbn: '9780441478125' }, helpers);
+
+    const edition = await pool.query(
+      "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-empty.example/%'"
+    );
+    assert.equal(edition.rowCount, 1);
+    assertTid(edition.rows[0].rkey);
+    assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
+
+    // ISBNdb was asked directly (empty), then again by the resolve chain
+    // (served from its cache), so only one HTTP request reached the stub.
+    assert.equal(isbndbRequests, 1);
+    assert.ok(googleRequests >= 1, 'Google Books must be reached after an empty ISBNdb');
+  } finally {
+    await cleanupHydrationRows(pool, 'isbn-empty.example');
+    await pool.end();
+  }
+});
+
+test('search tries ISBNdb first and never reaches Google when it returns candidates', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  const providers = createProviders({
+    pool,
+    env: {
+      ISBNDB_API_KEY: 'test-key',
+      ISBNDB_BASE_URL: `${baseUrl}/isbndb`,
+      GOOGLE_BOOKS_BASE_URL: `${baseUrl}/google`,
+      GOODREADS_BASE_URL: `${baseUrl}/goodreads`
+    }
+  });
+  const tasks = createTasks({ pool, providers, publisherHost: 'search-order.example' });
+  const helpers = { logger: { info() {}, warn() {}, error() {} } };
+
+  try {
+    await cleanupHydrationRows(pool, 'search-order.example');
+    isbndbRequests = 0;
+    googleRequests = 0;
+    goodreadsRequests = 0;
+
+    await tasks['catalog.search']({ title: 'isbndb-first' }, helpers);
+
+    const edition = await pool.query(
+      "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:search-order.example/%'"
+    );
+    assert.deepEqual(
+      edition.rows.map((row) => row.title),
+      ['ISBNdb First Volume'],
+      'only the ISBNdb candidate is ingested'
+    );
+    assertTid(edition.rows[0].rkey);
+    assert.equal(isbndbRequests, 1, 'ISBNdb search is called');
+    assert.equal(googleRequests, 0, 'Google Books must not be called');
+    assert.equal(goodreadsRequests, 0, 'Goodreads must not be called');
+  } finally {
+    await cleanupHydrationRows(pool, 'search-order.example');
+    await pool.end();
+  }
+});
+
+test('search falls back to Google on an empty ISBNdb, then to Goodreads', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  const providers = createProviders({
+    pool,
+    env: {
+      ISBNDB_API_KEY: 'test-key',
+      ISBNDB_BASE_URL: `${baseUrl}/isbndb`,
+      GOOGLE_BOOKS_BASE_URL: `${baseUrl}/google`,
+      GOODREADS_BASE_URL: `${baseUrl}/goodreads`
+    }
+  });
+  const tasks = createTasks({ pool, providers, publisherHost: 'search-empty.example' });
+  const helpers = { logger: { info() {}, warn() {}, error() {} } };
+
+  try {
+    await cleanupHydrationRows(pool, 'search-empty.example');
+    isbndbRequests = 0;
+    googleRequests = 0;
+    goodreadsRequests = 0;
+
+    await tasks['catalog.search']({ title: 'google-fills' }, helpers);
+    assert.equal(isbndbRequests, 1, 'ISBNdb is tried first');
+    assert.equal(googleRequests, 1, 'Google is called when ISBNdb is empty');
+    assert.equal(goodreadsRequests, 0, 'Goodreads is not reached when Google answers');
+
+    const fromGoogle = await pool.query(
+      "SELECT title FROM editions WHERE uri LIKE 'at://did:web:search-empty.example/%'"
+    );
+    assert.deepEqual(fromGoogle.rows.map((row) => row.title), ['The Left Hand of Darkness']);
+
+    await tasks['catalog.search']({ title: 'isbndb-empty' }, helpers);
+    assert.equal(isbndbRequests, 2, 'ISBNdb is tried for the second search');
+    assert.equal(googleRequests, 2, 'Google is called for the second search');
+    assert.equal(goodreadsRequests, 1, 'Goodreads fills the gap when Google is empty too');
+
+    const titles = await pool.query(
+      "SELECT title FROM editions WHERE uri LIKE 'at://did:web:search-empty.example/%' ORDER BY title"
+    );
+    assert.deepEqual(titles.rows.map((row) => row.title), [
+      'The Left Hand of Darkness',
+      'The Left Hand of Darkness'
+    ]);
+  } finally {
+    await cleanupHydrationRows(pool, 'search-empty.example');
+    await pool.end();
+  }
+});
+
+test('search ingests at most 50 candidates', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  const providers = createProviders({
+    pool,
+    env: {
+      ISBNDB_API_KEY: 'test-key',
+      ISBNDB_BASE_URL: `${baseUrl}/isbndb`,
+      GOOGLE_BOOKS_BASE_URL: `${baseUrl}/google`,
+      GOODREADS_BASE_URL: `${baseUrl}/goodreads`
+    }
+  });
+  const tasks = createTasks({ pool, providers, publisherHost: 'cap.example' });
+  const helpers = { logger: { info() {}, warn() {}, error() {} } };
+
+  try {
+    await cleanupHydrationRows(pool, 'cap.example');
+    isbndbRequests = 0;
+    googleRequests = 0;
+
+    await tasks['catalog.search']({ title: 'cap-test' }, helpers);
+
+    const editions = await pool.query(
+      "SELECT rkey FROM editions WHERE uri LIKE 'at://did:web:cap.example/%'"
+    );
+    assert.equal(editions.rowCount, 50, 'the provider returned 60 candidates');
+    for (const row of editions.rows) assertTid(row.rkey);
+    assert.equal(new Set(editions.rows.map((row) => row.rkey)).size, 50);
+    assert.equal(googleRequests, 0);
+  } finally {
+    await cleanupHydrationRows(pool, 'cap.example');
     await pool.end();
   }
 });
