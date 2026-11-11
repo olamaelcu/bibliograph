@@ -1,0 +1,14 @@
+{
+  "name": "worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "graphile-worker": "^0.18.0",
+    "pg": "^8.23.1"
+  }
+}

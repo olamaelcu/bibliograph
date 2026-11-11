@@ -42,12 +42,80 @@ Triggers on `editions` and its child tables write `pds_outbox` rows. The
 worker chooses create/update without a read. Only editions are published — there
 are no work, contributor or publisher records.
 
+The record value is rebuilt from the catalog at publish time
+(`packages/worker/lib/edition-record.js`), not stored in `pds_outbox.value`.
+Identifiers come from `edition_identifiers`, contributors from
+`edition_contributors` + `contributors` in `position` order, and the single
+publisher from the lowest-position `edition_publishers` row. `coverUrl` is a
+URL only; catalog editions never embed blobs, so the publisher repo does not own
+cover bytes. An edition without an identifier row is not lexicon-valid and the
+publish is retried as a failure (the outbox row names the reason).
+
+The authority in the URI is the publisher identity: `ATP_SERVICE_DID`, else
+`did:web:<ATP_SERVICE_HOST>`. New editions mint their URI from that identity,
+so it must not change once the catalog is populated.
+
 The public `/xrpc` gateway proxies `com.atproto.{repo,sync,identity}` and
 `com.atproto.server.describeServer` to the PDS, serves catalog/label/feed
 endpoints at the edge, and forwards everything else to HappyView. The edge also
 serves the two read-only books-wg procedures (`resolveEditions`,
 `searchEditions`) anonymously from the catalog tables; every `editionView` they
 return carries the edition's atproto URI as an `atproto` identifier.
+
+## Catalog worker
+
+`packages/worker` is the only long-running catalog process. Graphile Worker owns
+its job table (`graphile_worker.jobs`) and the edge enqueues jobs there when
+`catalog_enqueue_marks` exists; without the worker the edge still serves reads
+and skips enqueueing.
+
+| Task | Trigger | Work |
+| --- | --- | --- |
+| `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest into the identifier bag |
+| `catalog.search` | edge on a catalog search (`job_key` deduped, 1 h TTL) | provider search → ingest up to ten candidates |
+| `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
+
+`pds-publish` claims at most 25 ready rows for its configured publisher DID per
+batch with `FOR UPDATE SKIP LOCKED` and a five-minute lease, so several worker
+processes can share the database. Claiming writes `claimed_at`; the PDS call happens outside a
+transaction. Completion deletes the outbox row and upserts `pds_cids` from the
+returned CID in one transaction, guarded by the row's `updated_at`, so a trigger
+that rewrites the row mid-publish leaves the newer state queued instead of
+swallowing it. A failed publish increments `attempts`, clears `claimed_at`,
+records `last_error`, and schedules `next_at = now() + 60s × 2^attempts` (capped
+at one hour). `attempts < 10` is part of the claim predicate, matching the
+partial `pds_outbox_ready_idx`: after ten failures the row is parked and stays
+visible for an operator. Requeue it with:
+
+```sql
+UPDATE pds_outbox SET attempts = 0, next_at = now(), last_error = NULL
+ WHERE uri = 'at://…';
+```
+
+Publishing authenticates as an account on `PDS_URL`, not with a repository
+signing key: the PDS already owns that key. Set `PDS_ACCOUNT_DID` and
+`PDS_ACCOUNT_PASSWORD` (an app password) for a `com.atproto.server.createSession`
+session, or `PDS_ACCESS_TOKEN` (+ optional `PDS_REFRESH_TOKEN`) for a
+provisioned session. The session account must be the publisher DID, because
+`applyWrites` writes to that account's repo. With credentials missing the
+worker logs `pds-publish is DISABLED` with the exact missing settings, still
+runs the hydration tasks, and leaves rows queued; the task itself fails loudly
+if invoked. It never no-ops or reports fake success.
+
+Local development runs the worker against the local Postgres with `mise run
+worker` (or `pnpm worker:dev`). The local tranquil PDS issues `did:plc`
+accounts and has `selfHostedDidWebEnabled: false`, so it cannot host the
+`did:web` publisher: hydration works there, while a live `pds-publish` needs a
+PDS that has the publisher account provisioned and the outbox URIs rewritten
+to that DID. Publisher behaviour is tested against a stub PDS in
+`packages/worker/test/publish.test.js`.
+
+Packaging: `mise run package-worker-payload` stages plain ESM plus its
+production dependencies with `pnpm deploy --prod`, and `mise run
+package-worker-deb` builds `bibliograph-worker`, which installs the payload at
+`/usr/lib/bibliograph-worker` and its conffile at
+`/etc/bibliograph/worker.env`. The unit runs it with the host's nodejs and
+`StateDirectory=bibliograph`; the payload needs no pnpm, tsx or build toolchain.
 
 ## Activity
 

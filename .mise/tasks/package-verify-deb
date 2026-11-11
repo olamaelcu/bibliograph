@@ -177,7 +177,10 @@ grep -qF 'tsx server.ts' "$WEB" || fail "web unit does not run server.ts"
 grep -qF 'Requires=bibliograph-migrate.service' "$WEB" \
   || fail "web unit does not require the migrator"
 
-grep -qF 'tsx worker.ts' "$WORKER" || fail "worker unit does not run worker.ts"
+grep -qF 'WorkingDirectory=/usr/lib/bibliograph-worker' "$WORKER" \
+  || fail "worker unit does not run from the packaged worker payload"
+grep -qF 'ExecStart=/usr/bin/node /usr/lib/bibliograph-worker/index.js' "$WORKER" \
+  || fail "worker unit does not run the packaged worker entrypoint"
 grep -qF 'Requires=bibliograph-migrate.service' "$WORKER" \
   || fail "worker unit does not require the migrator"
 
