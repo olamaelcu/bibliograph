@@ -259,6 +259,57 @@ linked as a direct dependency.
 Note that `typescript` *is* present in the production tree, transitively via
 `cosmiconfig` (graphile-worker) and `valibot`. That is unavoidable and harmless.
 
+## HappyView as its own package
+
+`bibliograph-happyview` ships HappyView's host binary, its Postgres migrations
+and the built dashboard, extracted from the pinned container image — no Node or
+container runtime is needed. It installs beside `bibliograph`, not instead of
+it.
+
+```bash
+mise run package-hv-payload   # binary + migrations + dashboard from the pinned image
+mise run package-hv-deb       # dpkg-deb → dist/bibliograph-happyview_2.17.4-1_amd64.deb
+```
+
+It is deliberately not built by `debian/rules`: that tree assembles the
+application package from a Node payload staged by `package-payload`, which
+needs the SvelteKit server sources. HappyView has no Node payload and must be
+installable on its own, so `packaging/happyview/build-deb.sh` assembles it with
+`dpkg-deb` while keeping the same conventions — `/usr/lib/bibliograph-happyview`,
+`/etc/bibliograph/happyview.env`, the shared `bibliograph` sysuser.
+
+| Path | Contents |
+| --- | --- |
+| `/usr/lib/bibliograph-happyview/happyview` | server binary; the unit's WorkingDirectory, because migrations load from `./migrations/postgres` |
+| `…/migrations`, `…/static` | schema migrations, built dashboard |
+| `…/lexicons`, `…/scripts`, `…/lib`, `…/sql` | exactly what the deploy oneshot uploads, from this checkout |
+| `…/bin/hv-deploy` | the same tool `mise run hv-deploy` runs |
+| `/etc/bibliograph/happyview.env` | conffile; `DATABASE_URL` is the only required entry |
+| `/usr/share/bibliograph-happyview/db-init.sql` | one-time role + `happyview` schema creation |
+
+```bash
+sudo apt install ./dist/bibliograph-happyview_2.17.4-1_amd64.deb
+# once, if the role and schema do not exist yet:
+sudo -u postgres psql -v db=<database> -f /usr/share/bibliograph-happyview/db-init.sql
+# then set DATABASE_URL, SESSION_SECRET and TOKEN_ENCRYPTION_KEY in
+# /etc/bibliograph/happyview.env and restart:
+sudo systemctl restart happyview bibliograph-happyview-deploy
+```
+
+`happyview.service` binds `127.0.0.1:3000`; the application stays the public
+origin and proxies `/xrpc` to it. `bibliograph-happyview-deploy.service` runs at
+install and on every upgrade: with `--seed` it mints an admin key into
+`/etc/bibliograph/happyview-admin.key` on first run (a fresh HappyView has no
+credentials with which to accept an upload), then uploads the lexicons and
+scripts and applies the activity indexes. `DATABASE_URL` doubles as its SQL
+connection; set `HV_DATABASE_URL` only to deploy against a different database
+than the server uses.
+
+The package is `Architecture: any` because the binary links the host's glibc and
+`libssl3`, but it is only correct for the architecture of the image it was
+extracted from. It builds clean under `lintian` apart from the
+initial-upload-with-no-bug warning.
+
 ## Why a package instead of a container
 
 The Dokku/Docker path (image build, `Procfile`, push-to-deploy) was retired with

@@ -1,0 +1,41 @@
+#!/bin/sh
+# Hand-assembled package: debhelper does not run, so the units are enabled and
+# started with deb-systemd-helper/-invoke — the same tools debhelper's generated
+# snippets would use. Calling systemctl directly here would trip lintian's
+# maintainer-script-calls-systemctl and skip the package's own state tracking.
+set -e
+
+# The user is shared with the bibliograph package. Create it only when absent
+# so installing both in either order is safe.
+if ! getent group bibliograph >/dev/null; then
+    addgroup --system bibliograph
+fi
+if ! getent passwd bibliograph >/dev/null; then
+    adduser --system --ingroup bibliograph --home /var/lib/bibliograph \
+        --no-create-home --disabled-login --gecos "Bibliograph appview" bibliograph
+fi
+
+# Configuration, the generated admin key and the sysuser's writable path.
+install -d -m 0750 -o root -g bibliograph /etc/bibliograph
+install -d -m 0750 -o bibliograph -g bibliograph /var/lib/bibliograph
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+
+    deb-systemd-helper enable happyview.service >/dev/null 2>&1 || true
+    deb-systemd-invoke restart happyview.service >/dev/null 2>&1 || true
+
+    deb-systemd-helper enable bibliograph-happyview-deploy.service >/dev/null 2>&1 || true
+    deb-systemd-invoke restart bibliograph-happyview-deploy.service >/dev/null 2>&1 || true
+fi
+
+# The unit will fail without a database, so say so once rather than leaving a
+# silently restarting service behind.
+if ! grep -Eq '^DATABASE_URL=..+' /etc/bibliograph/happyview.env; then
+    echo "bibliograph-happyview: DATABASE_URL is unset in /etc/bibliograph/happyview.env." >&2
+    echo "bibliograph-happyview: HappyView will not start until it is set. On a new" >&2
+    echo "bibliograph-happyview: install, create the role and schema first:" >&2
+    echo "bibliograph-happyview:   sudo -u postgres psql -v db=<database> -f /usr/share/bibliograph-happyview/db-init.sql" >&2
+fi
+
+exit 0

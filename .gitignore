@@ -27,6 +27,7 @@ drizzle/meta/_journal.json.bak
 # Debian packaging artifacts
 dist/
 packaging/payload/
+packaging/build/
 debian/.debhelper/
 debian/bibliograph/
 debian/files

@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] && [ -d /run/systemd/system ]; then
+    deb-systemd-invoke stop bibliograph-happyview-deploy.service >/dev/null 2>&1 || true
+    deb-systemd-invoke stop happyview.service >/dev/null 2>&1 || true
+    deb-systemd-helper disable bibliograph-happyview-deploy.service >/dev/null 2>&1 || true
+    deb-systemd-helper disable happyview.service >/dev/null 2>&1 || true
+fi
+
+exit 0

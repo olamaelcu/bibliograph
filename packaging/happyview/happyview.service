@@ -1,0 +1,31 @@
+[Unit]
+Description=HappyView activity plane (Bibliograph)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+# HappyView loads ./migrations relative to its working directory, so this must
+# stay the install root.
+WorkingDirectory=/usr/lib/bibliograph-happyview
+EnvironmentFile=/etc/bibliograph/happyview.env
+ExecStart=/usr/lib/bibliograph-happyview/happyview
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65536
+
+# The install tree is read-only; HappyView's state is Postgres. The sysuser's
+# home is the only writable path, and only because the shared sysuser declares
+# it.
+StateDirectory=bibliograph
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bibliograph
+
+[Install]
+WantedBy=multi-user.target

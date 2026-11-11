@@ -1,0 +1,29 @@
+[Unit]
+Description=Bibliograph HappyView lexicon, script and index deploy (oneshot)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target happyview.service
+Wants=network-online.target
+Requires=happyview.service
+# Re-run after an upgrade of either unit, not on every boot.
+PartOf=happyview.service
+
+[Service]
+Type=oneshot
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph-happyview
+EnvironmentFile=/etc/bibliograph/happyview.env
+# --seed mints an admin key on first run and writes it here; later runs read
+# the same file, so the upload stays authenticated without any operator step.
+# --wait covers the first start, where migrations run before the listener binds.
+ExecStart=/usr/lib/bibliograph-happyview/bin/hv-deploy \
+    --wait 120 \
+    --seed \
+    --admin-key-file /etc/bibliograph/happyview-admin.key \
+    --admin-key-out /etc/bibliograph/happyview-admin.key
+SyslogIdentifier=bibliograph-happyview-deploy
+RemainAfterExit=yes
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
