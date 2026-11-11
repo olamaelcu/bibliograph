@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+#MISE description="Upload the activity lexicons and query scripts to HappyView and apply the activity indexes"
+# Replaces the deleted packages/bibliograph-service/happyview/deploy.ts. Uploads
+# the 7 record lexicons and 17 query lexicons from happyview/lexicons/, the Lua
+# query scripts from happyview/scripts/xrpc/query/ (with `-- @include
+# lib/prelude.lua` expanded exactly as deploy.ts did), then applies
+# happyview/sql/indexes.sql to the compose Postgres.
+#
+# Idempotent: HappyView upserts on POST, so a second run is not an error — the
+# first upload answers 201 and every repeat answers 200 with a bumped revision.
+# We therefore re-POST instead of delete-then-create (a DELETE would also reset
+# created_at/revision for no benefit). Verified empirically against 2.17.4.
+#
+# Record lexicons are uploaded with backfill: false: this local network's records
+# reach the index through HappyView's own procedures, and the old script's
+# backfill: true enqueued jobs that never complete here.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HV_URL="${HAPPYVIEW_URL:-http://127.0.0.1:3000}"
+HV_URL="${HV_URL%/}"
+ADMIN_KEY="${HAPPYVIEW_ADMIN_KEY:-hv_dev_admin}"
+
+export HV_URL ADMIN_KEY
+
+python3 - <<'PY'
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+
+ROOT = os.path.join(os.getcwd(), 'happyview')
+BASE = os.environ['HV_URL']
+ADMIN_KEY = os.environ['ADMIN_KEY']
+
+# Record lexicons: target_collection is the lexicon's own NSID.
+RECORD_LEXICONS = [
+    'net.olamaelcu.livtet.biblio.bookShelving',
+    'net.olamaelcu.livtet.biblio.shelf',
+    'net.olamaelcu.livtet.biblio.shelfItem',
+    'net.olamaelcu.livtet.biblio.follow',
+    'net.olamaelcu.livtet.biblio.readingGoal',
+    'net.olamaelcu.livtet.actor.profile',
+    'community.lexicon.media.book.review',
+]
+
+# Query lexicons: (nsid, target_collection) — mirrors deploy.ts exactly.
+QUERY_LEXICONS = [
+    ('net.olamaelcu.livtet.biblio.graph.isFollowing', 'net.olamaelcu.livtet.biblio.follow'),
+    ('net.olamaelcu.livtet.biblio.graph.listFollowers', 'net.olamaelcu.livtet.biblio.follow'),
+    ('net.olamaelcu.livtet.biblio.graph.listFollowees', 'net.olamaelcu.livtet.biblio.follow'),
+    ('net.olamaelcu.livtet.biblio.getReadingGoal', 'net.olamaelcu.livtet.biblio.readingGoal'),
+    ('net.olamaelcu.livtet.biblio.getActorProfile', 'net.olamaelcu.livtet.actor.profile'),
+    ('net.olamaelcu.livtet.biblio.getShelf', 'net.olamaelcu.livtet.biblio.shelf'),
+    ('net.olamaelcu.livtet.biblio.listShelves', 'net.olamaelcu.livtet.biblio.shelf'),
+    ('net.olamaelcu.livtet.biblio.listShelvesWithBooks', 'net.olamaelcu.livtet.biblio.shelf'),
+    ('net.olamaelcu.livtet.biblio.getShelvingOfBook', 'net.olamaelcu.livtet.biblio.bookShelving'),
+    ('net.olamaelcu.livtet.biblio.getShelversOfBook', 'net.olamaelcu.livtet.biblio.bookShelving'),
+    ('net.olamaelcu.livtet.biblio.listBooksOnShelf', 'net.olamaelcu.livtet.biblio.bookShelving'),
+    ('net.olamaelcu.livtet.biblio.listRecentShelving', 'net.olamaelcu.livtet.biblio.bookShelving'),
+    ('net.olamaelcu.livtet.biblio.getBookOnShelf', 'net.olamaelcu.livtet.biblio.bookShelving'),
+    ('net.olamaelcu.livtet.biblio.listShelfItems', 'net.olamaelcu.livtet.biblio.shelfItem'),
+    ('net.olamaelcu.livtet.biblio.listShelfItemsByBook', 'net.olamaelcu.livtet.biblio.shelfItem'),
+    ('net.olamaelcu.livtet.biblio.getReviewsByBook', 'community.lexicon.media.book.review'),
+    ('net.olamaelcu.livtet.biblio.listReviewsByActor', 'community.lexicon.media.book.review'),
+]
+
+
+def request(method, path, payload=None):
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f'{BASE}{path}',
+        data=data,
+        method=method,
+        headers={
+            'Authorization': f'Bearer {ADMIN_KEY}',
+            'Content-Type': 'application/json',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            body = res.read().decode() or '{}'
+            return res.status, json.loads(body) if body.strip() else None
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode(errors='replace')
+        raise SystemExit(f'{method} {path} failed: HTTP {err.code} {detail}') from None
+
+
+def read_lexicon(nsid):
+    path = os.path.join(ROOT, 'lexicons', *nsid.split('.')) + '.json'
+    with open(path, encoding='utf-8') as handle:
+        return json.load(handle)
+
+
+def expand(body, seen=None):
+    """Mirror deploy.ts: expand `-- @include <path>` relative to happyview/."""
+    seen = set() if seen is None else seen
+    out = []
+    for line in body.split('\n'):
+        match = re.match(r'^--\s*@include\s+(.+)$', line.strip())
+        if not match:
+            out.append(line)
+            continue
+        include_path = os.path.join(ROOT, match.group(1).strip())
+        if include_path in seen:
+            continue
+        seen.add(include_path)
+        with open(include_path, encoding='utf-8') as handle:
+            out.append(expand(handle.read(), seen))
+    return '\n'.join(out)
+
+
+lexicon_count = 0
+for nsid in RECORD_LEXICONS:
+    status, reply = request('POST', '/admin/lexicons', {
+        'lexicon_json': read_lexicon(nsid),
+        'backfill': False,
+        'target_collection': nsid,
+    })
+    print(f'lexicon {nsid} -> {nsid}: HTTP {status} revision {reply["revision"]}')
+    lexicon_count += 1
+
+for nsid, target in QUERY_LEXICONS:
+    status, reply = request('POST', '/admin/lexicons', {
+        'lexicon_json': read_lexicon(nsid),
+        'backfill': False,
+        'target_collection': target,
+    })
+    print(f'lexicon {nsid} -> {target}: HTTP {status} revision {reply["revision"]}')
+    lexicon_count += 1
+
+script_dir = os.path.join(ROOT, 'scripts', 'xrpc', 'query')
+script_count = 0
+for filename in sorted(name for name in os.listdir(script_dir) if name.endswith('.lua')):
+    nsid = filename[:-len('.lua')]
+    with open(os.path.join(script_dir, filename), encoding='utf-8') as handle:
+        body = expand(handle.read())
+    status, reply = request('POST', '/admin/scripts', {
+        'id': f'xrpc.query:{nsid}',
+        'script_type': 'lua',
+        'body': body,
+        'description': f'Bibliograph query {nsid} (generated from scripts/xrpc/query/{filename})',
+    })
+    print(f'script xrpc.query:{nsid}: HTTP {status}')
+    script_count += 1
+
+lexicons = request('GET', '/admin/lexicons')[1]
+scripts = request('GET', '/admin/scripts')[1]
+print(f'uploaded {lexicon_count} lexicons and {script_count} scripts '
+      f'({len(lexicons)} lexicons, {len(scripts)} scripts registered)')
+PY
+
+docker compose exec -T -e PGOPTIONS='-c client_min_messages=warning' postgres \
+  psql -q -U bibliograph -d bibliograph -v ON_ERROR_STOP=1 < happyview/sql/indexes.sql
+
+indexes="$(docker compose exec -T postgres psql -U bibliograph -d bibliograph -tAc \
+  "select count(*) from pg_indexes where indexname like 'happyview_record_%'")"
+echo "indexes applied: ${indexes} happyview_record_* indexes present"

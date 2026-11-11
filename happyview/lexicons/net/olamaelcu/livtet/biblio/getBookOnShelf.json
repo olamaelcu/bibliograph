@@ -1,0 +1,40 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getBookOnShelf",
+  "description": "Get a hydrated view of a bookShelving record.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uri"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the bookShelving record."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["bookShelf"],
+          "properties": {
+            "bookShelf": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfView"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "NotFound",
+          "description": "No bookShelving record exists at the given AT-URI."
+        }
+      ]
+    }
+  }
+}
