@@ -25,12 +25,18 @@ which:
 - relays only `content-type`, `accept`, `authorization` and `dpop` upstream, and adds its own
   `X-Client-Key`/`X-Client-Secret` from the environment (the browser cannot choose them);
 - returns the upstream status and body unchanged, with only `content-type` and `dpop-nonce` relayed
-  back;
+  back — except a script's failure envelope. A handler cannot choose an HTTP status, so `fail()`
+  returns `{ __bib_http: { status, body } }` and HappyView writes that table as a `200`. The edge
+  unwraps exactly that shape — a `200` whose whole body is the single key, whose `status` is a
+  4xx/5xx integer, and whose `body` is an object — and answers with the status it names, which is
+  what makes every error in the tables below reach a caller as the status it says;
 - answers `502 UpstreamUnavailable` when HappyView cannot be reached.
 
 The two books-wg procedures never reach HappyView: the edge dispatches them on NSID and answers them
 from the catalog tables (`editions`, `edition_identifiers`, `edition_contributors`,
 `edition_publishers`). They are `POST` by lexicon and reject `GET` with `405 MethodNotAllowed`.
+They never write catalog rows; when the local catalog cannot answer, they may queue a hydration job
+and mark it in `catalog_enqueue_marks`.
 
 **Auth.** Queries are anonymous. HappyView procedures require a DPoP-bound session:
 `Authorization: DPoP <token>` plus a fresh `DPoP` proof. The edge holds no session and cannot mint
@@ -53,8 +59,10 @@ Anything the index has not seen yet is absent until a backfill or reconcile inde
 does not have that gap because it indexes the record it just wrote in the same request.
 
 `resolveEditions` and `searchEditions` are the other exception: they read the catalog tables, not
-`happyview_records`, and they never write. Provider fan-out (Google Books, ISBNdb, Goodreads) is not
-implemented yet; the responses are the local catalog only.
+`happyview_records`, and they never write catalog rows. Provider fan-out (Google Books, ISBNdb,
+Goodreads) runs asynchronously in the worker (`catalog.resolve` / `catalog.search`), not in the
+request; the response is the local catalog only, with `pending` reporting whether background
+hydration is queued.
 
 **Catalog dependency.** Book-rendering views join `public.appview_book_lua`, the catalog read model:
 
@@ -116,6 +124,17 @@ first in `identifiers` and exactly once. The view type has no `uri` field, so th
 link back to the record; clients derive display routes such as
 `/book/<did>/<rkey>` from it. Stored identifiers follow it unchanged (`issuer`/`value`, no
 bookkeeping columns).
+
+`editionResults` (`{ items, hasMore, total?, pending }`) also carries `pending`, which is present on
+every response from the two catalog procedures and is always a boolean. `true` means background
+hydration — provider resolution or search — is outstanding for this request and may add editions
+matching it; the client should re-call later (with the same body) until `pending` is `false`.
+`false` means no catalog hydration is outstanding, so an immediate re-call is not expected to
+change the result. There is no ETag, conditional-request, stream, or subscription signal: polling
+is the only mechanism, and `pending` says nothing about whether anything will be found. It
+describes queued/outstanding work, not worker liveness: `hydrationAvailable()` only proves the job
+table and `catalog_enqueue_marks` are installed, so a stopped worker leaves `pending` true until
+the worker resumes and drains the queue.
 
 ## Inventory
 
@@ -295,11 +314,12 @@ missing target is `404`; successful writes go through the PDS and are indexed in
 
 ### Catalog discovery (edge)
 
-These two are `POST` by lexicon but never write and never authenticate. They are dispatched by the
+These two are `POST` by lexicon but never write catalog rows and never authenticate. They are dispatched by the
 edge, read the catalog tables, and answer `503 ServiceUnavailable` when `DATABASE_URL` is unset or
 the query fails. Both cap `identifiers` at 100 entries and clamp `offset`/`limit`; a duplicate
 `(issuer, value)` pair is collapsed before the query. Identifier comparison is exact — no
-normalization — per the lexicon.
+normalization — per the lexicon. Both may queue background hydration instead of writing catalog
+rows; `pending` in the response reports whether that work is outstanding (see above).
 
 #### `community.lexicon.media.book.resolveEditions`
 
@@ -309,14 +329,30 @@ paged by `offset`/`limit`, with `LIMIT limit + 1` deciding `hasMore`; `total` is
 first page only. No match is an empty page (the lexicon declares no errors). Every item is an
 `editionView` whose `identifiers` begin with the atproto URI identifier.
 
+`pending` is `true` exactly when at least one supplied identifier had no matching edition in this
+response and the hydration queue is installed. It stays `true` when this call's enqueue was
+suppressed by the TTL mark, because the earlier job is still outstanding; it is `false` when every
+identifier matched, or when the hydration queue is not installed (nothing can hydrate). Pending
+reports queued work, not worker liveness: a stopped worker leaves it `true` until it resumes. It is
+not a promise that the provider will resolve the identifier.
+
 #### `community.lexicon.media.book.searchEditions`
 
 At least one nonblank `q`, `title`, `author` or a non-empty `identifiers` array is required;
 otherwise `400 InvalidQuery`. The catalog pass ORs the supplied hints: exact identifier pairs,
 `title ILIKE`, contributor name for `author`, and for `q` a broader match over title, description,
 contributor names and identifier values. Local ranking is `identifier > title > author > text`,
-then `indexed_at DESC, uri ASC`. Provider search and ingestion are not implemented yet; the
-ranking is this catalog's relevance order, which the lexicon allows providers to define.
+then `indexed_at DESC, uri ASC`. Provider search and ingestion happen asynchronously in the worker
+(`catalog.search`, Google Books then ISBNdb for an ISBN when Google Books is empty, then Goodreads
+as gap-fill); newly ingested editions appear in later calls. The ranking above is this catalog's
+relevance order, which the lexicon allows providers to define.
+
+`pending` is `true` only when the local result was empty and the hydration queue is installed (a
+repeated query is deduplicated by its TTL mark, so this call may not have enqueued again); a
+non-empty local page always reports `pending: false`. As with
+`resolveEditions`, the flag describes queued work, not an expected hit: an empty page that reports
+`pending: true` may still be empty on every later call. The availability check is table presence,
+not worker liveness, so a stopped worker leaves `pending` true until it resumes.
 
 ### Follow
 
@@ -452,13 +488,23 @@ a PDS with a different shape are not found by them.
 
 - No PDS reads on the query path, no Constellation, no tiered cursors (`tap:`/`con:`/`pds:`), no
   Bookhive branches: the index is the only activity source.
-- No `com.atproto.*` or `community.lexicon.book.*` handlers are exposed here; the catalog is read
-  through `appview_book_lua` only.
-- No writes other than the 15 procedures; a client that writes records to its own PDS directly is
-  indexed only when a backfill or reconcile runs, not per request.
-- No provider search yet: `resolveEditions` and `searchEditions` read the local catalog only, and
-  the Google Books / ISBNdb / Goodreads worker, resolution-miss cache and PDS publication of newly
-  discovered editions remain to be built.
+- No `com.atproto.*` or `community.lexicon.book.*` handlers are exposed here; the activity queries
+  read the catalog through `appview_book_lua` only, and edition discovery is the two edge
+  procedures.
+- No request-path writes other than the 15 procedures; the worker writes catalog rows and
+  publishes editions out of band. A client that writes records to its own PDS directly is indexed
+  only when a backfill or reconcile runs, not per request.
+- Provider hydration is worker work, not request-path work: the edge queues `catalog.resolve` /
+  `catalog.search` (deduplicated by a TTL mark) and reports `pending`; `packages/worker` then
+  queries Google Books, then ISBNdb for an ISBN only when Google Books is empty, then Goodreads as
+  gap-fill, and ingests candidates through the identifier bag. New editions queue in `pds_outbox`
+  and the worker's `pds-publish` cron task drains it with `com.atproto.repo.applyWrites`. Neither
+  the providers nor the publisher are verified live in this environment: Google Books/ISBNdb need
+  API keys and consent, and the local dev PDS cannot host the `did:web` publisher, so live PDS
+  publishing needs a provisioned publisher account (`PDS_URL`, publisher DID,
+  `PDS_ACCOUNT_PASSWORD` or `PDS_ACCESS_TOKEN`). Without a provisioned publisher the worker still
+  hydrates and rows queue in `pds_outbox`; without the hydration queue installed `pending` is
+  always `false`.
 - No cache headers are set by the edge, and no cache-control is relayed from HappyView.
 - No works/contributors/publishers records, no feed generator, and no label or lexicon endpoints on
   this surface.

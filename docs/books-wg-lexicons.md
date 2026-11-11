@@ -16,7 +16,7 @@ commit the gitlink.
 
 | File | Type | Status in this repo |
 | --- | --- | --- |
-| `lexicons/defs.json` (`community.lexicon.media.book.defs`) | defs | identical to `happyview/lexicons/community/lexicon/media/book/defs.json` at this pin |
+| `lexicons/defs.json` (`community.lexicon.media.book.defs`) | defs | upstream copy; our `happyview/lexicons/community/lexicon/media/book/defs.json` is identical at this pin **plus the local `editionResults#pending` extension** (see below) |
 | `lexicons/review.json` (`community.lexicon.media.book.review`) | record | identical to our deployed copy |
 | `lexicons/edition.json` (`community.lexicon.media.book.edition`) | record | **not present** in `happyview/lexicons`; the catalog publisher owns this record type |
 | `lexicons/resolveEditions.json` | procedure (read-only) | served by the edge; see below |
@@ -25,6 +25,23 @@ commit the gitlink.
 Both new methods are `type: procedure` with a JSON body and `application/json` output, but they are
 **read-only**: `resolveEditions` has no declared errors, `searchEditions` declares
 `InvalidQuery` for a blank cross-field input. Neither takes an attestation or writes a record.
+
+## Local lexicons extension: `editionResults#pending`
+
+The upstream working set has no field for asynchronous hydration, so our copy of
+`community.lexicon.media.book.defs` adds one to `editionResults`:
+
+```json
+"pending": {
+  "type": "boolean",
+  "description": "True when background hydration (provider resolution or search) is outstanding for this result and the caller should re-call later; false when no further work is queued. Pending work may still find nothing: it is not a promise that more editions exist."
+}
+```
+
+It is optional: the required array stays `[items, hasMore]`. This is a local extension awaiting
+upstream adoption — the vendored submodule is pinned and untouched, and `generate-catalog.mjs` reads
+`happyview/lexicons` first (de-duplicating by NSID), so the local copy is what the edge and the
+public page use. Remove the note and the field once the working group adopts it upstream.
 
 ## They cannot live in HappyView
 
@@ -51,6 +68,10 @@ before the script runs (`401 XRPC procedures require DPoP authentication`), and 
 - **Configuration**: `DATABASE_URL` is declared in `packages/web/src/env.ts`; the deployment
   template is `packaging/web/web.env` (unset → the two methods answer `503 ServiceUnavailable`
   instead of taking the edge down).
+- **Worker**: `packages/worker` (`index.js`, `lib/providers`, `lib/ingest.js`, `lib/tasks.js`,
+  `lib/publish.js`) consumes `catalog.resolve` / `catalog.search` / `pds-publish`. The Debian unit
+  is `packaging/worker/bibliograph-worker.service`, running
+  `/usr/bin/node /usr/lib/bibliograph-worker/index.js` with `/etc/bibliograph/worker.env`.
 - **Public catalogue**: `packages/web/scripts/generate-catalog.mjs` now reads both
   `happyview/lexicons` and the vendored directory (de-duplicated by NSID), so the generated page
   lists the two procedures and the `edition` record type.
@@ -78,7 +99,12 @@ protocol namespace; identifier comparison stays exact and no normalization is ap
   ISBN-normalize).
 - Results are ordered `editions.indexed_at ASC, edition uri ASC`, `LIMIT limit + 1` decides
   `hasMore`, and `offset` pages. `total` is counted on the first page only.
-- Returns `editionResults { items, hasMore, total }`; no match is an empty page, not `404`.
+- Returns `editionResults { items, hasMore, total, pending }`; no match is an empty page, not `404`.
+  `pending` is true when any supplied identifier is unmatched locally and the hydration queue is
+  installed (it stays true while an earlier job is still deduplicated by its TTL mark), and false
+  when every identifier matched or the hydration queue is not installed. This is table presence,
+  not worker liveness: a stopped worker leaves `pending` true until it resumes and drains the
+  queue.
 
 ## `searchEditions`
 
@@ -88,21 +114,44 @@ protocol namespace; identifier comparison stays exact and no normalization is ap
   for `author`; `q` matches title, description, contributor names and identifier values.
 - Local ranking (provider-defined per the lexicon): identifier exact > title > author > broad text,
   then `indexed_at DESC, uri ASC`, with `LIMIT limit + 1` and `offset`.
+- `pending` is true only when the local result was empty and the hydration queue is installed (a
+  repeated query is deduplicated by its TTL mark, so this call may not have enqueued again); a
+  non-empty local page reports `false`. It means work is outstanding,
+  not that the provider will find a match, and not that a worker is currently consuming: a stopped
+  worker leaves it true until it resumes.
 
-## Not implemented yet: provider resolution
+## Provider hydration (worker)
 
-Network providers must not run in the request path (quota, latency, retries). The remaining work:
+Network providers must not run in the request path (quota, latency, retries), so the edge only
+queues work and `packages/worker` performs it:
 
-- add a job enqueue path from the edge for missing identifiers and provider searches, using the
-  worker's job table and a stable `jobKey` so concurrent identical calls collapse;
-- a worker task with the old service's order and cost model — Google Books first; ISBNdb only when
-  Google Books is empty and the input is an ISBN; Goodreads as gap-fill with title de-duplication;
-  Wikidata for enrichment;
-- ingest via the identifier bag (`editions_next_tid()` for new rows), which triggers `pds_outbox`;
-  `pds-publish` publishes the editions;
-- a resolution-miss row with a TTL so repeated calls cannot hot-loop the queue. Until the working
-  group adds a `pending`/`degraded` field, resolution is eventual: the client re-calls and gets the
-  edition once the worker has ingested it.
+- the edge enqueue path is `packages/web/src/lib/server/catalog/jobs.ts`: missing identifiers and
+  empty searches queue via the worker's job table with a stable `job_key` and a TTL mark in
+  `catalog_enqueue_marks`, so concurrent identical calls collapse;
+- `catalog.resolve` / `catalog.search` (`lib/tasks.js`, `lib/providers`) use Google Books first;
+  for an ISBN, ISBNdb only when Google Books returns nothing; Goodreads as gap-fill and identifier
+  fallback, with candidates merged and de-duplicated;
+- `lib/ingest.js` ingests via the identifier bag, minting new rows with `editions_next_tid()` or a
+  provider-prefixed rkey and extending the identifier bag of an existing edition; the edition
+  trigger queues `pds_outbox`;
+- `pds-publish` (`lib/publish.js`) drains `pds_outbox` with `com.atproto.repo.applyWrites` in
+  batches; the worker schedules it every minute plus a boot drain, and one publisher runs at a
+  time;
+- the TTL mark keeps repeated requests from hot-looping. Resolution is still eventual: the client
+  re-calls and gets the edition once the worker has ingested and published it. Our local `pending`
+  extension (above) signals that work is queued; `degraded` remains unimplemented.
+
+Honest limits:
+
+- No provider was exercised live in this environment: Google Books and ISBNdb need API keys
+  (`GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`) and third-party consent, so tests use fixtures/fakes;
+- Catalog hydration and outbox queueing work without publisher credentials, but live PDS
+  publishing does not: the local dev PDS cannot host the `did:web` publisher. A provisioned
+  publisher account must supply `PDS_URL`, the publisher DID (`PDS_ACCOUNT_DID`, or
+  `ATP_SERVICE_DID` / `ATP_SERVICE_HOST`), and either `PDS_ACCOUNT_PASSWORD` (app password) or
+  `PDS_ACCESS_TOKEN`; otherwise the worker logs `pds-publish is DISABLED` and rows stay queued in
+  `pds_outbox` without being lost;
+- Wikidata enrichment is not part of the worker yet.
 
 ## Publication and schema registration
 
@@ -122,7 +171,8 @@ Network providers must not run in the request path (quota, latency, retries). Th
 - Contract tests should validate responses against the vendored schemas; `editionResults` requires
   `items` and `hasMore`, `total` is optional. CI must initialise the submodule and fail if the pin is
   missing.
-- Open items to raise upstream: `editionResults` has no `pending`/`degraded` field for asynchronous
-  resolution; array bounds use `minLength` instead of `minItems`; `editionView` carries no CID, while
+- Open items to raise upstream: adopt our `editionResults#pending` extension (or an equivalent
+  `degraded` signal) for asynchronous resolution; array bounds use `minLength` instead of `minItems`;
+  `editionView` carries no CID, while
   writes such as `shelf.addItem` need `{ uri, cid }` strongRefs, so a resolving client still has to
   fetch the record for the CID.

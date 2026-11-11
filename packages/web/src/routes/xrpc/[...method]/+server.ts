@@ -3,6 +3,11 @@ import type { RequestHandler } from './$types';
 import { forward } from '$lib/server/happyview';
 import { CatalogUnavailableError } from '$lib/server/catalog/db';
 import { resolveEditions, searchEditions, type Identifier } from '$lib/server/catalog/editions';
+import {
+  enqueueResolveMiss,
+  enqueueSearchHydration,
+  hydrationAvailable
+} from '$lib/server/catalog/jobs';
 
 // An NSID is at least three labels: authority, name, and at least one more.
 const NSID = /^[a-zA-Z]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]([a-zA-Z0-9-]{0,62})$/;
@@ -90,7 +95,27 @@ async function handleResolve(request: Request): Promise<Response> {
   if (limit === null) return fail(400, 'InvalidRequest', 'limit must be an integer');
 
   try {
-    return json(await resolveEditions({ identifiers, offset, limit }));
+    const results = await resolveEditions({ identifiers, offset, limit });
+
+    const matched = new Set<string>();
+    for (const item of results.items) {
+      for (const identifier of item.identifiers) {
+        matched.add(`${identifier.issuer}\u0000${identifier.value}`);
+      }
+    }
+    const unmatched = identifiers.filter(
+      (identifier) => !matched.has(`${identifier.issuer}\u0000${identifier.value}`)
+    );
+    await Promise.all(
+      unmatched.map((identifier) => enqueueResolveMiss(identifier))
+    );
+
+    // Pending means work is queued, not that an enqueue call this time was
+    // accepted: the TTL mark dedupes repeats while the first job is still
+    // outstanding. Without a worker nothing will hydrate, so it is false.
+    const pending = unmatched.length > 0 && (await hydrationAvailable());
+
+    return json({ ...results, pending });
   } catch (error) {
     return catalogFailure(error);
   }
@@ -125,7 +150,14 @@ async function handleSearch(request: Request): Promise<Response> {
   if (limit === null) return fail(400, 'InvalidRequest', 'limit must be an integer');
 
   try {
-    return json(await searchEditions({ q, title, author, identifiers, offset, limit }));
+    const results = await searchEditions({ q, title, author, identifiers, offset, limit });
+    // Discovery only hydrates when the local catalog has nothing for the query.
+    let pending = false;
+    if (results.items.length === 0) {
+      await enqueueSearchHydration({ q, title, author, identifiers });
+      pending = await hydrationAvailable();
+    }
+    return json({ ...results, pending });
   } catch (error) {
     return catalogFailure(error);
   }
