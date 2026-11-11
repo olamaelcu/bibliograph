@@ -1,3 +1,24 @@
+bibliograph (0.5.22) unstable; urgency=medium
+
+  * Edition detail page gains an administrators-only "Queue description +
+    metadata backfill" button. It enqueues, for that one edition, the existing
+    `backfill-edition-description` job and a new `backfill-edition-format`
+    graphile task that wraps `backfillEditionMetadata` — the per-row logic
+    extracted from `scripts/backfill-formats.ts` into
+    `lib/server/jobs/format-backfill.ts`. Fills format, pages, ISBN/ASIN
+    identifiers, publishedYear and language from Goodreads, writing only
+    fields the row is missing; rows already complete short-circuit before any
+    upstream call, and Goodreads anti-bot responses are swallowed into a
+    `blocked` status so the worker never retries them. The scan script keeps
+    its SQL filters, cursor loop, failure threshold and `--dry` mode, now
+    delegating each row to the module. Enqueue-only: the form action returns
+    immediately and the search worker (`bibliograph-worker.service`) drains
+    the jobs; a re-click does not stack duplicates while one is pending
+    (`jobKey` per URI). Server action re-checks `isAdministrator` regardless
+    of UI visibility.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 21:38:28 -0500
+
 bibliograph (0.5.21) unstable; urgency=medium
 
   * `net.olamaelcu.livtet.biblio.searchActors` exposes the reader directory the
