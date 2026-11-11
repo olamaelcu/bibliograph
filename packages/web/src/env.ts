@@ -1,7 +1,7 @@
 import { defineEnvVars } from '@sveltejs/kit/env';
 
 // SvelteKit 3 exposes only the variables declared here to `$env/dynamic/private`
-// (undeclared ones are absent, not merely untyped). All three are server-only
+// (undeclared ones are absent, not merely untyped). All five are server-only
 // and read when the process starts, so they stay runtime-configurable. Each
 // validator returns the value unchanged, which marks the variable optional:
 // `HAPPYVIEW_URL` has a fallback, and HappyView serves anonymous XRPC calls
@@ -18,5 +18,15 @@ export const variables = defineEnvVars({
   HAPPYVIEW_CLIENT_SECRET: {
     schema: (value) => value,
     description: 'Secret proving the edge owns HAPPYVIEW_CLIENT_KEY.'
+  },
+  PDS_URL: {
+    schema: (value) => value,
+    description:
+      'Authorization server of the local PDS, e.g. https://pds.127-0-0-1.sslip.io. Unset falls back to that local default; a deployed edge points it at the user PDS it should authorise against.'
+  },
+  WEB_DATA_DIR: {
+    schema: (value) => value,
+    description:
+      'Directory for the server-side session store. Defaults to `.data` under the working directory.'
   }
 });
