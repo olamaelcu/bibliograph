@@ -217,6 +217,22 @@ Do not point the app at HappyView for `com.atproto.repo.*`: those are built-in
 lexicons, and HappyView proxies them to an authority DID that does not exist in
 the local PLC (see Known limits).
 
+### Record keys
+
+The rkeys are part of the contract — the queries resolve records by them, so a
+writer that invents its own scheme produces records nothing can read:
+
+| Collection | rkey | Why |
+| --- | --- | --- |
+| `…biblio.bookStatus` | the edition record's rkey (last segment of the edition URI) | one status per edition per reader; a status change replaces the record. `getShelversOfBook` defaults to this derivation |
+| `…biblio.shelfItem` | `<shelf rkey>-<edition rkey>` | one membership edge per (shelf, book), so re-adding is idempotent |
+| `…biblio.readingGoal` | `current` | `getReadingGoal` reads `readingGoal/current` |
+| `…actor.profile` | `self` | `getActorProfile` reads `actor.profile/self` |
+
+`bookStatus.metadata.status` is required (`to-read`, `reading`, `read`, `dnf`).
+Shelf membership and reading status are separate records on purpose: a book can
+sit on several custom shelves while having exactly one reading status.
+
 ## Dashboard login
 
 Open `http://127.0.0.1:3000`, redirects to `/dashboard/`, and sign in with the

@@ -48,7 +48,7 @@ endpoints at the edge, and forwards everything else to HappyView.
 
 ## Activity
 
-Indexed collections: `net.olamaelcu.livtet.biblio.{bookShelving,shelf,shelfItem,follow,readingGoal}`,
+Indexed collections: `net.olamaelcu.livtet.biblio.{bookStatus,shelf,shelfItem,follow,readingGoal}`,
 `net.olamaelcu.livtet.actor.profile` and `community.lexicon.media.book.review`.
 Query scripts lived in the deleted package's `happyview/scripts/`; uploads now
 go through HappyView's admin API (see `docs/happyview.md`).
