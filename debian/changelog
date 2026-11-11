@@ -1,3 +1,21 @@
+bibliograph (0.5.27) unstable; urgency=high
+
+  * Fix: clients replaying a pre-0.5.26 uncompressed search cursor were still
+    rejected, so 0.5.26's cursor fix did not reach them. 0.5.26 only shrank
+    the cursors it emitted (deflated, ~150-220 chars); a client resending an
+    older cursor (284 chars from Livtet 0.15.1, observed in production logs
+    ~304 times/day) hit the lexicon's 256-character cap at parameter
+    validation and got 400 before the handler's inflate fallback could run,
+    so it backed off permanently. `withLenientCursor()` now rewraps the
+    generated schema at the `searchWorks`, `searchContributors` and
+    `searchPublishers` registrations to accept `cursor` up to 1024
+    characters; the vendored lexicons and the published schema are
+    unchanged, the 0.5.26 inflate fallback decodes the legacy plain-text
+    payload, and emission stays deflated. Clients stuck on legacy cursors
+    recover on their next request with no restart or client change.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 00:03:18 -0500
+
 bibliograph (0.5.26) unstable; urgency=high
 
   * Fix: search cursors could exceed the lexicon's 256-character cap. The
