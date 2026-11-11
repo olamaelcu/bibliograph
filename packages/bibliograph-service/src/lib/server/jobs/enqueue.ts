@@ -22,9 +22,14 @@ const ENQUEUE_CHUNK = 1_000;
 async function getUtils(): Promise<WorkerUtils> {
   if (!utilsPromise) {
     const { makeWorkerUtils } = await import('graphile-worker');
+    const { Pool } = await import('pg');
     const connectionString = process.env.DATABASE_URL;
     if (!connectionString) throw new Error('DATABASE_URL is required for job enqueue');
-    utilsPromise = makeWorkerUtils({ connectionString });
+    // Bounded pool: enqueueing is quick, and the shared budget cannot spare a
+    // pg default of 10 per process (see db/index.ts).
+    utilsPromise = makeWorkerUtils({
+      pgPool: new Pool({ connectionString, max: Number(process.env.ENQUEUE_POOL_MAX ?? 3) }),
+    });
   }
   return utilsPromise;
 }

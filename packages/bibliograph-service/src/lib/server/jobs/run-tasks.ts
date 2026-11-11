@@ -25,8 +25,16 @@ export async function runJobTasks(log: Logger): Promise<void> {
     import('pg'),
   ]);
 
-  const searchPool = new Pool({ connectionString });
-  const tapPool = new Pool({ connectionString });
+  // Pool maxima are part of the shared connection budget, not a tuning knob to
+  // leave at pg's default: see db/index.ts for the 53300 this prevents.
+  const searchPool = new Pool({
+    connectionString,
+    max: Number(process.env.GRAPHILE_WORKER_POOL_SEARCH ?? 4),
+  });
+  const tapPool = new Pool({
+    connectionString,
+    max: Number(process.env.GRAPHILE_WORKER_POOL_TAP ?? 6),
+  });
 
   log.info({ searchConcurrency: SEARCH_CONCURRENCY, tapConcurrency: TAP_CONCURRENCY }, 'graphile task lists started');
   try {
