@@ -10,4 +10,10 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: Number(process.env.PG_POOL_MAX ?? 5),
 });
+// A pg Pool emits 'error' for a client that dies while idle (server restart,
+// network reset). Node treats an unhandled 'error' event as fatal, so one
+// dropped connection would take the whole process down.
+pool.on('error', (err) => {
+  console.error('[db] idle client error', err);
+});
 export const db = drizzle(pool, { schema });

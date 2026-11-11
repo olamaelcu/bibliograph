@@ -35,6 +35,10 @@ export async function runJobTasks(log: Logger): Promise<void> {
     connectionString,
     max: Number(process.env.GRAPHILE_WORKER_POOL_TAP ?? 6),
   });
+  // Idle clients die when Postgres restarts or the network resets; an
+  // unhandled 'error' event is fatal to the process.
+  searchPool.on('error', (err) => log.warn({ err }, 'search pool idle client error'));
+  tapPool.on('error', (err) => log.warn({ err }, 'tap pool idle client error'));
 
   log.info({ searchConcurrency: SEARCH_CONCURRENCY, tapConcurrency: TAP_CONCURRENCY }, 'graphile task lists started');
   try {

@@ -27,9 +27,13 @@ async function getUtils(): Promise<WorkerUtils> {
     if (!connectionString) throw new Error('DATABASE_URL is required for job enqueue');
     // Bounded pool: enqueueing is quick, and the shared budget cannot spare a
     // pg default of 10 per process (see db/index.ts).
-    utilsPromise = makeWorkerUtils({
-      pgPool: new Pool({ connectionString, max: Number(process.env.ENQUEUE_POOL_MAX ?? 3) }),
+    const pool = new Pool({ connectionString, max: Number(process.env.ENQUEUE_POOL_MAX ?? 3) });
+    // graphile warns when the pool it is handed has no 'error' listener, and an
+    // idle client dying would otherwise crash the process.
+    pool.on('error', (err) => {
+      console.error('[enqueue] idle client error', err);
     });
+    utilsPromise = makeWorkerUtils({ pgPool: pool });
   }
   return utilsPromise;
 }
