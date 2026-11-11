@@ -6,11 +6,4 @@ set -euo pipefail
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
-# The edge talks to the PDS over TLS with Caddy's internal CA. Node does not read
-# NSS or the Debian trust store it landed in, so point it at the exported root;
-# without this any PDS fetch fails with UNABLE_TO_GET_ISSUER_CERT_LOCALLY.
-if [[ -f .cache/caddy-root.crt ]]; then
-  export NODE_EXTRA_CA_CERTS="$ROOT/.cache/caddy-root.crt"
-fi
-
 exec pnpm --filter web dev --port 5176
