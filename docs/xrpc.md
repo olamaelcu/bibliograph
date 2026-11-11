@@ -12,7 +12,8 @@ The surface is the set of uploaded lexicons plus the books-wg working set vendor
 served by the edge in `packages/web`; the other 15 are HappyView procedures that write to a caller's
 PDS. Everything except the review and edition record types lives under
 `net.olamaelcu.livtet.biblio.*`. HappyView's built-in `com.atproto.*` routes are not part of this
-surface — they proxy to an authority DID that the local network does not resolve.
+surface — they proxy to an authority DID that the local network does not resolve. The edge proxies
+exactly two read-only `com.atproto` methods, `repo.getRecord` and `repo.listRecords`, to the PDS.
 
 ## Conventions
 
@@ -20,7 +21,8 @@ surface — they proxy to an authority DID that the local network does not resol
 Every call reaches HappyView through the SvelteKit edge (`packages/web/src/routes/xrpc/[...method]`),
 which:
 
-- accepts only `GET` and `POST`; anything else is `405 MethodNotAllowed`;
+- accepts only `GET` and `POST`; `OPTIONS` is answered only as a CORS preflight for the two catalog
+  procedures and is `405 MethodNotAllowed` everywhere else;
 - rejects a path that is not a plausible NSID with `400 InvalidRequest`;
 - relays only `content-type`, `accept`, `authorization` and `dpop` upstream, and adds its own
   `X-Client-Key`/`X-Client-Secret` from the environment (the browser cannot choose them);
@@ -31,6 +33,20 @@ which:
   4xx/5xx integer, and whose `body` is an object — and answers with the status it names, which is
   what makes every error in the tables below reach a caller as the status it says;
 - answers `502 UpstreamUnavailable` when HappyView cannot be reached.
+
+Read-only publisher-record calls are the one exception to the HappyView path: `GET
+com.atproto.repo.getRecord` and `GET com.atproto.repo.listRecords` are proxied to
+`${PDS_URL}/xrpc/<nsid>` with the caller's query string verbatim, relaying only `accept` and
+`content-type` upstream and returning the PDS's status, body and content type. A network failure or
+timeout is `502 UpstreamUnavailable`; an unset `PDS_URL` is `503 ServiceUnavailable` with a message
+naming the missing setting. Every other `com.atproto.*` method still goes to HappyView.
+
+The two catalog procedures are the only browser-facing part of the surface: Livtet's search and
+contributor pages call them directly. `OPTIONS` on either NSID answers `204` with
+`Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: POST, OPTIONS`,
+`Access-Control-Allow-Headers: content-type`, `Access-Control-Max-Age: 86400` and `Vary: Origin`;
+their `POST` responses carry `Access-Control-Allow-Origin: *` and `Vary: Origin`, including errors.
+No credentials are allowed, and no other NSID gains CORS.
 
 The two books-wg procedures never reach HappyView: the edge dispatches them on NSID and answers them
 from the catalog tables (`editions`, `edition_identifiers`, `edition_contributors`,
@@ -104,8 +120,8 @@ min, max)`), so an out-of-range number is adjusted, not rejected.
 | 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing |
 | 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST |
 | 502 | `UpstreamFailure` | `shelf.addBooks` when the PDS rejects the batch |
-| 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable |
-| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails; `resolveEditions` / `searchEditions` only |
+| 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable, or when a PDS-proxied read fails or times out |
+| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (`resolveEditions` / `searchEditions` only), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
 
 Queries and the two catalog procedures never answer `401`. Missing optional records are not errors:
 `getActorProfile` and `getReadingGoal` answer `200` with `null`.
@@ -488,7 +504,9 @@ a PDS with a different shape are not found by them.
 
 - No PDS reads on the query path, no Constellation, no tiered cursors (`tap:`/`con:`/`pds:`), no
   Bookhive branches: the index is the only activity source.
-- No `com.atproto.*` or `community.lexicon.book.*` handlers are exposed here; the activity queries
+- No `com.atproto.*` writes or other methods are handled here; only the two read-only PDS proxies
+  (`repo.getRecord`, `repo.listRecords`) run at the edge, and every other `com.atproto.*` call is
+  forwarded to HappyView. No `community.lexicon.book.*` handlers are exposed; the activity queries
   read the catalog through `appview_book_lua` only, and edition discovery is the two edge
   procedures.
 - No request-path writes other than the 15 procedures; the worker writes catalog rows and

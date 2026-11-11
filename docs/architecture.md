@@ -68,12 +68,14 @@ row whose URI authority is not the configured publisher DID. Re-ingest the
 edition under the new authority, or rewrite the stored URI deliberately; the
 worker never silently rewrites edition URIs.
 
-The public `/xrpc` gateway proxies `com.atproto.{repo,sync,identity}` and
-`com.atproto.server.describeServer` to the PDS, serves catalog/label/feed
-endpoints at the edge, and forwards everything else to HappyView. The edge also
-serves the two read-only books-wg procedures (`resolveEditions`,
-`searchEditions`) anonymously from the catalog tables; every `editionView` they
-return carries the edition's atproto URI as an `atproto` identifier.
+The public `/xrpc` gateway serves the two read-only books-wg procedures
+(`resolveEditions`, `searchEditions`) anonymously from the catalog tables, with
+CORS because Livtet calls them from the browser; every `editionView` they
+return carries the edition's atproto URI as an `atproto` identifier. GET
+`com.atproto.repo.getRecord` and `com.atproto.repo.listRecords` are proxied to
+`PDS_URL`, so clients read publisher records through the edge. Everything else
+is forwarded to HappyView, including the remaining `com.atproto.*` methods
+(HappyView's own com.atproto proxy is authority-bound).
 
 ## Catalog worker
 

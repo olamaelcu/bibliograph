@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { forward } from '$lib/server/happyview';
+import { isPdsRead, proxyPdsRead } from '$lib/server/pds';
 import { CatalogUnavailableError } from '$lib/server/catalog/db';
 import { resolveEditions, searchEditions, type Identifier } from '$lib/server/catalog/editions';
 import {
@@ -19,6 +20,39 @@ const MAX_IDENTIFIERS = 100;
 const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
 const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
 const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
+
+/**
+ * CORS for the two catalog procedures only. Livtet's search and contributor
+ * pages call them from the browser, so the preflight and the responses both
+ * need to answer without credentials. Nothing else on this surface is a
+ * browser-facing API, so no other route gains CORS.
+ */
+const CATALOG_CORS = {
+  'Access-Control-Allow-Origin': '*',
+  Vary: 'Origin'
+} as const;
+
+function catalogPreflight(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...CATALOG_CORS,
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'content-type',
+      'Access-Control-Max-Age': '86400'
+    }
+  });
+}
+
+function withCatalogCors(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(CATALOG_CORS)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
 
 function methodNotAllowed(): Response {
   return json({ error: 'MethodNotAllowed' }, { status: 405 });
@@ -175,19 +209,27 @@ export const GET: RequestHandler = ({ params, request }) => {
   }
   // Both books-wg methods are procedures.
   if (EDGE_PROCEDURES.has(params.method)) return methodNotAllowed();
+  // Publisher-record reads go to the PDS; other com.atproto methods still go
+  // to HappyView below.
+  if (isPdsRead(params.method)) return proxyPdsRead(params.method, request);
   return forward(params.method, request);
 };
 
-export const POST: RequestHandler = ({ params, request }) => {
+export const POST: RequestHandler = async ({ params, request }) => {
   if (!NSID.test(params.method)) {
     return json({ error: 'InvalidRequest' }, { status: 400 });
   }
-  if (params.method === RESOLVE_EDITIONS) return handleResolve(request);
-  if (params.method === SEARCH_EDITIONS) return handleSearch(request);
+  if (params.method === RESOLVE_EDITIONS) return withCatalogCors(await handleResolve(request));
+  if (params.method === SEARCH_EDITIONS) return withCatalogCors(await handleSearch(request));
   return forward(params.method, request);
 };
 
 export const PUT: RequestHandler = () => methodNotAllowed();
 export const PATCH: RequestHandler = () => methodNotAllowed();
 export const DELETE: RequestHandler = () => methodNotAllowed();
-export const OPTIONS: RequestHandler = () => methodNotAllowed();
+export const OPTIONS: RequestHandler = ({ params }) => {
+  // Only the browser-called catalog procedures answer a preflight; every other
+  // path keeps the surface's 405.
+  if (EDGE_PROCEDURES.has(params.method)) return catalogPreflight();
+  return methodNotAllowed();
+};

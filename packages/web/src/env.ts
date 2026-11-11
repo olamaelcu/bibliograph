@@ -22,5 +22,10 @@ export const variables = defineEnvVars({
   HAPPYVIEW_CLIENT_SECRET: {
     schema: (value) => value,
     description: 'Secret proving the edge owns HAPPYVIEW_CLIENT_KEY.'
+  },
+  PDS_URL: {
+    schema: (value) => value,
+    description:
+      'Base URL of the PDS that owns publisher records; GET com.atproto.repo.getRecord/listRecords are proxied there.'
   }
 });
