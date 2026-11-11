@@ -148,8 +148,10 @@ Honest limits:
   A provisioned publisher account must supply `PDS_URL`, the publisher DID (`PDS_ACCOUNT_DID`,
   or `ATP_SERVICE_DID` / `ATP_SERVICE_HOST`), and either `PDS_ACCOUNT_PASSWORD` (app password) or
   `PDS_ACCESS_TOKEN`; otherwise the worker logs `pds-publish is DISABLED` and rows stay queued in
-  `pds_outbox` without being lost. Rows minted under another authority must be re-ingested, not
-  silently rewritten;
+  `pds_outbox` without being lost. Rows minted under a previous authority are not migrated or
+  re-ingested: this deployment uses the `did:plc` publisher identity, so old `did:web` rows are
+  intentionally dropped (a fresh database, or a cleared catalog and outbox). There is no seed or
+  import step — the catalog is rebuilt organically by XRPC traffic and worker hydration;
 - Wikidata enrichment is not part of the worker yet.
 
 ## Publication and schema registration
@@ -160,6 +162,10 @@ Honest limits:
   hand-maintained duplicate.
 - Publish the two procedure lexicons and the defs/review lexicons as `com.atproto.lexicon.schema`
   records from the same vendored source, so `com.atproto.lexicon.resolveLexicon` answers for them.
+- The publisher identity is the configured `did:plc` account (`ATP_SERVICE_DID`; the
+  `did:web:<ATP_SERVICE_HOST>` form is a local/test fallback). Publication requires that account to
+  be provisioned on the PDS; the catalog itself is not seeded, imported or migrated from a previous
+  publisher authority.
 
 ## Tests and contract gaps
 

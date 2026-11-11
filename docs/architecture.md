@@ -59,14 +59,18 @@ publish is retried as a failure (the outbox row names the reason).
 
 The authority in the URI is the publisher identity: `ATP_SERVICE_DID`, else
 `did:web:<ATP_SERVICE_HOST>`. New editions mint their URI from that identity,
-so it must not change once the catalog is populated.
+so it must not change once the catalog is populated. Production must set
+`ATP_SERVICE_DID` to the `did:plc` publisher account; the `did:web` form is the
+fallback for local and test environments.
 
-Migration note: editions and `pds_outbox` rows minted under a previous
-authority (for example a `did:web` identity) belong to a different repo. They
-are not publishable into a `did:plc` publisher repo: `pds-publish` refuses any
-row whose URI authority is not the configured publisher DID. Re-ingest the
-edition under the new authority, or rewrite the stored URI deliberately; the
-worker never silently rewrites edition URIs.
+Fresh-start policy: this deployment uses the `did:plc` publisher authority.
+Editions and `pds_outbox` rows minted under a previous `did:web` authority
+belong to a different repo and are not migrated. `pds-publish` refuses any row
+whose URI authority is not the configured publisher DID, so discard them: start
+from a fresh database, or clear the catalog tables and `pds_outbox`. No seed or
+import is performed. The catalog grows organically through XRPC traffic — a
+miss queues worker hydration, which mints editions under the configured
+authority — so publication needs only the configured publisher account.
 
 The public `/xrpc` gateway serves the two read-only books-wg procedures
 (`resolveEditions`, `searchEditions`) anonymously from the catalog tables, with
@@ -134,8 +138,8 @@ accounts and has `selfHostedDidWebEnabled: false`, so set `ATP_SERVICE_DID` to
 that account to mint edition URIs under it; the default `did:web` authority
 cannot be hosted there. Hydration works without publisher credentials, while a
 live `pds-publish` also needs the publisher account provisioned on the PDS.
-Rows minted under another authority need re-ingest (see the migration note
-above). Publisher behaviour is tested against a stub PDS in
+Rows minted under a previous authority are discarded, not migrated (see the
+fresh-start policy above). Publisher behaviour is tested against a stub PDS in
 `packages/worker/test/publish.test.js`.
 
 Packaging: `mise run package-worker-payload` stages plain ESM plus its
