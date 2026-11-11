@@ -1,0 +1,56 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelf.removeItem",
+  "description": "Take a book off a shelf by deleting the shelfItem at <shelf rkey>-<edition rkey>.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Delete one shelf membership edge. Answers NotFound when the book is not on the shelf.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["shelf", "book"],
+          "properties": {
+            "shelf": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the shelf record."
+            },
+            "book": {
+              "type": "object",
+              "description": "A strongRef or a bare {uri} naming the edition to remove.",
+              "required": ["uri"],
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "format": "at-uri",
+                  "description": "AT-URI of the catalog edition record."
+                },
+                "cid": {
+                  "type": "string",
+                  "format": "cid",
+                  "description": "Optional CID of the edition record."
+                }
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the deleted shelfItem record."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.graph.follow",
+  "description": "Follow a person by DID. Writes the follow record at rkey <subject did>, so repeated calls leave exactly one record.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Follow a DID. Idempotent: an existing follow is left as it is.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["subject"],
+          "properties": {
+            "subject": {
+              "type": "string",
+              "format": "did",
+              "description": "DID of the person to follow."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "created"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the follow record."
+            },
+            "created": {
+              "type": "boolean",
+              "description": "True when this call created the follow, false when it already existed."
+            }
+          }
+        }
+      }
+    }
+  }
+}

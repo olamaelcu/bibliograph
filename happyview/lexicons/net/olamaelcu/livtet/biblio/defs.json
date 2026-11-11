@@ -1,0 +1,441 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.defs",
+  "defs": {
+    "identifier": {
+      "type": "object",
+      "description": "An external identifier for a record, such as an ISBN or Open Library key.",
+      "required": [
+        "resource",
+        "url"
+      ],
+      "properties": {
+        "resource": {
+          "type": "string",
+          "maxGraphemes": 128,
+          "description": "The identifier value issued by the external source."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL where the identifier can be resolved."
+        }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "datetime",
+      "description": "An ISO-8601 datetime (RFC 3339)."
+    },
+    "bskyEngagement": {
+      "type": "object",
+      "description": "Public Bluesky engagement counts for an at-uri subject.",
+      "required": [
+        "likeCount",
+        "quoteCount"
+      ],
+      "properties": {
+        "likeCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of like records referencing the subject."
+        },
+        "quoteCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of post records embedding the subject as a quoted record."
+        }
+      }
+    },
+    "readingStatus": {
+      "type": "string",
+      "knownValues": [
+        "reading",
+        "to-read",
+        "dnf",
+        "read"
+      ],
+      "description": "Reading status for a book."
+    },
+    "progressUnit": {
+      "type": "string",
+      "knownValues": [
+        "other",
+        "pages",
+        "seconds",
+        "percent"
+      ],
+      "description": "The unit a progress value is measured in."
+    },
+    "bookFormat": {
+      "type": "string",
+      "knownValues": [
+        "hardcover",
+        "paperback",
+        "mass_market_paperback",
+        "ebook",
+        "audiobook",
+        "board_book",
+        "spiral_bound"
+      ],
+      "description": "Normalized physical or digital format of an edition."
+    },
+    "formatView": {
+      "type": "object",
+      "required": [
+        "format",
+        "uri",
+        "description",
+        "emoji",
+        "unit"
+      ],
+      "properties": {
+        "format": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookFormat",
+          "description": "The normalized format value."
+        },
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the format record."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 128,
+          "description": "Human-readable description of the format."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing the format."
+        },
+        "iconImageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Small image URL for the format."
+        },
+        "unit": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#progressUnit",
+          "description": "The unit a progress value for a book in this format is measured in."
+        }
+      }
+    },
+    "genreView": {
+      "type": "object",
+      "required": [
+        "uri",
+        "name",
+        "description",
+        "emoji"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the genre record."
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 64,
+          "description": "Display name of the genre."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing the genre."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 512,
+          "description": "What this genre covers."
+        },
+        "iconImageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Small icon image URL for the genre."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
+          },
+          "description": "External identifiers for the genre."
+        },
+        "parent": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the parent genre, if any."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
+          "description": "Public Bluesky engagement for this genre, when non-zero."
+        }
+      }
+    },
+    "bookView": {
+      "type": "object",
+      "description": "A catalog book: the edition AT-URI plus its current edition view.",
+      "required": [
+        "uri",
+        "edition"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the catalog edition record."
+        },
+        "edition": {
+          "type": "ref",
+          "ref": "community.lexicon.media.book.defs#editionView",
+          "description": "The edition metadata for this book."
+        }
+      }
+    },
+    "shelfView": {
+      "type": "object",
+      "required": [
+        "uri",
+        "name"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the shelf record."
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 128,
+          "description": "Display name of the shelf."
+        },
+        "description": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Description of the shelf."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        },
+        "bsky": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
+          "description": "Public Bluesky engagement for this shelf, when non-zero."
+        }
+      }
+    },
+    "bookShelfMetadata": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#readingStatus",
+          "description": "Reading status for this book."
+        },
+        "startedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "When the reader started the book, when known."
+        },
+        "finishedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "When the reader finished the book, when known."
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Position of the book within the shelf (1-indexed)."
+        },
+        "notes": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Personal notes about this book on the shelf."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing this book on the shelf."
+        }
+      }
+    },
+    "bookShelfView": {
+      "type": "object",
+      "required": [
+        "uri",
+        "shelf",
+        "book",
+        "metadata",
+        "did"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the bookShelf record."
+        },
+        "shelf": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfView",
+          "description": "The shelf the book is on."
+        },
+        "book": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookView",
+          "description": "The book on the shelf."
+        },
+        "metadata": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfMetadata",
+          "description": "Shelf-specific metadata for this book."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the account that shelved the book."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
+    "shelfItemMetadata": {
+      "type": "object",
+      "description": "Optional ordering and presentation metadata for a book's place on a shelf.",
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Position of the book within the shelf (1-indexed)."
+        },
+        "notes": {
+          "type": "string",
+          "maxGraphemes": 8192,
+          "description": "Personal notes about this book on the shelf."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 8,
+          "description": "Emoji representing this book on the shelf."
+        }
+      }
+    },
+    "shelfItemView": {
+      "type": "object",
+      "description": "A book placed on a shelf, hydrated with the shelf and book views.",
+      "required": [
+        "uri",
+        "shelf",
+        "book",
+        "metadata",
+        "did"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the shelfItem record."
+        },
+        "shelf": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfView",
+          "description": "The shelf the book is on."
+        },
+        "book": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#bookView",
+          "description": "The book on the shelf."
+        },
+        "metadata": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfItemMetadata",
+          "description": "Position, notes and emoji for this book's place on the shelf."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the account that owns the shelf."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp when the record was originally created."
+        },
+        "updatedAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "Timestamp of the last update to the record."
+        }
+      }
+    },
+    "shelfWithBooksView": {
+      "type": "object",
+      "required": [
+        "shelf",
+        "books"
+      ],
+      "properties": {
+        "shelf": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#shelfView",
+          "description": "The shelf."
+        },
+        "books": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfView"
+          },
+          "description": "Books on the shelf, in order."
+        }
+      }
+    },
+    "reviewView": {
+      "type": "object",
+      "description": "A review record with its author.",
+      "required": [
+        "uri",
+        "did",
+        "record"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the review record."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the review author."
+        },
+        "record": {
+          "type": "ref",
+          "ref": "community.lexicon.media.book.review#main",
+          "description": "The review record value."
+        }
+      }
+    }
+  }
+}

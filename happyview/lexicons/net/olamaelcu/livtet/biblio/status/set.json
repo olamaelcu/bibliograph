@@ -1,0 +1,84 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.status.set",
+  "description": "Set the reading status of one edition. The bookStatus rkey is the edition rkey, so changing status replaces the previous record instead of adding a shelf membership.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Upsert a bookStatus. Metadata is merged, createdAt survives an update, updatedAt is bumped.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["book", "status"],
+          "properties": {
+            "book": {
+              "type": "ref",
+              "ref": "com.atproto.repo.strongRef",
+              "description": "The catalog edition this status belongs to."
+            },
+            "status": {
+              "type": "string",
+              "knownValues": ["to-read", "reading", "read", "dnf"],
+              "description": "Reading status for the edition."
+            },
+            "shelf": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "Optional shelf record URI to file the status under."
+            },
+            "metadata": {
+              "type": "object",
+              "description": "Optional progress metadata. `status` is taken from the top-level field.",
+              "properties": {
+                "startedAt": {
+                  "type": "string",
+                  "format": "datetime",
+                  "description": "When the reader started the book."
+                },
+                "finishedAt": {
+                  "type": "string",
+                  "format": "datetime",
+                  "description": "When the reader finished the book."
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Position of the book within the shelf (1-indexed)."
+                },
+                "notes": {
+                  "type": "string",
+                  "maxGraphemes": 8192,
+                  "description": "Personal notes about this book."
+                },
+                "emoji": {
+                  "type": "string",
+                  "maxGraphemes": 8,
+                  "description": "Emoji representing this book."
+                }
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "status"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the bookStatus record."
+            },
+            "status": {
+              "type": "string",
+              "description": "The status that was written."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelf.update",
+  "description": "Rename or re-describe one of the caller's shelves. Fields the input omits are left as they are.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Load the shelf, apply the supplied fields, save. Answers NotFound when the shelf does not exist.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["shelf"],
+          "properties": {
+            "shelf": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the shelf record to update."
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 128,
+              "maxGraphemes": 128,
+              "description": "New shelf name. Omit to keep the current one."
+            },
+            "description": {
+              "type": "string",
+              "maxGraphemes": 8192,
+              "description": "New description. Omit to keep the current one; an empty string clears it."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "updated"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the updated shelf record."
+            },
+            "updated": {
+              "type": "boolean",
+              "description": "True when a field was changed, false when the input carried none."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.review.delete",
+  "description": "Delete one of the caller's reviews.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Delete a review by AT-URI. Answers NotFound when the review does not exist.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the review record to delete."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the deleted review record."
+            }
+          }
+        }
+      }
+    }
+  }
+}

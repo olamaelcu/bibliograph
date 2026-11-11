@@ -1,19 +1,19 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.follow",
-  "description": "A follow relationship to a person (DID), used for personalizing feeds.",
+  "description": "A follow relationship to a person (DID), used for personalizing feeds. The rkey is the followed DID, so a person can only be followed once.",
   "defs": {
     "main": {
       "type": "record",
-      "key": "tid",
+      "key": "any",
       "record": {
         "type": "object",
         "required": ["subject", "createdAt"],
         "properties": {
           "subject": {
             "type": "string",
-            "format": "at-uri",
-            "description": "AT-URI of the followed person (typically did:web:...)."
+            "format": "did",
+            "description": "DID of the followed person."
           },
           "createdAt": {
             "type": "string",

@@ -266,3 +266,81 @@ function paged(rows, limit, build, cursor_for)
   if #rows > limit then cursor = cursor_for(rows[limit]) end
   return toarray(out), cursor
 end
+
+-- ---------------------------------------------------------------------------
+-- Helpers shared by the XRPC write procedures (scripts/xrpc/procedure/).
+--
+-- The procedures validate their own input: `input` is whatever JSON the caller
+-- posted, so every value is checked for the type the record schema needs
+-- before a `Record` is built. These helpers keep that validation identical
+-- across the fifteen endpoints.
+-- ---------------------------------------------------------------------------
+
+-- Split `at://<did>/<collection>/<rkey>` into its three parts. Returns nil for
+-- anything else (a bare DID, a URI with a fragment, four segments, ...).
+function at_uri_parts(uri)
+  if type(uri) ~= 'string' then return nil end
+  local did, coll, rkey = string.match(uri, '^at://([^/]+)/([^/]+)/([^/]+)$')
+  if did == nil then return nil end
+  return did, coll, rkey
+end
+
+-- A DID as atproto writes one: did:<method>:<identifier>.
+function is_did(value)
+  if type(value) ~= 'string' then return false end
+  return string.match(value, '^did:[a-z0-9]+:[A-Za-z0-9._:%-]+$') ~= nil
+end
+
+-- A non-empty string, or nil for anything else (missing, JSON null, wrong type).
+function string_field(value)
+  if type(value) == 'string' and value ~= '' then return value end
+  return nil
+end
+
+-- An integral JSON number, or nil. Rejects floats such as 1.5.
+function integer_field(value)
+  if type(value) == 'number' and value == math.floor(value) then return value end
+  return nil
+end
+
+-- Validate a `com.atproto.repo.strongRef`. Returns a fresh {uri=..., cid=...}
+-- table so the caller can assign it to a record field, or nil when the value
+-- is not a strongRef with a usable at-uri (and a cid, when require_cid).
+function strong_ref(value, require_cid)
+  if type(value) ~= 'table' then return nil end
+  local uri = string_field(value.uri)
+  if uri == nil then return nil end
+  local _, _, rkey = at_uri_parts(uri)
+  if rkey == nil then return nil end
+  local cid = string_field(value.cid)
+  if cid == nil and require_cid then return nil end
+  local ref = { uri = uri }
+  if cid ~= nil then ref.cid = cid end
+  return ref
+end
+
+-- Copy the `allowed` keys of an input object onto `target`, leaving the keys
+-- the input omits untouched. This is what makes the metadata/merge procedures
+-- partial updates. Returns how many keys were copied.
+function merge_fields(target, update, allowed)
+  local copied = 0
+  if type(update) ~= 'table' then return copied end
+  for _, key in ipairs(allowed) do
+    local value = update[key]
+    local kind = type(value)
+    if kind == 'string' or kind == 'number' or kind == 'boolean' or kind == 'table' then
+      target[key] = value
+      copied = copied + 1
+    end
+  end
+  return copied
+end
+
+-- A shallow copy of a record field that may be a JSON object.
+function copy_table(value)
+  local out = {}
+  if type(value) == 'table' then
+    for key, item in pairs(value) do out[key] = item end
+  end
+  return out
+end

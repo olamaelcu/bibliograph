@@ -1,0 +1,65 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.review.create",
+  "description": "Create a review of an edition at a fresh TID rkey. Separate rkeys allow multiple reviews of the same book, including rereads.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Create a community.lexicon.media.book.review record for the caller.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["subject"],
+          "properties": {
+            "subject": {
+              "type": "ref",
+              "ref": "community.lexicon.media.book.defs#editionRef",
+              "description": "Self-contained book reference the review is about."
+            },
+            "subjectRecord": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "Optional AT-URI of an edition record for enrichment."
+            },
+            "rating": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Rating on a 1-20 scale; divide by four for a five-star display."
+            },
+            "textContent": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Plain-text review."
+            },
+            "content": {
+              "type": "union",
+              "refs": [],
+              "description": "Optional client-specific rich content; each object carries a $type."
+            },
+            "flags": {
+              "type": "ref",
+              "ref": "community.lexicon.media.book.review#flags",
+              "description": "Optional presentation flags."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the new review record."
+            }
+          }
+        }
+      }
+    }
+  }
+}
