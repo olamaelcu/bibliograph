@@ -475,7 +475,7 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 | `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
 | `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
 | `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
-| `community.lexicon.media.book.edition` | `tid` | `title`, `identifiers`, `contributors`, `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
+| `community.lexicon.media.book.edition` | `any` — provider-prefixed (`gb.`/`isbn.`/`gr.`) or `tid`; the lexicon declares `tid` | `title`, `identifiers`, `contributors`, `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
 
 The record keys are part of the contract: the queries resolve records by them. `bookStatus` derives
 from the edition URI, `shelfItem` from the shelf and edition rkeys, `readingGoal` and

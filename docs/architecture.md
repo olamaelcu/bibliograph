@@ -24,15 +24,19 @@ through `edition_contributors` / `edition_publishers`, and identifiers live in
 `edition_identifiers` as exact `(issuer, value)` pairs. The inline
 contributor/publisher/identifier arrays exist only in two places:
 
-- `editionRecordValue` when publishing `community.lexicon.media.book.edition`;
+- `buildEditionRecord` in `packages/worker/lib/edition-record.js` when
+  publishing `community.lexicon.media.book.edition`;
 - `appview_book`, the read model HappyView joins against.
 
 That keeps a contributor rename or merge to one row instead of every edition
 that credits it.
 
-`editions.rkey` is minted by `editions_next_tid()`. Identity lookup is the
-identifier bag: an ingest that finds a stored pair updates that edition in place,
-otherwise a fresh TID is minted.
+New editions get a provider-prefixed rkey from
+`packages/worker/lib/ingest.js` (`gb.<googlebooks id>`, `isbn.<isbn13>`,
+`gr.<goodreads id>`), falling back to `editions_next_tid()` only when the
+candidate carries no provider identifier; if the derived rkey already exists,
+that edition is reused. Identity lookup is the identifier bag: an ingest that
+finds any stored pair updates that edition in place.
 
 ## Publication
 
