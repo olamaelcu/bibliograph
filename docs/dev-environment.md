@@ -13,6 +13,8 @@ docker compose up -d          # postgres, plc, pds, caddy, happyview, prometheus
 mise run hv-account           # mint the provisional account on the local PDS
 mise run hv-seed              # make it superuser, write the admin key + XRPC client
 mise run hv-ca                # trust Caddy's CA in Chrome and Firefox
+mise run hv-deploy            # upload the lexicons, query scripts and indexes
+mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 ```
 
 | Address | What |
@@ -81,7 +83,8 @@ inlines into each script.
 ## Calling HappyView from the frontend
 
 `/xrpc/*` is served by HappyView, not by the SvelteKit app, and it is not the
-public origin: proxy it server-side with `HAPPYVIEW_CLIENT_KEY` and
-`HAPPYVIEW_CLIENT_SECRET`. Queries answer anonymous callers; procedures need a
-DPoP session. `docs/happyview.md` has the header contract, the DPoP provisioning
-flow and the error mapping.
+public origin: `packages/web` proxies it server-side with
+`HAPPYVIEW_CLIENT_KEY` and `HAPPYVIEW_CLIENT_SECRET`, and strips those headers
+from anything a caller sends. Queries answer anonymous callers; procedures need
+a DPoP session. `docs/happyview.md` has the header contract, the DPoP
+provisioning flow and the error mapping.

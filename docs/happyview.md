@@ -132,20 +132,27 @@ building the stack.
 
 ## Calling it from the SvelteKit edge
 
-Server-side only; HappyView is not the public origin.
+Server-side only; HappyView is not the public origin. `packages/web` implements
+this — `mise run web` serves the edge on `127.0.0.1:5176`, and
+`src/lib/server/happyview.ts` is the only place that holds the client
+credentials.
 
 ```ts
-const HAPPYVIEW = process.env.HAPPYVIEW_URL ?? "http://127.0.0.1:3000";
+import { env } from "$env/dynamic/private";
+const HAPPYVIEW = env.HAPPYVIEW_URL ?? "http://127.0.0.1:3000";
 
 // Query
 await fetch(`${HAPPYVIEW}/xrpc/net.olamaelcu.livtet.biblio.listShelves?did=${did}`, {
   headers: {
-    "X-Client-Key": process.env.HAPPYVIEW_CLIENT_KEY!,
-    "X-Client-Secret": process.env.HAPPYVIEW_CLIENT_SECRET!,
+    "X-Client-Key": env.HAPPYVIEW_CLIENT_KEY!,
+    "X-Client-Secret": env.HAPPYVIEW_CLIENT_SECRET!,
   },
 });
 ```
 
+- **The proxy owns the client identity.** Caller-supplied `X-Client-Key` and
+  `X-Client-Secret` are never forwarded; the edge drops them and sets its own
+  from env, so a browser cannot choose which client HappyView sees.
 - **Queries** work anonymously. HappyView requires `X-Client-Key` only on
   *authenticated* (DPoP) requests, and an unknown key is a warning, not a
   rejection — so the header is there for rate limiting and caller attribution,
@@ -158,8 +165,14 @@ await fetch(`${HAPPYVIEW}/xrpc/net.olamaelcu.livtet.biblio.listShelves?did=${did
 - **Unknown methods return 502**, not 404. Do not map that to "upstream down".
 - There is no `BASE_PATH`; routes are at the root. The previous deployment used
   `/~/hv`.
-- The seeded client's `client_uri` is `http://127.0.0.1:5176`, so run the dev
-  server there and the `Origin` check stays quiet.
+- The seeded client's `client_uri` is `http://127.0.0.1:5176`, so the dev server
+  binds `127.0.0.1` (not `localhost`, which Vite resolves to `::1`, leaving the
+  origin mismatched) on port 5176; the `Origin` check then stays quiet.
+- `packages/web` runs SvelteKit 3 with Vite 8. Kit 3 rejects a
+  `svelte.config.js` (`config_file_unsupported`) — adapter and server settings
+  live in `vite.config.ts`, and runtime variables must be declared in
+  `src/env.ts` with `defineEnvVars` or `$env/dynamic/private` will not expose
+  them.
 
 ## Dashboard login
 
