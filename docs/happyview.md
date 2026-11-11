@@ -200,9 +200,27 @@ at upload, and a successful PDS write is indexed in the same request.
 | Reviews | `review.create`, `review.update`, `review.delete` |
 
 All fifteen answer `401 XRPC procedures require DPoP authentication` until a
-session is registered, because the write is proxied to the caller's PDS. Without
-one, the data has to be written to the PDS directly and backfilled — the
-sequence below, which predates the procedures and still works:
+session is registered, because the write is proxied to the caller's PDS.
+`packages/web` has that flow for local development: `/login` provisions a DPoP
+key with the edge's client credentials, runs the OAuth dance against the PDS,
+registers the session with HappyView, and forwards `Authorization: DPoP` plus a
+fresh proof on `/xrpc` once signed in.
+
+Two things gate a *write* on top of identity:
+
+- **The token needs `transition:generic`.** HappyView proxies the write with the
+  session's token, and `atproto` alone grants no repo write. The PDS advertises
+  the scope; the HV client is registered for it.
+- **The loopback client must declare it.** The localhost client's synthesised
+  metadata takes its scope from the `client_id` query string, so the client is
+  `http://localhost?scope=atproto%20transition:generic`. Without the parameter
+  the PDS registers `atproto` only and lists `transition:generic` under
+  `rejected_scopes` (`not_registered`).
+
+Verified end to end: `POST /xrpc/…shelf.create` through the edge returned the new
+shelf URI and `listShelves` included it immediately — indexed inline, no
+backfill. Without a session, the same data has to be written to the PDS directly
+and backfilled, the sequence below:
 
 ```bash
 # 1. write as the user (dev shape; in the app this is the user's OAuth session)
@@ -311,13 +329,25 @@ public`.
   the removal) and the catalog tables it reads are intact, so book-rendering
   queries work. `docker compose down -v` takes it with them; those queries would
   then answer 404 "catalog edition is missing" instead of rendering books.
-- **Procedures need a registered DPoP session.** All fifteen answer 401 without
-  one, and HappyView proxies the write with that session, so the client must run
-  `/oauth/dpop-keys` → OAuth → `/oauth/sessions` first, with scopes that permit
-  the write. Until the app does, use direct PDS writes plus backfill (see
-  Writes above).
-- **Browser OAuth consent is a manual step.** Everything server-side up to the
-  authorize URL is exercised; the consent form is not automated.
+- **The PDS validates against the *published* lexicons, not ours.** It resolves
+  the NSID authority through DNS TXT (`_lexicon.livtet.olamaelcu.net` →
+  `did:web:biblio.livtet.olamaelcu.net`) and fetches the schema from there. A
+  collection it cannot find is accepted with `validationStatus: "unknown"`
+  (`bookStatus` works), but a collection whose published schema disagrees with
+  our local one is rejected: `follow` fails with
+  `Invalid field 'subject': invalid format: AtUri`, because the published
+  schema types `subject` as an at-uri while ours is a DID. Fixing that means
+  republishing the lexicon at the authority — the local stack cannot override
+  it.
+- **`graph.follow` therefore cannot write locally**, until the published
+  `follow` schema is corrected. `shelf.create`, `status.set` and the rest are
+  unaffected.
+- **The edge's session store is development-only.** `packages/web` keeps user
+  tokens in `.data/sessions.json` behind an opaque cookie so procedures can be
+  exercised locally. In production Livtet stays the OAuth client and this edge
+  is the AppView origin — no user-token custody. Login and consent are
+  automatable (a headless browser drives the PDS page end to end); nothing in
+  the app depends on a human.
 - **`db.raw` runs on the main connection** behind HappyView's tokenizer guard
   and logs a warning. Setting `PLUGIN_SQL_DATABASE_URL` to a least-privileged
   `happyview_plugin` role would move it to its own pool; no such role exists
