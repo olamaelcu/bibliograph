@@ -143,10 +143,10 @@ bookkeeping columns).
 `editionResults` is exactly the upstream envelope: `{ items, hasMore, total? }`, with no
 `pending`/`degraded` field, so a response cannot tell a client that catalog hydration is
 outstanding. The two catalog procedures still queue `catalog.resolve` / `catalog.search` work for
-unmatched input (at most 10 hydration jobs per request; see the catalog discovery section), and
-that work may add editions matching a later identical request, but the only
-way to learn about it is to re-call: there is no ETag, conditional-request, stream, or
-subscription signal. Queued work is not a promise that anything will be found.
+unmatched input (hydration enqueueing is capped at 10 jobs per request; see the catalog discovery
+section), and that work may add editions matching a later identical request, but the only way to
+learn about it is to re-call: there is no ETag, conditional-request, stream, or subscription
+signal. Queued work is not a promise that anything will be found.
 
 ## Inventory
 
@@ -333,13 +333,14 @@ the query fails. Both cap `identifiers` at 100 entries and clamp `offset`/`limit
 normalization — per the lexicon. Both may queue background hydration instead of writing catalog
 rows; the response does not report whether that work is outstanding (see above).
 
-**Enqueue cap.** Both procedures queue at most 10 hydration jobs per request
-(`MAX_HYDRATION_JOBS_PER_REQUEST` in the edge route). A body may still name 100 identifiers; those
-beyond the cap are validated and matched normally, they are just not queued on this call, and a
-later call that repeats the miss can queue them. The cap is per request, not a global quota: the
-TTL marks only dedupe repeats across calls. Each queued job can spend up to 50 paid provider
-lookups in the worker, so operators should also rate-limit this anonymous surface at the reverse
-proxy.
+**Enqueue cap.** Both procedures cap each hydration enqueue list at 10 jobs per request
+(`MAX_HYDRATION_JOBS_PER_REQUEST` in the edge route): `resolveEditions` queues at most 10 unmatched
+identifiers, and `searchEditions` at most 10 ISBN hydration jobs, plus its single `catalog.search`
+job when the local page is empty. A body may still name 100 identifiers; those beyond the cap are
+validated and matched normally, they are just not queued on this call, and a later call that
+repeats the miss can queue them. The cap is per request, not a global quota: the TTL marks only
+dedupe repeats across calls. Each queued job can spend up to 50 paid provider lookups in the
+worker, so operators should also rate-limit this anonymous surface at the reverse proxy.
 
 #### `community.lexicon.media.book.resolveEditions`
 
@@ -350,10 +351,11 @@ first page only. No match is an empty page (the lexicon declares no errors). Eve
 `editionView` whose `identifiers` begin with the atproto URI identifier.
 
 Each identifier with no matching edition in the response is enqueued as a `catalog.resolve` job,
-up to 10 enqueues per request (deduplicated by a TTL mark, so a repeat while the first job is
-still outstanding does not queue again). The response carries no flag for this: the client can only re-call with the same body
-later. Queued work is not a promise that the provider will resolve the identifier, and a stopped
-worker leaves the work outstanding without any response signal.
+up to `MAX_HYDRATION_JOBS_PER_REQUEST` (10) enqueues per request (deduplicated by a TTL mark, so a
+repeat while the first job is still outstanding does not queue again). The response carries no
+flag for this: the client can only re-call with the same body later. Queued work is not a promise
+that the provider will resolve the identifier, and a stopped worker leaves the work outstanding
+without any response signal.
 
 #### `community.lexicon.media.book.searchEditions`
 
@@ -367,18 +369,20 @@ gap-fill, stopping at the first provider that returns candidates and ingesting a
 newly ingested editions appear in later calls. The ranking above is this catalog's relevance
 order, which the lexicon allows providers to define.
 
-Hydration is queued only when the local result is empty, and a repeated query is deduplicated by
-its TTL mark. The response carries no flag for it, so a client can only re-call with the same body
-later; an empty page may stay empty on every later call. As with `resolveEditions`, there is no
-signal for worker liveness or for a stopped worker.
+Text/identifier hydration (`catalog.search`) is queued only when the local result is empty
+(`items.length === 0`), and a repeated query is deduplicated by its TTL mark. The response carries
+no flag for it, so a client can only re-call with the same body later; an empty page may stay
+empty on every later call. As with `resolveEditions`, there is no signal for worker liveness or
+for a stopped worker.
 
 ISBN identifiers (`isbn13`, `isbn10`, `isbn`, case-insensitive, normalized to a checksum-valid
-ISBN-13) additionally queue a direct ISBNdb lookup (`catalog.isbn`) **even when the local result is
-non-empty** — the goal is to enrich and ingest the edition from the provider, not to fill an empty
-page. Those enqueues are capped at 10 per request after dedupe and are deduplicated by their own
-TTL mark. No response field signals it: the response
-shape is unchanged (`items`/`hasMore`/`total`; `editionResults` has no `pending` or `degraded`
-field), so clients learn of new editions only by re-calling later.
+ISBN-13) follow a separate rule: they queue a direct ISBNdb lookup (`catalog.isbn`)
+**unconditionally — even when the local result is non-empty** — because the goal is to enrich and
+ingest the edition from the provider, not to fill an empty page. Only the first
+`MAX_HYDRATION_JOBS_PER_REQUEST` (10) distinct normalized ISBN-13s queue per request, after dedupe;
+each is deduplicated by its own TTL mark. No response field signals queued work: the response shape
+is unchanged (`items`/`hasMore`/`total`; `editionResults` has no `pending` or `degraded` field), so
+clients learn of new editions only by re-calling later.
 
 ### Follow
 
