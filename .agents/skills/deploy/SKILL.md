@@ -35,6 +35,14 @@ version and service state.
      cannot: PostgreSQL, the application role and database, `DATABASE_URL`, the
      OAuth client id derived from `OAUTH_PUBLIC_ORIGIN`, and the lexicon publish.
 
+5. **Verify on the host — every deploy, no exceptions.** `SERVICE_OK` only says
+   the package landed and the units are alive; it must never be the end of a
+   release. Run the checklist under [Verification](#verification) and act on
+   what it shows. If a check contradicts the release note — the change is in
+   the build but the symptom persists — the release is not done: say so and fix
+   it, do not report success. Verification is most valuable when it tries to
+   falsify the specific claim the release makes.
+
 ## Usage
 
 ```bash
@@ -79,17 +87,46 @@ is picked by `ls -1 dist/bibliograph_*.deb | sort -V | tail -1`.
 
 ## Verification
 
-After deploy, check the remote host:
+**Always** run this after every deploy — it is step 5 of the release flow, not
+an optional epilogue. A release is not finished until every line below has been
+read and interpreted:
 
 ```bash
 ssh veve@lescayes.ts.olamaelcu.net 'dpkg-query -W bibliograph'
 ssh veve@lescayes.ts.olamaelcu.net 'systemctl is-active bibliograph bibliograph-worker'
-ssh veve@lescayes.ts.olamaelcu.net 'systemctl status bibliograph-migrate --no-pager'
+ssh veve@lescayes.ts.olamaelcu.net 'systemctl status bibliograph-migrate --no-pager -n 4 | head -10'
 ssh veve@lescayes.ts.olamaelcu.net 'cat /etc/bibliograph/port.conf'
 ssh veve@lescayes.ts.olamaelcu.net 'curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5000/'
 ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u bibliograph -n 30 --no-pager'
+ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u bibliograph-worker -n 20 --no-pager'
 curl -s -o /dev/null -w '%{http_code}\n' https://biblio.livtet.olamaelcu.net/
 ```
+
+What each answer has to say:
+
+- `dpkg-query` must print the version you built — anything else means the host
+  installed a different `.deb`.
+- Both units `active`; `bibliograph-migrate` is a oneshot, so `inactive (dead)`
+  is correct **only** together with `status=0/SUCCESS` in its recent log.
+- Local socket and public URL both `200`. A 200 on the socket with a failing
+  public URL points at TLS/nginx, not the package.
+- Journal scan: Google Books `429` and `breaker open` are expected noise; other
+  warnings and any `status":5xx` access entries are not.
+- Confirm the change is actually in the installed build, e.g.
+  `ssh … "grep -rlo '<new symbol>' /usr/lib/bibliograph/packages/bibliograph-service/build/server/chunks/ | head"`.
+- Exercise the changed surface through the public URL (a real request to the
+  affected XRPC method or page) and read the answer, not just its status code.
+
+The service access journal gives you nsid/status/duration but **not the query
+string**; when a 4xx needs a cause, use the site log instead:
+
+```bash
+ssh veve@lescayes.ts.olamaelcu.net 'sudo -n grep "searchContributors" /var/log/nginx/bibliograph.access.log | tail -12'
+ssh veve@lescayes.ts.olamaelcu.net 'sudo -n grep " 400 " /var/log/nginx/bibliograph.access.log | grep -o "/xrpc/[a-zA-Z.]*" | sort | uniq -c | sort -rn | head'
+```
+
+Query strings are logged (nginx `combined`), so a parameter-validation 400 can
+be replayed verbatim with `curl`. Do that before blaming the deploy.
 
 Unlike the platform package there is no `VERSION+SHA` stamp: the installed
 version is only the changelog version, so two builds of the same version are
@@ -132,6 +169,19 @@ directives.
 - **The page still serves the old bundle after an install** — the units must be
   restarted. `dpkg -i` or `apt install` alone does not do it: the postinst only
   restarts on a port change. Use this skill's script, not a bare install.
+- **`400 InvalidRequest: invalid params: invalid_string_length at .cursor
+  (expected a string at most 256 character(s))`** — an input cursor over the
+  lexicon cap, rejected by parameter validation before the handler (a 400 in
+  `~0.4 ms` is that, not a database or upstream error). Cursors emitted since
+  0.5.26 are deflate-compressed (~150–230 chars) so this should only come from
+  a client replaying an old uncompressed cursor, or from a cursor built over an
+  unusually long AT-URI. Legacy cursors *under* the cap still decode via the
+  inflate fallback; ones *over* it never reach the handler. A client that
+  retries the same long cursor every ~60 s stays broken until it resets its
+  cursor or the cap is relaxed — compression on the emit side does not help it.
+  Find the offenders with the nginx greps above (`grep -o "cursor=[^ &]*"`,
+  `sort -u`). `searchEditions`, `searchWorks` and `searchPublishers` carry the
+  same 256-char cap.
 - **The worker stops a few seconds after a deploy** — `TAP_URL` /
   `TAP_ADMIN_PASSWORD` are unset and the unit's start limit trips after five
   attempts. Intentional: an unconfigured tap consumer would restart-loop.
