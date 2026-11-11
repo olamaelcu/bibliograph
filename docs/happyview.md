@@ -174,6 +174,49 @@ await fetch(`${HAPPYVIEW}/xrpc/net.olamaelcu.livtet.biblio.listShelves?did=${did
   `src/env.ts` with `defineEnvVars` or `$env/dynamic/private` will not expose
   them.
 
+## Writes
+
+HappyView never writes a repo. Records are written to the **PDS**, by whoever
+holds the user's session — in this app, `packages/web` — and the AppView only
+indexes what it can see:
+
+| Path | Endpoint | Indexed immediately? |
+| --- | --- | --- |
+| App → PDS (normal) | `com.atproto.repo.{createRecord,putRecord,applyWrites}` on `https://pds.127-0-0-1.sslip.io` | no — needs Jetstream or backfill |
+| App → HappyView procedure | `POST /xrpc/<nsid>` with a DPoP session | yes — `procedure.rs` upserts `happyview_records` after the PDS accepts the write |
+
+The procedure path is not available yet: the restored lexicon set is 17 queries
+and 7 record types, no procedures, so HappyView serves no write endpoint. Until
+one is uploaded, a write lands in the repo and the index stays behind until a
+backfill runs. Both halves are proven in this stack:
+
+```bash
+# 1. write as the user (dev shape; in the app this is the user's OAuth session)
+JWT=$(curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.createSession \
+  -H 'content-type: application/json' \
+  -d '{"identifier":"alice.pds.127-0-0-1.sslip.io","password":"…"}' | jq -r .accessJwt)
+
+curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.repo.putRecord \
+  -H "authorization: Bearer $JWT" -H 'content-type: application/json' \
+  -d '{"repo":"did:plc:…","collection":"net.olamaelcu.livtet.biblio.shelf",
+       "rkey":"dev-shelf","record":{"name":"Dev shelf","createdAt":"…","updatedAt":"…"}}'
+
+# 2. the query still answers empty, because nothing told the AppView
+
+# 3. index it
+curl -X POST -H 'Authorization: Bearer hv_dev_admin' -H 'content-type: application/json' \
+  -d '{"did":"did:plc:…","collection":"net.olamaelcu.livtet.biblio.shelf"}' \
+  http://127.0.0.1:3000/admin/backfill
+```
+
+The job reports `completed` with `1` record and `listShelves` then returns the
+shelf. Backfill walks `RELAY_URL` (`com.atproto.sync.listRepos` on the local
+PDS), so it only ever sees the local network.
+
+Do not point the app at HappyView for `com.atproto.repo.*`: those are built-in
+lexicons, and HappyView proxies them to an authority DID that does not exist in
+the local PLC (see Known limits).
+
 ## Dashboard login
 
 Open `http://127.0.0.1:3000`, redirects to `/dashboard/`, and sign in with the
@@ -238,8 +281,9 @@ public`.
   the removal) and the catalog tables it reads are intact, so book-rendering
   queries work. `docker compose down -v` takes it with them; those queries would
   then answer 404 "catalog edition is missing" instead of rendering books.
-- **Backfill is wired but unexercised.** `RELAY_URL` points at the local PDS;
-  no backfill job has been run against it.
+- **No procedure lexicons yet**, so the write-through-HappyView path (the one
+  that indexes inline) is unavailable. Writes go straight to the PDS and need a
+  backfill to become visible — see Writes above.
 - **Browser OAuth consent is a manual step.** Everything server-side up to the
   authorize URL is exercised; the consent form is not automated.
 - **`db.raw` runs on the main connection** behind HappyView's tokenizer guard
