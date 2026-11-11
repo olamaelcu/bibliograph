@@ -1,0 +1,12 @@
+bibliograph-web (0.1.0-1) unstable; urgency=medium
+
+  * Initial package. The SvelteKit edge from packages/web, built with
+    adapter-node and running on the host's nodejs:
+
+    - bibliograph-web.service serves the UI and /xrpc on 127.0.0.1:5176.
+    - The proxy injects the configured HappyView XRPC client identity and
+      relays Authorization/DPoP untouched; it holds no user session.
+    - /etc/bibliograph/web.env carries the upstream URL and the client
+      key/secret.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 13:30:00 +0000

@@ -310,6 +310,44 @@ The package is `Architecture: any` because the binary links the host's glibc and
 extracted from. It builds clean under `lintian` apart from the
 initial-upload-with-no-bug warning.
 
+## The web edge as its own package
+
+`bibliograph-web` ships the adapter-node build of `packages/web`: the public
+SvelteKit origin, which proxies `/xrpc` to HappyView. It bundles no runtime —
+the output is self-contained JavaScript (~2 MB, 320 KB packaged) and the package
+depends on the host's `nodejs` — so it is `Architecture: all`.
+
+```bash
+mise run package-web-payload   # pnpm --filter web build → packaging/payload/web/build
+mise run package-web-deb       # dpkg-deb → dist/bibliograph-web_0.1.0-1_all.deb
+```
+
+| Path | Contents |
+| --- | --- |
+| `/usr/lib/bibliograph-web/build` | adapter-node output: `index.js`, `handler.js`, `client/`, `server/` |
+| `/etc/bibliograph/web.env` | conffile: `HOST`/`PORT`, `HAPPYVIEW_URL`, `HAPPYVIEW_CLIENT_KEY`/`SECRET` |
+| `/usr/lib/systemd/system/bibliograph-web.service` | `/usr/bin/node …/build/index.js`, binds `127.0.0.1:5176` |
+
+```bash
+sudo apt install ./dist/bibliograph-web_0.1.0-1_all.deb
+# set HAPPYVIEW_CLIENT_KEY / HAPPYVIEW_CLIENT_SECRET in /etc/bibliograph/web.env
+sudo systemctl restart bibliograph-web
+```
+
+The edge holds no state and no user session: it injects the configured XRPC
+client identity and relays `Authorization`/`DPoP` untouched, so procedures still
+require the caller to bring a session (see `docs/happyview.md`). The unit binds
+loopback only; terminate TLS in front of it.
+
+The dependency is `nodejs (>= 20)`. Debian 12 and Ubuntu 24.04 ship 18, so
+install a newer Node from the NodeSource repository before installing this
+package (the same constraint the retired application package documented).
+
+`bibliograph-web` and `bibliograph-happyview` install side by side: distinct
+trees under `/usr/lib`, distinct conffiles, one shared `bibliograph` sysuser that
+either package creates if it is missing. Extracting both into one root shows no
+path collisions outside the standard directories.
+
 ## Why a package instead of a container
 
 The Dokku/Docker path (image build, `Procfile`, push-to-deploy) was retired with

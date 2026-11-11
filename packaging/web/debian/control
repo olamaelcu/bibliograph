@@ -1,0 +1,24 @@
+Package: bibliograph-web
+Version: @VERSION@
+Section: web
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @SIZE@
+Maintainer: Bibliograph Maintainers <maintainers@olamaelcu.net>
+Homepage: https://biblio.livtet.olamaelcu.net
+Depends: nodejs (>= 20), adduser
+Recommends: nginx, bibliograph-happyview
+Description: Bibliograph web edge (SvelteKit appview front end)
+ The public SvelteKit application for Bibliograph. It serves the UI and the
+ /xrpc surface, and is the only public origin: queries and procedures are
+ proxied server-side to HappyView on 127.0.0.1:3000, with the edge's own XRPC
+ client identity injected so a browser cannot choose it.
+ .
+ The adapter-node build is self-contained JavaScript (~2 MB) and runs on the
+ host's nodejs; no runtime is bundled. Configuration lives in
+ /etc/bibliograph/web.env — the HappyView client key and secret are required
+ for the proxy to identify itself upstream.
+ .
+ The service binds 127.0.0.1:5176. Put a TLS-terminating reverse proxy in front
+ (the package recommends nginx); the port and HappyView URL are conffile
+ settings.

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Hand-assembled package: debhelper does not run, so the unit is enabled and
+# started with deb-systemd-helper/-invoke, which is what debhelper's generated
+# snippets call. Using systemctl directly here would trip lintian and skip the
+# package's state tracking.
+set -e
+
+# Shared with the bibliograph and bibliograph-happyview packages.
+if ! getent group bibliograph >/dev/null; then
+    addgroup --system bibliograph
+fi
+if ! getent passwd bibliograph >/dev/null; then
+    adduser --system --ingroup bibliograph --home /var/lib/bibliograph \
+        --no-create-home --disabled-login --gecos "Bibliograph appview" bibliograph
+fi
+
+install -d -m 0750 -o root -g bibliograph /etc/bibliograph
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+    deb-systemd-helper enable bibliograph-web.service >/dev/null 2>&1 || true
+    deb-systemd-invoke restart bibliograph-web.service >/dev/null 2>&1 || true
+fi
+
+# The proxy still serves public queries without credentials, but HappyView
+# then cannot attribute them, so say so once.
+if ! grep -Eq '^HAPPYVIEW_CLIENT_KEY=..+' /etc/bibliograph/web.env; then
+    echo "bibliograph-web: HAPPYVIEW_CLIENT_KEY is unset in /etc/bibliograph/web.env." >&2
+    echo "bibliograph-web: proxied requests will reach HappyView unauthenticated." >&2
+    echo "bibliograph-web: copy the hvc_/hvs_ pair from the HappyView install." >&2
+fi
+
+exit 0

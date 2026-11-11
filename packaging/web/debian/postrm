@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+fi
+
+# Nothing to purge: the edge keeps no state. The conffile in /etc and the
+# upstream database are the operator's.
+exit 0

@@ -1,0 +1,29 @@
+[Unit]
+Description=Bibliograph web edge (SvelteKit)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph-web
+EnvironmentFile=/etc/bibliograph/web.env
+ExecStart=/usr/bin/node /usr/lib/bibliograph-web/build/index.js
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65536
+
+# The edge holds no state: upstream is HappyView, configuration is the
+# conffile, and it writes nothing. The whole filesystem can stay read-only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
