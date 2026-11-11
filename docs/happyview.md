@@ -157,11 +157,11 @@ await fetch(`${HAPPYVIEW}/xrpc/net.olamaelcu.livtet.biblio.listShelves?did=${did
   *authenticated* (DPoP) requests, and an unknown key is a warning, not a
   rejection — so the header is there for rate limiting and caller attribution,
   not access control.
-- **Procedures** need a user session. The server-side flow is: `POST
-  /oauth/dpop-keys` (client key + secret) → run OAuth against the PDS with the
-  returned keypair → `POST /oauth/sessions` → forward `Authorization: DPoP
-  <token>` plus a fresh `DPoP` proof and `X-Client-Key`. HappyView then proxies
-  the write to the PDS with its stored session.
+- **Procedures** need a user session, and the edge cannot supply one. The calling
+  server's flow is: `POST /oauth/dpop-keys` (client key + secret), run OAuth
+  against the PDS with the returned keypair, `POST /oauth/sessions`, then send
+  `Authorization: DPoP <token>` plus a fresh `DPoP` proof on the proxied call.
+  HappyView proxies the write to the PDS with its stored session.
 - **Unknown methods return 502**, not 404. Do not map that to "upstream down".
 - There is no `BASE_PATH`; routes are at the root. The previous deployment used
   `/~/hv`.
@@ -176,9 +176,9 @@ await fetch(`${HAPPYVIEW}/xrpc/net.olamaelcu.livtet.biblio.listShelves?did=${did
 
 ## Writes
 
-HappyView never writes a repo. Records are written to the **PDS**, by whoever
-holds the user's session — in this app, `packages/web` — and the AppView only
-indexes what it can see:
+HappyView never writes a repo. Records are written to the **PDS** by whoever
+holds the user's session — the calling server (Livtet), not this edge, which
+only relays credentials — and the AppView indexes what it can see:
 
 | Path | Endpoint | Indexed immediately? |
 | --- | --- | --- |
@@ -199,28 +199,21 @@ at upload, and a successful PDS write is indexed in the same request.
 | Reader | `readingGoal.set` (rkey `current`), `profile.set` (rkey `self`) |
 | Reviews | `review.create`, `review.update`, `review.delete` |
 
-All fifteen answer `401 XRPC procedures require DPoP authentication` until a
-session is registered, because the write is proxied to the caller's PDS.
-`packages/web` has that flow for local development: `/login` provisions a DPoP
-key with the edge's client credentials, runs the OAuth dance against the PDS,
-registers the session with HappyView, and forwards `Authorization: DPoP` plus a
-fresh proof on `/xrpc` once signed in.
+All fifteen answer `401 XRPC procedures require DPoP authentication` until the
+caller presents a DPoP-bound session, because the write is proxied to the
+caller's PDS. The edge holds no session of its own — it injects its XRPC client
+identity and relays `Authorization` and `DPoP` untouched, so credentials are the
+caller's responsibility (see Calling it from the SvelteKit edge).
 
-Two things gate a *write* on top of identity:
+The token in that session needs `transition:generic`: HappyView proxies the
+write with it, and `atproto` alone grants no repo write. HappyView also refuses
+a session whose scopes exceed its API client's registered ones, so the client is
+registered for both.
 
-- **The token needs `transition:generic`.** HappyView proxies the write with the
-  session's token, and `atproto` alone grants no repo write. The PDS advertises
-  the scope; the HV client is registered for it.
-- **The loopback client must declare it.** The localhost client's synthesised
-  metadata takes its scope from the `client_id` query string, so the client is
-  `http://localhost?scope=atproto%20transition:generic`. Without the parameter
-  the PDS registers `atproto` only and lists `transition:generic` under
-  `rejected_scopes` (`not_registered`).
-
-Verified end to end: `POST /xrpc/…shelf.create` through the edge returned the new
-shelf URI and `listShelves` included it immediately — indexed inline, no
-backfill. Without a session, the same data has to be written to the PDS directly
-and backfilled, the sequence below:
+Inline indexing was verified end to end while a local session harness existed:
+`POST /xrpc/…shelf.create` returned the new shelf URI and `listShelves` included
+it immediately, no backfill. Without such a session, the same data has to be
+written to the PDS directly and backfilled — the sequence below:
 
 ```bash
 # 1. write as the user (dev shape; in the app this is the user's OAuth session)
@@ -342,12 +335,11 @@ public`.
 - **`graph.follow` therefore cannot write locally**, until the published
   `follow` schema is corrected. `shelf.create`, `status.set` and the rest are
   unaffected.
-- **The edge's session store is development-only.** `packages/web` keeps user
-  tokens in `.data/sessions.json` behind an opaque cookie so procedures can be
-  exercised locally. In production Livtet stays the OAuth client and this edge
-  is the AppView origin — no user-token custody. Login and consent are
-  automatable (a headless browser drives the PDS page end to end); nothing in
-  the app depends on a human.
+- **The edge holds no user session.** `packages/web` injects its XRPC client
+  key/secret and relays `Authorization`/`DPoP`; it never runs an OAuth flow or
+  stores tokens. A caller that wants procedures must bring a DPoP session
+  (Livtet registers its own with HappyView, or writes to the PDS directly), and
+  the proxy cannot mint one on its behalf.
 - **`db.raw` runs on the main connection** behind HappyView's tokenizer guard
   and logs a warning. Setting `PLUGIN_SQL_DATABASE_URL` to a least-privileged
   `happyview_plugin` role would move it to its own pool; no such role exists
