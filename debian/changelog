@@ -1,3 +1,31 @@
+bibliograph (0.5.23) unstable; urgency=medium
+
+  * Any XRPC read that serves books or contributors now heals what it returns.
+    `lib/server/jobs/on-read.ts` adds `maybeEnqueueEditionBackfills` and
+    `maybeEnqueueContributorBackfills`: one indexed `ANY()` query per batch
+    selects only rows missing a field that has never been checked, and each
+    missing description, cover, portrait or bio is enqueued fire-and-forget
+    through the existing `jobKey`'d helpers, so a hot row cannot stack
+    duplicates. Neither helper throws — a backfill that cannot be queued never
+    fails the read that triggered it — and in steady state (nothing missing) a
+    pass costs one query and enqueues nothing. Wired into `hydrateBooksByUri`,
+    `searchEditions`, `resolveEditions`, `searchWorks` (contributors only),
+    `searchContributors`, `getImageForBook` / `getImageForContributor` (which
+    also gain the `cover_checked_at` gate) and `getEditionsByContributor`.
+  * Contributor pages gain an administrators-only "Queue portrait + bio
+    backfill" button, whose `runBackfill` action re-checks `isAdministrator`
+    regardless of UI visibility and enqueues both contributor jobs. Enqueue-
+    only: the action returns immediately and `bibliograph-worker.service`
+    scrapes.
+  * `backfill-contributor-bio` is now a real graphile task in
+    `searchTaskList`. `backfillBioForContributor` previously had no
+    registration point, so the module was dead code; it is reachable through
+    the new `enqueueContributorBioBackfill` (`jobKey` `backfill-bio:<uri>`,
+    maxAttempts 5) as well as the on-read helper and the contributor button.
+    No migration: job names are not schema.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 22:15:23 -0500
+
 bibliograph (0.5.22) unstable; urgency=medium
 
   * Edition detail page gains an administrators-only "Queue description +
