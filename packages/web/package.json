@@ -4,10 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
+    "catalog": "node scripts/generate-catalog.mjs",
+    "dev": "node scripts/generate-catalog.mjs && vite dev",
+    "build": "node scripts/generate-catalog.mjs && vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "node scripts/generate-catalog.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@awesome.me/webawesome": "^3.11.0",
+    "lucide-static": "^1.24.0"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^6.0.1",

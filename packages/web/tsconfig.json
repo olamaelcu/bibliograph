@@ -11,6 +11,10 @@
     "sourceMap": true,
     "strict": true,
     "moduleResolution": "bundler",
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "paths": {
+      "$lib": ["./src/lib"],
+      "$lib/*": ["./src/lib/*"]
+    }
   }
 }

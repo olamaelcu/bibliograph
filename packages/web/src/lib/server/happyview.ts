@@ -22,14 +22,14 @@ function clientHeaders(): Record<string, string> {
 }
 
 /**
- * Proxy one XRPC call to HappyView and return its response unchanged.
+ * Proxy one XRPC call to the AppView and return its response unchanged.
  *
  * `method` is the NSID from the path; the verb comes from the request, which the
  * route has already constrained to GET or POST.
  *
  * The edge holds no user session. `authorization` and `dpop` are relayed from
  * the caller untouched: that is how a trusted server-side client presents an
- * inter-service JWT or its own DPoP-bound session, and HappyView — not this
+ * inter-service JWT or its own DPoP-bound session, and the AppView — not this
  * proxy — decides what those credentials are worth.
  */
 export async function forward(method: string, request: Request): Promise<Response> {

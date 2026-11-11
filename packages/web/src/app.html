@@ -1,11 +1,49 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="wa-theme-default">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Bibliograph — XRPC surface</title>
+    <meta
+      name="description"
+      content="Queries and write procedures the Bibliograph AppView serves over XRPC."
+    />
+    <script>
+      // Web Awesome color-scheme detection — runs synchronously in <head> before paint.
+      // Per https://webawesome.com/docs/customizing#detecting-color-scheme-preference
+      (function () {
+        try {
+          var stored = localStorage.getItem('wa-color-scheme');
+          var prefersDark =
+            stored !== null
+              ? stored === 'dark'
+              : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (prefersDark) {
+            document.documentElement.classList.add('wa-dark');
+          }
+          window
+            .matchMedia('(prefers-color-scheme: dark)')
+            .addEventListener('change', function (e) {
+              if (localStorage.getItem('wa-color-scheme') === null) {
+                document.documentElement.classList.toggle('wa-dark', e.matches);
+              }
+            });
+          window.__toggleWaColorScheme = function () {
+            var toDark = !document.documentElement.classList.contains('wa-dark');
+            document.documentElement.classList.toggle('wa-dark', toDark);
+            try {
+              localStorage.setItem('wa-color-scheme', toDark ? 'dark' : 'light');
+            } catch (_) {}
+          };
+        } catch (e) {
+          document.documentElement.classList.add('wa-dark');
+        }
+      })();
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
-    <div style="display: contents">%sveltekit.body%</div>
+    %sveltekit.body%
   </body>
 </html>

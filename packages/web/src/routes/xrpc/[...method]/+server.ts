@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { forward } from '../../../lib/server/happyview';
+import { forward } from '$lib/server/happyview';
 
 // An NSID is at least three labels: authority, name, and at least one more.
 const NSID = /^[a-zA-Z]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]([a-zA-Z0-9-]{0,62})$/;
@@ -14,7 +14,7 @@ function methodNotAllowed(): Response {
  *
  * The edge adds its own client identity and relays the rest as-is, so callers
  * may be anonymous (public queries) or present their own credentials for
- * HappyView to authenticate.
+ * the AppView to authenticate.
  */
 const handle: RequestHandler = ({ params, request }) => {
   if (!NSID.test(params.method)) {
