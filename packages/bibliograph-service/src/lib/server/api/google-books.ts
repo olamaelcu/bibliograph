@@ -3,9 +3,9 @@ import { withRetry } from './retry';
 import { searchProviderRequestsTotal, googleBooksCacheTotal } from '../metrics';
 import { googleBooksBreaker } from './breakers';
 import { requestJson } from '../http/client';
-import type { EditionItem, WorkItem, SearchQuery, SearchResult, Identifier } from '../search/types';
+import type { EditionItem, SearchQuery, SearchResult, Identifier } from '../search/types';
 import { toGbLangRestrict } from '../search/language';
-import { gbEditionUri, gbWorkUri } from '../gb/keys';
+
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { gbCacheEntry, gbCacheGet, gbCachePut } from '../gb/cache';
 import { prefetchContributors, type ContributorResolver } from './contributor-name-resolver';
@@ -99,13 +99,13 @@ export async function mapGbToEdition(v: GbVolume, createdAt: string, resolver: C
   }
   const contributors = await resolver.resolve(info.authors ?? []);
   return {
-    uri: gbEditionUri(v.id),
     title: info.title,
     subtitle: info.subtitle,
     publishedYear: yearFromGbPublishedDate(info.publishedDate),
     language: info.language,
     description: descriptionFromGb(info, v.searchInfo?.textSnippet),
-    coverImageUrl: coverFromLinks(info.imageLinks),
+    coverUrl: coverFromLinks(info.imageLinks),
+    publisher: info.publisher ? { name: info.publisher } : null,
     pages: info.pageCount,
     // An ISBN_10 and its ISBN_13 carry the same canonical `isbn` identifier.
     identifiers: uniqueIdentifiers(ids),
@@ -114,31 +114,6 @@ export async function mapGbToEdition(v: GbVolume, createdAt: string, resolver: C
   };
 }
 
-export async function mapGbToWork(v: GbVolume, createdAt: string, resolver: ContributorResolver): Promise<WorkItem | null> {
-  const info = v.volumeInfo;
-  if (!info?.title || !v.id) return null;
-  const ids: Identifier[] = [makeGbVolumeIdentifier(v.id)];
-  for (const ii of info.industryIdentifiers ?? []) {
-    if (!ii.identifier) continue;
-    const ident = isbnIdentifier(ii.identifier);
-    if (ident) ids.push(ident);
-  }
-  const subjects = (info.categories ?? [])
-    .flatMap((c) => c.split('/').map((s) => s.trim()).filter(Boolean));
-  const contributors = await resolver.resolve(info.authors ?? []);
-  return {
-    uri: gbWorkUri(v.id),
-    title: info.title,
-    subtitle: info.subtitle,
-    originalLanguage: info.language,
-    firstPublishedYear: yearFromGbPublishedDate(info.publishedDate),
-    subjects,
-    description: descriptionFromGb(info, v.searchInfo?.textSnippet),
-    contributors,
-    identifiers: uniqueIdentifiers(ids),
-    createdAt,
-  };
-}
 
 function buildGbUrl(q: string, limit: number, startIndex: number, key: string, langRestrict?: string): string {
   const u = new URL(BASE);
@@ -280,46 +255,6 @@ export async function searchEditions(
   return { items, total: data.totalItems ?? 0, cursor, hasMore: cursor !== undefined };
 }
 
-export async function searchWorks(
-  query: SearchQuery,
-  log: Logger,
-  externalSignal?: AbortSignal,
-): Promise<SearchResult<WorkItem>> {
-  const key = process.env.GOOGLE_BOOKS_API_KEY;
-  if (!key) {
-    if (!warnedMissingKey) {
-      warnedMissingKey = true;
-      log.warn({ stage: 'google-books-source' }, 'GOOGLE_BOOKS_API_KEY is not set; Google Books search disabled');
-    }
-    return { items: [], total: 0, degraded: { upstream: 'googlebooks', reason: 'missing_api_key' } };
-  }
-  if (!query.q) {
-    return { items: [], total: 0 };
-  }
-  const limit = Math.min(query.limit, 40);
-  const startIndex = query.cursor ? decodeGbCursor(query.cursor) : Math.min(query.offset ?? 0, 1000);
-  const url = buildGbUrl(query.q, limit, startIndex, key);
-  const data = await gbFetch<GbSearchResponse>(url, log, externalSignal);
-  if (!data) {
-    return { items: [], total: 0, degraded: { upstream: 'googlebooks', reason: 'fetch_failed' } };
-  }
-  const createdAt = new Date().toISOString();
-  const resolver = await prefetchContributors(
-    (data.items ?? []).flatMap((v) => v.volumeInfo?.authors ?? []),
-    'googlebooks',
-    log,
-  );
-  const items = (
-    await Promise.all((data.items ?? []).map((v) => mapGbToWork(v, createdAt, resolver)))
-  ).filter((item): item is WorkItem => item !== null);
-  const fetchedCount = data.items?.length ?? 0;
-  const nextStart = startIndex + fetchedCount;
-  const cursor = data.totalItems !== undefined && nextStart < data.totalItems && fetchedCount > 0
-    ? encodeGbCursor(nextStart)
-    : undefined;
-  log.info({ stage: 'google-books-source', q: query.q, items: items.length, total: data.totalItems, cursor: !!cursor }, 'googlebooks ok');
-  return { items, total: data.totalItems ?? 0, cursor, hasMore: cursor !== undefined };
-}
 
 export async function enrichEditions(
   items: readonly EditionItem[],
@@ -359,7 +294,7 @@ export async function enrichEditions(
       // pages and cover. When all three are already present there is nothing to
       // merge, and the lookup would spend quota to prove it — the search paths
       // call this on every result of every distinct query.
-      if (item.description && item.coverImageUrl && item.pages !== undefined) {
+      if (item.description && item.coverUrl && item.pages !== undefined) {
         out[i] = item;
         continue;
       }
@@ -378,9 +313,9 @@ export async function enrichEditions(
           if (!enriched.description && info.description) enriched = { ...enriched, description: stripHtml(info.description) };
           if (enriched.pages === undefined && info.pageCount) enriched = { ...enriched, pages: info.pageCount };
           const cover = coverFromLinks(info.imageLinks);
-          if (!enriched.coverImageUrl && cover) enriched = { ...enriched, coverImageUrl: cover };
-          if (enriched.coverImageUrl) {
-            enriched.coverImageUrl = datacenterCoverUrl(enriched.coverImageUrl.replace("&edge=curl", ""));
+          if (!enriched.coverUrl && cover) enriched = { ...enriched, coverUrl: cover };
+          if (enriched.coverUrl) {
+            enriched.coverUrl = datacenterCoverUrl(enriched.coverUrl.replace("&edge=curl", ""));
           }
           matched++;
         } else {

@@ -96,8 +96,8 @@ function pendingFor(result: RequeueResult, olderThanDays: number) {
          AND e.checked_at < now() - make_interval(days => ${olderThanDays})
     )
     AND NOT EXISTS (
-      SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) AS ident
-       WHERE ident->>'type' = 'isbn'
+      SELECT 1 FROM edition_identifiers i
+       WHERE i.edition_uri = ${editions.uri} AND i.issuer = 'isbn13'
     )
   `;
 }

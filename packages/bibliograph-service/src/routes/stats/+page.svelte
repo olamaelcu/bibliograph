@@ -21,9 +21,8 @@
     href?: string;
   };
   const tiles: Tile[] = [
-    { key: "works", label: "Works", href: "/queries" },
-    { key: "editions", label: "Editions", href: "/queries" },
-    { key: "contributors", label: "Contributors", href: "/queries" },
+    { key: "editions", label: "Editions", href: "/search" },
+    { key: "contributors", label: "Contributors" },
     { key: "publishers", label: "Publishers" },
   ];
 

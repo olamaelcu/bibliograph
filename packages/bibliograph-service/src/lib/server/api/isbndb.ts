@@ -5,10 +5,10 @@ import { isbndbBreaker } from './breakers';
 import { HttpError, requestJson } from '../http/client';
 import { isbndbCacheEntry, isbndbCacheGet, isbndbCachePut } from '../isbndb/cache';
 import { isbndbCacheTotal } from '../metrics';
-import type { EditionItem, WorkItem, Identifier, SearchQuery, SearchResult } from '../search/types';
-import { isbndbEditionUri, isbndbWorkUri } from '../isbndb/keys';
+import type { EditionItem, Identifier, SearchQuery, SearchResult } from '../search/types';
+
 import { prefetchContributors, type ContributorResolver } from './contributor-name-resolver';
-import { normalizeBookFormat } from '../format-view';
+import { normalizeBookFormat } from '../media-book-view';
 import { isbnIdentifier, isbnValueFromIdentifier, providerIdentifier, uniqueIdentifiers } from '../identifiers';
 
 const BASE = 'https://api2.isbndb.com';
@@ -95,13 +95,13 @@ async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, resolver: Co
   if (!primary) return null;
   const contributors = await resolver.resolve(b.authors ?? []);
   return {
-    uri: isbndbEditionUri(primary),
     title: b.title,
     subtitle: undefined,
     publishedYear: yearFromDatePublished(b.date_published),
     language: b.language ?? undefined,
     description: descriptionFromIsbndb(b),
-    coverImageUrl: coverFromImage(b.image),
+    coverUrl: coverFromImage(b.image),
+    publisher: b.publisher ? { name: b.publisher } : null,
     pages: b.pages ?? undefined,
     format: normalizeBookFormat(b.binding),
     identifiers: makeIdentifiers(b, primary),
@@ -110,25 +110,6 @@ async function mapIsbndbToEdition(b: IsbndbBook, createdAt: string, resolver: Co
   };
 }
 
-async function mapIsbndbToWork(b: IsbndbBook, createdAt: string, resolver: ContributorResolver): Promise<WorkItem | null> {
-  if (!b.title) return null;
-  const primary = primaryIsbn(b);
-  if (!primary) return null;
-  const subjects = (b.subjects ?? []).filter((s): s is string => typeof s === 'string');
-  const contributors = await resolver.resolve(b.authors ?? []);
-  return {
-    uri: isbndbWorkUri(primary),
-    title: b.title,
-    subtitle: undefined,
-    originalLanguage: b.language ?? undefined,
-    firstPublishedYear: yearFromDatePublished(b.date_published),
-    subjects,
-    description: descriptionFromIsbndb(b),
-    contributors,
-    identifiers: makeIdentifiers(b, primary),
-    createdAt,
-  };
-}
 
 /**
  * Accept loose ISBN inputs from upstream callers — `q` may arrive as
@@ -194,7 +175,7 @@ async function isbndbFetch<T>(
   }
 }
 
-function missingKeyDegraded(): SearchResult<EditionItem> & SearchResult<WorkItem> {
+function missingKeyDegraded(): SearchResult<EditionItem> {
   return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'missing_api_key' } };
 }
 
@@ -229,36 +210,6 @@ export async function searchEditions(
   return { items: mapped ? [mapped] : [], total: mapped ? 1 : 0 };
 }
 
-export async function searchWorks(
-  query: SearchQuery,
-  log: Logger,
-  externalSignal?: AbortSignal,
-): Promise<SearchResult<WorkItem>> {
-  if (!process.env.ISBNDB_API_KEY) {
-    if (!warnedMissingKey) {
-      warnedMissingKey = true;
-      log.warn({ stage: 'isbndb-source' }, 'ISBNDB_API_KEY is not set; ISBNDb lookup disabled');
-    }
-    return missingKeyDegraded();
-  }
-  if (!query.q) return { items: [], total: 0 };
-  const isbn = isbnFromQuery(query.q);
-  if (!isbn) {
-    return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'non_isbn_query' } };
-  }
-  const data = await isbndbFetch<IsbndbSingleResponse>(
-    `${BASE}/book/${encodeURIComponent(isbn)}`,
-    log,
-    externalSignal,
-  );
-  if (!data || !data.book) {
-    return { items: [], total: 0, degraded: { upstream: 'isbndb', reason: 'fetch_failed' } };
-  }
-  const createdAt = new Date().toISOString();
-  const resolver = await prefetchContributors(data.book.authors ?? [], 'isbndb', log);
-  const mapped = await mapIsbndbToWork(data.book, createdAt, resolver);
-  return { items: mapped ? [mapped] : [], total: mapped ? 1 : 0 };
-}
 
 async function bulkLookupByIsbn(isbns: string[], log: Logger, signal?: AbortSignal): Promise<Map<string, IsbndbBook>> {
   const out = new Map<string, IsbndbBook>();
@@ -308,7 +259,7 @@ async function enrichEditionsInternal(
     // search result of every distinct query.
     if (
       item.description &&
-      item.coverImageUrl &&
+      item.coverUrl &&
       item.publishedYear &&
       item.language &&
       item.pages !== undefined &&
@@ -333,9 +284,9 @@ async function enrichEditionsInternal(
     if (!enriched.description && descriptionFromIsbndb(book)) {
       enriched = { ...enriched, description: descriptionFromIsbndb(book) };
     }
-    if (!enriched.coverImageUrl) {
+    if (!enriched.coverUrl) {
       const cover = coverFromImage(book.image);
-      if (cover) enriched = { ...enriched, coverImageUrl: cover };
+      if (cover) enriched = { ...enriched, coverUrl: cover };
     }
     if (!enriched.publishedYear) {
       const year = yearFromDatePublished(book.date_published);
@@ -362,58 +313,6 @@ export async function enrichEditions(
   return enrichEditionsInternal(items, log, externalSignal);
 }
 
-export async function enrichWorks(
-  items: readonly WorkItem[],
-  log: Logger,
-  externalSignal?: AbortSignal,
-): Promise<WorkItem[]> {
-  if (!process.env.ISBNDB_API_KEY) {
-    if (!warnedMissingKey) {
-      warnedMissingKey = true;
-      log.warn({ stage: 'isbndb-enricher' }, 'ISBNDB_API_KEY is not set; ISBNDb enrichment disabled');
-    }
-    return [...items];
-  }
-  const isbns: string[] = [];
-  const seen = new Set<string>();
-  for (const item of items) {
-    for (const id of item.identifiers) {
-      const clean = isbnValueFromIdentifier(id);
-      if (clean && !seen.has(clean)) {
-        isbns.push(clean);
-        seen.add(clean);
-      }
-    }
-  }
-  if (isbns.length === 0) return [...items];
-  const lookup = await bulkLookupByIsbn(isbns, log, externalSignal);
-  return items.map((item) => {
-    let enriched = item;
-    let matched: IsbndbBook | undefined;
-    for (const id of item.identifiers) {
-      const clean = isbnValueFromIdentifier(id);
-      if (clean && lookup.has(clean)) {
-        matched = lookup.get(clean);
-        break;
-      }
-    }
-    if (!matched) return enriched;
-    if (enriched.subjects.length === 0 && matched.subjects) {
-      enriched = { ...enriched, subjects: matched.subjects.filter((s): s is string => typeof s === 'string') };
-    }
-    if (!enriched.firstPublishedYear) {
-      const year = yearFromDatePublished(matched.date_published);
-      if (year) enriched = { ...enriched, firstPublishedYear: year };
-    }
-    if (!enriched.originalLanguage && matched.language) {
-      enriched = { ...enriched, originalLanguage: matched.language };
-    }
-    if (!enriched.description && descriptionFromIsbndb(matched)) {
-      enriched = { ...enriched, description: descriptionFromIsbndb(matched) };
-    }
-    return enriched;
-  });
-}
 
 export async function getBookByIsbn(isbn: string, log: Logger, signal?: AbortSignal): Promise<IsbndbBook | null> {
   if (!process.env.ISBNDB_API_KEY) return null;

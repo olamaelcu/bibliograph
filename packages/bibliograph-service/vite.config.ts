@@ -17,7 +17,7 @@ export default defineConfig({
     }),
   ],
   server: {
-    port: 5176,
+    port: Number(process.env.WEB_PORT ?? 5176),
     strictPort: true,
   },
 });

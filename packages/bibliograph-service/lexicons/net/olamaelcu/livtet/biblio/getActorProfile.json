@@ -7,7 +7,9 @@
       "type": "query",
       "parameters": {
         "type": "params",
-        "required": ["did"],
+        "required": [
+          "did"
+        ],
         "properties": {
           "did": {
             "type": "string",
@@ -20,12 +22,14 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["profile"],
+          "required": [
+            "profile"
+          ],
           "properties": {
-          "profile": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.actorProfile#main"
-          },
+            "profile": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.actor.profile#main"
+            },
             "handle": {
               "type": "string",
               "description": "Resolved handle for the DID, if available."
@@ -34,7 +38,10 @@
         }
       },
       "errors": [
-        { "name": "UpstreamUnavailable", "description": "Could not reach the user's PDS." }
+        {
+          "name": "UpstreamUnavailable",
+          "description": "Could not reach the user's PDS."
+        }
       ]
     }
   }

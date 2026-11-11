@@ -8,7 +8,9 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: ['src/routes/.well-known/*/*.ts'],
+        },
         tsconfigRootDir: import.meta.dirname,
       },
       globals: { ...globals.node },
@@ -44,6 +46,7 @@ export default tseslint.config(
     ignores: [
       '.svelte-kit/**',
       'build/**',
+      '.cache/**',
       'node_modules/**',
       'lexicons/**',
       'data/**',

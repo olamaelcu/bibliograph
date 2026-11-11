@@ -65,10 +65,10 @@ test('unknown values are rejected', () => {
   assert.equal(isKnownLabel('!hide'), false, 'global values are not ours to define');
 });
 
-test('seniority thresholds default and clamp', () => {
-  assert.deepEqual(seniorityPolicy(undefined, undefined), { minDays: 365, minVotes: 10 });
-  assert.deepEqual(seniorityPolicy('180', '3'), { minDays: 180, minVotes: 3 });
-  assert.deepEqual(seniorityPolicy('nonsense', '-4'), { minDays: 365, minVotes: 10 });
+test('seniority threshold defaults and clamps', () => {
+  assert.deepEqual(seniorityPolicy(undefined), { minDays: 365 });
+  assert.deepEqual(seniorityPolicy('180'), { minDays: 180 });
+  assert.deepEqual(seniorityPolicy('nonsense'), { minDays: 365 });
   // Zero is a legitimate "everyone qualifies" setting, not a typo.
-  assert.deepEqual(seniorityPolicy('0', '0'), { minDays: 0, minVotes: 0 });
+  assert.deepEqual(seniorityPolicy('0'), { minDays: 0 });
 });

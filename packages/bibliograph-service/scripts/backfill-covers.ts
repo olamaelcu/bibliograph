@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 //
-// Backfill missing cover_image_url for editions.
-// Enqueues `backfill-edition-cover` jobs for every edition where cover_image_url
+// Backfill missing cover_url for editions.
+// Enqueues `backfill-edition-cover` jobs for every edition where cover_url
 // IS NULL and no job for it is already waiting. Safe to re-run: jobKey dedup
 // keeps one queued job per edition and the handler checks already_has_cover.
 //
@@ -33,7 +33,7 @@ const RETRY_AFTER_DAYS = 30;
  * `RETRY_AFTER_DAYS`, instead of being re-enqueued every four hours forever.
  */
 const PENDING = and(
-  isNull(editions.coverImageUrl),
+  isNull(editions.coverUrl),
   sql`(${editions.coverCheckedAt} IS NULL OR ${editions.coverCheckedAt} < now() - interval '${sql.raw(String(RETRY_AFTER_DAYS))} days')`,
   sql`NOT EXISTS (
     SELECT 1 FROM graphile_worker.jobs j

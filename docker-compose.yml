@@ -1,3 +1,13 @@
+# Local development stack: Postgres, a mock PLC directory, and a disposable PDS.
+#
+# Nothing here touches the public network: the PDS creates `.test` accounts and
+# registers them with the mock PLC, and the app resolves did:plc documents from
+# that PLC via PLC_DIRECTORY_URL. `pnpm dev:seed` writes activity records into a
+# local account; no real account is minted.
+#
+# The PDS image is the same Bluesky dev build livtet's E2E suite uses. The
+# production target is rsky-pds; protocol behavior that matters for this AppView
+# (repo reads, listRecords, getRecord) is shared.
 services:
   postgres:
     image: postgres:18.4
@@ -6,6 +16,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-happyview.sql:ro
     environment:
       POSTGRES_USER: bibliograph
       POSTGRES_PASSWORD: bibliograph
@@ -16,23 +27,97 @@ services:
       timeout: 3s
       retries: 5
 
-  tap:
-    image: ghcr.io/bluesky-social/indigo/tap:latest
+  plc:
+    image: node:26-alpine
+    restart: unless-stopped
+    working_dir: /app/packages/bibliograph-service
+    command: ["node", "scripts/mock-plc.ts"]
+    volumes:
+      - .:/app
+      - plcdata:/data
+    environment:
+      HOST: 0.0.0.0
+      PORT: "2582"
+    ports:
+      - "2582:2582"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:2582/_health >/dev/null || exit 1",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  pds:
+    image: ghcr.io/happyproto/pds-test/pds-spaces-alpha:latest
+    platform: linux/amd64
+    restart: unless-stopped
+    user: root
+    depends_on:
+      plc:
+        condition: service_healthy
+    ports:
+      - "2583:2583"
+    environment:
+      PDS_HOSTNAME: localhost
+      PDS_PORT: "2583"
+      PDS_DEV_MODE: "true"
+      PDS_DATA_DIRECTORY: /tmp/pds
+      PDS_BLOBSTORE_DISK_LOCATION: /tmp/pds/blocks
+      PDS_JWT_SECRET: dev-only-jwt-secret
+      PDS_ADMIN_PASSWORD: dev-only-admin-password
+      PDS_DID_PLC_URL: http://plc:2582
+      PDS_SERVICE_HANDLE_DOMAINS: .test
+      PDS_INVITE_REQUIRED: "false"
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: ee69c68a213e447d2c0881ef7a8a3e821c9500344bbaafe8011f057597eb8d58
+    volumes:
+      - pdsdata:/tmp/pds
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:2583/xrpc/_health >/dev/null || exit 1",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 5s
+
+  happyview:
+    image: ghcr.io/gamesgamesgamesgamesgames/happyview:2.17.4
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      plc:
+        condition: service_healthy
     ports:
-      - "2480:2480"
-      - "2481:2481"
+      - "3000:3000"
     environment:
-      TAP_DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/bibliograph?sslmode=disable
-      TAP_BIND: 0.0.0.0:2480
-      TAP_COLLECTION_FILTERS: net.olamaelcu.livtet.biblio.*
-      TAP_RELAY_URL: https://relay1.us-east.bsky.network
-      TAP_METRICS_LISTEN: 0.0.0.0:2481
-    env_file:
-      - .env
+      DATABASE_URL: postgres://happyview_app:happyview@postgres:5432/bibliograph
+      PUBLIC_URL: http://127.0.0.1:3000
+      # BASE_PATH: /~/hv
+      STATIC_DIR: /srv/static
+      HOST: 0.0.0.0
+      PORT: "3000"
+      SESSION_SECRET: local-dev-session-secret-0123456789-0123456789-0123456789
+      # Compose DNS, not loopback: inside this container 127.0.0.1 is itself.
+      PLC_URL: http://plc:2582
+      JETSTREAM_URL: ws://127.0.0.1:1
+      RELAY_URL: http://127.0.0.1:1
+      ALLOW_PRIVATE_DESTINATIONS: "true"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:3000/health >/dev/null || exit 1",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
 
   prometheus:
     image: prom/prometheus:latest
@@ -46,13 +131,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=7d'
-    depends_on:
-      tap:
-        condition: service_started
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
 
 volumes:
   pgdata:
+  plcdata:
+  pdsdata:
   promdata:

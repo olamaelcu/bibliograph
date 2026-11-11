@@ -32,8 +32,8 @@ const PENDING = sql`
     SELECT 1 FROM edition_isbn_enrichment e WHERE e.uri = ${editions.uri}
   )
   AND NOT EXISTS (
-    SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) AS ident
-     WHERE ident->>'type' = 'isbn'
+    SELECT 1 FROM edition_identifiers i
+     WHERE i.edition_uri = ${editions.uri} AND i.issuer = 'isbn13'
   )
 `;
 

@@ -1,53 +1,30 @@
-// Graphile Worker task lists, run inside the worker process.
+// Graphile Worker task list, run inside the worker process.
 //
-// This was `src/worker-search-jobs.ts` and its own systemd unit. Folded into the
-// TAP consumer's process because on a single-core, 1 GB host a second Node
-// runtime (plus the tsx loader) is real memory the web app cannot use: the units
-// it replaces measured 15 MB resident and ~30 MB with the loader, against a box
-// that had 18 MB available at its worst.
-//
-// The two lists keep separate pools and concurrency settings: ingest handlers run
-// few and slow because they wait on upstream APIs, while tap mirrors run many and
-// short because they are local upserts.
+// The TAP consumer is gone; the worker now only drains catalog enrichment and
+// the PDS outbox.
 
 import type { Logger } from 'pino';
-import { searchTaskList, tapTaskList } from './handlers';
+import { allTaskList } from './handlers';
 
-const SEARCH_CONCURRENCY = Number(process.env.GRAPHILE_WORKER_CONCURRENCY_SEARCH ?? 10);
-const TAP_CONCURRENCY = Number(process.env.GRAPHILE_WORKER_CONCURRENCY_TAP ?? 25);
+const CONCURRENCY = Number(process.env.GRAPHILE_WORKER_CONCURRENCY ?? 10);
 
 export async function runJobTasks(log: Logger): Promise<void> {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error('DATABASE_URL required');
+	const connectionString = process.env.DATABASE_URL;
+	if (!connectionString) throw new Error('DATABASE_URL required');
 
-  const [{ runTaskList }, { Pool }] = await Promise.all([
-    import('graphile-worker'),
-    import('pg'),
-  ]);
+	const [{ runTaskList }, { Pool }] = await Promise.all([import('graphile-worker'), import('pg')]);
 
-  // Pool maxima are part of the shared connection budget, not a tuning knob to
-  // leave at pg's default: see db/index.ts for the 53300 this prevents.
-  const searchPool = new Pool({
-    connectionString,
-    max: Number(process.env.GRAPHILE_WORKER_POOL_SEARCH ?? 4),
-  });
-  const tapPool = new Pool({
-    connectionString,
-    max: Number(process.env.GRAPHILE_WORKER_POOL_TAP ?? 6),
-  });
-  // Idle clients die when Postgres restarts or the network resets; an
-  // unhandled 'error' event is fatal to the process.
-  searchPool.on('error', (err) => log.warn({ err }, 'search pool idle client error'));
-  tapPool.on('error', (err) => log.warn({ err }, 'tap pool idle client error'));
+	// Pool maxima are part of the shared connection budget: see db/index.ts.
+	const pool = new Pool({
+		connectionString,
+		max: Number(process.env.GRAPHILE_WORKER_POOL ?? 6),
+	});
+	pool.on('error', (err) => log.warn({ err }, 'worker pool idle client error'));
 
-  log.info({ searchConcurrency: SEARCH_CONCURRENCY, tapConcurrency: TAP_CONCURRENCY }, 'graphile task lists started');
-  try {
-    await Promise.all([
-      runTaskList({ connectionString, concurrency: SEARCH_CONCURRENCY }, searchTaskList, searchPool),
-      runTaskList({ connectionString, concurrency: TAP_CONCURRENCY }, tapTaskList, tapPool),
-    ]);
-  } finally {
-    await searchPool.end().catch(() => undefined);
-    await tapPool.end().catch(() => undefined);
-  }
+	log.info({ concurrency: CONCURRENCY }, 'graphile task list started');
+	try {
+		await runTaskList({ connectionString, concurrency: CONCURRENCY }, allTaskList, pool);
+	} finally {
+		await pool.end().catch(() => undefined);
+	}
 }

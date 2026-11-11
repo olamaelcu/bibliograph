@@ -10,7 +10,6 @@
   // imports its own element where it is used, so `/stats` no longer downloads the
   // tab, callout and textarea bundles it never instantiates.
   import { page } from "$app/state";
-  import { setViewer } from "$lib/stores/auth";
   import NavProgress from "$lib/components/NavProgress.svelte";
   import type { Snippet } from "svelte";
 
@@ -25,16 +24,12 @@
 
   // A nav link is active when the current pathname equals its href OR
   // (for non-root links) starts with the href + '/'. Special aliases:
-  // /query/... also highlights /queries; the four detail-page kinds
-  // (/editions/, /works/, /contributors/, /publishers/) all highlight Search.
+  // /query/... also highlights /queries; /editions/... highlights Search.
   function isActive(href: string, pathname: string): boolean {
     if (href === "/") return pathname === "/";
     if (pathname === href || pathname.startsWith(href + "/")) return true;
     if (href === "/queries" && pathname.startsWith("/query/")) return true;
-    if (href === "/search" && (
-      pathname.startsWith("/editions/") || pathname.startsWith("/works/") ||
-      pathname.startsWith("/contributors/") || pathname.startsWith("/publishers/")
-    )) return true;
+    if (href === "/search" && pathname.startsWith("/editions/")) return true;
     return false;
   }
 
@@ -42,18 +37,9 @@
     data,
     children,
   }: {
-    data: {
-      viewer: { did: string; handle: string | null } | null;
-      viewerIsAdmin: boolean;
-    };
+    data: { isAdmin: boolean };
     children: Snippet;
   } = $props();
-
-  // Mirror the server's session into the client store. `$effect` runs in the
-  // browser only, so SSR never writes module-level state (see stores/auth.ts).
-  $effect(() => {
-    setViewer(data.viewer);
-  });
 </script>
 
 <svelte:head>
@@ -111,18 +97,10 @@
       {/each}
     </nav>
     <div class="auth">
-      {#if data.viewer}
-        {#if data.viewerIsAdmin}
-          <a class="admin" href="/admin">Admin</a>
-        {/if}
-        <span class="who" title={data.viewer.did}>
-          {data.viewer.handle ?? data.viewer.did}
-        </span>
-        <form method="POST" action="/logout">
-          <button type="submit">Sign out</button>
-        </form>
+      {#if data.isAdmin}
+        <a class="admin" href="/admin">Admin</a>
       {:else}
-        <a class="signin" href="/login?next={encodeURIComponent(page.url.pathname + page.url.search)}">Sign in</a>
+        <span class="who">anonymous reads</span>
       {/if}
     </div>
   </header>
@@ -254,12 +232,6 @@
     text-overflow: ellipsis;
   }
 
-  .auth form {
-    margin: 0;
-  }
-
-  .auth button,
-  .auth .signin,
   .auth .admin {
     padding: 0.25rem 0.7rem;
     border: 1px solid var(--wa-form-control-border-color);
@@ -272,8 +244,6 @@
     cursor: pointer;
   }
 
-  .auth button:hover,
-  .auth .signin:hover,
   .auth .admin:hover {
     border-color: var(--wa-color-brand-50);
     color: var(--wa-color-brand-50);

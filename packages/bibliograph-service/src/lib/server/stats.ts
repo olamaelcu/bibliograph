@@ -1,12 +1,11 @@
 import { count } from 'drizzle-orm';
 import type { PgTable } from 'drizzle-orm/pg-core';
 import { db as defaultDb } from './db';
-import { works, editions, contributors, publishers } from './db/schema';
+import { editions, contributors, publishers } from './db/schema';
 
 export type DbExecutor = typeof defaultDb;
 
 export type Counts = {
-  works: number;
   editions: number;
   contributors: number;
   publishers: number;
@@ -19,14 +18,12 @@ async function countTable(db: DbExecutor, table: PgTable): Promise<number> {
 }
 
 export async function fetchCounts(db: DbExecutor = defaultDb): Promise<Counts> {
-  const [worksCount, editionsCount, contributorsCount, publishersCount] = await Promise.all([
-    countTable(db, works),
+  const [editionsCount, contributorsCount, publishersCount] = await Promise.all([
     countTable(db, editions),
     countTable(db, contributors),
     countTable(db, publishers),
   ]);
   return {
-    works: worksCount,
     editions: editionsCount,
     contributors: contributorsCount,
     publishers: publishersCount,

@@ -8,9 +8,12 @@
     "worker.ts",
     "server.ts",
     "eslint.config.js",
-    "lex.config.js"
+    "lex.config.js",
+    "happyview"
   ],
-  "exclude": ["src/service-worker"],
+  "exclude": [
+    "src/service-worker"
+  ],
   "compilerOptions": {
     "allowJs": true,
     "checkJs": true,

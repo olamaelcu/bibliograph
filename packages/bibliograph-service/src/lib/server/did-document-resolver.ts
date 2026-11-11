@@ -38,9 +38,18 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
+/**
+ * PLC directory origin. Defaults to the public registry; a local stack points
+ * this at the mock PLC so its DIDs resolve without touching the network.
+ */
+export function plcDirectoryUrl(): string {
+  const configured = process.env.PLC_DIRECTORY_URL?.trim();
+  return configured ? configured.replace(/\/+$/, '') : 'https://plc.directory';
+}
+
 const networkResolver: DidDocumentResolver = new CompositeDidDocumentResolver({
   methods: {
-    plc: new PlcDidDocumentResolver(),
+    plc: new PlcDidDocumentResolver({ apiUrl: plcDirectoryUrl() }),
     web: new WebDidDocumentResolver(),
   },
 });

@@ -1,50 +1,35 @@
 /**
- * Canonical `community.lexicon.book.defs#identifier` helpers.
+ * Canonical `community.lexicon.media.book.defs#identifier` helpers.
  *
- * The lexicon compares identifiers by exact `type`/`value` equality and never
- * parses or normalises them (`defs#identifier.description`). That makes the
- * stored form load-bearing: `community.lexicon.book.resolveEditions` matches a
- * request `{type, value}` against an edition row, which is only possible if the
- * row already holds the canonical pair. Everything that writes an identifier
- * goes through this module.
+ * The lexicon compares identifiers by exact `(issuer, value)` equality and never
+ * parses or normalises them. That makes the stored form load-bearing: the
+ * catalog matches an identifier bag against `edition_identifiers`, which only
+ * works if both sides use the same canonical pair. Everything that writes an
+ * identifier goes through this module.
  *
- * `type` is either a well-known global scheme token (`isbn`, `issn`, …) or the
- * lowercase ASCII domain of the provider that minted the identifier.
+ * `issuer` is either a global scheme token (`isbn13`) or the lowercase ASCII
+ * domain of the provider that minted the identifier (`googlebooks.com`).
  */
 
- import type * as v from '@atcute/lexicons/validations';
-
- import type * as CommunityLexiconBookDefs from './lexicons/types/community/lexicon/book/defs.js';
-
- /**
- * The wire identifier, taken straight from the generated lexicon schema so the
- * storage shape cannot drift from `community.lexicon.book.defs#identifier`.
- */
- export type Identifier = v.InferInput<typeof CommunityLexiconBookDefs.identifierSchema>;
-
-/** Identifier namespaces that are global scheme tokens rather than provider domains. */
-export const GLOBAL_IDENTIFIER_TOKENS: Record<string, true> = {
-	isbn: true,
-	issn: true,
-	doi: true,
-	asin: true,
-	oclc: true,
-	lccn: true,
-};
+export interface Identifier {
+	issuer: string;
+	value: string;
+	/** Display-only canonical URL; never part of identifier comparison. */
+	url?: string;
+}
 
 /**
- * Provider resource token (the legacy `resource` values) → the domain used as
- * `identifier.type`. The legacy token is kept in the same vocabulary so the
- * pre-migration rows can be converted without a lookup table per row.
+ * Provider resource token → the `issuer` stored for it. The plan pins the
+ * issuer map: Google Books volume → googlebooks.com, OpenLibrary →
+ * openlibrary.org, ISBNdb → isbndb.com, Goodreads → goodreads.com, ISBN →
+ * isbn13.
  */
 export const PROVIDER_IDENTIFIER_DOMAINS: Record<string, string> = {
 	goodreads: 'goodreads.com',
-	bookhive: 'bookhive.buzz',
-	googlebooks: 'books.google.com',
-	'googlebooks-canonical': 'books.google.com',
+	googlebooks: 'googlebooks.com',
+	'googlebooks-canonical': 'googlebooks.com',
 	openlibrary: 'openlibrary.org',
 	isbndb: 'isbndb.com',
-	hardcover: 'hardcover.app',
 	wikidata: 'wikidata.org',
 	viaf: 'viaf.org',
 	isni: 'isni.org',
@@ -56,21 +41,12 @@ export const PROVIDER_IDENTIFIER_DOMAINS: Record<string, string> = {
 	web: 'web',
 };
 
-/** Legacy rows still hold `{ uri, resource }`; the migration rewrites them. */
-export interface LegacyIdentifier {
-	uri: string;
-	resource: string;
-}
-
 /** Digits only, with a trailing `X` kept for ISBN-10. Hyphens and spaces go. */
 export function normaliseIsbn(raw: string): string {
 	return raw.replace(/[^0-9Xx]/g, '').toUpperCase();
 }
 
-/**
- * ISBN-10 → ISBN-13. The proposal requires hyphenless ISBN-13 on write
- * ("converting ISBN-10 on write"), so a stored ISBN-10 is not representable.
- */
+/** ISBN-10 → ISBN-13. The lexicon requires hyphenless ISBN-13 on write. */
 export function isbn13FromIsbn10(raw: string): string | null {
 	const digits = normaliseIsbn(raw);
 	if (digits.length !== 10) return null;
@@ -104,21 +80,15 @@ function lastPathSegment(uri: string): string {
 }
 
 /**
- * The `identifier.value` for a provider identifier, i.e. the provider's own
- * opaque key rather than the URL carrying it. Values are the provider's stable
- * identity — a Goodreads id, an ISBNdb isbn, a Google Books volume id —
- * so the same book resolves identically regardless of URL shape.
+ * The provider's own opaque key rather than the URL carrying it — a Goodreads
+ * id, an ISBNdb isbn, a Google Books volume id — so the same book resolves
+ * identically regardless of URL shape.
  */
 function providerValue(resource: string, uri: string): string {
 	switch (resource) {
 		case 'goodreads': {
 			const match = /\/book\/show\/([^/?#]+)/.exec(uri);
 			return match?.[1] ?? lastPathSegment(uri);
-		}
-		case 'bookhive': {
-			// `at://did/collection/rkey`
-			const segments = uri.split('/');
-			return segments.at(-1) ?? uri;
 		}
 		case 'googlebooks':
 		case 'googlebooks-canonical': {
@@ -129,85 +99,41 @@ function providerValue(resource: string, uri: string): string {
 			const match = /\/book\/([^/?#]+)/.exec(uri);
 			return match?.[1] ?? lastPathSegment(uri);
 		}
-		case 'wikidata':
-		case 'viaf':
-		case 'isni':
-		case 'imdb':
-			return lastPathSegment(uri);
 		default:
 			return lastPathSegment(uri);
 	}
 }
 
-/** The `identifier.type` for a legacy resource token. */
-export function identifierTypeForResource(resource: string): string {
+/** The `issuer` for a provider resource token. */
+export function issuerForResource(resource: string): string {
 	const token = resource.toLowerCase();
-	if (token === 'isbn' || token === 'isbn10' || token === 'isbn13') return 'isbn';
-	if (GLOBAL_IDENTIFIER_TOKENS[token] === true) return token;
 	return PROVIDER_IDENTIFIER_DOMAINS[token] ?? token;
 }
 
 /** An ISBN identifier, always carrying hyphenless ISBN-13. */
 export function isbnIdentifier(raw: string): Identifier | null {
 	const value = isbn13FromAny(raw);
-	return value ? { type: 'isbn', value } : null;
+	return value ? { issuer: 'isbn13', value } : null;
 }
 
-/**
- * Build an identifier for a provider lookup. `url` keeps the provider's
- * canonical page, which is display-only and never compared.
- */
+/** Build an identifier for a provider lookup. */
 export function providerIdentifier(resource: string, uri: string): Identifier {
-	const type = identifierTypeForResource(resource);
-	if (type === 'isbn') {
-		const isbn = isbnIdentifier(uri);
-		if (isbn) return isbn;
-	}
-	const value = providerValue(resource.toLowerCase(), uri);
-	const identifier: Identifier = { type, value };
-	const url = displayUrl(uri);
-	if (url !== undefined) identifier.url = url;
-	return identifier;
+	return { issuer: issuerForResource(resource), value: providerValue(resource, uri) };
 }
 
-/**
- * Whether a URI can serve as `identifier.url`.
- *
- * `url` is display/reference only, so it must be fetchable. The contributor
- * resolver mints synthetic `googlebooks://contributor/<slug>` keys that name the
- * namespace but are not a real address, and those are dropped.
- */
-export function displayUrl(uri: string | undefined): Identifier['url'] | undefined {
-	return uri !== undefined && /^(?:https?:\/\/|at:\/\/)/.test(uri) ? (uri as Identifier['url']) : undefined;
-}
-
-/** Convert a stored pre-migration `{ uri, resource }` identifier. */
-export function identifierFromLegacy(legacy: LegacyIdentifier): Identifier {
-	if (identifierTypeForResource(legacy.resource) === 'isbn') {
-		const isbn = isbnIdentifier(legacy.uri);
-		if (isbn) return isbn;
-	}
-	return providerIdentifier(legacy.resource, legacy.uri);
-}
-
-/** Whether an identifier belongs to the ISBN namespace. */
 export function isIsbnIdentifier(identifier: Identifier): boolean {
-	return identifier.type === 'isbn';
+	return identifier.issuer === 'isbn13' || identifier.issuer === 'isbn' || identifier.issuer === 'isbn10';
 }
 
-/** The hyphenless ISBN-13 an identifier carries, or null. */
 export function isbnValueFromIdentifier(identifier: Identifier): string | null {
-	if (!isIsbnIdentifier(identifier)) return null;
-	const value = isbn13FromAny(identifier.value);
-	return value === identifier.value ? value : null;
+	return isIsbnIdentifier(identifier) ? identifier.value : null;
 }
 
-/** Stable key for dedupe and comparison: `type` + `value`, never the URL. */
+/** Stable key for dedupe and exact comparison. */
 export function identifierKey(identifier: Identifier): string {
-	return `${identifier.type}\u0000${identifier.value}`;
+	return `${identifier.issuer}:${identifier.value}`;
 }
 
-/** Dedupe by exact `type`/`value`, preserving first-seen order. */
 export function uniqueIdentifiers(identifiers: readonly Identifier[]): Identifier[] {
 	const seen = new Set<string>();
 	const out: Identifier[] = [];
@@ -220,60 +146,18 @@ export function uniqueIdentifiers(identifiers: readonly Identifier[]): Identifie
 	return out;
 }
 
-/** Exact-match helper mirroring the lexicon's comparison rules. */
 export function sameIdentifier(a: Identifier, b: Identifier): boolean {
-	return a.type === b.type && a.value === b.value;
+	return a.issuer === b.issuer && a.value === b.value;
 }
 
-/**
- * Provider domain → the legacy resource token that names it. Used to interpret
- * free-form identifier strings (the still-query-shaped `searchWorks`,
- * `searchContributors` and `searchPublishers` take `id` URLs/URNs).
- */
-const RESOURCE_BY_DOMAIN: Record<string, string> = Object.fromEntries(
-	Object.entries(PROVIDER_IDENTIFIER_DOMAINS).map(([resource, domain]) => [domain, resource]),
-);
-
-/**
- * Interpret a free-form identifier string (`isbn:…`, `urn:isbn:…`, a provider
- * URL) as a canonical identifier, or null when it names no known namespace.
- */
+/** Parse the wire form `<issuer>:<value>`. A hint without both halves is dropped. */
 export function identifierFromString(raw: string): Identifier | null {
-	const trimmed = raw.trim();
-	if (!trimmed) return null;
+	const colon = raw.indexOf(':');
+	if (colon <= 0 || colon === raw.length - 1) return null;
+	return { issuer: raw.slice(0, colon), value: raw.slice(colon + 1) };
+}
 
-	const lower = trimmed.toLowerCase();
-	for (const prefix of ['urn:isbn:', 'isbn:']) {
-		if (lower.startsWith(prefix)) return isbnIdentifier(trimmed.slice(prefix.length));
-	}
-
-	if (lower.startsWith('http://') || lower.startsWith('https://')) {
-		let host: string;
-		try {
-			host = new URL(trimmed).hostname.toLowerCase();
-		} catch {
-			return null;
-		}
-		const withoutWww = host.replace(/^www\./, '');
-		const resource = RESOURCE_BY_DOMAIN[withoutWww] ?? RESOURCE_BY_DOMAIN[host];
-		if (!resource) return null;
-		return providerIdentifier(resource, trimmed);
-	}
-
-	if (lower.startsWith('at://')) {
-		// Bookhive catalog records and the AppView's own record uris.
-		const resource = trimmed.includes('/buzz.bookhive.') ? 'bookhive' : undefined;
-		if (resource) return providerIdentifier(resource, trimmed);
-		return null;
-	}
-
-	// A bare global token form such as `doi:10.1000/xyz`.
-	const match = /^([a-z]+):(.+)$/i.exec(trimmed);
-	if (match && GLOBAL_IDENTIFIER_TOKENS[match[1]!.toLowerCase()] === true) {
-		const type = match[1]!.toLowerCase();
-		if (type === 'isbn') return isbnIdentifier(match[2]!);
-		return { type, value: match[2]! };
-	}
-
-	return null;
+/** Render an identifier in the wire `<issuer>:<value>` form. */
+export function identifierToString(identifier: Identifier): string {
+	return `${identifier.issuer}:${identifier.value}`;
 }

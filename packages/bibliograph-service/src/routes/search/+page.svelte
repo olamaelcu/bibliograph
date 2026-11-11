@@ -1,130 +1,22 @@
 <script lang="ts">
   import "@awesome.me/webawesome/dist/components/button/button.js";
-  import "@awesome.me/webawesome/dist/components/button-group/button-group.js";
   import "@awesome.me/webawesome/dist/components/card/card.js";
   import "@awesome.me/webawesome/dist/components/input/input.js";
-  type Item =
-    | {
-        $type: "community.lexicon.book.edition";
-        uri?: string;
-        title: string;
-        subtitle?: string;
-        publishedYear?: number;
-        place?: string;
-        language?: string;
-        coverImageUrl?: string;
-      }
-    | {
-        $type: "community.lexicon.book.work";
-        uri?: string;
-        title: string;
-        subtitle?: string;
-        firstPublishedYear?: number;
-      }
-    | {
-        $type: "community.lexicon.book.contributor";
-        uri?: string;
-        name: string;
-        aliases?: string[];
-        bio?: string;
-        imageUrl?: string;
-      }
-    | {
-        $type: "community.lexicon.book.publisher";
-        uri?: string;
-        name: string;
-        foundingDate?: number;
-        closingDate?: number;
-      };
-
-  type Kind = "editions" | "works" | "contributors" | "publishers";
+  import type { BookView } from "$lib/server/media-book-view";
 
   let {
     data,
   }: {
-    data: {
-      kind: Kind;
-      q?: string;
-      items: Item[];
-      cursor?: string;
-      total?: number;
-    };
+    data: { q: string; items: BookView[]; total: number };
   } = $props();
 
-  const KIND_TABS: Array<{ value: Kind; label: string; endpoint: string }> = [
-    {
-      value: "editions",
-      label: "Editions",
-      endpoint: "community.lexicon.book.edition",
-    },
-    { value: "works", label: "Works", endpoint: "community.lexicon.book.work" },
-    {
-      value: "contributors",
-      label: "Contributors",
-      endpoint: "community.lexicon.book.contributor",
-    },
-    {
-      value: "publishers",
-      label: "Publishers",
-      endpoint: "community.lexicon.book.publisher",
-    },
-  ];
-
-  function rkeyFromUri(uri?: string): string {
-    if (!uri) return "";
+  function rkeyFromUri(uri: string): string {
     const at = uri.lastIndexOf("/");
     return at >= 0 ? uri.slice(at + 1) : uri;
   }
 
-  function tabHref(kind: Kind, q?: string): string {
-    const params = new URLSearchParams();
-    params.set("kind", kind);
-    if (q) params.set("q", q);
-    return `/search?${params.toString()}`;
-  }
-
-  function heading(item: Item): string {
-    if (item.$type === "community.lexicon.book.contributor") {
-      const alias = item.aliases?.[0];
-      return alias ? `${item.name} (${alias})` : item.name;
-    }
-    if (item.$type === "community.lexicon.book.publisher") {
-      return item.name;
-    }
-    return item.title;
-  }
-
-  /** The one image a result row can show: edition cover or contributor portrait. */
-  function thumbnail(item: Item): string | undefined {
-    if (item.$type === "community.lexicon.book.edition")
-      return item.coverImageUrl;
-    if (item.$type === "community.lexicon.book.contributor")
-      return item.imageUrl;
-    return undefined;
-  }
-
-  function subtitle(item: Item): string {
-    switch (item.$type) {
-      case "community.lexicon.book.edition": {
-        const bits: string[] = [];
-        if (item.publishedYear) bits.push(String(item.publishedYear));
-        if (item.place) bits.push(item.place);
-        if (item.language) bits.push(item.language);
-        return bits.join(" · ");
-      }
-      case "community.lexicon.book.work":
-        return item.firstPublishedYear
-          ? `first published ${item.firstPublishedYear}`
-          : "";
-      case "community.lexicon.book.publisher": {
-        const bits: string[] = [];
-        if (item.foundingDate) bits.push(`founded ${item.foundingDate}`);
-        if (item.closingDate) bits.push(`closed ${item.closingDate}`);
-        return bits.join(" · ");
-      }
-      case "community.lexicon.book.contributor":
-        return "";
-    }
+  function authors(item: BookView): string {
+    return item.edition.contributors.map((c) => c.name).join(", ");
   }
 </script>
 
@@ -132,86 +24,56 @@
   <header class="page-intro">
     <h1>Search</h1>
     <p class="muted">
-      Find bibliographic editions, works, contributors, and publishers served by
-      Bibliograph.
+      Find catalog editions served by Bibliograph. Matching is exact on identifiers
+      and substring on title; the same catalog backs the
+      <code>community.lexicon.media.book.searchEditions</code> procedure.
     </p>
   </header>
 
   <form method="GET" action="/search" class="search-form">
-    <input type="hidden" name="kind" value={data.kind} />
     <wa-input
       name="q"
-      value={data.q ?? ""}
-      placeholder="Search by title, author, or publisher…"
+      value={data.q}
+      placeholder="Search by title…"
       label="Search query"
     ></wa-input>
     <wa-button type="submit" variant="brand">Search</wa-button>
   </form>
 
-  <wa-button-group label="Result kind">
-    {#each KIND_TABS as tab}
-      <wa-button
-        href={tabHref(tab.value, data.q)}
-        variant={tab.value === data.kind ? "brand" : "default"}
-        aria-current={tab.value === data.kind ? "page" : undefined}
-      >
-        {tab.label}
-      </wa-button>
-    {/each}
-  </wa-button-group>
-
   {#if !data.q}
-    <section class="empty">
-      <p>
-        Enter a query above to search {KIND_TABS.find(
-          (t) => t.value === data.kind,
-        )?.label.toLowerCase()}.
-      </p>
-    </section>
+    <section class="empty"><p>Enter a query above.</p></section>
   {:else if data.items.length === 0}
     <section class="empty">
-      <p>
-        No {KIND_TABS.find((t) => t.value === data.kind)?.label.toLowerCase()} matched
-        <code>{data.q}</code>.
-      </p>
+      <p>No editions matched <code>{data.q}</code>.</p>
     </section>
   {:else}
     <section class="results">
-      {#if data.total !== undefined}
-        <p class="muted meta">
-          {data.total} match{data.total === 1 ? "" : "es"}
-        </p>
-      {/if}
-      {#each data.items as item (item.uri ?? heading(item))}
+      <p class="muted meta">{data.total} match{data.total === 1 ? "" : "es"}</p>
+      {#each data.items as item (item.uri)}
         <wa-card>
           <div class="result">
-            {#if thumbnail(item)}
-              <img
-                class="thumb"
-                class:portrait={item.$type ===
-                  "community.lexicon.book.contributor"}
-                src={thumbnail(item)}
-                alt=""
-                loading="lazy"
-              />
+            {#if item.edition.coverUrl}
+              <img class="thumb" src={item.edition.coverUrl} alt="" loading="lazy" />
             {/if}
             <div class="result-body">
               <div class="card-header">
-                <a href={`/${data.kind}/${rkeyFromUri(item.uri)}`}
-                  >{heading(item)}</a
-                >
-                {#if (item.$type === "community.lexicon.book.edition" || item.$type === "community.lexicon.book.work") && item.subtitle}
-                  <span class="muted">— {item.subtitle}</span>
+                <a href={`/editions/${rkeyFromUri(item.uri)}`}>{item.edition.title}</a>
+                {#if item.edition.subtitle}
+                  <span class="muted">— {item.edition.subtitle}</span>
                 {/if}
               </div>
-              {#if subtitle(item)}
-                <p class="muted">{subtitle(item)}</p>
+              {#if authors(item)}
+                <p class="muted">{authors(item)}</p>
               {/if}
-              {#if item.$type === "community.lexicon.book.contributor" && item.bio}
-                <p class="muted">
-                  {item.bio.slice(0, 200)}{#if item.bio.length > 200}…{/if}
-                </p>
-              {/if}
+              <p class="muted">
+                {item.edition.publishedDate ?? ""}
+                {#if item.edition.publisher?.name}
+                  · {item.edition.publisher.name}
+                {/if}
+                {#if item.edition.identifiers.length > 0}
+                  · {item.edition.identifiers.map((i) => `${i.issuer}:${i.value}`).join(", ")}
+                {/if}
+              </p>
             </div>
           </div>
         </wa-card>
@@ -237,9 +99,6 @@
     margin: 0;
     font-size: var(--wa-font-size-s);
     line-height: 1.55;
-  }
-  .meta {
-    margin-bottom: var(--wa-space-s);
   }
   .search-form {
     display: flex;
@@ -285,7 +144,6 @@
     gap: var(--wa-space-3xs);
     min-width: 0;
   }
-  /* Fixed box so a row never reflows while the image is still loading. */
   .thumb {
     flex: 0 0 auto;
     width: 4rem;
@@ -293,9 +151,5 @@
     object-fit: cover;
     border-radius: 6px;
     border: 1px solid var(--wa-form-control-border-color);
-  }
-  .thumb.portrait {
-    height: 4rem;
-    border-radius: 50%;
   }
 </style>

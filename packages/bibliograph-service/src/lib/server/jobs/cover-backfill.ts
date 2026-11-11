@@ -1,7 +1,5 @@
 import type { Logger } from 'pino';
 import { eq } from 'drizzle-orm';
-import { cidForLex } from '@atproto/lex-cbor';
-import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
@@ -10,9 +8,8 @@ import { withRetry } from '../api/retry';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
 import { datacenterCoverUrl } from '../gb/cover-url';
 import { getBookByIsbn } from '../api/isbndb';
-import { editionRecordValue, rowIdentifiers } from '../edition-record';
+import { loadEditionIdentifiers } from '../edition-record';
 import { isbnFromIdentifiers } from '../isbn/lookup';
-import { wireContributorsFor } from './wire-contributors';
 
 type Db = typeof defaultDb;
 
@@ -95,7 +92,7 @@ export async function resolveCoverUrl(
       const cover = await fetchGbByVolumeId(vid, log, signal);
       if (cover) return cover;
     } catch { /* invalid rkey already validated */ }
-    const isbn = isbnFromIdentifiers(rowIdentifiers(row.identifiers));
+    const isbn = isbnFromIdentifiers(await loadEditionIdentifiers(row.uri));
     if (isbn) {
       const cover = await fetchGbByIsbn(isbn, log, signal);
       if (cover) return cover;
@@ -103,7 +100,7 @@ export async function resolveCoverUrl(
     return undefined;
   }
 
-  const isbn = isbnFromIdentifiers(rowIdentifiers(row.identifiers));
+  const isbn = isbnFromIdentifiers(await loadEditionIdentifiers(row.uri));
   if (isbn) {
     const cover = await fetchGbByIsbn(isbn, log, signal);
     if (cover) return cover;
@@ -127,7 +124,7 @@ export async function backfillCoverForEdition(
   const rows = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
   const row = rows[0];
   if (!row) return { updated: false, reason: 'not_found' };
-  if (row.coverImageUrl) return { updated: false, reason: 'already_has_cover' };
+  if (row.coverUrl) return { updated: false, reason: 'already_has_cover' };
   // Validate rkey matches row
   if (row.rkey !== rkey) {
     log.warn({ stage: 'cover-backfill', uri, rkey, rowRkey: row.rkey }, 'rkey mismatch; using row rkey');
@@ -141,19 +138,14 @@ export async function backfillCoverForEdition(
     return { updated: false, reason: 'no_cover_found' };
   }
 
-  const contributors = await wireContributorsFor(db, row.contributors);
-  const value = editionRecordValue(row, { contributors, coverUrl });
-  if (!value) return { updated: false, reason: 'missing_identifiers' };
-  const cid = (await cidForLex(value as unknown as LexMap)).toString();
-
   const updated = await db.update(editions)
-    .set({ coverImageUrl: coverUrl, coverCheckedAt: new Date(), cid, indexedAt: new Date() })
+    .set({ coverUrl, coverCheckedAt: new Date(), indexedAt: new Date() })
     .where(eq(editions.uri, uri))
     .returning({ uri: editions.uri });
 
   if (updated.length === 0) return { updated: false, reason: 'update_missed' };
 
-  log.info({ stage: 'cover-backfill', uri, coverUrl, cid }, 'cover backfilled');
+  log.info({ stage: 'cover-backfill', uri, coverUrl }, 'cover backfilled');
 
   return { updated: true, coverUrl, reason: 'ok' };
 }

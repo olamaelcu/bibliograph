@@ -45,8 +45,8 @@
   <section class="about">
     <p>
       Every query is documented from the lexicon files and served over
-      <code>/xrpc</code>. Callers authenticate with a DPoP-bound OAuth access
-      token.
+      <code>/xrpc</code>. Reads are anonymous; catalog records live in the
+      publisher PDS and activity records in each reader's PDS.
     </p>
   </section>
 
@@ -54,11 +54,11 @@
     <h2>Feeds</h2>
     <p>
       Feed generator at <code>net.olamaelcu.livtet.biblio.feed.generator</code>
-      exposes five feeds via <code>com.atproto.feed.getFeedSkeleton</code>.
+      exposes four feeds via <code>com.atproto.feed.getFeedSkeleton</code>.
       Entries are book reviews and shelving events — a book placed on
       <em>Reading</em>, <em>Read</em>, <em>To Read</em> or
       <em>Did Not Finish</em>
-      — newest first (the recommendations feed returns catalog books instead):
+      — newest first:
     </p>
     <ul>
       <li>
@@ -93,12 +93,6 @@
         hops), excluding people you already follow (<code
           >requiresAuth: true</code
         >)
-      </li>
-      <li>
-        <strong>Recommendations</strong>
-        <code>at://PUBLISHER/net.olamaelcu.livtet.biblio.feed.generator/recommendations</code>
-        — session auth; a ranked page of catalog books you have not shelved,
-        scored by shared genres (<code>requiresAuth: true</code>)
       </li>
     </ul>
     Per-edition reviews: <code>…/edition/{'{rkey}'}</code> — no auth.

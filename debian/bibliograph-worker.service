@@ -1,11 +1,9 @@
 [Unit]
-Description=Bibliograph worker (TAP consumer + graphile task lists)
+Description=Bibliograph worker (catalog enrichment + PDS outbox)
 Documentation=https://github.com/olamaelcu/bibliograph
 After=network-online.target bibliograph-migrate.service
 Wants=network-online.target
 Requires=bibliograph-migrate.service
-# The consumer needs TAP_URL in the conffile. If that is not configured yet the
-# process exits immediately and would otherwise restart forever on a small host.
 # StartLimit* live in [Unit]: since systemd 229 the [Service] placement is
 # ignored with a warning.
 StartLimitIntervalSec=300
@@ -22,8 +20,8 @@ EnvironmentFile=-/etc/bibliograph/bibliograph.env
 
 ExecStart=/usr/lib/bibliograph/packages/bibliograph-service/node_modules/.bin/tsx worker.ts
 
-# A TAP outage should not exhaust the start limit: back off gently and keep
-# trying, because the consumer is what keeps the index current.
+# An upstream outage should not exhaust the start limit: back off gently and
+# keep trying, because this process drains the PDS outbox.
 Restart=on-failure
 RestartSec=10s
 # A signal that arrives before the Node interpreter has finished loading our

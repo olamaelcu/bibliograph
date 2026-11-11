@@ -1,14 +1,20 @@
 import type { LayoutServerLoad } from './$types';
-import { isAdministrator } from '$lib/server/labeler/librarian';
+import { hasAdminAccess } from '$lib/server/admin';
+import { lexiconForNsid, publishedNsids } from '$lib/server/lexicon-map';
 
-// The signed-in viewer is resolved in hooks.server.ts and surfaced to every page
-// via layout data, so the top bar can render sign-in/out without each page
-// forwarding it.
-//
-// `viewerIsAdmin` decides whether the top bar offers the admin entrance. It is
-// presentation only: every /admin route re-checks on the server, so a stale or
-// spoofed flag grants nothing.
-export const load: LayoutServerLoad = async ({ locals }) => ({
-  viewer: locals.viewer,
-  viewerIsAdmin: locals.viewer ? await isAdministrator(locals.viewer.did) : false,
+function endpointCounts(): { queries: number; records: number } {
+	let queries = 0;
+	let records = 0;
+	for (const nsid of publishedNsids()) {
+		const main = lexiconForNsid(nsid)?.defs as Record<string, { type?: string }> | undefined;
+		const type = main?.main?.type;
+		if (type === 'query') queries += 1;
+		if (type === 'record') records += 1;
+	}
+	return { queries, records };
+}
+
+export const load: LayoutServerLoad = async ({ request, cookies }) => ({
+	isAdmin: hasAdminAccess({ request, cookies }),
+	endpointCounts: endpointCounts(),
 });

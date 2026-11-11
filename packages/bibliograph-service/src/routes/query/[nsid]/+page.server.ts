@@ -1,35 +1,66 @@
 import { error } from '@sveltejs/kit';
-import { queryRegistry } from '$lib/server/xrpc-router';
-import { cleanSchema, getErrors, summarizeSchema } from '$lib/server/schema-render';
+import { lexiconForNsid } from '$lib/server/lexicon-map';
 import type { PageServerLoad } from './$types';
 
-/**
- * The registry never mutates, so the cleaned schema text of an nsid is a constant.
- * `cleanSchema` deep-clones the whole generated valibot graph, which ran on every
- * render of this page.
- */
-const schemaText = new Map<string, string>();
+interface LexiconProperty {
+	type?: string;
+	description?: string;
+	default?: unknown;
+}
 
-function schemaTextFor(nsid: string, schema: unknown): string {
-  const cached = schemaText.get(nsid);
-  if (cached !== undefined) return cached;
-  const text = JSON.stringify(cleanSchema(schema), null, 2);
-  schemaText.set(nsid, text);
-  return text;
+interface LexiconMain {
+	type?: string;
+	description?: string;
+	parameters?: { properties?: Record<string, LexiconProperty>; required?: string[] };
+	output?: { schema?: { properties?: Record<string, LexiconProperty>; required?: string[] } };
+	errors?: Array<{ name: string; description?: string }>;
+}
+
+interface Field {
+	name: string;
+	type: string;
+	required: boolean;
+	description?: string;
+	defaultValue?: string;
+	constraints?: string[];
+}
+
+function fieldsFrom(
+	properties: Record<string, LexiconProperty> | undefined,
+	required: readonly string[] | undefined,
+): Field[] {
+	return Object.entries(properties ?? {}).map(([name, property]) => ({
+		name,
+		type: property.type ?? 'unknown',
+		required: (required ?? []).includes(name),
+		description: property.description,
+		...(property.default === undefined ? {} : { defaultValue: JSON.stringify(property.default) }),
+	}));
 }
 
 export const load: PageServerLoad = async ({ params }) => {
-  const nsid = decodeURIComponent(params.nsid);
-  if (nsid.startsWith('com.atproto.')) error(404, `Unknown query: ${nsid}`);
-  const schema = queryRegistry.get(nsid);
-  if (!schema) error(404, `Unknown query: ${nsid}`);
-
-  const s = schema as { params?: unknown; output?: { schema?: unknown } };
-  return {
-    nsid,
-    schemaRaw: schemaTextFor(nsid, schema),
-    params: s.params ? summarizeSchema(s.params) : undefined,
-    output: s.output?.schema ? summarizeSchema(s.output.schema) : undefined,
-    errors: getErrors(schema),
-  };
+	const nsid = decodeURIComponent(params.nsid);
+	if (nsid.startsWith('com.atproto.')) error(404, `Unknown query: ${nsid}`);
+	const lexicon = lexiconForNsid(nsid);
+	if (!lexicon) error(404, `Unknown query: ${nsid}`);
+	const main = (lexicon.defs as Record<string, LexiconMain> | undefined)?.main;
+	if (!main || (main.type !== 'query' && main.type !== 'procedure')) {
+		error(404, `Unknown query: ${nsid}`);
+	}
+	const description = main.description ?? (lexicon.description as string | undefined);
+	return {
+		nsid,
+		kind: main.type,
+		schemaRaw: JSON.stringify(lexicon, null, 2),
+		params: {
+			kind: 'params' as const,
+			description,
+			fields: fieldsFrom(main.parameters?.properties, main.parameters?.required),
+		},
+		output: {
+			kind: 'output' as const,
+			fields: fieldsFrom(main.output?.schema?.properties, main.output?.schema?.required),
+		},
+		errors: main.errors ?? [],
+	};
 };

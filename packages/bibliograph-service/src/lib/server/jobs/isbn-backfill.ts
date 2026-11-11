@@ -1,287 +1,100 @@
 import type { Logger } from 'pino';
-import { eq, inArray } from 'drizzle-orm';
-import { cidForLex } from '@atproto/lex-cbor';
-import type { LexMap } from '@atproto/lex-data';
+import { eq, sql } from 'drizzle-orm';
 import { db as defaultDb } from '../db/index';
-import { contributors, editionIsbnEnrichment, editions } from '../db/schema';
+import { editionIsbnEnrichment, editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
-import { prefetchContributors } from '../api/contributor-name-resolver';
-import { searchOpenLibraryEditionsByTitle } from '../api/open-library-search';
-import { isbnIdentifier } from '../identifiers';
-import { searchGoodreadsIsbnCandidates } from '../search/goodreads-isbn';
-import { getEditionByVolumeId, searchEditions as searchGbEditions } from '../api/google-books';
-import type { EditionItem, Identifier } from '../search/types';
-import { hasIsbn, isbnFromIdentifier, mergeIsbnIdentifiers } from '../isbn/merge';
-import {
-  candidateFromEditionItem,
-  pruneCandidates,
-  type CandidateBook,
-  type ScoredCandidate,
-  type TargetEdition,
-} from '../isbn/prune';
+import { loadEditionIdentifiers } from '../edition-record';
+import { getEditionByVolumeId } from '../api/google-books';
+import { identifierKey, isbnValueFromIdentifier, type Identifier } from '../identifiers';
 import { isIsbndbRkey, isbnFromIsbndbRkey } from '../isbndb/keys';
 import { isGbRkey, volumeIdFromGbRkey } from '../gb/keys';
-import { editionRecordValueForCid } from '../isbn/record-value';
-import { rowIdentifiers } from '../edition-record';
-import { wireContributorsFor } from './wire-contributors';
-
-/**
- * Backfill the ISBN an edition record is missing.
- *
- * Almost every ISBN-less edition in the catalog is a `gb.*` or `isbndb.*`
- * record, and the authority it was derived from already knows the ISBN. That
- * authority refetch is tier 1 and it is deterministic: no matching, no
- * guessing.
- *
- * Tier 2 only runs when the authority has no ISBN to give. It searches Google
- * Books, then prunes the candidates down with `pruneCandidates`. A single
- * surviving ISBN at the top score is written; a tie is recorded as `ambiguous`
- * and nothing is written, because a wrong ISBN silently repoints a reader's
- * shelf at a different physical book. Rows that older versions of this job
- * already stamped with a verdict (`shadow`, `none`) are re-enqueued by
- * `scripts/requeue-isbn-enrichment.ts --result=<verdict>`, since the daily scan
- * skips any row that has one.
- */
+import { isbn13FromAny } from '../identifiers';
 
 type Db = typeof defaultDb;
 
-/** Contributor refs, as the records store them. */
-type ContributorRef = { uri: string };
-
-/** Everything tier 2 needs; injected so the planner is testable. */
-export interface IsbnEnrichmentDeps {
-  fetchGbEdition(volumeId: string): Promise<EditionItem | null>;
-  searchGb(query: string): Promise<EditionItem[]>;
-  /** OpenLibrary edition search, used only for ISBN discovery by title. */
-  searchOl(query: string): Promise<EditionItem[]>;
-  /** Goodreads title search, resolved down to hits that carry an ISBN. */
-  searchGr(query: string): Promise<EditionItem[]>;
-  /** contributor uri → name, for the refs the planner hands over. */
-  authorNames(refs: readonly ContributorRef[]): Promise<Map<string, string>>;
-}
-
-export type EnrichmentResultName = 'found' | 'shadow' | 'ambiguous' | 'none' | 'already';
-
-export interface EnrichmentPlan {
-  action: 'already_has_isbn' | 'write' | 'none';
-  result: EnrichmentResultName;
-  identifiers?: Identifier[];
-  added?: string[];
-  candidates?: ScoredCandidate[];
-}
-
-/** The authority record the edition was derived from, if the rkey names one. */
-async function fetchAuthorityItem(
-  row: EditionRow,
-  deps: IsbnEnrichmentDeps,
-): Promise<EditionItem | null> {
-  if (isGbRkey(row.rkey)) return deps.fetchGbEdition(volumeIdFromGbRkey(row.rkey));
-  // `isbndb.*` rkeys carry the ISBN themselves; `bh.*` has no per-edition API.
-  return null;
-}
-
-/**
- * Decide what an edition's enrichment should do, without touching the database.
- *
- * Split out of the job so both tiers can be exercised without network or
- * Postgres: every dependency arrives through `deps`.
- */
-export async function planIsbnEnrichment(
-  row: EditionRow,
-  deps: IsbnEnrichmentDeps,
-): Promise<EnrichmentPlan> {
-  const existing = rowIdentifiers(row.identifiers);
-  if (hasIsbn(existing)) return { action: 'already_has_isbn', result: 'already' };
-
-  // An `isbndb.*` record's rkey is the ISBN; no upstream call is needed.
-  if (isIsbndbRkey(row.rkey)) {
-    const fromKey = isbnFromIsbndbRkey(row.rkey);
-    const merged = mergeIsbnIdentifiers(existing, [fromKey]);
-    if (merged.added.length > 0) {
-      return { action: 'write', result: 'found', identifiers: merged.identifiers, added: merged.added };
-    }
-  }
-
-  const authority = await fetchAuthorityItem(row, deps);
-  const authorityIsbns = (authority?.identifiers ?? [])
-    .map((identifier) => isbnFromIdentifier(identifier))
-    .filter((value): value is string => value !== null);
-
-  if (authorityIsbns.length > 0) {
-    const merged = mergeIsbnIdentifiers(existing, authorityIsbns);
-    if (merged.added.length > 0) {
-      return { action: 'write', result: 'found', identifiers: merged.identifiers, added: merged.added };
-    }
-  }
-
-  // ── Tier 2, shadow only ─────────────────────────────────────────────
-  const authorRefs: ContributorRef[] = [
-    ...(authority?.contributors ?? []),
-    ...row.contributors,
-  ]
-    .filter((contribution) => contribution.role === 'author')
-    .map((contribution) => ({ uri: contribution.subject?.uri ?? '' }))
-    .filter((ref) => ref.uri.length > 0);
-
-  const names = await deps.authorNames(authorRefs).catch(() => new Map<string, string>());
-  const target: TargetEdition = {
-    // The authority's title is what its own search results are indexed under.
-    title: authority?.title ?? row.title,
-    authors: [...names.values()],
-    publishedYear: authority?.publishedYear ?? row.publishedYear ?? null,
-    pages: row.pages ?? null,
-  };
-
-  const candidates: CandidateBook[] = [];
-  if (target.title.trim().length > 0) {
-    const surname = target.authors[0]?.split(/\s+/).pop() ?? '';
-    const olQuery = `title:"${target.title}"`;
-    const gbQuery = [`intitle:${target.title}`, surname ? `inauthor:${surname}` : ''].filter(Boolean).join(' ');
-    const grQuery = [target.title, surname].filter(Boolean).join(' ');
-
-    const [olHits, gbHits, grHits] = await Promise.all([
-      deps.searchOl(olQuery).catch(() => []),
-      deps.searchGb(gbQuery).catch(() => []),
-      deps.searchGr(grQuery).catch(() => []),
-    ]);
-
-    const candidateRefs: ContributorRef[] = [...olHits, ...gbHits, ...grHits].flatMap((hit) =>
-      (hit.contributors ?? []).map((contribution) => ({ uri: contribution.subject?.uri ?? '' })),
-    );
-    const candidateNames = await deps
-      .authorNames(candidateRefs.filter((ref) => ref.uri.length > 0))
-      .catch(() => new Map<string, string>());
-
-    for (const hit of olHits) candidates.push(candidateFromEditionItem('openlibrary', hit, candidateNames));
-    for (const hit of gbHits) candidates.push(candidateFromEditionItem('googlebooks', hit, candidateNames));
-    for (const hit of grHits) candidates.push(candidateFromEditionItem('goodreads', hit, candidateNames));
-  }
-
-  const pruned = pruneCandidates(target, candidates);
-  const recorded = [...pruned.survivors, ...pruned.rejected];
-  if (pruned.kind === 'found' && pruned.isbn) {
-    const merged = mergeIsbnIdentifiers(existing, [pruned.isbn]);
-    return { action: 'write', result: 'found', identifiers: merged.identifiers, added: merged.added, candidates: recorded };
-  }
-  if (pruned.kind === 'ambiguous') return { action: 'none', result: 'ambiguous', candidates: recorded };
-  return { action: 'none', result: 'none', candidates: recorded };
-}
-
-/** Wire the real clients, with the job's logger and timeout baked in. */
-export function defaultIsbnDeps(
-  log: Logger,
-  db: Db = defaultDb,
-  signal?: AbortSignal,
-): IsbnEnrichmentDeps {
-  return {
-    fetchGbEdition: (volumeId) => getEditionByVolumeId(volumeId, log, signal),
-    searchGb: async (q) => (await searchGbEditions({ q, limit: 8 }, log, signal)).items,
-    searchOl: async (q) => {
-      const hits = await searchOpenLibraryEditionsByTitle(q, log, signal);
-      const createdAt = new Date().toISOString();
-      const items: EditionItem[] = [];
-      // One prefetch for the whole hit list instead of one lookup per hit.
-      const resolver = await prefetchContributors(
-        hits.flatMap((hit) => hit.authors),
-        'openlibrary',
-        log,
-      );
-      for (const hit of hits) {
-        const contributorEntries = await resolver.resolve(hit.authors);
-        items.push({
-          uri: `https://openlibrary.org${hit.key}`,
-          title: hit.title,
-          publishedYear: hit.publishedYear,
-          identifiers: hit.isbns
-            .map((isbn) => isbnIdentifier(isbn))
-            .filter((identifier): identifier is Identifier => identifier !== null),
-          contributors: contributorEntries,
-          createdAt,
-        });
-      }
-      return items;
-    },
-    // Three hits keeps a row's upstream cost bounded: each hit is a book-page
-    // fetch on top of the search itself.
-    searchGr: (q) => searchGoodreadsIsbnCandidates(q, log, 3, signal),
-    authorNames: async (refs) => {
-      const uris = [...new Set(refs.map((ref) => ref.uri))];
-      if (uris.length === 0) return new Map();
-      const rows = await db
-        .select({ uri: contributors.uri, name: contributors.name })
-        .from(contributors)
-        .where(inArray(contributors.uri, uris));
-      return new Map(rows.map((row) => [row.uri, row.name]));
-    },
-  };
-}
-
 export interface IsbnBackfillOutcome {
-  updated: boolean;
-  reason: string;
-  added?: string[];
+	updated: boolean;
+	reason: string;
+	added?: string[];
 }
 
 /**
- * Run one edition through both tiers and persist the outcome.
+ * Fill the ISBN an edition is missing.
  *
- * Tier 1 writes identifiers (and recomputes the record CID so clients see a new
- * revision). Tier 2 only records its candidates, which is why `updated` stays
- * false for `shadow`/`ambiguous`/`none` — those rows still get a row in
- * `edition_isbn_enrichment` so the scan stops re-asking upstream for a book that
- * has no ISBN to find.
+ * Tier 1 only: the authority the edition was derived from already knows the
+ * ISBN, so a `gb.*` volume is re-read and an `isbndb.*` rkey carries it
+ * directly. There is no title-matching tier any more — matching a book by title
+ * against provider results needs contributor identity, and contributors are
+ * now inline metadata rather than records. Rows with no authority ISBN are
+ * stamped `none` so the scan does not re-ask forever.
  */
 export async function backfillIsbnForEdition(
-  uri: string,
-  rkey: string,
-  log: Logger,
-  db: Db = defaultDb,
-  deps?: IsbnEnrichmentDeps,
+	uri: string,
+	rkey: string,
+	log: Logger,
+	db: Db = defaultDb,
 ): Promise<IsbnBackfillOutcome> {
-  const rows = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
-  const row = rows[0];
-  if (!row) return { updated: false, reason: 'not_found' };
-  // Only the catalog's own records are ours to rewrite.
-  if (row.did !== process.env.LEX_PUBLISHER_DID && !row.did.startsWith('did:web:')) {
-    return { updated: false, reason: 'not_catalog_record' };
-  }
-  if (row.rkey !== rkey) {
-    log.warn({ stage: 'isbn-backfill', uri, rkey, rowRkey: row.rkey }, 'rkey mismatch; using row rkey');
-  }
+	const rows = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
+	const row: EditionRow | undefined = rows[0];
+	if (!row) return { updated: false, reason: 'not_found' };
+	if (row.rkey !== rkey) {
+		log.warn({ stage: 'isbn-backfill', uri, rkey, rowRkey: row.rkey }, 'rkey mismatch; using row rkey');
+	}
 
-  const plan = await planIsbnEnrichment(row, deps ?? defaultIsbnDeps(log, db));
-  if (plan.action === 'already_has_isbn') return { updated: false, reason: 'already_has_isbn' };
+	const existing = await loadEditionIdentifiers(uri);
+	if (existing.some((identifier) => isbnValueFromIdentifier(identifier) !== null)) {
+		return { updated: false, reason: 'already_has_isbn' };
+	}
 
-  if (plan.action === 'write' && plan.identifiers) {
-    const contributors = await wireContributorsFor(db, row.contributors);
-    const value = editionRecordValueForCid(row, plan.identifiers, contributors);
-    if (!value) return { updated: false, reason: 'missing_identifiers' };
-    const cid = (await cidForLex(value as unknown as LexMap)).toString();
-    const updated = await db
-      .update(editions)
-      .set({ identifiers: plan.identifiers, cid, indexedAt: new Date() })
-      .where(eq(editions.uri, uri))
-      .returning({ uri: editions.uri });
-    if (updated.length === 0) return { updated: false, reason: 'update_missed' };
-    await recordEnrichment(db, uri, plan);
-    log.info({ stage: 'isbn-backfill', uri, added: plan.added, cid }, 'isbn backfilled');
-    return { updated: true, reason: 'ok', added: plan.added };
-  }
+	const candidates: Identifier[] = [];
+	if (isIsbndbRkey(row.rkey)) {
+		const isbn = isbn13FromAny(isbnFromIsbndbRkey(row.rkey));
+		if (isbn) candidates.push({ issuer: 'isbn13', value: isbn });
+	} else if (isGbRkey(row.rkey)) {
+		try {
+			const volume = await getEditionByVolumeId(volumeIdFromGbRkey(row.rkey), log);
+			for (const identifier of volume?.identifiers ?? []) {
+				if (isbnValueFromIdentifier(identifier) !== null) candidates.push(identifier);
+			}
+		} catch (err) {
+			log.warn({ stage: 'isbn-backfill', err, uri }, 'authority refetch failed; deferring');
+			return { updated: false, reason: 'deferred' };
+		}
+	}
 
-  await recordEnrichment(db, uri, plan);
-  return { updated: false, reason: plan.result };
+	const seen = new Set(existing.map(identifierKey));
+	const additions = candidates.filter((identifier) => !seen.has(identifierKey(identifier)));
+	if (additions.length === 0) {
+		await recordEnrichment(db, uri, 'none', []);
+		return { updated: false, reason: 'none' };
+	}
+
+	for (const identifier of additions) {
+		await db.execute(sql`
+			INSERT INTO edition_identifiers (edition_uri, issuer, value)
+			VALUES (${uri}, ${identifier.issuer}, ${identifier.value})
+			ON CONFLICT DO NOTHING
+		`);
+	}
+	await recordEnrichment(db, uri, 'found', additions);
+	log.info({ stage: 'isbn-backfill', uri, added: additions }, 'isbn backfilled');
+	return { updated: true, reason: 'ok', added: additions.map((identifier) => identifier.value) };
 }
 
-/** Bookkeeping row: what was looked at, and what the tiers concluded. */
-async function recordEnrichment(db: Db, uri: string, plan: EnrichmentPlan): Promise<void> {
-  const values = {
-    uri,
-    checkedAt: new Date(),
-    result: plan.result,
-    candidates: plan.candidates ?? null,
-  };
-  await db
-    .insert(editionIsbnEnrichment)
-    .values(values)
-    .onConflictDoUpdate({ target: editionIsbnEnrichment.uri, set: values });
+async function recordEnrichment(
+	db: Db,
+	uri: string,
+	result: 'found' | 'none',
+	candidates: Identifier[],
+): Promise<void> {
+	const values = {
+		uri,
+		checkedAt: new Date(),
+		result,
+		candidates: candidates.map((identifier) => ({ source: identifier.issuer, isbn: identifier.value, score: 1, accepted: true })),
+	};
+	await db
+		.insert(editionIsbnEnrichment)
+		.values(values)
+		.onConflictDoUpdate({ target: editionIsbnEnrichment.uri, set: values });
 }

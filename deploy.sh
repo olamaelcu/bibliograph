@@ -93,16 +93,9 @@ rm -f "$REMOTE_DEB" /etc/bibliograph/bibliograph.env.dpkg-dist
 # The worker unit holds its own handles and needs its own restart; it is optional
 # so a host that does not run it still deploys. The graphile task lists run inside
 # it since 0.1.21, so there is no separate jobs unit to restart.
-# On lescayes, TAP's resync and the appview share one vCPU: restarting the web
-# unit while TAP is crawling leaves the new process swapped out in `epoll_wait`,
-# never binding its port (observed 502s for minutes, three releases in a row).
-# Pausing TAP for the restart window is seconds and makes the start deterministic.
-tap_was_running=0
-if systemctl is-active --quiet tap.service 2>/dev/null; then
-  tap_was_running=1
-  echo "    pausing tap.service for the restart window"
-  systemctl stop tap.service >/dev/null 2>&1 || true
-fi
+echo "    uploading HappyView lexicons and scripts"
+systemctl start bibliograph-hv-deploy.service >/dev/null 2>&1 || \
+  echo "WARN: bibliograph-hv-deploy.service failed; run 'mise run hv-deploy' by hand"
 
 echo "    restarting units"
 systemctl restart bibliograph.service
@@ -124,11 +117,6 @@ for _ in $(seq 1 30); do
   [ "$code" != "000" ] && break
   sleep 1
 done
-
-if [ "$tap_was_running" = "1" ]; then
-  echo "    resuming tap.service"
-  systemctl start tap.service >/dev/null 2>&1 || true
-fi
 
 INSTALLED_VERSION="$(dpkg-query -W -f='${Version}' bibliograph 2>/dev/null || echo 'not installed')"
 echo "INSTALLED_VERSION: $INSTALLED_VERSION"
@@ -162,10 +150,10 @@ What the package cannot do for you:
       certbot certonly --webroot -w /var/www/html -d biblio.livtet.olamaelcu.net
       ln -s ../sites-available/bibliograph-platform /etc/nginx/sites-enabled/
       nginx -t && systemctl reload nginx
-  * Secrets: ATP_SIGNING_KEY, ATP_LABEL_SIGNING_KEY, ATP_SERVICE_HOST,
-    OAUTH_PUBLIC_ORIGIN, ADMIN_DIDS in /etc/bibliograph/bibliograph.env,
+  * Secrets: ATP_LABEL_SIGNING_KEY, ATP_SERVICE_HOST, HAPPYVIEW_CLIENT_KEY,
+    HAPPYVIEW_CLIENT_SECRET, HAPPYVIEW_ADMIN_KEY, PDS_ACCOUNT_DID,
+    PDS_ACCOUNT_PASSWORD and ADMIN_TOKEN in /etc/bibliograph/bibliograph.env,
     then: systemctl restart bibliograph
-  * TAP: TAP_URL and TAP_ADMIN_PASSWORD, otherwise the worker stops after 5
-    attempts and the Postgres record cache (behind listShelves/getShelvingOfBook)
-    stays empty — reads then fall back to per-request PDS scans.
+  * HappyView and rsky-pds are installed by the infra repository; this package
+    only talks to their loopback origins.
 NEXT

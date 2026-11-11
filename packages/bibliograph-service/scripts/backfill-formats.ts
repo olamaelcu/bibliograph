@@ -24,7 +24,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { db } from "../src/lib/server/db/index";
 import { editions } from "../src/lib/server/db/schema";
 import { createLogger } from "../src/lib/server/logger";
-import { rowIdentifiers } from "../src/lib/server/edition-record";
+import { loadEditionIdentifiers } from "../src/lib/server/edition-record";
 import {
   backfillEditionMetadata,
   isbnForRow,
@@ -40,8 +40,8 @@ const FAILURE_LIMIT = 0.8;
 const MIN_FAILURE_SAMPLE = 20;
 
 const HAS_ISBN = sql`EXISTS (
-  SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) elem
-   WHERE elem->>'type' = 'isbn'
+  SELECT 1 FROM edition_identifiers i
+   WHERE i.edition_uri = ${editions.uri} AND i.issuer = 'isbn13'
 )`;
 
 const NOT_KNOWN_MISSING = sql`NOT EXISTS (
@@ -55,7 +55,7 @@ const MISSING = and(
   or(
     isNull(editions.format),
     isNull(editions.pages),
-    isNull(editions.publishedYear),
+    isNull(editions.publishedDate),
     isNull(editions.language),
   ),
 )!;
@@ -79,8 +79,8 @@ async function main(): Promise<void> {
 
   const isbnFilter = isbn
     ? sql`EXISTS (
-        SELECT 1 FROM jsonb_array_elements(${editions.identifiers}) elem
-         WHERE elem->>'type' = 'isbn' AND elem->>'value' = ${isbn}
+        SELECT 1 FROM edition_identifiers i
+         WHERE i.edition_uri = ${editions.uri} AND i.issuer = 'isbn13' AND i.value = ${isbn}
       )`
     : undefined;
   const filter = isbnFilter ? and(MISSING, isbnFilter)! : MISSING;
@@ -147,8 +147,8 @@ async function main(): Promise<void> {
       total += 1;
       // Rows written before the identifier migration still hold the legacy
       // `{ uri, resource }` pair, so normalise once and use that from here on.
-      const currentIdentifiers = rowIdentifiers(row.identifiers);
-      const rowIsbn = isbnForRow(currentIdentifiers); // imported from the new module
+      const currentIdentifiers = await loadEditionIdentifiers(row.uri);
+      const rowIsbn = isbnForRow(currentIdentifiers);
       if (rowIsbn) {
         try {
           const res = await backfillEditionMetadata(row, log, { dry: dry });

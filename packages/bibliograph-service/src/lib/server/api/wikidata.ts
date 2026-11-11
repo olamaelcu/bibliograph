@@ -84,8 +84,7 @@ function qidFromEntityUri(uri: string): string | undefined {
  */
 function qidFromIdentifier(identifier: Identifier): string | undefined {
   const bare = /^(Q\d+)$/i.exec(identifier.value.trim())?.[1];
-  if (bare) return bare.toUpperCase();
-  return identifier.url ? qidFromEntityUri(identifier.url) : undefined;
+  return bare ? bare.toUpperCase() : qidFromEntityUri(identifier.value);
 }
 
 function buildQuery(qids: readonly string[]): string {
@@ -219,7 +218,7 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   const wanted = new Set<string>();
   for (const item of items) {
     for (const id of item.identifiers) {
-      if (id.type !== WIKIDATA_TYPE) continue;
+      if (id.issuer !== WIKIDATA_TYPE) continue;
       const qid = qidFromIdentifier(id);
       if (qid) wanted.add(qid);
     }
@@ -265,7 +264,7 @@ export async function enrichWithWikidata<T extends { identifiers: Identifier[] }
   return items.map((item) => {
     const extra: Identifier[] = [];
     for (const id of item.identifiers) {
-      if (id.type !== WIKIDATA_TYPE) continue;
+      if (id.issuer !== WIKIDATA_TYPE) continue;
       const qid = qidFromIdentifier(id);
       const match = qid ? matches.get(qid) : undefined;
       if (match) extra.push(...match.identifiers);

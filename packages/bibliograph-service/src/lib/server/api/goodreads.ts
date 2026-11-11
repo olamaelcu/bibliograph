@@ -1,4 +1,4 @@
-import { normalizeBookFormat, type BookFormat } from "../format-view";
+import { normalizeBookFormat, type BookFormat } from "../media-book-view";
 import { request } from "../http/client";
 
 /**

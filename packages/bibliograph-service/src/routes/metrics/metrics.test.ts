@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GET } from './+server';
 
-function fakeEvent() {
-  return { request: new Request('http://localhost/metrics'), locals: {}, url: new URL('http://localhost/metrics') } as never;
+function fakeEvent(): Parameters<typeof GET>[0] {
+  // The endpoint reads only `request`/`url`; the rest of the RequestEvent
+  // surface is irrelevant to the handler under test.
+  const event = { request: new Request('http://localhost/metrics'), url: new URL('http://localhost/metrics') };
+  return event as unknown as Parameters<typeof GET>[0];
 }
 
 test('GET /metrics returns 200 with Prometheus text content-type', async () => {

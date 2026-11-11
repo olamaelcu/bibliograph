@@ -5,7 +5,10 @@
     "identifier": {
       "type": "object",
       "description": "An external identifier for a record, such as an ISBN or Open Library key.",
-      "required": ["resource", "url"],
+      "required": [
+        "resource",
+        "url"
+      ],
       "properties": {
         "resource": {
           "type": "string",
@@ -19,43 +22,6 @@
         }
       }
     },
-    "actorView": {
-      "type": "object",
-      "description": "A public profile view for the AppView actor.",
-      "required": ["did"],
-      "properties": {
-        "did": {
-          "type": "string",
-          "format": "did",
-          "description": "DID of the actor."
-        },
-        "handle": {
-          "type": "string",
-          "maxGraphemes": 253,
-          "description": "Handle of the actor, if resolvable."
-        },
-        "displayName": {
-          "type": "string",
-          "maxGraphemes": 64,
-          "description": "Display name of the actor."
-        },
-        "description": {
-          "type": "string",
-          "maxGraphemes": 256,
-          "description": "Short bio of the actor."
-        },
-        "avatar": {
-          "type": "string",
-          "format": "uri",
-          "description": "Avatar image URL for the actor, when known. Absent for an actor whose avatar has not been resolved."
-        },
-        "bsky": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
-          "description": "Public Bluesky engagement for the actor's DID, when non-zero."
-        }
-      }
-    },
     "timestamp": {
       "type": "string",
       "format": "datetime",
@@ -64,7 +30,10 @@
     "bskyEngagement": {
       "type": "object",
       "description": "Public Bluesky engagement counts for an at-uri subject.",
-      "required": ["likeCount", "quoteCount"],
+      "required": [
+        "likeCount",
+        "quoteCount"
+      ],
       "properties": {
         "likeCount": {
           "type": "integer",
@@ -113,7 +82,13 @@
     },
     "formatView": {
       "type": "object",
-      "required": ["format", "uri", "description", "emoji", "unit"],
+      "required": [
+        "format",
+        "uri",
+        "description",
+        "emoji",
+        "unit"
+      ],
       "properties": {
         "format": {
           "type": "ref",
@@ -149,7 +124,12 @@
     },
     "genreView": {
       "type": "object",
-      "required": ["uri", "name", "description", "emoji"],
+      "required": [
+        "uri",
+        "name",
+        "description",
+        "emoji"
+      ],
       "properties": {
         "uri": {
           "type": "string",
@@ -196,172 +176,32 @@
         }
       }
     },
-    "contributorView": {
-      "type": "object",
-      "required": ["uri", "name"],
-      "properties": {
-        "uri": {
-          "type": "string",
-          "format": "at-uri",
-          "description": "AT-URI of the contributor record."
-        },
-        "name": {
-          "type": "string",
-          "maxGraphemes": 200,
-          "description": "Display name of the contributor."
-        },
-        "sortName": {
-          "type": "string",
-          "maxGraphemes": 200,
-          "description": "Name used for alphabetical sorting."
-        },
-        "identifiers": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
-          },
-          "description": "External identifiers for the contributor."
-        },
-        "bio": {
-          "type": "string",
-          "maxGraphemes": 16384,
-          "description": "Short biography of the contributor."
-        },
-        "imageUrl": {
-          "type": "string",
-          "format": "uri",
-          "description": "Portrait or avatar image URL for the contributor."
-        },
-        "createdAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp when the record was originally created."
-        },
-        "updatedAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp of the last update to the record."
-        },
-        "bsky": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
-          "description": "Public Bluesky engagement for this contributor, when non-zero."
-        }
-      }
-    },
-    "bookContributorView": {
-      "type": "object",
-      "required": ["bookUri", "contributor", "role"],
-      "properties": {
-        "bookUri": {
-          "type": "string",
-          "format": "at-uri",
-          "description": "AT-URI of the book record."
-        },
-        "contributor": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#contributorView",
-          "description": "The contributor."
-        },
-        "role": {
-          "type": "string",
-          "format": "at-uri",
-          "description": "AT-URI of the contributor role record."
-        }
-      }
-    },
     "bookView": {
       "type": "object",
-      "required": ["uri", "title"],
+      "description": "A catalog book: the edition AT-URI plus its current edition view.",
+      "required": [
+        "uri",
+        "edition"
+      ],
       "properties": {
         "uri": {
           "type": "string",
           "format": "at-uri",
-          "description": "AT-URI of the book record."
+          "description": "AT-URI of the catalog edition record."
         },
-        "title": {
-          "type": "string",
-          "maxGraphemes": 300,
-          "description": "Title of the edition."
-        },
-        "authorNames": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "maxGraphemes": 300
-          },
-          "description": "Author names as plain strings, for books whose contributors are not resolvable to records."
-        },
-        "format": {
+        "edition": {
           "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#formatView",
-          "description": "The format of this edition."
-        },
-        "pages": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Page count for this edition, when known."
-        },
-        "genres": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#genreView"
-          },
-          "description": "Genres this book belongs to."
-        },
-        "contributors": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#bookContributorView"
-          },
-          "description": "Contributors to this edition and their roles."
-        },
-        "identifiers": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
-          },
-          "description": "External identifiers for this edition."
-        },
-        "publishDate": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Publication date of this edition."
-        },
-        "description": {
-          "type": "string",
-          "maxGraphemes": 8192,
-          "description": "Description or synopsis of the book."
-        },
-        "coverUrl": {
-          "type": "string",
-          "format": "uri",
-          "description": "Cover image URL of the book."
-        },
-        "createdAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp when the record was originally created."
-        },
-        "updatedAt": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
-          "description": "Timestamp of the last update to the record."
-        },
-        "bsky": {
-          "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.defs#bskyEngagement",
-          "description": "Public Bluesky engagement for this book, when non-zero."
+          "ref": "community.lexicon.media.book.defs#editionView",
+          "description": "The edition metadata for this book."
         }
       }
     },
     "shelfView": {
       "type": "object",
-      "required": ["uri", "name"],
+      "required": [
+        "uri",
+        "name"
+      ],
       "properties": {
         "uri": {
           "type": "string",
@@ -395,85 +235,11 @@
         }
       }
     },
-    "expandedContributor": {
-      "type": "object",
-      "required": ["name", "role"],
-      "properties": {
-        "name": {
-          "type": "string",
-          "maxGraphemes": 200,
-          "description": "Display name of the contributor."
-        },
-        "role": {
-          "type": "string",
-          "format": "at-uri",
-          "description": "AT-URI of the contributor role record."
-        },
-        "sortName": {
-          "type": "string",
-          "maxGraphemes": 200,
-          "description": "Name used for alphabetical sorting."
-        },
-        "identifiers": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
-          },
-          "description": "External identifiers for the contributor."
-        },
-        "bio": {
-          "type": "string",
-          "maxGraphemes": 16384,
-          "description": "Short biography of the contributor."
-        },
-        "imageUrl": {
-          "type": "string",
-          "format": "uri",
-          "description": "Portrait or avatar image URL for the contributor."
-        }
-      }
-    },
-    "expandedBook": {
-      "type": "object",
-      "required": ["ref", "title"],
-      "properties": {
-        "ref": {
-          "type": "string",
-          "format": "at-uri",
-          "description": "Strong reference to the canonical book record."
-        },
-        "title": {
-          "type": "string",
-          "maxGraphemes": 300,
-          "description": "Title of the edition."
-        },
-        "coverImageUrl": {
-          "type": "string",
-          "format": "uri",
-          "description": "Cover image URL of the book."
-        },
-        "contributors": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#expandedContributor"
-          },
-          "description": "Contributors to this edition and their roles."
-        },
-        "identifiers": {
-          "type": "array",
-          "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#identifier"
-          },
-          "description": "External identifiers for this edition."
-        }
-      }
-    },
     "bookShelfMetadata": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
         "status": {
           "type": "ref",
@@ -509,7 +275,13 @@
     },
     "bookShelfView": {
       "type": "object",
-      "required": ["uri", "shelf", "book", "metadata", "did"],
+      "required": [
+        "uri",
+        "shelf",
+        "book",
+        "metadata",
+        "did"
+      ],
       "properties": {
         "uri": {
           "type": "string",
@@ -572,7 +344,13 @@
     "shelfItemView": {
       "type": "object",
       "description": "A book placed on a shelf, hydrated with the shelf and book views.",
-      "required": ["uri", "shelf", "book", "metadata", "did"],
+      "required": [
+        "uri",
+        "shelf",
+        "book",
+        "metadata",
+        "did"
+      ],
       "properties": {
         "uri": {
           "type": "string",
@@ -613,7 +391,10 @@
     },
     "shelfWithBooksView": {
       "type": "object",
-      "required": ["shelf", "books"],
+      "required": [
+        "shelf",
+        "books"
+      ],
       "properties": {
         "shelf": {
           "type": "ref",
@@ -632,7 +413,12 @@
     },
     "reviewView": {
       "type": "object",
-      "required": ["uri", "did", "record"],
+      "description": "A review record with its author.",
+      "required": [
+        "uri",
+        "did",
+        "record"
+      ],
       "properties": {
         "uri": {
           "type": "string",
@@ -646,7 +432,7 @@
         },
         "record": {
           "type": "ref",
-          "ref": "net.olamaelcu.livtet.biblio.bookReview",
+          "ref": "community.lexicon.media.book.review#main",
           "description": "The review record value."
         }
       }

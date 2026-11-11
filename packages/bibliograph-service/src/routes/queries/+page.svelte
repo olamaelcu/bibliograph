@@ -6,8 +6,9 @@
     data: {
       endpoints: Array<{
         nsid: string;
+        kind: 'query' | 'procedure';
         description?: string;
-        params?: { kind: string; description?: string; fields?: Array<{ name: string; type: string; required: boolean }> };
+        fields: Array<{ name: string; type: string; required: boolean }>;
       }>;
     };
   } = $props();
@@ -17,25 +18,24 @@
   <section class="page-intro">
     <h1>Queries</h1>
     <p class="muted">
-      Every query exposed by this AppView over <code>/xrpc</code>. Documented directly from the
-      registered schemas — adding a <code>router.addQuery(...)</code> call to <code>xrpc-router.ts</code>
-      makes the endpoint appear here on next page load.
+      Every query and procedure exposed by this AppView over <code>/xrpc</code>.
+      Documented directly from the published lexicon files.
     </p>
   </section>
 
   <section class="grid">
-    {#each data.endpoints as { nsid, description, params }}
+    {#each data.endpoints as { nsid, kind, description, fields }}
       <wa-card class="endpoint-card">
         <div slot="header" class="card-header">
           <code class="endpoint-id"><a href={`/query/${encodeURIComponent(nsid)}`}>{nsid}</a></code>
-          <wa-badge variant="brand" appearance="tint">query</wa-badge>
+          <wa-badge variant="brand" appearance="tint">{kind}</wa-badge>
         </div>
         {#if description}
           <p>{description}</p>
         {/if}
-        {#if params?.fields && params.fields.length > 0}
+        {#if fields.length > 0}
           <p class="muted">
-            Parameters: {params.fields.map((f) => `${f.name}${f.required ? '' : '?'}: ${f.type}`).join(', ')}
+            Parameters: {fields.map((f) => `${f.name}${f.required ? '' : '?'}: ${f.type}`).join(', ')}
           </p>
         {/if}
         <p class="muted">

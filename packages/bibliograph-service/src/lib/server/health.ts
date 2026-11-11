@@ -1,5 +1,4 @@
 import { createLogger } from './logger';
-import { getTapQueueDepth } from './jobs/depth';
 import { googleBooksBreaker, wikipediaBreaker, isbndbBreaker, wikidataBreaker, commonsBreaker } from './api/breakers';
 import { sql } from 'drizzle-orm';
 import { db } from './db';
@@ -12,7 +11,7 @@ interface HealthStatus {
   service: { running: boolean; uptimeSec: number };
   database: { reachable: boolean; latencyMs: number };
   worker: { running: boolean; lastSeen?: string };
-  tap: { queueDepth: number; threshold: number };
+  outbox: { pending: number };
   upstream: Record<string, { state: string; failures: number; openMs?: number }>;
 }
 
@@ -34,9 +33,11 @@ export async function computeHealth(): Promise<HealthStatus> {
     log.error({ err }, 'database health check failed');
   }
 
-  let queueDepth = 0;
-  const threshold = Number(process.env.TAP_QUEUE_DEPTH_THRESHOLD ?? 50_000);
-  try { queueDepth = await getTapQueueDepth(); } catch { /* ignore */ }
+  let pending = 0;
+  try {
+    const rows = (await db.execute(sql`SELECT count(*)::int AS n FROM pds_outbox WHERE attempts < 10`)) as unknown as { rows?: Array<{ n: number }> };
+    pending = rows.rows?.[0]?.n ?? 0;
+  } catch { /* the outbox table may not exist before the first migrate */ }
 
   const breakers = [
     { name: 'googlebooks', b: googleBooksBreaker },
@@ -54,7 +55,7 @@ export async function computeHealth(): Promise<HealthStatus> {
     };
   }
 
-  const degraded = !dbReachable || queueDepth > threshold / 2 || Object.values(upstream).some(u => u.state === 'open');
+  const degraded = !dbReachable || pending > 500 || Object.values(upstream).some((u) => u.state === 'open');
 
   return {
     status: dbReachable ? (degraded ? 'degraded' : 'healthy') : 'unhealthy',
@@ -62,7 +63,7 @@ export async function computeHealth(): Promise<HealthStatus> {
     service: { running: true, uptimeSec: Math.floor((Date.now() - serviceStartedAt) / 1000) },
     database: { reachable: dbReachable, latencyMs: dbLatency },
     worker: { running: true, lastSeen: now },
-    tap: { queueDepth, threshold },
+    outbox: { pending },
     upstream,
   };
 }

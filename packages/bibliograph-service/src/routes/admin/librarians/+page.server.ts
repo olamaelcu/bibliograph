@@ -9,7 +9,8 @@ import {
 import { activeSubjects } from '$lib/server/labeler/labels';
 import { LIBRARIAN_LABEL } from '$lib/server/labeler/vocabulary';
 import { actorHandle, resolveActorDid } from '$lib/server/pds/resolve';
-import { log } from '$lib/server/xrpc-router';
+import { createLogger } from '$lib/server/logger';
+const log = createLogger('web');
 
 export interface LibrarianRow {
   did: string;
@@ -19,8 +20,8 @@ export interface LibrarianRow {
   decidedBy: string | null;
 }
 
-export const load: PageServerLoad = async ({ locals }) => {
-  await requireAdmin(locals.viewer, '/admin/librarians');
+export const load: PageServerLoad = async (event) => {
+  requireAdmin(event);
   const dids = await activeSubjects(LIBRARIAN_LABEL);
   const applications = await applicationsForDids(dids);
   const librarians: LibrarianRow[] = await Promise.all(
@@ -52,7 +53,7 @@ async function targetFrom(event: Parameters<NonNullable<Actions['issue']>>[0]) {
 
 export const actions: Actions = {
   issue: async (event) => {
-    const adminDid = await requireAdmin(event.locals.viewer, '/admin/librarians');
+    const adminDid = requireAdmin(event);
     const target = await targetFrom(event);
     if ('error' in target) return fail(400, { error: target.error });
     try {
@@ -67,7 +68,7 @@ export const actions: Actions = {
   },
 
   revoke: async (event) => {
-    const adminDid = await requireAdmin(event.locals.viewer, '/admin/librarians');
+    const adminDid = requireAdmin(event);
     const form = await event.request.formData();
     const did = String(form.get('did') ?? '').trim();
     if (!did.startsWith('did:')) return fail(400, { error: 'Expected a DID' });

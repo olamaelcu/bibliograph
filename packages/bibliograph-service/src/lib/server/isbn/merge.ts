@@ -9,8 +9,8 @@ import {
 /**
  * ISBN identifiers on an edition record.
  *
- * `community.lexicon.book.defs#identifier` carries an ISBN as
- * `{ type: 'isbn', value: '<hyphenless ISBN-13>' }` and compares identifiers by
+ * `community.lexicon.media.book.defs#identifier` carries an ISBN as
+ * `{ issuer: 'isbn13', value: '<hyphenless ISBN-13>' }` and compares identifiers by
  * exact `type`/`value` equality. ISBN-10 is therefore not representable: the
  * lexicon requires conversion to ISBN-13 on write, so an edition holds at most
  * one ISBN identifier. Everything here is append-only — this runs against
@@ -64,7 +64,7 @@ export function mergeIsbnIdentifiers(
 		const isbn = isbn13FromAny(raw);
 		if (!isbn || seen.has(isbn)) continue;
 		seen.add(isbn);
-		incoming.push({ type: 'isbn', value: isbn });
+		incoming.push({ issuer: 'isbn13', value: isbn });
 	}
 
 	const room = Math.max(0, max - identifiers.length);

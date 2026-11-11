@@ -4,11 +4,10 @@ pnpm = "11.13.1"
 
 [env]
 _.file = ".env"
-TAP_ADMIN_PASSWORD = "19b37984434cbe7908fedcc267d535eee21b15a13971eb4c873a00d371f0b493"
 DATABASE_URL = "postgres://bibliograph:bibliograph@localhost:5432/bibliograph"
-
-[tasks.containers]
-run = ["docker compose up --detach"]
+# HappyView tables live in their own schema; keep DATABASE_URL public-only.
+HAPPYVIEW_DATABASE_URL = "postgres://happyview_app:happyview@localhost:5432/bibliograph"
+PLC_DIRECTORY_URL = "http://127.0.0.1:2582"
 
 [tasks.web-dev]
 run = ["pnpm run dev --host"]
@@ -16,47 +15,77 @@ run = ["pnpm run dev --host"]
 [tasks.worker-dev]
 run = ["pnpm run worker"]
 
-[tasks."backfill:isbns"]
-description = "Run the ISBN backfill scan once (enqueues jobs for the worker)"
-run = ["pnpm --filter bibliograph-service run backfill:isbns"]
+[tasks.stack]
+description = "Start the local Postgres + mock PLC + disposable PDS"
+run = ["docker compose up --detach plc pds postgres"]
 
-[tasks."backfill:requeue-isbns"]
-description = "Re-enqueue ISBN lookups for editions stamped shadow/none/ambiguous"
-run = ["pnpm --filter bibliograph-service run backfill:requeue-isbns"]
+[tasks.mock-plc]
+description = "Run the mock PLC directory alone (PORT=2582)"
+run = ["pnpm --filter bibliograph-service mock-plc"]
 
-[tasks."backfill:bookhive-catalog"]
-description = "Fill bh.* editions from Bookhive's catalog: on-protocol ISBNs and contributor refs"
-run = ["pnpm --filter bibliograph-service run backfill:bookhive-catalog"]
+[tasks.dev-seed]
+description = "Create a local .test account on the dev PDS and write a shelf (no network account)"
+run = ["pnpm --filter bibliograph-service dev:seed"]
 
-[tasks."backfill:descriptions"]
-description = "Run the description backfill scan once (enqueues jobs for the worker)"
-run = ["pnpm --filter bibliograph-service run backfill:descriptions"]
+[tasks.hv-extract]
+description = "Extract the pinned HappyView image's binary/static/migrations into .cache/happyview"
+run = ["pnpm --filter bibliograph-service hv:extract"]
 
-[tasks."backfill:actors"]
-description = "Seed the reader-directory DIDs and resolve their handles/profiles"
-run = ["pnpm --filter bibliograph-service run backfill:actors"]
+[tasks.hv-dev-auth]
+description = "Seed a local HappyView admin key and XRPC client (local DB only)"
+run = ["pnpm --filter bibliograph-service hv:dev-auth"]
 
-[tasks.worker]
-description = "Run the worker (TAP consumer + graphile task lists) to drain the queue"
-run = ["pnpm --filter bibliograph-service run worker"]
+[tasks.hv-dev]
+depends = ["hv-extract"]
+description = "Run the extracted HappyView binary against HAPPYVIEW_DATABASE_URL"
+run = ["pnpm --filter bibliograph-service hv:dev"]
+
+[tasks.db-migrate]
+run = ["pnpm run db:migrate"]
+
+[tasks.hv-deploy]
+description = "Upload lexicons/scripts to HappyView and apply activity indexes"
+run = ["pnpm --filter bibliograph-service hv:deploy"]
+
+[tasks.pds-publish-lexicons]
+description = "Publish lexicons to the publisher PDS as com.atproto.lexicon.schema records"
+run = ["pnpm --filter bibliograph-service pds:publish-lexicons"]
 
 [tasks.dev]
-depends = ["containers"]
-run = ["mise run worker-dev ::: web-dev"]
+description = "Migrate, start HappyView, seed local keys, deploy, then run worker + web"
+run = [
+  "docker compose up -d",
+  "docker compose stop happyview",
+  "pnpm --filter bibliograph-service dev:stack",
+]
+
+[tasks.worker]
+description = "Run catalog enrichment and the PDS outbox publisher"
+run = ["pnpm --filter bibliograph-service run worker"]
 
 [tasks.sql]
 description = "Open a psql shell against the local bibliograph database"
 run = ["psql ${DATABASE_URL}"]
 
-[tasks.lex-keygen]
-description = "Generate an ATProto lex-publisher K-256 keypair (one-time)"
-run = [
-  "pnpm --filter bibliograph-service exec tsx scripts/gen-lex-publisher-key.ts",
-]
+[tasks."backfill:covers"]
+description = "Enqueue cover backfills for editions with no stored cover"
+run = ["pnpm --filter bibliograph-service run backfill:covers"]
 
-[tasks.lex-build]
-description = "Build the signed lex repo CAR files from lexicons/*.json"
-run = ["pnpm --filter bibliograph-service exec tsx scripts/build-lex-repo.ts"]
+[tasks."backfill:descriptions"]
+description = "Enqueue description backfills for editions with no description"
+run = ["pnpm --filter bibliograph-service run backfill:descriptions"]
+
+[tasks."backfill:formats"]
+description = "Run the Goodreads format/pages/date backfill once"
+run = ["pnpm --filter bibliograph-service run backfill:formats"]
+
+[tasks."backfill:isbns"]
+description = "Enqueue ISBN lookups for editions that have none"
+run = ["pnpm --filter bibliograph-service run backfill:isbns"]
+
+[tasks."backfill:requeue-isbns"]
+description = "Re-enqueue ISBN lookups for editions stamped shadow/none/ambiguous"
+run = ["pnpm --filter bibliograph-service run backfill:requeue-isbns"]
 
 [shell_alias]
 sql = "mise sql"

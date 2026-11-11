@@ -239,6 +239,13 @@
       "when": 1795594800000,
       "tag": "0035_backfill_events",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795681200000,
+      "tag": "0036_appview",
+      "breakpoints": true
     }
   ]
 }

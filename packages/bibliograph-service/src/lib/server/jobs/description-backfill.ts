@@ -1,7 +1,5 @@
 import type { Logger } from 'pino';
 import { eq, isNull, and } from 'drizzle-orm';
-import { cidForLex } from '@atproto/lex-cbor';
-import type { LexMap } from '@atproto/lex-data';
 import { db as defaultDb } from '../db/index';
 import { editions } from '../db/schema';
 import type { EditionRow } from '../db/schema';
@@ -16,9 +14,8 @@ import {
   getBookByIsbn,
   isbndbDescription,
 } from '../api/isbndb';
-import { editionRecordValue, rowIdentifiers } from '../edition-record';
+import { loadEditionIdentifiers } from '../edition-record';
 import { isbnFromIdentifiers } from '../isbn/lookup';
-import { wireContributorsFor } from './wire-contributors';
 
 /**
  * Backfill missing `description` on an edition record.
@@ -127,7 +124,7 @@ export async function resolveDescription(
     }
   }
 
-  const isbn = isbnFromIdentifiers(rowIdentifiers(row.identifiers));
+  const isbn = isbnFromIdentifiers(await loadEditionIdentifiers(row.uri));
   if (!isbn) return undefined;
 
   if (googleBooksBreaker.canCall()) {
@@ -189,20 +186,15 @@ export async function backfillDescriptionForEdition(
     return { updated: false, reason: 'no_description_found' };
   }
 
-  const contributors = await wireContributorsFor(db, row.contributors);
-  const value = editionRecordValue(row, { contributors, description });
-  if (!value) return { updated: false, reason: 'missing_identifiers' };
-  const cid = (await cidForLex(value as unknown as LexMap)).toString();
-
   const updated = await db
     .update(editions)
-    .set({ description, cid, indexedAt: new Date(), descriptionCheckedAt: new Date() })
+    .set({ description, indexedAt: new Date(), descriptionCheckedAt: new Date() })
     .where(eq(editions.uri, uri))
     .returning({ uri: editions.uri });
 
   if (updated.length === 0) return { updated: false, reason: 'update_missed' };
 
-  log.info({ stage: 'description-backfill', uri, length: description.length, cid }, 'description backfilled');
+  log.info({ stage: 'description-backfill', uri, length: description.length }, 'description backfilled');
 
   return { updated: true, description, reason: 'ok' };
 }

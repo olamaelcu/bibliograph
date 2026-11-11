@@ -1,255 +1,121 @@
 # Bibliograph
 
-A collection of tools for bibliographic work in one project:
+An [ATProto AppView][1] for books. Bibliograph owns two things the network cannot:
 
-- An [ATProto appview][1] for:
-  - resolving book information in a uniform way conforming to [the proposal
-    made by Olamaelcu][2]
-  - fetching reviews published in the Atmosphere [using microcosm for discovery](#network-discovery)
+- **book identity** — canonical catalog editions, identifier bags, inline
+  contributors/publishers, provider enrichment, and publication of each edition
+  to a real PDS;
+- **cross-user reading activity views** — shelves, shelving, shelf items,
+  reviews, follows and reading goals, indexed from readers' own PDSes.
 
-The end goal of this project is to provide the appview that [Livtet][] will
-leverage to interface with the ATProto ecosystem - it's published in the open
-to allow for simpler interoperability with other products and projects but
-designed for the needs of Livtet.
+It is the AppView [Livtet][] uses, and is published in the open for
+interoperability.
 
-## Discovery
+The complete endpoint contract — the old surface, its history, and the target
+surface — is in [`docs/xrpc.md`](docs/xrpc.md).
 
-Discovery for things like reviews happen in a few ways:
+## Structure
 
-### Network Discovery
-
-Bibliograph leverages <https://constellation.microcosm.blue/> to find book
-reviews specific to Bibliograph written into the Atmosphere as well as records
-ingested from TAP of the expected NSID
-`net.olamaelcu.livtet.biblio.bookReview`. This allows for (near-)real time
-analysis of book reviews on protocol from Livtet. For compatibility with other
-applications like [Bookhive][], Bibliograph normalizes those reviews into
-Bibliograph reviews so they can appear to Bibliograph-powered applications.
-
-### Bookhive
-
-[Bookhive][] publishes its catalog and its users' book records on-protocol from
-a single PDS (`did:plc:enu2j5xjlqsjaylv3du4myh4`), which Bibliograph consumes in
-both directions:
-
-- **Catalog → editions.** `buzz.bookhive.catalogBook` records are ingested as
-  `community.lexicon.book.edition` rows keyed `bh.{hiveId}`
-  (`pnpm --filter bibliograph-service ingest:bookhive`), carrying the catalog record's at-uri as a `bookhive`
-  identifier (plus the `goodreads` id when that is the upstream source).
-- **User records → reviews and shelving.** A `buzz.bookhive.book` record holds
-  the review text, a 1–10 star rating and a reading status
-  (`reading` / `finished` / `wantToRead` / `abandoned`) all at once, and refs its
-  catalog record through `hiveBookUri`. Bibliograph never rewrites those
-  records: `getReviewsByBook` translates them into `biblio.bookReview` values and
-  `getShelvingOfBook` maps the status onto `defs#bookShelfMetadata.status`, both
-  only for the edition that carries the matching `bookhive` identifier.
-- **Discovery.** Records are mirrored through TAP (`buzz.bookhive.book`) and
-  resolved through Constellation with source `buzz.bookhive.book:hiveBookUri`,
-  so reviews written since the last mirror — or by repos no TAP instance follows
-  — are still found on the first page.
-
-`buzz.bookhive.buzz` (book comments) is deliberately **not** ingested: comments
-ref the user book record and each other, never the catalog record, so
-Constellation cannot attach them to a Bibliograph edition and mirroring them
-would only cost storage. Set `BOOKHIVE_PDS` to point somewhere other than
-`https://bluesky.nickthesick.com`.
-
-### Material Discovery
-
-Information is sourced from a few places:
-
-- Book information is sourced from Google Books, ISBNdb and Goodreads. Google
-  Books enrichment supplies descriptions and covers (requires
-  `GOOGLE_BOOKS_API_KEY`). Google Books answers are cached in Postgres for 24
-  hours — hits and "no such volume" misses alike — because the quota is charged
-  per request against that one key, which the web and worker processes share.
-- Cover bytes are cached on disk under `COVER_CACHE_DIR` the first time
-  `getImageForBook` serves them, so the cover providers are only
-  contacted on a miss. The cache survives restarts and package upgrades.
-- Edition display metadata — the normalized format (`hardcover`, `paperback`,
-  `ebook`, `audiobook`) and page count — is stored on `editions` and returned
-  by the AppView's `getBooks` query. The common format slugs are declared as
-  `knownValues` in `net.olamaelcu.livtet.biblio.defs#bookFormat`; clients still
-  accept a newer slug rather than rejecting the edition.
-- `pnpm --filter bibliograph-service backfill:formats` fills missing
-  `format`, `pages`, ISBN-10/13 and ASIN identifiers, `publishedYear`, and
-  `language` from Goodreads. Genres, publisher, publication date, and
-  contributor portraits are parsed and logged but not stored yet. A missing
-  book emits `goodreads-book-not-found`, is recorded in
-  `edition_goodreads_backfill`, and is counted as `notFound` in the run summary.
-  Known misses are skipped on later runs. The run stops when the failure rate
-  reaches 80% after at least 20 fresh attempts, and stops immediately on a
-  Goodreads anti-bot response. It is an operator-run, rate-limited script, not
-  a request-path scrape; prefer the provider APIs when they carry the binding.
-- `pnpm --filter bibliograph-service goodreads:book -- <isbn>` prints the full
-  Goodreads payload for one ISBN: pages, binding, ISBN/ASIN, publication date,
-  publisher, language, genres, and contributors with portrait URLs. Author
-  pages are used as a portrait fallback via their OpenGraph `og:image`.
-- General `searchEditions` queries also merge Goodreads results as
-  `gr.<bookId>` editions. They are deduped by normalized title against the
-  primary sources; a blocked or failed Goodreads call is returned as a
-  `degraded: { upstream: 'goodreads' }` result rather than failing the search.
-- Author information is _gleamed_ from Wikipedia
-
-## Catalog curation
-
-The catalog records (`community.lexicon.book.*`) are served by Bibliograph, but
-corrections come from people. Anyone who signs in with an AT Protocol account
-can vote on which work an edition belongs to.
-
-- The vote is a record in the voter's **own** repository:
-  `net.olamaelcu.livtet.biblio.editionWorkLink`, keyed by the edition's rkey, so
-  an account holds at most one vote per edition and changing your mind updates
-  that record rather than stacking another one.
-- Bibliograph ingests votes through TAP into `edition_work_votes` and only
-  rewrites `editions.work_uri` once votes agree: `link votes − unlink votes >=
-  EDITION_WORK_CONSENSUS_THRESHOLD` (default `2`). With one vote per account,
-  a single dissenter cannot overwrite an established link. Set the threshold to
-  `1` to let one account curate a small or private catalog.
-- A decision is stamped `editions.work_link_source = 'consensus'`, and the
-  automatic reconciler (`pnpm --filter bibliograph-service backfill:works`) skips those rows — otherwise a
-  nightly run would silently undo a voted unlink.
-- The reconciler has no work catalogue to consult any more: a run leaves
-  `work_uri` NULL and reports each orphan as deferred, rather than inventing a
-  work from the edition's own fields, so an unlinked edition means the catalog
-  genuinely does not know its work. `pnpm --filter bibliograph-service backfill:works --shard=<index>/<count>`
-  walks one slice of the table, for splitting a large catalog across several
-  processes, and phase 2 re-verifies the CID of every already-linked work.
-  `edition_work_backfill` rows written by earlier builds are still honoured —
-  `--retry-unmatched` ignores them — but nothing writes new ones.
-
-OAuth is least-privilege: the client asks only for
-`repo:net.olamaelcu.livtet.biblio.editionWorkLink`, never for general repo or
-profile access.
-
-| Variable | Dev default | Purpose |
+| Plane | Runs | Owns |
 | --- | --- | --- |
-| `OAUTH_PUBLIC_ORIGIN` | `http://127.0.0.1:5176` | Origin used to build the redirect URI. Loopback redirects must be `127.0.0.1`/`[::1]`, not `localhost`. |
-| `OAUTH_CLIENT_ID` | _(unset)_ | Unset → an ATProto loopback client id carrying its metadata inline. Set to an HTTPS URL serving `/oauth-client-metadata.json` in production. |
-| `EDITION_WORK_CONSENSUS_THRESHOLD` | `2` | Net votes required to apply a link or unlink. |
+| Catalog (TypeScript, this repo) | SvelteKit edge + graphile worker | catalog tables, provider enrichment, PDS publisher, labeler, feed generator, image routes, `/xrpc` gateway |
+| Activity (HappyView) | Debian package, loopback only | Jetstream/backfill index (`happyview_records`), activity query lexicons + Lua |
+| PDS (rsky-pds) | Debian package | publisher repo, lexicons, catalog edition records |
 
-Sessions are server-side (`oauth_sessions` holds DPoP key material; the browser
-cookie only carries an opaque id), so a tampered cookie cannot claim another
-account's session.
+One Postgres database serves both the catalog tables and HappyView's index.
+Activity Lua reads a single `appview_book` view; no other catalog coupling exists
+at read time.
 
-## Librarian gate
+## Contexts and records
 
-Voting on catalog edits is limited to accounts that hold the `librarian` label.
-Signing in is not enough: authentication proves who you are, the label decides
-whether you may curate.
+Catalog records use the books-wg namespace:
 
-Bibliograph is itself the labeler. Its labeler identity is the same `did:web` as
-the publisher, so `/.well-known/did.json` advertises both `#atproto_label` (the
-label signing key) and `#atproto_labeler` (the `AtprotoLabeler` service, an
-origin with no path).
+- `community.lexicon.media.book.edition` — an edition, published by the
+  publisher account. Contributors and one publisher are inlined on the wire but
+  stored as entities linked by join tables.
+- `community.lexicon.media.book.review` — a reader's review, written to their
+  own PDS and indexed by HappyView.
 
-| Endpoint | Where |
-| --- | --- |
-| `com.atproto.label.queryLabels` | XRPC query in the SvelteKit router |
-| `com.atproto.label.subscribeLabels` | WebSocket on the Node entrypoint |
+Reading activity stays in each reader's PDS under
+`net.olamaelcu.livtet.biblio.*` (`shelf`, `shelfItem`, `bookShelving`, `follow`,
+`readingGoal`) and `net.olamaelcu.livtet.actor.profile`.
 
-Labels are signed over the DRISL/dag-CBOR encoding of the schema fields
-(`ver` included, `sig` and `$type` excluded), SHA-256 hashed, with the raw hash
-bytes signed by the `#atproto_label` key. Revocation is a negation label
-(`neg: true`), per spec; the gate treats a negated label as absent.
+No AppView write procedure exists: clients write their own records, and the
+AppView only publishes catalog editions.
 
-### Entrypoint note
+## Publication
 
-`com.atproto.label.subscribeLabels` is a WebSocket stream. `@sveltejs/adapter-node`
-generates a `build/index.js` that constructs its own `http.Server` and never
-exposes the `upgrade` event, so a SvelteKit route cannot serve it. Bibliograph
-therefore runs `server.ts`, which imports the emitted `build/handler.js`, hands
-HTTP to SvelteKit, and keeps upgrades for the label stream. `pnpm start`, the
-`start` script, and the packaged `bibliograph.service` (whose `ExecStart` runs
-`tsx server.ts`) all use that entrypoint.
+Triggers on the catalog tables write `pds_outbox`. The `pds-publish` worker
+drains it into the publisher PDS with `com.atproto.repo.applyWrites`, using the
+account session from `PDS_ACCOUNT_DID` / `PDS_ACCOUNT_PASSWORD`; `pds_cids`
+remembers the last published CID so create/update is chosen without a read.
 
-`vite dev` does not run `server.ts`, so the stream only exists in a built server:
-run `pnpm build && pnpm start` to exercise it locally.
+`/xrpc/com.atproto.{repo,sync,identity}.*` and
+`/xrpc/com.atproto.server.describeServer` are proxied to that PDS. Lexicons are
+published as `com.atproto.lexicon.schema` records with
+`pnpm --filter bibliograph-service pds:publish-lexicons`.
 
-### Label vocabulary
+## Providers
 
-All values live in `src/lib/server/labeler/vocabulary.ts`, shaped like
-`com.atproto.label.defs#labelValueDefinition` so they can be published in a
-labeler service record without translation. Every write is validated against it:
-an undeclared value, or a value applied to the wrong subject kind, throws before
-anything is signed.
+Catalog ingestion and enrichment use Google Books, ISBNdb and Goodreads.
+Google Books and ISBNdb answers are cached in Postgres (hits and negative
+answers), because the quota is charged against one key shared by the web and
+worker processes.
 
-| Label | Subject | Behavior | Issued by |
-| --- | --- | --- | --- |
-| `librarian` | account | `none`/`inform`, default ignore | admin approval of an application |
-| `senior-librarian` | account | `none`/`inform`, default ignore | `pnpm --filter bibliograph-service labels:seniority`, automatically |
-| `administrator` | account | `none`/`inform`, default ignore | an existing administrator |
-| `controversial` | record (edition/work) | `none`/`inform`, default warn | administrators, from the record page |
+```bash
+mise run backfill:covers
+mise run backfill:descriptions
+mise run backfill:formats
+mise run backfill:isbns
+```
 
-Credential labels deliberately never blur content: they say nothing about what
-the subject contains. `controversial` defaults to `warn` so the banner is visible
-without every subscriber configuring it — the point is that a reader sees the
-context.
+The admin import UI lives at `/admin/import/isbn` and is gated on `ADMIN_TOKEN`.
 
-`senior-librarian` requires **both** tenure and contribution, since applying and
-then going quiet for a year should not earn it:
-`SENIOR_LIBRARIAN_MIN_DAYS` (default 365) since the first librarian label, and
-`SENIOR_LIBRARIAN_MIN_VOTES` (default 10) votes cast. Run
-`pnpm --filter bibliograph-service labels:seniority --dry-run` to see the
-evaluation without writing anything; the job is idempotent, so schedule it daily.
+## Feeds
 
-### Administrators
+`com.atproto.feed.describeFeedGenerator` advertises four feeds:
 
-The admin view is gated by the `administrator` label, so anyone holding it —
-including accounts granted long after deployment — can review the queue without a
-redeploy. `ADMIN_DIDS` remains as a bootstrap only: it is the way to grant the
-first administrator on a fresh deployment, and to recover if a label is ever lost.
-An account in that list stays an admin even if the label is withdrawn.
+- `public` — newest reviews and shelving across the index;
+- `following` — activity by accounts the viewer follows;
+- `extended` — two-hop follow graph;
+- `dynamic` — same graph, service-JWT required.
 
-### Requesting access
+Personalized feeds authenticate with an atproto service JWT
+(`lxm = com.atproto.feed.getFeedSkeleton`). There is no browser session and no
+end-user OAuth.
 
-A signed-in account without the label sees a request control on any edition page.
-The request lands in `/admin/applications`, readable only by DIDs listed in
-`ADMIN_DIDS` (empty = nobody). Approving emits the label; revoking emits a
-negation and marks the application revoked. The application table records the
-decision trail, but the label is the authority.
+## Development
 
-| Variable | Dev default | Purpose |
-| --- | --- | --- |
-| `ATP_LABEL_SIGNING_KEY` | _(unset → labeler disabled)_ | K-256 private key (64 hex) used to sign labels. `pnpm --filter bibliograph-service label-keygen`. |
-| `ATP_LABEL_KEY_MULTIBASE` | _(unset → placeholder published)_ | Public half, published as `#atproto_label` in the DID document. Must match the signing key or every label fails verification. |
-| `ADMIN_DIDS` | _(unset → nobody)_ | Comma-separated DIDs allowed to review the queue. |
+```bash
+mise run db-migrate     # apply drizzle migrations
+mise run hv-deploy      # upload lexicons/scripts, apply activity indexes
+mise run stack          # Postgres + mock PLC + disposable local PDS
+mise run hv-extract     # extract the pinned HappyView binary into .cache
+mise run hv-dev-auth    # seed local HappyView admin/client credentials
+mise run dev-seed       # create reader.test and write a shelf (no network account)
+mise run dev            # HappyView + worker + web
+```
 
-## Observability
+`PLC_DIRECTORY_URL` points `did:plc` resolution at the mock PLC; see
+[`docs/dev-environment.md`](docs/dev-environment.md). The web process serves `/xrpc/*` in both dev and production; HappyView is an
+internal upstream at `HAPPYVIEW_URL`. `.env.example` is the canonical
+configuration schema.
 
-Prometheus is available locally at <http://localhost:9090> (no auth, dev only).
+Static checks:
 
-Scrape targets:
+```bash
+pnpm --filter bibliograph-service check
+pnpm --filter bibliograph-service lint
+pnpm --filter bibliograph-service build
+```
 
-- **bibliograph-service** — `host.docker.internal:5000/metrics`. HTTP request
-  histograms labelled by `method`, `status`, and a normalized `path`
-  (DIDs / opaque IDs collapsed to `/{did}` and `/{id}` to bound cardinality;
-  `/xrpc/*` and `/.well-known/*` are kept verbatim).
-- **tap** — `tap:2481/metrics`. Firehose ingestion, outbox delivery, resync
-  latency emitted by [indigo/tap](https://github.com/bluesky-social/indigo/tree/main/cmd/tap).
+## Labeler
 
-Pre-computed recording rules live in [`prometheus/rules/bibliograph.yml`](prometheus/rules/bibliograph.yml) and refresh every 30s:
-
-| Rule                                              | What it tells you                     |
-| ------------------------------------------------- | ------------------------------------- |
-| `job:http_requests:rate5m`                        | Request rate per route + status class |
-| `job:http_latency:p50_5m` / `:p95_5m` / `:p99_5m` | Latency percentiles per route         |
-| `job:http_errors:ratio5m`                         | Share of 5xx responses per route      |
-| `job:nodejs_eventloop_lag:p95_1m`                 | Event-loop lag p95 (Node-side)        |
-| `job:process_memory_rss:bytes`                    | RSS memory in bytes                   |
-| `job:tap_firehose:received_rate1m`                | Events/sec received from the relay    |
-| `job:tap_firehose:processed_rate1m`               | Events/sec successfully processed     |
-| `job:tap_outbox:delivered_rate1m`                 | Events/sec delivered to consumers     |
-| `job:tap_resync:p95_5m`                           | Resync latency p95                    |
-| `job:tap_event_cache:size`                        | Tap in-memory buffer size             |
-| `job:tap_firehose:last_seq`                       | Last cursor seq committed upstream    |
-
-TSDB lives in the `promdata` named volume with **7-day** retention.
-
-The `/metrics` endpoint on bibliograph-service is currently unauthenticated — bind
-Prometheus to localhost before exposing the port.
+`net.olamaelcu.livtet.biblio` remains the label authority for librarian and
+administrator labels. Sign labels with `ATP_LABEL_SIGNING_KEY` and publish the
+public half under `#atproto_label` in the DID document. The admin UI issues and
+revokes labels; `pnpm --filter bibliograph-service labels:seniority` grants
+`senior-librarian` after the configured tenure.
 
 [1]: https://atproto.com/guides/glossary#app-view
-[2]: https://www.olamaelcu.net/blog/2026/book-lexicon
-[livtet]: https://livtet.olamaelcu.net
-[bookhive]: https://bookhive.buzz/
+[Livtet]: https://livtet.olamaelcu.net

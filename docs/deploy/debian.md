@@ -17,7 +17,7 @@ and an nginx site generated around a debconf-selected port.
 | `/var/lib/bibliograph/lex` | published lexicon CAR files | systemd `StateDirectory` |
 | `/var/log/bibliograph` | pino per-process log files | systemd `LogsDirectory` |
 | `/usr/lib/systemd/system/bibliograph.service` | web process | dpkg |
-| `/usr/lib/systemd/system/bibliograph-worker.service` | TAP consumer | dpkg |
+| `/usr/lib/systemd/system/bibliograph-worker.service` | catalog jobs + PDS outbox | dpkg |
 | `/usr/lib/systemd/system/bibliograph-migrate.service` | oneshot migrator | dpkg |
 | `/usr/lib/sysusers.d/bibliograph.conf` | `bibliograph` system user | dpkg |
 
@@ -32,7 +32,7 @@ The Livtet package runs a single process. Bibliograph has three:
 | Unit | Runs | Why separate |
 | --- | --- | --- |
 | `bibliograph.service` | `tsx server.ts` | The WebSocket label stream needs the `upgrade` event, so the package runs the custom entrypoint, not `build/index.js` |
-| `bibliograph-worker.service` | `tsx worker.ts` | TAP consumption must survive web restarts and back off on its own |
+| `bibliograph-worker.service` | `tsx worker.ts` | catalog enrichment and the PDS outbox must survive web restarts and back off on their own |
 | `bibliograph-migrate.service` | `tsx src/lib/server/db/migrate.ts` | `Type=oneshot`, `Requires=`d by both. No `RemainAfterExit`, so it re-runs every time either unit starts — that is how an upgrade applies new migrations |
 
 The migrator fails closed: any unrecognized PostgreSQL error aborts it, and the
@@ -46,7 +46,7 @@ Both long-running units stop on SIGTERM in well under a second:
 
 | Process | What it does |
 | --- | --- |
-| `bibliograph-worker` | flushes the TAP batch buffers, asks the subscription to close its websocket (bounded at 200 ms, because the iterator's `return()` does not settle a pending `next()`), then exits 0 |
+| `bibliograph-worker` | stops the outbox interval and lets graphile finish the current job, then exits 0 |
 | `bibliograph.service` | `server.close()` + `closeAllConnections()`, then exits 0; a 10 s timer exits 1 if sockets refuse to go |
 
 Signal handlers are registered *before* the dependency graph is imported — the
@@ -61,7 +61,7 @@ Two related decisions:
   first few hundred milliseconds, before the interpreter has loaded our module,
   still hits the default disposition; this keeps systemd from calling that a
   failure.
-- If the TAP subscription ends *without* a signal, the worker throws and exits
+- If the task list ends *without* a signal, the worker throws and exits
   non-zero on purpose. Exiting 0 there would look like a clean stop and
   `Restart=on-failure` would never bring the consumer back.
 
@@ -109,11 +109,14 @@ su - postgres -c "createdb -O bibliograph bibliograph"
 or point `DATABASE_URL` at a remote server and open the firewall. Migrations run
 automatically on service start.
 
-### TAP
+### Activity plane and PDS
 
-The worker consumes an ATProto TAP service. Set `TAP_URL` and
-`TAP_ADMIN_PASSWORD`; without them the worker exits and restarts in a loop, and
-the index stops advancing. The web process is unaffected.
+HappyView and rsky-pds are separate Debian packages installed by the infra
+repository. The app process only needs their loopback origins and credentials:
+`HAPPYVIEW_URL`, `HAPPYVIEW_CLIENT_KEY`, `HAPPYVIEW_CLIENT_SECRET`,
+`HAPPYVIEW_ADMIN_KEY`, `PDS_URL`, `PDS_ACCOUNT_DID` and
+`PDS_ACCOUNT_PASSWORD`. Without them the edge still serves catalog reads, but
+activity queries answer `502 UpstreamUnavailable` and the outbox cannot publish.
 
 ## Install and operate
 
@@ -125,123 +128,30 @@ systemctl status bibliograph bibliograph-worker
 journalctl -u bibliograph -u bibliograph-worker -f
 ```
 
-Required entries have no defaults: `DATABASE_URL`, `TAP_URL`,
-`TAP_ADMIN_PASSWORD`, `ATP_SIGNING_KEY`, `ATP_LABEL_SIGNING_KEY`. The conffile
-marks each one.
+Required entries have no defaults: `DATABASE_URL`, `ATP_LABEL_SIGNING_KEY`,
+`HAPPYVIEW_CLIENT_KEY`, `HAPPYVIEW_CLIENT_SECRET`, `HAPPYVIEW_ADMIN_KEY`,
+`PDS_ACCOUNT_DID`, `PDS_ACCOUNT_PASSWORD` and `ADMIN_TOKEN`. The conffile marks
+each one.
 
 ## Signing keys
 
-Two independent K-256 keypairs. Generate them **on the host** so the private
-halves never leave it, and never commit them:
+The publisher repo is written through the PDS session, so the app no longer
+holds a repo-signing key. It holds one K-256 labeler key:
 
 ```bash
-cd /usr/lib/bibliograph/packages/bibliograph-service
-export LEX_PUBLISHER_HOSTNAME=biblio.livtet.olamaelcu.net
-
-# repository / lex publisher:  ATP_SIGNING_KEY + ATP_SERVICE_KEY_MULTIBASE
-./node_modules/.bin/tsx scripts/gen-lex-publisher-key.ts
-
-# labeler:                     ATP_LABEL_SIGNING_KEY + ATP_LABEL_KEY_MULTIBASE
-./node_modules/.bin/tsx scripts/gen-label-key.ts
+pnpm --filter bibliograph-service label-keygen
 ```
 
-Each script prints a **private** half (`*_SIGNING_KEY`, 64 hex chars) and the
-matching **public** half (`*_MULTIBASE`, `zQ3s…`). They are two halves of one
-keypair: the private key signs, the public key is what verifiers resolve. Note
-the asymmetry in the variable names — the DID document publishes `#atproto`
-from `ATP_SERVICE_KEY_MULTIBASE` and `#atproto_label` from
-`ATP_LABEL_KEY_MULTIBASE`, so setting `ATP_SIGNING_KEY` alone leaves `#atproto`
-at the placeholder.
-
-Put all four values in `/etc/bibliograph/bibliograph.env`, then
-`systemctl restart bibliograph`. The keys are exposed at
-`https://biblio.livtet.olamaelcu.net/.well-known/did.json`; until they are set,
-`did.ts` serves `z6Mkplaceholder…` and logs a `[did] … is not set` warning per
-missing variable.
-
-Keep the two pairs distinct: the labeler key must be rotatable without touching
-repository signing, and the blast radii differ. A wrong public half makes every
-label signature invalid, because verifiers check each label against the key
-resolved from the DID document. Changing either key therefore invalidates
-everything signed with the old one.
-
-## Lexicon publication
-
-The DID document advertises `#atproto_pds` because that is the only discovery
-hook ATProto offers for fetching a DID's repository. The chain a resolver walks
-is:
-
-```
-com.atproto.lexicon.resolveLexicon
-  -> resolve did:web:biblio.livtet.olamaelcu.net
-  -> service #atproto_pds  (this host)
-  -> com.atproto.sync.getRecord for com.atproto.lexicon.schema/<nsid>
-```
-
-The app does not run a PDS. It serves a **read-only, single-repo** surface built
-offline from `lexicons/**/*.json` and signed with `ATP_SIGNING_KEY`:
+Publish the public half in the DID document under `#atproto_label`. Lexicons are
+published to the PDS with:
 
 ```bash
-mise run publish-lex     # also runs automatically from deploy-deb once a key exists
+pnpm --filter bibliograph-service pds:publish-lexicons
 ```
 
-That writes into `LEX_OUT_DIR` (`/var/lib/bibliograph/lex`):
-
-| File | Contents |
-| --- | --- |
-| `full.car` | commit + MST + every schema record (`sync.getRepo`) |
-| `<nsid_safe>.car` | commit + MST proof + one record (`sync.getRecord`) |
-
-The directory is a systemd `StateDirectory` (`StateDirectory=bibliograph
-bibliograph/lex`), so it is created with the right ownership; the publisher
-reads the files per request, so publishing needs no restart.
-
-Implemented verbs: `sync.getRepo`, `getRepoStatus`, `getLatestCommit`,
-`getBlocks`, `getRecord` (only for `com.atproto.lexicon.schema`),
-`repo.getRecord`, `repo.describeRepo`, `identity.resolveHandle/resolveDid/
-resolveIdentity` (only this DID), and `server.describeServer`. There are **no
-write paths** — `createRecord`, `uploadBlob`, `createAccount` are absent, so
-anything treating this as a general PDS will fail on account operations.
-
-Publishing is what makes the DID claim true. Without CARs, every `sync.*` and
-`repo.*` call answers `400 RepoNotFound` — which is what a fresh install looks
-like before the first publish. Verify end to end with the canonical resolver
-(it walks the local lexicon sources, resolves over https, and checks signatures):
-
-```bash
-pnpm --filter bibliograph-service exec tsx scripts/verify-resolver.ts
-```
-
-### Livtet space declarations
-
-The same publisher is the lexicon authority for `net.olamaelcu.livtet.*`, so it
-also publishes the `type: "space"` declarations that an ATProto spaces OAuth
-provider resolves before issuing `space:` scopes:
-
-- `net.olamaelcu.livtet.readingList`
-- `net.olamaelcu.livtet.bookClub`
-- `net.olamaelcu.livtet.clubBookmarks`
-
-`build-lex-repo.ts` defaults `LEX_AUTHORITY` to the authority root
-(`net/olamaelcu/livtet`) and `publish-lex` exports the same default. The
-`@atcute/lex-cli` codegen step deliberately excludes those top-level space
-documents: it does not model the alpha `type: "space"` type, while the static
-publisher stores the declaration verbatim.
-
-Point the authority's DNS at this publisher:
-
-```text
-_lexicon.livtet.olamaelcu.net. 300 IN TXT "did=did:web:biblio.livtet.olamaelcu.net"
-```
-
-The DID document already exposes `#atproto_pds`; exactly one `did=` TXT value
-is required. After publishing and DNS propagation, verify the three records
-through the static publisher before retrying OAuth:
-
-```bash
-LEX_OUT_DIR=/var/lib/bibliograph/lex \
-  pnpm --filter bibliograph-service verify:space
-```
+`com.atproto.lexicon.resolveLexicon` is served at the edge from the build-time
+lexicon map; the protocol endpoints (`com.atproto.repo.*`, `sync.*`,
+`identity.*`) are proxied to the PDS.
 
 `apt upgrade` treats `/etc/bibliograph/bibliograph.env` as a conffile and prompts
 instead of overwriting local edits. debhelper's generated `postinst` restarts
@@ -358,7 +268,7 @@ rationale for what replaced it.
 | Container deploy (before) | Debian package (now) |
 | --- | --- |
 | `ENTRYPOINT` ran the migrator then exec'd the web process | dedicated oneshot unit, `Requires=`d by both long-running units |
-| process types declared in a `Procfile` | `bibliograph-worker.service` (TAP consumer + graphile task lists) |
+| process types declared in a `Procfile` | `bibliograph-worker.service` (catalog jobs + PDS outbox) |
 | environment baked into the image | `/etc/bibliograph/bibliograph.env` conffile, 0640 root:root, read by PID 1 |
 | `EXPOSE 5000`, `HOST=0.0.0.0` behind the platform proxy | unit binds `127.0.0.1`; the package ships the nginx site that proxies to it |
 | `docker save` + `rsync` + `docker load` | `apt install`, previous version kept in the apt cache |

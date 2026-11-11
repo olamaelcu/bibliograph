@@ -1,17 +1,16 @@
 // `senior-librarian`: recognition for librarians who have actually been around.
 //
-// Tenure alone is gameable (apply, leave, come back in a year), so eligibility
-// requires both a minimum time since the FIRST librarian label was issued and a
-// minimum number of votes cast. Both thresholds are configurable because the
-// right numbers are a policy call, not a protocol one.
+// Eligibility requires a minimum time since the FIRST librarian label was
+// issued. The threshold is configurable because the right number is a policy
+// call, not a protocol one.
 //
 // This runs as a one-shot job (scripts/issue-tenure-labels.ts) rather than on the
 // request path: it scans every label and is idempotent, so running it daily is
 // cheap and safe.
 
-import { count, desc, eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db as defaultDb } from '../db/index';
-import { editionWorkVotes, labels } from '../db/schema';
+import { labels } from '../db/schema';
 import type { DbExecutor } from '../stats';
 import { grantLabel, hasLabel } from './labels';
 import { SENIOR_LIBRARIAN_LABEL } from './vocabulary';
@@ -20,25 +19,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface SeniorityPolicy {
   minDays: number;
-  minVotes: number;
 }
 
 export function seniorityPolicy(
   minDaysRaw: string | undefined = process.env.SENIOR_LIBRARIAN_MIN_DAYS,
-  minVotesRaw: string | undefined = process.env.SENIOR_LIBRARIAN_MIN_VOTES,
 ): SeniorityPolicy {
   const minDays = Number(minDaysRaw);
-  const minVotes = Number(minVotesRaw);
   return {
     minDays: Number.isFinite(minDays) && minDays >= 0 ? Math.floor(minDays) : 365,
-    minVotes: Number.isFinite(minVotes) && minVotes >= 0 ? Math.floor(minVotes) : 10,
   };
 }
 
 export interface SeniorityReport {
   did: string;
   tenureDays: number;
-  votes: number;
   eligible: boolean;
   alreadySenior: boolean;
 }
@@ -79,23 +73,14 @@ export async function evaluateSeniority(
 
   if (activeDids.length === 0) return [];
 
-  const voteCounts = new Map<string, number>();
-  const counts = await db
-    .select({ did: editionWorkVotes.voterDid, c: count() })
-    .from(editionWorkVotes)
-    .groupBy(editionWorkVotes.voterDid);
-  for (const row of counts) voteCounts.set(row.did, Number(row.c));
-
   const reports: SeniorityReport[] = [];
   for (const did of activeDids) {
     const issued = firstIssued.get(did)!;
     const tenureDays = Math.floor((now.getTime() - issued.getTime()) / DAY_MS);
-    const votes = voteCounts.get(did) ?? 0;
     reports.push({
       did,
       tenureDays,
-      votes,
-      eligible: tenureDays >= policy.minDays && votes >= policy.minVotes,
+      eligible: tenureDays >= policy.minDays,
       alreadySenior: await hasLabel(did, SENIOR_LIBRARIAN_LABEL, db),
     });
   }

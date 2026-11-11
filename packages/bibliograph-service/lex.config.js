@@ -7,8 +7,9 @@ export default defineLexiconConfig({
     // lexicons/net/olamaelcu/livtet/*.json; only code generation skips them.
     files: [
       'lexicons/com/**/*.json',
-      'lexicons/community/**/*.json',
+      'lexicons/codegen/community/lexicon/media/**/*.json',
       'lexicons/net/olamaelcu/livtet/biblio/**/*.json',
+      'lexicons/net/olamaelcu/livtet/actor/**/*.json',
     ],
     outdir: 'src/lib/server/lexicons/',
     imports: ['@atcute/atproto'],
