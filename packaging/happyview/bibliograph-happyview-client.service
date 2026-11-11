@@ -1,0 +1,15 @@
+[Unit]
+Description=Seed the Bibliograph edge's HappyView XRPC client
+Documentation=https://github.com/olamaelcu/bibliograph
+# Must finish before HappyView loads its client registry into memory.
+Before=happyview.service
+After=network.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/bibliograph/happyview.env
+ExecStart=/usr/lib/bibliograph-happyview/bin/hv-client
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -22,6 +22,12 @@ install -d -m 0750 -o bibliograph -g bibliograph /var/lib/bibliograph
 if [ -d /run/systemd/system ]; then
     deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
 
+    # The edge's XRPC client has to exist before HappyView builds its client
+    # registry at boot, so seed it first (the unit is also ordered
+    # Before=happyview.service).
+    deb-systemd-helper enable bibliograph-happyview-client.service >/dev/null 2>&1 || true
+    deb-systemd-invoke restart bibliograph-happyview-client.service >/dev/null 2>&1 || true
+
     deb-systemd-helper enable happyview.service >/dev/null 2>&1 || true
     deb-systemd-invoke restart happyview.service >/dev/null 2>&1 || true
 

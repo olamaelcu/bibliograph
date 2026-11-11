@@ -22,12 +22,21 @@ if [ -d /run/systemd/system ]; then
     deb-systemd-invoke restart bibliograph-web.service >/dev/null 2>&1 || true
 fi
 
-# The proxy still serves public queries without credentials, but HappyView
-# then cannot attribute them, so say so once.
-if ! grep -Eq '^HAPPYVIEW_CLIENT_KEY=..+' /etc/bibliograph/web.env; then
-    echo "bibliograph-web: HAPPYVIEW_CLIENT_KEY is unset in /etc/bibliograph/web.env." >&2
-    echo "bibliograph-web: proxied requests will reach HappyView unauthenticated." >&2
-    echo "bibliograph-web: copy the hvc_/hvs_ pair from the HappyView install." >&2
+# The pair normally comes from the HappyView package's generated file; web.env
+# can override it. Warn only when neither supplies a key, because the proxy
+# then reaches HappyView unattributed.
+client_key_configured() {
+    for file in /etc/bibliograph/happyview-client.env /etc/bibliograph/web.env; do
+        [ -r "$file" ] && grep -Eq '^HAPPYVIEW_CLIENT_KEY=..+' "$file" && return 0
+    done
+    return 1
+}
+
+if ! client_key_configured; then
+    echo "bibliograph-web: no HAPPYVIEW_CLIENT_KEY in web.env or" >&2
+    echo "bibliograph-web: happyview-client.env; proxied requests will reach" >&2
+    echo "bibliograph-web: HappyView unauthenticated. Install" >&2
+    echo "bibliograph-web: bibliograph-happyview and restart it to generate one." >&2
 fi
 
 exit 0

@@ -32,13 +32,17 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import socket
-import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+
+import hvlib
+
+# Both tools share one SQL path; the error type is the same one they raise.
+DeployError = hvlib.ToolError
+run_sql = hvlib.run_sql
 
 RECORD_LEXICONS = [
     "net.olamaelcu.livtet.biblio.bookStatus",
@@ -95,35 +99,6 @@ DEFS_LEXICONS = [
 ]
 
 TIMESTAMP_SQL = "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')"
-
-
-class DeployError(Exception):
-    pass
-
-
-def sql_command() -> list[str]:
-    configured = os.environ.get("HV_PSQL")
-    if configured:
-        return shlex.split(configured)
-    # An installed unit passes only DATABASE_URL, the same value HappyView
-    # itself runs on; HV_DATABASE_URL remains for pointing the deploy at a
-    # different database than the server uses.
-    dsn = os.environ.get("HV_DATABASE_URL") or os.environ.get("DATABASE_URL")
-    if dsn:
-        return ["psql", dsn]
-    raise DeployError("set HV_PSQL, HV_DATABASE_URL or DATABASE_URL to apply SQL")
-
-
-def run_sql(sql: str, variables: dict[str, str] | None = None) -> None:
-    command = sql_command() + ["-q", "-v", "ON_ERROR_STOP=1"]
-    for name, value in (variables or {}).items():
-        command += ["-v", f"{name}={value}"]
-    command += ["-f", "-"]
-    result = subprocess.run(command, input=sql.encode(), capture_output=True)
-    if result.returncode != 0:
-        raise DeployError(
-            f"{' '.join(command[:2])} failed:\n{result.stderr.decode(errors='replace').strip()}"
-        )
 
 
 def configured_admin_key(args: argparse.Namespace) -> str | None:

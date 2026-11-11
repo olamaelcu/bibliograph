@@ -305,6 +305,16 @@ scripts and applies the activity indexes. `DATABASE_URL` doubles as its SQL
 connection; set `HV_DATABASE_URL` only to deploy against a different database
 than the server uses.
 
+`bibliograph-happyview-client.service` runs **before** HappyView starts
+(`Before=happyview.service` in the client unit, `After=`/`Wants=` in
+`happyview.service`). It seeds the edge's XRPC client: on first run it mints an
+`hvc_`/`hvs_` pair, writes it 0640 root:bibliograph to
+`/etc/bibliograph/happyview-client.env`, and stores only the secret's SHA-256.
+The ordering is not cosmetic — HappyView loads client identities into memory at
+boot, so a row inserted afterwards is invisible until a restart. Re-running
+reuses the pair; `hv-client --force` mints a new one, after which the edge needs
+a restart.
+
 The package is `Architecture: any` because the binary links the host's glibc and
 `libssl3`, but it is only correct for the architecture of the image it was
 extracted from. It builds clean under `lintian` apart from the
@@ -325,7 +335,7 @@ mise run package-web-deb       # dpkg-deb → dist/bibliograph-web_0.1.0-1_all.d
 | Path | Contents |
 | --- | --- |
 | `/usr/lib/bibliograph-web/build` | adapter-node output: `index.js`, `handler.js`, `client/`, `server/` |
-| `/etc/bibliograph/web.env` | conffile: `HOST`/`PORT`, `HAPPYVIEW_URL`, `HAPPYVIEW_CLIENT_KEY`/`SECRET` |
+| `/etc/bibliograph/web.env` | conffile: `HOST`/`PORT`, `HAPPYVIEW_URL`; client credentials are read from HappyView's generated file |
 | `/usr/lib/systemd/system/bibliograph-web.service` | `/usr/bin/node …/build/index.js`, binds `127.0.0.1:5176` |
 
 ```bash
@@ -333,9 +343,16 @@ mise run package-web-deb       # dpkg-deb → dist/bibliograph-web_0.1.0-1_all.d
 # unsatisfied dependency rather than installing an edge with no upstream.
 sudo apt install ./dist/bibliograph-happyview_*.deb
 sudo apt install ./dist/bibliograph-web_*.deb
-# set HAPPYVIEW_CLIENT_KEY / HAPPYVIEW_CLIENT_SECRET in /etc/bibliograph/web.env
-sudo systemctl restart bibliograph-web
+# nothing to configure: the unit also loads /etc/bibliograph/happyview-client.env,
+# which the HappyView package generated
 ```
+
+The edge's unit loads two environment files, in order:
+`/etc/bibliograph/web.env` then `/etc/bibliograph/happyview-client.env`. The
+second is written by `bibliograph-happyview-client.service` and wins, so the
+`hvc_`/`hvs_` pair exists without any manual copy step. Setting the pair in
+`web.env` still overrides it, which is the escape hatch when pointing an edge at
+a HappyView elsewhere.
 
 `bibliograph-web` **Depends** on `bibliograph-happyview` — the edge has no
 upstream without it, and the pair is configured in that order (HappyView before

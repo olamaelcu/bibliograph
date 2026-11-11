@@ -1,8 +1,9 @@
 [Unit]
 Description=HappyView activity plane (Bibliograph)
 Documentation=https://github.com/olamaelcu/bibliograph
-After=network-online.target
-Wants=network-online.target
+# The edge's XRPC client must exist before the client registry is loaded.
+After=network-online.target bibliograph-happyview-client.service
+Wants=network-online.target bibliograph-happyview-client.service
 
 [Service]
 Type=simple

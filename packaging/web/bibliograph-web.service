@@ -10,6 +10,9 @@ User=bibliograph
 Group=bibliograph
 WorkingDirectory=/usr/lib/bibliograph-web
 EnvironmentFile=/etc/bibliograph/web.env
+# Written by the HappyView package; later files win, so the generated pair
+# overrides anything stale in web.env.
+EnvironmentFile=-/etc/bibliograph/happyview-client.env
 ExecStart=/usr/bin/node /usr/lib/bibliograph-web/build/index.js
 Restart=on-failure
 RestartSec=2

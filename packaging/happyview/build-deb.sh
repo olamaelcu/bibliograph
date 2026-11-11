@@ -51,6 +51,9 @@ cp -a happyview/lib "$STAGE$LIVE/lib"
 install -D -m 0644 happyview/sql/indexes.sql "$STAGE$LIVE/sql/indexes.sql"
 install -D -m 0644 happyview/sql/admin-bootstrap.sql "$STAGE$LIVE/sql/admin-bootstrap.sql"
 install -D -m 0755 happyview/bin/hv-deploy "$STAGE$LIVE/bin/hv-deploy"
+install -D -m 0644 happyview/sql/client-bootstrap.sql "$STAGE$LIVE/sql/client-bootstrap.sql"
+install -D -m 0755 happyview/bin/hv-client "$STAGE$LIVE/bin/hv-client"
+install -D -m 0644 happyview/bin/hvlib.py "$STAGE$LIVE/bin/hvlib.py"
 
 install -D -m 0644 packaging/happyview/happyview.env \
   "$STAGE/etc/bibliograph/happyview.env"
@@ -60,6 +63,8 @@ install -D -m 0644 packaging/happyview/happyview.service \
   "$UNIT_DIR/happyview.service"
 install -D -m 0644 packaging/happyview/bibliograph-happyview-deploy.service \
   "$UNIT_DIR/bibliograph-happyview-deploy.service"
+install -D -m 0644 packaging/happyview/bibliograph-happyview-client.service \
+  "$UNIT_DIR/bibliograph-happyview-client.service"
 
 # Debian policy: units live under /usr/lib; /lib is an aliased location that
 # lintian rejects in a package built like this.
@@ -97,6 +102,7 @@ chmod 0644 "$DEBIAN_DIR/control"
 # Fail closed on anything that would install but not run.
 [[ -x "$STAGE$LIVE/happyview" ]] || die "binary is not executable in the tree"
 [[ -x "$STAGE$LIVE/bin/hv-deploy" ]] || die "deploy tool is not executable"
+[[ -x "$STAGE$LIVE/bin/hv-client" ]] || die "client seeder is not executable"
 [[ -n "$(find "$STAGE$LIVE/migrations/postgres" -name '*.sql' -print -quit)" ]] \
   || die "no migrations staged"
 [[ -n "$(find "$STAGE$LIVE/lexicons" -name '*.json' -print -quit)" ]] \
