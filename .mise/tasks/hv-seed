@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#MISE description="Seed HappyView with the provisional account as superuser plus the local admin key and XRPC client"
+# Runs docker/seed-local-admin.sql against the compose Postgres. Resolves the
+# account's DID from the local PDS, so it stays correct after a reset.
+#
+# Prints the three credentials the edge needs; they are fixed development values
+# and are idempotent across runs.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HANDLE="${1:-${HV_ACCOUNT_HANDLE:-alice.pds.127-0-0-1.sslip.io}}"
+PDS="https://pds.127-0-0-1.sslip.io"
+
+did="$(curl -sk -m 10 "$PDS/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("did",""))' 2>/dev/null || true)"
+if [[ -z "$did" ]]; then
+  echo "ERROR: could not resolve $HANDLE on $PDS;" >&2
+  echo "       create the account first: mise run hv-account" >&2
+  exit 1
+fi
+
+docker compose exec -T postgres psql -q -U bibliograph -d bibliograph \
+  -v did="$did" < docker/seed-local-admin.sql >/dev/null
+
+cat <<EOF
+seeded HappyView for $HANDLE ($did)
+
+  HAPPYVIEW_URL=http://127.0.0.1:3000
+  HAPPYVIEW_ACCOUNT_DID=$did
+  HAPPYVIEW_ADMIN_KEY=hv_dev_admin
+  HAPPYVIEW_CLIENT_KEY=hvc_dev_client
+  HAPPYVIEW_CLIENT_SECRET=hvs_dev_secret
+
+Dashboard: http://127.0.0.1:3000  (sign in with $HANDLE)
+EOF

@@ -1,0 +1,19 @@
+# Caddy terminates TLS for the PDS with its own internal CA — no ACME, no
+# outbound traffic. `*.127-0-0-1.sslip.io` resolves to 127.0.0.1 through public
+# DNS, so the host needs no /etc/hosts entry; it does need Caddy's root CA
+# imported once (`mise run hv-ca`). HappyView is served directly on
+# http://127.0.0.1:3000 (its OAuth client must be an `http` loopback client),
+# so only the PDS is behind Caddy.
+#
+# 80 redirects to 443 so an `http://` URL lands somewhere useful.
+
+http://pds.127-0-0-1.sslip.io, http://*.pds.127-0-0-1.sslip.io {
+	redir https://{host}{uri} permanent
+}
+
+# The PDS, plus one host per handle suffix so handle resolution
+# (`https://alice.pds.127-0-0-1.sslip.io/.well-known/atproto-did`) reaches it.
+https://pds.127-0-0-1.sslip.io, https://*.pds.127-0-0-1.sslip.io {
+	tls internal
+	reverse_proxy pds:3000
+}
