@@ -45,7 +45,7 @@
       <span class="meta">Publishes to the labeler repo</span>
     </a>
 
-    <a class="tool" href="/admin/editions/merge">
+    <a class="tool" href="/admin/backfills">
       <span class="title">Backfill audit</span>
       <span class="body">
         Every meaningful backfill run against an edition, contributor, or work —
