@@ -185,10 +185,24 @@ indexes what it can see:
 | App → PDS (normal) | `com.atproto.repo.{createRecord,putRecord,applyWrites}` on `https://pds.127-0-0-1.sslip.io` | no — needs Jetstream or backfill |
 | App → HappyView procedure | `POST /xrpc/<nsid>` with a DPoP session | yes — `procedure.rs` upserts `happyview_records` after the PDS accepts the write |
 
-The procedure path is not available yet: the restored lexicon set is 17 queries
-and 7 record types, no procedures, so HappyView serves no write endpoint. Until
-one is uploaded, a write lands in the repo and the index stays behind until a
-backfill runs. Both halves are proven in this stack:
+Fifteen procedures implement the write side, so a client calls HappyView instead
+of assembling records itself. Each is a lexicon (`type: procedure`) plus a
+script at `xrpc.procedure:<nsid>`; the collection travels as `target_collection`
+at upload, and a successful PDS write is indexed in the same request.
+
+| Group | NSIDs |
+| --- | --- |
+| Follow graph | `graph.follow`, `graph.unfollow` — rkey is the subject DID, so a repeat is a no-op |
+| Shelves | `shelf.create`, `shelf.update`, `shelf.delete` — delete cascades `shelfItem` and `bookStatus` rows that name the shelf |
+| Membership | `shelf.addItem`, `shelf.removeItem`, `shelf.addBooks` — rkey `<shelf rkey>-<edition rkey>` |
+| Reading status | `status.set`, `status.clear` — rkey is the edition rkey, metadata merges |
+| Reader | `readingGoal.set` (rkey `current`), `profile.set` (rkey `self`) |
+| Reviews | `review.create`, `review.update`, `review.delete` |
+
+All fifteen answer `401 XRPC procedures require DPoP authentication` until a
+session is registered, because the write is proxied to the caller's PDS. Without
+one, the data has to be written to the PDS directly and backfilled — the
+sequence below, which predates the procedures and still works:
 
 ```bash
 # 1. write as the user (dev shape; in the app this is the user's OAuth session)
@@ -297,9 +311,11 @@ public`.
   the removal) and the catalog tables it reads are intact, so book-rendering
   queries work. `docker compose down -v` takes it with them; those queries would
   then answer 404 "catalog edition is missing" instead of rendering books.
-- **No procedure lexicons yet**, so the write-through-HappyView path (the one
-  that indexes inline) is unavailable. Writes go straight to the PDS and need a
-  backfill to become visible — see Writes above.
+- **Procedures need a registered DPoP session.** All fifteen answer 401 without
+  one, and HappyView proxies the write with that session, so the client must run
+  `/oauth/dpop-keys` → OAuth → `/oauth/sessions` first, with scopes that permit
+  the write. Until the app does, use direct PDS writes plus backfill (see
+  Writes above).
 - **Browser OAuth consent is a manual step.** Everything server-side up to the
   authorize URL is exercised; the consent form is not automated.
 - **`db.raw` runs on the main connection** behind HappyView's tokenizer guard
