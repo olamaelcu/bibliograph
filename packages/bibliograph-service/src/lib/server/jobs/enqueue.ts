@@ -190,3 +190,16 @@ export async function enqueueContributorImageBackfill(uri: string): Promise<void
     maxAttempts: 5,
   });
 }
+
+/**
+ * Fill one contributor's bio from Wikipedia. Same jobKey contract as the
+ * image backfill: the admin button and any future scanner re-click without
+ * stacking duplicates.
+ */
+export async function enqueueContributorBioBackfill(uri: string): Promise<void> {
+  const utils = await getUtils();
+  await utils.addJob('backfill-contributor-bio', { uri }, {
+    jobKey: `backfill-bio:${uri}`,
+    maxAttempts: 5,
+  });
+}

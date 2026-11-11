@@ -129,7 +129,11 @@ import {
   isBhRkey,
 } from './bookhive/keys';
 import { BOOKHIVE_BACKLINK_SOURCE, normalizeBookhiveBook, shelfForBookhiveStatus } from './bookhive/records';
-import { enqueueContributorImageBackfill, enqueueCoverBackfill, enqueueDescriptionBackfill } from './jobs/enqueue';
+import { enqueueDescriptionBackfill } from './jobs/enqueue';
+import {
+  maybeEnqueueContributorBackfills,
+  maybeEnqueueEditionBackfills,
+} from './jobs/on-read';
 import { contributorRecordValue, publisherRecordValue, workRecordValue } from './book-records';
 import { contributorUrisFor, loadContributorRefs } from './contributor-refs';
 import { wireContributors } from './book-wire';
@@ -1194,11 +1198,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForBook.mainSchema, {
     if (isBhRkey(row.rkey)) {
       return json({ url: await bookhiveCoverProxyUrl(row.rkey) } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
     }
-    // Backfill the book the uri resolves to: enqueueing the retired rkey would
-    // re-ingest a row the merge deliberately removed.
-    void enqueueCoverBackfill(row.uri, row.rkey).catch((err) => {
-      log.warn({ err, uri: row.uri, rkey: row.rkey, stage: 'getImageForBook.enqueue' }, 'cover backfill enqueue failed');
-    });
+    // Backfill the book the uri resolves to — description and cover:
+    // enqueueing the retired rkey would re-ingest a row the merge deliberately
+    // removed. The helper no-ops unless a field is missing AND never checked.
+    void maybeEnqueueEditionBackfills([row.uri], log);
     return json({ url: undefined } as NetOlamaelcuLivtetBiblioGetImageForBook.$output);
   },
 });
@@ -1233,15 +1236,8 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetImageForContributor.mainSchema, {
     // empty so the client renders initials until the portrait exists. A row the
     // resolver already stamped as checked is NOT re-enqueued — that is what
     // keeps a contributor with no portrait from costing a Commons lookup per
-    // page render.
-    if (!row.imageCheckedAt) {
-      void enqueueContributorImageBackfill(row.uri).catch((err) => {
-        log.warn(
-          { err, uri: row.uri, stage: 'getImageForContributor.enqueue' },
-          'contributor image backfill enqueue failed',
-        );
-      });
-    }
+    // page render. Bio gets the same treatment.
+    void maybeEnqueueContributorBackfills([row.uri], log);
     return json({} as NetOlamaelcuLivtetBiblioGetImageForContributor.$output);
   },
 });
@@ -2120,6 +2116,10 @@ router.addQuery(NetOlamaelcuLivtetBiblioGetEditionsByContributor.mainSchema, {
         // by — not the batch-import time `indexed_at` holds.
         .orderBy(sql`${editions.createdAt} desc`, editions.uri)
         .limit(limit);
+      // Editions fetched over XRPC self-heal: description/cover for the rows
+      // (and portrait/bio for the contributor itself).
+      void maybeEnqueueEditionBackfills(rows.map((row) => row.uri), log);
+      void maybeEnqueueContributorBackfills([contributor], log);
       return json({
         uris: rows.map((row) => row.uri),
       } as unknown as NetOlamaelcuLivtetBiblioGetEditionsByContributor.$output);

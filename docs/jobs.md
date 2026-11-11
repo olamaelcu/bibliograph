@@ -63,9 +63,37 @@ As of 0.5.22 there is also an on-demand path: the administrators-only
 "Queue description + metadata backfill" button on `/editions/[rkey]` enqueues
 `backfill-edition-description` (and `backfill-edition-format`) for that one
 edition straight from the web process (`runBackfill` action in
-`src/routes/editions/[rkey]/+page.server.ts`). Same task list, same worker,
-same `jobKey` dedupe. The description job itself no-ops when the row already
-has a description.
+`src/routes/editions/[rkey]/+page.server.ts`). The contributor detail page
+has the same shape: its `runBackfill` action enqueues
+`backfill-contributor-image` and `backfill-contributor-bio` (registered in
+`searchTaskList`). Same task list, same worker, same `jobKey`
+dedupe. The description/bio jobs themselves no-op when the row already has
+the field.
+
+### On-read enqueues
+
+Read paths also fire the backfills, because they are idempotently gated on
+"never checked":
+
+- `getImageForBook` / `getImageForContributor` have always enqueued the cover /
+  portrait resolver exactly this way (gated on `cover_checked_at` /
+  `image_checked_at`).
+- `jobs/on-read.ts` (`maybeEnqueueEditionBackfills` /
+  `maybeEnqueueContributorBackfills`) generalises the pattern: one indexed
+  `ANY()` query for missing-and-unchecked rows across the editions/contributors
+  tables, enqueue with the usual `jobKey` dedupe. Fire-and-forget; failures
+  log and never fail the read; steady state is zero jobs.
+- Wired into: `hydrateBooksByUri` (every shelf/book XRPC), the
+  `community.lexicon.book.searchEditions` / `resolveEditions` /
+  `searchWorks` / `searchContributors` handlers in `routes/xrpc/book-queries.ts`,
+  and `net.olamaelcu.livtet.biblio.getEditionsByContributor`.
+  `searchWorks` enqueues only the embedded contributors; there is no work
+  backfill task.
+
+The read path never stamps anything; stamps come from the worker when it runs
+the backfill for real. A row that comes back `no_cover_found` / `not_found` /
+`deferred` keeps whatever stamp the backfill applies, or none (deferred rows
+are deliberately left unchecked) — the read path adds no new stamping rules.
 
 ### Sizing and quota
 

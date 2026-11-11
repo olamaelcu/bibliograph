@@ -14,6 +14,10 @@ import { formatViewFor } from '../format-view';
 import { usableCoverUrl } from '../book-wire';
 import { loadContributorRefs } from '../contributor-refs';
 import { displayNameForShelfRkey, shelfViewFromValue } from './shelf-view';
+import {
+  maybeEnqueueContributorBackfills,
+  maybeEnqueueEditionBackfills,
+} from '../jobs/on-read';
 
 const log = createLogger('web');
 
@@ -71,8 +75,14 @@ export async function hydrateBooksByUri(
   // to, so two uris naming the same book answer with one book view.
   const views = new Map<string, NetOlamaelcuLivtetBiblioDefs.BookView>();
   const byUri = await resolveEditions(uris);
-  const names = await contributorNamesFor(
-    [...new Map([...byUri.values()].map((row) => [row.uri, row])).values()],
+  const uniqueRows = [...new Map([...byUri.values()].map((row) => [row.uri, row])).values()];
+  const names = await contributorNamesFor(uniqueRows);
+  // Books served over XRPC self-heal: enqueue the missing-data backfills for
+  // the rows just hydrated. Fire-and-forget; the helper no-ops in steady state.
+  void maybeEnqueueEditionBackfills(uniqueRows.map((row) => row.uri), log);
+  void maybeEnqueueContributorBackfills(
+    uniqueRows.flatMap((row) => (row.contributors ?? []).map((c) => c.subject.uri)),
+    log,
   );
   for (const [uri, row] of byUri) {
     let view = views.get(row.tid);

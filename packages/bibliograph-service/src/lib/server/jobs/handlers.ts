@@ -23,6 +23,7 @@ import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
 import { backfillEditionMetadata } from './format-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
+import { backfillBioForContributor } from './contributor-bio-backfill';
 import { backfillIsbnForEdition } from './isbn-backfill';
 import { fetchEditionForUri } from '../shelving/edition-fetch';
 import { aliasedEditionUris } from '../edition-lookup';
@@ -882,6 +883,15 @@ export const backfillContributorImageTask: Task = async (payload, helpers) => {
   await backfillContributorImageForUri(uri, log);
 };
 
+export const backfillContributorBioTask: Task = async (payload, helpers) => {
+  const { uri } = payload as { uri: string };
+  const log = helpers.logger as unknown as Logger;
+  const res = await backfillBioForContributor(uri, log);
+  if (!res.updated) {
+    log.info({ stage: 'backfill-contributor-bio', uri, reason: res.reason }, 'contributor bio backfill skipped');
+  }
+};
+
 export const backfillEditionIsbnTask: Task = async (payload, helpers) => {
   const { uri, rkey } = payload as { uri: string; rkey: string };
   const log = helpers.logger as unknown as Logger;
@@ -900,6 +910,7 @@ export const searchTaskList: TaskList = {
   'backfill-edition-description': backfillEditionDescriptionTask,
   'backfill-edition-format': backfillEditionFormatTask,
   'backfill-contributor-image': backfillContributorImageTask,
+  'backfill-contributor-bio': backfillContributorBioTask,
   'backfill-edition-isbn': backfillEditionIsbnTask,
 };
 

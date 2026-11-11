@@ -25,6 +25,10 @@ import { editionViewFromItem } from '../../lib/server/book-wire';
 import { wireContributors } from '../../lib/server/book-wire';
 import { isResourceUri, type ResourceUri } from '@atcute/lexicons';
 import { contributorUrisFor, loadContributorRefs } from '../../lib/server/contributor-refs';
+import {
+  maybeEnqueueContributorBackfills,
+  maybeEnqueueEditionBackfills,
+} from '../../lib/server/jobs/on-read';
 import type { SearchService } from '../../lib/server/search/service';
 import type { Identifier } from '../../lib/server/identifiers';
 
@@ -299,6 +303,14 @@ export function registerBookQueries(
         invalidContributorResponsesTotal.inc({ nsid: 'community.lexicon.book.searchEditions', reason: 'empty_name' });
       }
 
+      // Books fetched over XRPC self-heal: enqueue missing-data backfills for
+      // the local rows on this page. Steady state is one indexed query, no jobs.
+      void maybeEnqueueEditionBackfills(result.items.map((item) => item.uri), log);
+      void maybeEnqueueContributorBackfills(
+        contributorUrisFor(result.items.flatMap((item) => item.contributors ?? [])),
+        log,
+      );
+
       const items = [];
       for (const item of result.items) {
         // `defs#editionView` requires at least one identifier; a row without one
@@ -360,6 +372,12 @@ export function registerBookQueries(
         views.push(editionViewFromItem(item, contributorRefs));
       }
 
+      void maybeEnqueueEditionBackfills(items.map((item) => item.uri), log);
+      void maybeEnqueueContributorBackfills(
+        contributorUrisFor(items.flatMap((item) => item.contributors ?? [])),
+        log,
+      );
+
       return json({
         items: views,
         hasMore,
@@ -377,6 +395,10 @@ export function registerBookQueries(
       });
       const contributorRefs = await loadContributorRefs(
         contributorUrisFor(result.items.flatMap((r) => r.contributors ?? [])),
+      );
+      void maybeEnqueueContributorBackfills(
+        contributorUrisFor(result.items.flatMap((r) => r.contributors ?? [])),
+        log,
       );
       const items = result.items.map((r) => ({
         $type: 'community.lexicon.book.work' as const,
@@ -431,6 +453,7 @@ export function registerBookQueries(
           identifiers: r.identifiers,
           createdAt: r.createdAt,
         }));
+        void maybeEnqueueContributorBackfills(validContributors.map((r) => r.uri), log);
         return json({
           items,
           cursor: result.cursor,

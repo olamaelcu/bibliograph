@@ -1,6 +1,7 @@
 <script lang="ts">
   // Contributor detail route: hero with lifespan chips, then the metadata card
   // with the bio, aliases and identifiers.
+  import ActionFeedback from "$lib/components/records/ActionFeedback.svelte";
   import DetailFrame from "$lib/components/records/DetailFrame.svelte";
   import RecordBody from "$lib/components/records/RecordBody.svelte";
   import RecordHero from "$lib/components/records/RecordHero.svelte";
@@ -11,13 +12,16 @@
 
   let {
     data,
+    form,
   }: {
     data: {
       kind: "contributors";
       rkey: string;
       notFound: boolean;
       value?: DetailValue;
+      canLabel: boolean;
     };
+    form?: { error?: string; ok?: boolean; backfill?: boolean };
   } = $props();
 
   const chips = $derived.by((): Chip[] => {
@@ -57,6 +61,19 @@
         {chips}
       />
 
+      <ActionFeedback {form} success="Backfill queued for this contributor." />
+      {#if data.canLabel}
+        <form method="POST" action="?/runBackfill" class="backfill-form">
+          <wa-button type="submit" appearance="outlined" size="s">
+            Queue portrait + bio backfill
+          </wa-button>
+          <span class="muted small">
+            Wikidata/Commons portrait and Wikipedia bio. Fills missing fields
+            only; runs on the worker.
+          </span>
+        </form>
+      {/if}
+
       <RecordBody
         description={data.value.bio}
         tags={data.value.aliases}
@@ -73,5 +90,17 @@
     display: flex;
     flex-direction: column;
     gap: var(--wa-space-l);
+  }
+  .backfill-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wa-space-s);
+    align-items: center;
+  }
+  .small {
+    font-size: var(--wa-font-size-s);
+  }
+  .muted {
+    color: var(--wa-color-on-quiet);
   }
 </style>
