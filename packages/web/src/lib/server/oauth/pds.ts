@@ -24,17 +24,17 @@ const DEFAULT_PDS_URL = 'https://pds.127-0-0-1.sslip.io';
  * at this app returns `401 invalid_client ... Failed to fetch client
  * metadata`), and a metadata URL served by this app is unreachable from there.
  *
- * The consequence is a scope ceiling: synthesised metadata registers `atproto`
- * only, so `transition:generic` comes back in `rejected_scopes` with reason
- * `not_registered` and the PDS mints an `atproto` token. `graph.follow` then
- * fails its PDS write with `InsufficientScope`. A client registered by URL —
- * anything deployed behind HTTPS — gets the write scope; the local stack
- * cannot, which is why the procedure path is proven only as far as the
- * identity (HappyView logs `caller_did=did:plc:…`) here.
+ * The spec lets the virtual document be configured from the `client_id`'s own
+ * query string, and `scope` is one of those fields. Without it the synthesised
+ * document registers `atproto` alone, so a requested `transition:generic` comes
+ * back in `rejected_scopes` as `not_registered` and the PDS mints an
+ * `atproto` token — which cannot pass the `com.atproto.repo.createRecord`
+ * scope check that HappyView's procedure writes need. With it, consent shows
+ * both scopes and the token carries both (verified against the local PDS).
  */
-export const CLIENT_ID = 'http://localhost';
+export const CLIENT_ID = `http://localhost?scope=${encodeURIComponent('atproto transition:generic')}`;
 
-/** Asked for; the session registers whatever the PDS actually grants. */
+/** Asked for in PAR, matching the `client_id`; the session registers what is granted. */
 export const SCOPE = 'atproto transition:generic';
 
 export interface AuthorizationServerMetadata {
