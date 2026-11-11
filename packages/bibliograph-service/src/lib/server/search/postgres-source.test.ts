@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { inflateRawSync } from 'node:zlib';
 import { pino } from 'pino';
 import { PostgresSource, type DbExecutor } from './postgres-source';
 import { editions, works, contributors } from '../db/schema';
@@ -138,7 +139,10 @@ function encodeV2Cursor(t: string, u: string): string {
 }
 
 function decodeV2Cursor(cursor: string): { v: number; t: string; u: string } {
-  return JSON.parse(Buffer.from(cursor, 'base64url').toString());
+  // New cursors are raw zlib deflate of the same JSON the v2 encoder produced;
+  // legacy ones are plain base64 of it. Try inflation first, fall back to raw.
+  const raw = Buffer.from(cursor, 'base64url');
+  try { return JSON.parse(inflateRawSync(raw).toString()); } catch { return JSON.parse(raw.toString()); }
 }
 
 test('searchEditions applies q filter when provided', async () => {
@@ -340,6 +344,31 @@ test('searchContributors decodes v1 cursor (back-compat)', async () => {
   await src.searchContributors({ cursor: v1Cursor, limit: 10 });
 
   assert.equal(cap.whereCalled, true);
+});
+
+test('searchContributors emits a cursor within the lexicon 256-char cap', async () => {
+  // Regression: before deflate, a 400 from the lexicographic ordering over a
+  // long URI (e.g. Goodreads catalog slugs) produced cursors > 256 chars; the
+  // atcute validator rejected them, Livtet read it as 'bad-request' and
+  // backed off permanently.
+  const cap: CallCapture = { whereCalled: false, orderByCalled: false };
+  const longUri = 'at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.book.contributor/gr.a-mr-syed-humaid-hasan-cloud-engineer-amazon-web-services-aws-dallas-usa';
+  const fullPage = [
+    makeContributorRow({ uri: 'at://x/c/r1', indexedAt: new Date('2024-03-01T00:00:00Z') }),
+    makeContributorRow({ uri: longUri, indexedAt: new Date('2024-02-01T00:00:00Z') }),
+    makeContributorRow({ uri: 'at://x/c/r3', indexedAt: new Date('2024-01-01T00:00:00Z') }),
+  ];
+  const fakeDb = createFakeDb(fullPage, cap);
+  const src = new PostgresSource(silentLog, fakeDb);
+
+  const result = await src.searchContributors({ limit: 2 });
+  assert.equal(result.items.length, 2);
+  assert.ok(result.cursor);
+  assert.ok(result.cursor!.length <= 256, `cursor is ${result.cursor!.length} chars, over the 256 cap`);
+  const decoded = decodeV2Cursor(result.cursor!);
+  assert.equal(decoded.v, 2);
+  assert.equal(decoded.u, longUri);
+  assert.equal(decoded.t, '2024-02-01T00:00:00.000Z');
 });
 
 test('searchContributors emits v2 cursor on full page', async () => {

@@ -17,17 +17,27 @@ import type {
   ContributionEntry,
 } from './types';
 
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
+
 const CURSOR_VERSION = 2;
 
 type PostgresCursor = { v: 1 | 2; src: 'postgres'; t: string; u: string };
 
+// The lexicon caps `cursor` at 256 chars; a raw URI inside the payload used
+// to push cursors over the limit for long collectors (hit in production
+// 2026-11-11, client got 400 InvalidQuery from the `.cursor` field). Deflate
+// shrinks the payload to ~150 bytes; legacy plain-text cursors still decode
+// via the inflate failure fallback.
 function encodeCursor(indexedAt: Date, uri: string): string {
-  return Buffer.from(JSON.stringify({ v: CURSOR_VERSION, src: 'postgres', t: indexedAt.toISOString(), u: uri } satisfies PostgresCursor)).toString('base64url');
+  return deflateRawSync(Buffer.from(JSON.stringify({ v: CURSOR_VERSION, src: 'postgres', t: indexedAt.toISOString(), u: uri } satisfies PostgresCursor))).toString('base64url');
 }
 
 function decodeCursor(cursor: string): PostgresCursor | null {
+  const raw = Buffer.from(cursor, 'base64url');
+  let json: Buffer | undefined;
+  try { json = inflateRawSync(raw); } catch { json = raw; }
   try {
-    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString());
+    const parsed = JSON.parse(json.toString());
     if ((parsed.v !== 1 && parsed.v !== 2) || parsed.src !== 'postgres') return null;
     return parsed as PostgresCursor;
   } catch { return null; }
