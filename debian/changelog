@@ -1,3 +1,28 @@
+bibliograph (0.5.25) unstable; urgency=high
+
+  * Fix: the "For You" recommendations feed returned empty for every viewer
+    since 0.5.23. `@atcute/client`'s `client.get` answers with a
+    `{ ok, status, headers, data }` envelope, and `readViewerLibrary` read that
+    envelope as the XRPC body; the shape guard rejected every page and the
+    function returned null for every viewer, so every recommendation path
+    returned `[]`. Unwrapped in both the library reader and the linklonk
+    signal reader, matching the shelf/profile call sites.
+  * "For You" now also ranks by a LinkLonk-style collaborative-filtering walk
+    over the local Bookhive mirror (~144k records, 99% mapped to catalog
+    editions), merged behind the viewer's subject-overlap candidates. Biblio
+    shelving `read`/`reading` counts as an up and `dnf` as a down, and review
+    ratings fold in the same way (>= 6 up, <= 5 down; a review without a
+    rating counts as up). Down votes outrank ups on conflict. The graph is
+    TTL-cached for 10 minutes and the viewer's own editions are never
+    candidates.
+  * Discover and Extended Network feeds no longer surface the signed-in
+    viewer's own records: `paginateFromDb` drops them from the public feed and
+    the extended feed removes the viewer from its 1-hop author set, so a
+    self-follow cannot leak either. `following` keeps its raw set and
+    anonymous callers see the unfiltered Discover feed.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 23:35:51 -0500
+
 bibliograph (0.5.24) unstable; urgency=medium
 
   * Viewer-facing feeds served over XRPC now drop authors the viewer blocks —
