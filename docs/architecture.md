@@ -59,6 +59,13 @@ The authority in the URI is the publisher identity: `ATP_SERVICE_DID`, else
 `did:web:<ATP_SERVICE_HOST>`. New editions mint their URI from that identity,
 so it must not change once the catalog is populated.
 
+Migration note: editions and `pds_outbox` rows minted under a previous
+authority (for example a `did:web` identity) belong to a different repo. They
+are not publishable into a `did:plc` publisher repo: `pds-publish` refuses any
+row whose URI authority is not the configured publisher DID. Re-ingest the
+edition under the new authority, or rewrite the stored URI deliberately; the
+worker never silently rewrites edition URIs.
+
 The public `/xrpc` gateway proxies `com.atproto.{repo,sync,identity}` and
 `com.atproto.server.describeServer` to the PDS, serves catalog/label/feed
 endpoints at the edge, and forwards everything else to HappyView. The edge also
@@ -109,10 +116,12 @@ if invoked. It never no-ops or reports fake success.
 
 Local development runs the worker against the local Postgres with `mise run
 worker` (or `pnpm worker:dev`). The local tranquil PDS issues `did:plc`
-accounts and has `selfHostedDidWebEnabled: false`, so it cannot host the
-`did:web` publisher: hydration works there, while a live `pds-publish` needs a
-PDS that has the publisher account provisioned and the outbox URIs rewritten
-to that DID. Publisher behaviour is tested against a stub PDS in
+accounts and has `selfHostedDidWebEnabled: false`, so set `ATP_SERVICE_DID` to
+that account to mint edition URIs under it; the default `did:web` authority
+cannot be hosted there. Hydration works without publisher credentials, while a
+live `pds-publish` also needs the publisher account provisioned on the PDS.
+Rows minted under another authority need re-ingest (see the migration note
+above). Publisher behaviour is tested against a stub PDS in
 `packages/worker/test/publish.test.js`.
 
 Packaging: `mise run package-worker-payload` stages plain ESM plus its

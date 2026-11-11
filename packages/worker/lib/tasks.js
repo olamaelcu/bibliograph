@@ -14,8 +14,8 @@ function validIdentifier(identifier) {
   );
 }
 
-export function createTasks({ pool, providers, publisherHost, publisher }) {
-  const ingest = createIngest({ pool, publisherHost });
+export function createTasks({ pool, providers, publisherDid, publisherHost, publisher }) {
+  const ingest = createIngest({ pool, publisherDid, publisherHost });
 
   // Without configured credentials the task still exists and fails with the
   // exact missing settings; it must never quietly drop outbox rows.

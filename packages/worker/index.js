@@ -3,7 +3,7 @@ import { parseCronItems, run } from 'graphile-worker';
 import { createProviders } from './lib/providers/index.js';
 import { createTasks } from './lib/tasks.js';
 import { createOutboxPublisher } from './lib/publish.js';
-import { resolvePublisherConfig } from './lib/pds.js';
+import { resolvePublisherAuthority, resolvePublisherConfig } from './lib/pds.js';
 import { ensureSupportSchema } from './lib/setup.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -13,6 +13,9 @@ if (!databaseUrl) {
 }
 
 const publisherHost = process.env.ATP_SERVICE_HOST || 'biblio.livtet.olamaelcu.net';
+// The repo authority is independent of publisher credentials: hydration mints
+// the same URIs even while pds-publish is disabled.
+const publisherDid = resolvePublisherAuthority() || `did:web:${publisherHost}`;
 const concurrency = Number.parseInt(process.env.GRAPHILE_WORKER_CONCURRENCY ?? '5', 10);
 
 const pool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
@@ -35,7 +38,7 @@ if (publisherConfig.configured) {
   );
 }
 
-const taskList = createTasks({ pool, providers, publisherHost, publisher });
+const taskList = createTasks({ pool, providers, publisherDid, publisherHost, publisher });
 
 // One publisher at a time: the task queue serializes the jobs, so two batches
 // never race for the same rows (claiming is safe anyway, this just avoids noise).
@@ -62,9 +65,9 @@ const runner = await run({
   logger: undefined
 });
 
-// When publishing is configured, the identity that matters is the DID the
-// records are written as, not the host used to mint catalog URIs.
-const publisherLabel = publisher ? publisher.config.publisherDid : publisherHost;
+// Report the repo authority, configured or not: it is the identity catalog URIs
+// are minted under, whether or not publisher credentials are present.
+const publisherLabel = publisher ? publisher.config.publisherDid : publisherDid;
 console.log(
   `worker: ready (concurrency=${concurrency}, publisher=${publisherLabel}, ` +
     `isbndb=${providers.providers.isbndb ? 'enabled' : 'disabled'}, ` +

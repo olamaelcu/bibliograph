@@ -19,8 +19,8 @@ export function rkeyForCandidate(candidate) {
   return null;
 }
 
-function editionUri(publisherHost, rkey) {
-  return `at://did:web:${publisherHost}/${COLLECTION}/${rkey}`;
+function editionUri(publisherDid, rkey) {
+  return `at://${publisherDid}/${COLLECTION}/${rkey}`;
 }
 
 function normalizedIdentifiers(candidate) {
@@ -191,8 +191,16 @@ async function linkPublisher(client, uri, publisher) {
   );
 }
 
-export function createIngest({ pool, publisherHost }) {
-  if (!publisherHost) throw new Error('publisherHost is required');
+export function createIngest({ pool, publisherDid, publisherHost }) {
+  // The URI authority is the publisher identity, not necessarily a did:web
+  // host: a did:plc deployment must mint records into the same repo it
+  // publishes to. `publisherHost` remains for callers that only know the host.
+  const authority = publisherDid || (publisherHost ? `did:web:${publisherHost}` : undefined);
+  if (!authority) {
+    throw new Error(
+      'publisherDid is required to mint edition URIs (or publisherHost for a did:web authority)'
+    );
+  }
 
   return async function ingest(candidate) {
     const identifiers = normalizedIdentifiers(candidate);
@@ -215,7 +223,7 @@ export function createIngest({ pool, publisherHost }) {
         }
         if (!uri) {
           rkey ??= await nextTid(client);
-          uri = editionUri(publisherHost, rkey);
+          uri = editionUri(authority, rkey);
           await insertEdition(client, uri, rkey, candidate);
           created = true;
         }

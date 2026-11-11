@@ -65,12 +65,12 @@ before the script runs (`401 XRPC procedures require DPoP authentication`), and 
 carries the edition's atproto URI as an identifier:
 
 ```json
-{ "issuer": "atproto", "value": "at://did:web:biblio.livtet.olamaelcu.net/community.lexicon.media.book/gb.efdyneVzATwC" }
+{ "issuer": "atproto", "value": "at://did:plc:e2x3ihw2ntxt7pcgzmtu3abi/community.lexicon.media.book/gb.efdyneVzATwC" }
 ```
 
 It is first in `identifiers`, exactly once, and stored identifiers follow unchanged (`issuer` and
 `value` only — no bookkeeping columns leak). Clients derive display routes from it, e.g.
-`/book/did:web:biblio.livtet.olamaelcu.net/gb.efdyneVzATwC`. `atproto` is the issuer token for the
+`/book/did:plc:e2x3ihw2ntxt7pcgzmtu3abi/gb.efdyneVzATwC`. `atproto` is the issuer token for the
 protocol namespace; identifier comparison stays exact and no normalization is applied on read.
 
 ## `resolveEditions`
@@ -113,7 +113,8 @@ queues work and `packages/worker` performs it:
   when the local catalog already answered, and ingests up to three candidates. Without
   `ISBNDB_API_KEY` (so no ISBNdb provider) it logs a warning and falls back to the normal
   `catalog.resolve` provider chain, so hydration still happens without claiming an ISBNdb call;
-- `lib/ingest.js` ingests via the identifier bag, minting new rows with `editions_next_tid()` or a
+- `lib/ingest.js` ingests via the identifier bag, minting new rows under the publisher authority
+  (`ATP_SERVICE_DID`, else `did:web:<ATP_SERVICE_HOST>`) with `editions_next_tid()` or a
   provider-prefixed rkey and extending the identifier bag of an existing edition; the edition
   trigger queues `pds_outbox`;
 - `pds-publish` (`lib/publish.js`) drains `pds_outbox` with `com.atproto.repo.applyWrites` in
@@ -129,11 +130,13 @@ Honest limits:
 - No provider was exercised live in this environment: Google Books and ISBNdb need API keys
   (`GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`) and third-party consent, so tests use fixtures/fakes;
 - Catalog hydration and outbox queueing work without publisher credentials, but live PDS
-  publishing does not: the local dev PDS cannot host the `did:web` publisher. A provisioned
-  publisher account must supply `PDS_URL`, the publisher DID (`PDS_ACCOUNT_DID`, or
-  `ATP_SERVICE_DID` / `ATP_SERVICE_HOST`), and either `PDS_ACCOUNT_PASSWORD` (app password) or
+  publishing does not: the local dev PDS issues `did:plc` accounts and cannot host a `did:web`
+  publisher, so set `ATP_SERVICE_DID` to the local account (it is also the edition URI authority).
+  A provisioned publisher account must supply `PDS_URL`, the publisher DID (`PDS_ACCOUNT_DID`,
+  or `ATP_SERVICE_DID` / `ATP_SERVICE_HOST`), and either `PDS_ACCOUNT_PASSWORD` (app password) or
   `PDS_ACCESS_TOKEN`; otherwise the worker logs `pds-publish is DISABLED` and rows stay queued in
-  `pds_outbox` without being lost;
+  `pds_outbox` without being lost. Rows minted under another authority must be re-ingested, not
+  silently rewritten;
 - Wikidata enrichment is not part of the worker yet.
 
 ## Publication and schema registration

@@ -38,14 +38,29 @@ export class PdsError extends Error {
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 /**
+ * The repo authority catalog URIs are minted under: `ATP_SERVICE_DID` when set,
+ * else `did:web:<ATP_SERVICE_HOST>`. This does not require publisher
+ * credentials, so hydration keeps minting the same identity while pds-publish
+ * is disabled. `PDS_ACCOUNT_DID` is deliberately not a fallback here: it names
+ * the authenticated account, and only config resolution may adopt it when no
+ * explicit authority exists.
+ */
+export function resolvePublisherAuthority(env = process.env) {
+  return (
+    env.ATP_SERVICE_DID ||
+    (env.ATP_SERVICE_HOST ? `did:web:${env.ATP_SERVICE_HOST}` : undefined) ||
+    undefined
+  );
+}
+
+/**
  * Resolve and validate publisher configuration without touching the network.
  * `configured: false` carries the exact list of missing settings.
  */
 export function resolvePublisherConfig(env = process.env) {
   const pdsUrl = typeof env.PDS_URL === 'string' ? env.PDS_URL.replace(/\/+$/, '') : undefined;
   const publisherDid =
-    env.ATP_SERVICE_DID ||
-    (env.ATP_SERVICE_HOST ? `did:web:${env.ATP_SERVICE_HOST}` : undefined) ||
+    resolvePublisherAuthority(env) ||
     env.PDS_ACCOUNT_DID ||
     undefined;
   const accountDid = env.PDS_ACCOUNT_DID || publisherDid;

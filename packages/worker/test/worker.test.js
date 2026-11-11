@@ -34,6 +34,20 @@ const googleBody = {
   ]
 };
 
+const plcBody = {
+  totalItems: 1,
+  items: [
+    {
+      id: 'plcAuthorityVolume',
+      volumeInfo: {
+        title: 'PLC Authority Edition',
+        language: 'en',
+        industryIdentifiers: [{ type: 'ISBN_13', identifier: '9781111111111' }]
+      }
+    }
+  ]
+};
+
 const isbndbBook = {
   title: 'Direct Hydration Volume',
   title_long: 'Direct Hydration Volume: A Test',
@@ -108,7 +122,9 @@ before(async () => {
     };
 
     if (url.pathname === '/google/volumes') {
-      send(url.searchParams.get('q')?.startsWith('isbn:') ? googleBody : { totalItems: 0, items: [] });
+      const query = url.searchParams.get('q');
+      if (query === 'isbn:9781111111111') send(plcBody);
+      else send(query?.startsWith('isbn:') ? googleBody : { totalItems: 0, items: [] });
       return;
     }
     if (url.pathname === '/isbndb/book/9780306406157') {
@@ -262,6 +278,52 @@ test('resolve hydrates the catalog from provider results', async () => {
     await pool.query("DELETE FROM contributors WHERE name = 'Ursula K. Le Guin'");
     await pool.query("DELETE FROM publishers WHERE name = 'Ace'");
     await pool.query("DELETE FROM google_books_cache WHERE key LIKE $1", [`${baseUrl}/%`]);
+    await pool.end();
+  }
+});
+
+test('mints edition URIs under an explicit did:plc publisher authority', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  const publisherDid = 'did:plc:testworkerauthority';
+  const providers = createProviders({
+    pool,
+    env: {
+      GOOGLE_BOOKS_BASE_URL: `${baseUrl}/google`,
+      ISBNDB_BASE_URL: `${baseUrl}/isbndb`,
+      GOODREADS_BASE_URL: `${baseUrl}/goodreads`
+    }
+  });
+  const tasks = createTasks({ pool, providers, publisherDid, publisherHost: PUBLISHER });
+  const helpers = { logger: { info() {}, warn() {}, error() {} } };
+  const prefix = `at://${publisherDid}/community.lexicon.media.book/`;
+
+  try {
+    await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+    await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+
+    await tasks['catalog.resolve'](
+      { identifier: { issuer: 'isbn13', value: '9781111111111' } },
+      helpers
+    );
+
+    const edition = await pool.query('SELECT uri, rkey, title FROM editions WHERE uri LIKE $1', [
+      `at://${publisherDid}/%`
+    ]);
+    assert.equal(edition.rowCount, 1);
+    assert.ok(edition.rows[0].uri.startsWith(prefix), edition.rows[0].uri);
+    assert.equal(edition.rows[0].rkey, 'gb.plcAuthorityVolume');
+    assert.equal(edition.rows[0].title, 'PLC Authority Edition');
+
+    const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
+      edition.rows[0].uri
+    ]);
+    assert.deepEqual(outbox.rows, [
+      { collection: 'community.lexicon.media.book.edition', op: 'create' }
+    ]);
+  } finally {
+    await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+    await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+    await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${baseUrl}/%`]);
     await pool.end();
   }
 });

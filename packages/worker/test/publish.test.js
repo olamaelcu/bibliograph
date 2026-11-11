@@ -4,6 +4,7 @@ import http from 'node:http';
 import pg from 'pg';
 
 import { createTasks } from '../lib/tasks.js';
+import { createIngest } from '../lib/ingest.js';
 import {
   DEFAULT_BATCH,
   claimBatch,
@@ -23,6 +24,9 @@ const PUBLISHER_DID = 'did:web:pds-test.example';
 const HOST = 'pds-test.example';
 const COLLECTION = 'community.lexicon.media.book.edition';
 const PREFIX = `at://${PUBLISHER_DID}/${COLLECTION}/`;
+const PLC_PUBLISHER_DID = 'did:plc:testpublisherauthority';
+// Edition URIs use the book collection; the outbox row uses `.edition`.
+const PLC_PREFIX = `at://${PLC_PUBLISHER_DID}/community.lexicon.media.book/`;
 const CONTRIBUTOR_PREFIX = 'PDS Test Contributor';
 
 const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 4 });
@@ -67,7 +71,7 @@ function startStub() {
       return send(200, {
         accessJwt: 'test-access-jwt',
         refreshJwt: 'test-refresh-jwt',
-        did: PUBLISHER_DID,
+        did: body.identifier,
         handle: HOST
       });
     }
@@ -229,6 +233,9 @@ async function cleanup() {
   await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [`${PREFIX}%`]);
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`${PREFIX}%`]);
   await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${PREFIX}%`]);
+  await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
+  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
+  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
   await pool.query('DELETE FROM contributors WHERE name LIKE $1', [`${CONTRIBUTOR_PREFIX}%`]);
   await pool.query('DELETE FROM publishers WHERE name LIKE $1', ['PDS Test Publisher%']);
 }
@@ -338,6 +345,57 @@ test('publishes a create, stores the returned CID and drains the outbox row', as
   assert.equal(outbox.rowCount, 0, 'successful publish deletes the outbox row');
 
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
+  assert.equal(cids.rowCount, 1);
+  assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].result.cid);
+});
+
+test('a did:plc publisher authority mints and drains an edition', async () => {
+  const ingest = createIngest({ pool, publisherDid: PLC_PUBLISHER_DID });
+  const ingested = await ingest({
+    title: 'A did:plc Edition',
+    identifiers: [{ issuer: 'googlebooks', value: 'plc-publish-authority' }]
+  });
+
+  assert.equal(ingested.created, true);
+  assert.ok(ingested.uri.startsWith(PLC_PREFIX), ingested.uri);
+
+  const config = {
+    ...validConfig(stub.url),
+    publisherDid: PLC_PUBLISHER_DID,
+    accountDid: PLC_PUBLISHER_DID
+  };
+  const publisher = createOutboxPublisher({ pool, config });
+  const tasks = createTasks({
+    pool,
+    publisherDid: PLC_PUBLISHER_DID,
+    publisherHost: HOST,
+    publisher
+  });
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  const session = stub.state.requests.find(
+    (request) => request.url === '/xrpc/com.atproto.server.createSession'
+  );
+  assert.ok(session, 'createSession must be called for the did:plc account');
+  assert.deepEqual(session.body, {
+    identifier: PLC_PUBLISHER_DID,
+    password: 'test-password'
+  });
+
+  const [write] = applyWriteRequests();
+  assert.ok(write, 'applyWrites must be called');
+  assert.equal(write.headers.authorization, 'Bearer test-access-jwt');
+  assert.equal(write.body.repo, PLC_PUBLISHER_DID);
+  assert.equal(write.body.writes[0].rkey, 'gb.plc-publish-authority');
+  assert.equal(write.body.writes[0].value.title, 'A did:plc Edition');
+
+  const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri LIKE $1', [
+    `${PLC_PREFIX}%`
+  ]);
+  assert.equal(outbox.rowCount, 0, 'the did:plc outbox row is drained');
+
+  const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [ingested.uri]);
   assert.equal(cids.rowCount, 1);
   assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].result.cid);
 });
