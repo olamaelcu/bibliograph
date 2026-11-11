@@ -538,7 +538,7 @@ async function serveBookRecordFromDb(
     }
     const cid = await cidForLex(value as unknown as LexMap);
     if (!row.description) {
-      void enqueueDescriptionBackfill(uri).catch((err) => {
+      void enqueueDescriptionBackfill(uri, 'on-read').catch((err) => {
         log.warn({ err, uri, stage: 'serveBookRecordFromDb.description.enqueue' }, 'description backfill enqueue failed');
       });
     }

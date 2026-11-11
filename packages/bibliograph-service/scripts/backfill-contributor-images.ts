@@ -76,7 +76,7 @@ async function run(): Promise<void> {
     if (rows.length === 0) break;
 
     for (const row of rows) {
-      await utils.addJob('backfill-contributor-image', { uri: row.uri }, {
+      await utils.addJob('backfill-contributor-image', { uri: row.uri, source: 'scan' }, {
         jobKey: `backfill-contributor-image:${row.uri}`,
         maxAttempts: 5,
       });

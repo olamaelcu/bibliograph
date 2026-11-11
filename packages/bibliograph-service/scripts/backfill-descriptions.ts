@@ -104,7 +104,7 @@ async function run(): Promise<void> {
     for (const row of rows) {
       await utils.addJob(
         'backfill-edition-description',
-        { uri: row.uri },
+        { uri: row.uri, source: 'scan' },
         {
           jobKey: `backfill-description:${row.uri}`,
           maxAttempts: 5,

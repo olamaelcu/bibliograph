@@ -35,8 +35,8 @@ export const actions: Actions = {
     }
     const uri = contributorUri(params.rkey);
     await Promise.all([
-      enqueueContributorImageBackfill(uri),
-      enqueueContributorBioBackfill(uri),
+      enqueueContributorImageBackfill(uri, 'admin'),
+      enqueueContributorBioBackfill(uri, 'admin'),
     ]);
     log.info(
       { stage: 'contributor-backfill', rkey: params.rkey, did: locals.viewer.did },

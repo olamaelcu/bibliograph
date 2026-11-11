@@ -364,6 +364,38 @@ export const tapDeadLetter = pgTable(
 export type IngestDeadLetterRow = typeof ingestDeadLetter.$inferSelect;
 export type TapDeadLetterRow = typeof tapDeadLetter.$inferSelect;
 
+export const backfillEvents = pgTable(
+  'backfill_events',
+  {
+    id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    enqueuedAt: timestamp('enqueued_at', { withTimezone: true }),
+    job: text('job').notNull(),
+    resourceType: text('resource_type').notNull(),
+    resourceUri: text('resource_uri').notNull(),
+    resourceRkey: text('resource_rkey').notNull(),
+    outcome: text('outcome').notNull(),
+    reason: text('reason'),
+    origin: text('origin'),
+    attempts: integer('attempts').notNull(),
+    maxAttempts: integer('max_attempts').notNull(),
+    durationMs: integer('duration_ms'),
+    jobId: bigint('job_id', { mode: 'number' }),
+    jobKey: text('job_key'),
+    error: text('error'),
+    detail: jsonb('detail'),
+  },
+  (t) => ({
+    occurredIdx: index('backfill_events_occurred_idx').on(t.occurredAt),
+    jobOccurredIdx: index('backfill_events_job_occurred_idx').on(t.job, t.occurredAt),
+    typeOccurredIdx: index('backfill_events_type_occurred_idx').on(t.resourceType, t.occurredAt),
+    outcomeOccurredIdx: index('backfill_events_outcome_occurred_idx').on(t.outcome, t.occurredAt),
+    uriOccurredIdx: index('backfill_events_uri_occurred_idx').on(t.resourceUri, t.occurredAt),
+  }),
+);
+
+export type BackfillEventRow = typeof backfillEvents.$inferSelect;
+
 // ─── Edition→work link votes ────────────────────────────────────────────────
 // Materialized from `net.olamaelcu.livtet.biblio.editionWorkLink` records in
 // users' own repos. One row per (edition, voter): a user changing their mind

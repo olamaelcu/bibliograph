@@ -143,7 +143,7 @@ export const actions: Actions = {
       return fail(403, { error: 'Only administrators can queue backfills.' });
     }
     const uri = editionUriForRkey(params.rkey, PUBLISHER_DID);
-    await Promise.all([enqueueDescriptionBackfill(uri), enqueueFormatBackfill(uri)]);
+    await Promise.all([enqueueDescriptionBackfill(uri, 'admin'), enqueueFormatBackfill(uri, 'admin')]);
     log.info(
       { stage: 'edition-backfill', rkey: params.rkey, did: locals.viewer.did },
       'description+metadata backfill queued by administrator',

@@ -1,4 +1,5 @@
 import type { WorkerUtils } from 'graphile-worker';
+import type { BackfillSource } from './backfill-audit';
 import type { EditionItem, WorkItem, ContributorItem } from '../search/types.ts';
 
 type IngestItem = EditionItem | WorkItem | ContributorItem;
@@ -114,33 +115,33 @@ export async function enqueueRecordDeleteItems(uris: string[]): Promise<void> {
   }
 }
 
-export async function enqueueCoverBackfill(uri: string, rkey: string): Promise<void> {
+export async function enqueueCoverBackfill(uri: string, rkey: string, source?: BackfillSource): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('backfill-edition-cover', { uri, rkey }, {
+  await utils.addJob('backfill-edition-cover', { uri, rkey, source }, {
     jobKey: `backfill-cover:${uri}`,
     maxAttempts: 5,
   });
 }
 
-export async function enqueueDescriptionBackfill(uri: string): Promise<void> {
+export async function enqueueDescriptionBackfill(uri: string, source?: BackfillSource): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('backfill-edition-description', { uri }, {
+  await utils.addJob('backfill-edition-description', { uri, source }, {
     jobKey: `backfill-description:${uri}`,
     maxAttempts: 5,
   });
 }
 
-export async function enqueueFormatBackfill(uri: string): Promise<void> {
+export async function enqueueFormatBackfill(uri: string, source?: BackfillSource): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('backfill-edition-format', { uri }, {
+  await utils.addJob('backfill-edition-format', { uri, source }, {
     jobKey: `backfill-format:${uri}`,
     maxAttempts: 5,
   });
 }
 
-export async function enqueueIsbnBackfill(uri: string, rkey: string): Promise<void> {
+export async function enqueueIsbnBackfill(uri: string, rkey: string, source?: BackfillSource): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('backfill-edition-isbn', { uri, rkey }, {
+  await utils.addJob('backfill-edition-isbn', { uri, rkey, source }, {
     jobKey: `backfill-isbn:${uri}`,
     maxAttempts: 5,
   });
@@ -152,21 +153,21 @@ export async function enqueueIsbnBackfill(uri: string, rkey: string): Promise<vo
  * pending, and the task itself re-checks the row, so a later ingest winning the
  * race is not an error.
  */
-export async function enqueueShelvingEditionBackfill(uri: string): Promise<void> {
+export async function enqueueShelvingEditionBackfill(uri: string, source?: BackfillSource): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('backfill-shelving-edition', { uri }, {
+  await utils.addJob('backfill-shelving-edition', { uri, source }, {
     jobKey: `backfill-shelving-edition:${uri}`,
     maxAttempts: 3,
   });
 }
 
 /** `enqueueShelvingEditionBackfill` for a whole page, in one statement per chunk. */
-export async function enqueueShelvingEditionBackfills(uris: readonly string[]): Promise<void> {
+export async function enqueueShelvingEditionBackfills(uris: readonly string[], source?: BackfillSource): Promise<void> {
   if (uris.length === 0) return;
   const utils = await getUtils();
   const jobs = uris.map((uri) => ({
     identifier: 'backfill-shelving-edition',
-    payload: { uri },
+    payload: { uri, source },
     jobKey: `backfill-shelving-edition:${uri}`,
     maxAttempts: 3,
   }));
@@ -183,9 +184,9 @@ export async function enqueueShelvingEditionBackfills(uris: readonly string[]): 
  * same call, and without dedupe each render would enqueue another lookup for a
  * contributor the resolver has nothing for.
  */
-export async function enqueueContributorImageBackfill(uri: string): Promise<void> {
+export async function enqueueContributorImageBackfill(uri: string, source?: BackfillSource): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('backfill-contributor-image', { uri }, {
+  await utils.addJob('backfill-contributor-image', { uri, source }, {
     jobKey: `backfill-contributor-image:${uri}`,
     maxAttempts: 5,
   });
@@ -196,9 +197,9 @@ export async function enqueueContributorImageBackfill(uri: string): Promise<void
  * image backfill: the admin button and any future scanner re-click without
  * stacking duplicates.
  */
-export async function enqueueContributorBioBackfill(uri: string): Promise<void> {
+export async function enqueueContributorBioBackfill(uri: string, source?: BackfillSource): Promise<void> {
   const utils = await getUtils();
-  await utils.addJob('backfill-contributor-bio', { uri }, {
+  await utils.addJob('backfill-contributor-bio', { uri, source }, {
     jobKey: `backfill-bio:${uri}`,
     maxAttempts: 5,
   });

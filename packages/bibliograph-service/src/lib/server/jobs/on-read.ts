@@ -41,7 +41,7 @@ export async function maybeEnqueueEditionBackfills(
       .where(inArray(editions.uri, list));
     for (const row of rows) {
       if (row.needDescription) {
-        await enqueueDescriptionBackfill(row.uri).catch((err: unknown) =>
+        await enqueueDescriptionBackfill(row.uri, 'on-read').catch((err: unknown) =>
           log.warn({ err, uri: row.uri, stage: 'on-read-backfill' }, 'description backfill enqueue failed'),
         );
       }
@@ -49,7 +49,7 @@ export async function maybeEnqueueEditionBackfills(
         // The cover job wants the rkey alongside the uri (legacy callers build
         // provider urls from it).
         const rkey = row.uri.split('/').pop() ?? '';
-        await enqueueCoverBackfill(row.uri, rkey).catch((err: unknown) =>
+        await enqueueCoverBackfill(row.uri, rkey, 'on-read').catch((err: unknown) =>
           log.warn({ err, uri: row.uri, stage: 'on-read-backfill' }, 'cover backfill enqueue failed'),
         );
       }
@@ -78,12 +78,12 @@ export async function maybeEnqueueContributorBackfills(
       .where(inArray(contributors.uri, list));
     for (const row of rows) {
       if (row.needBio) {
-        await enqueueContributorBioBackfill(row.uri).catch((err: unknown) =>
+        await enqueueContributorBioBackfill(row.uri, 'on-read').catch((err: unknown) =>
           log.warn({ err, uri: row.uri, stage: 'on-read-backfill' }, 'contributor bio backfill enqueue failed'),
         );
       }
       if (row.needImage) {
-        await enqueueContributorImageBackfill(row.uri).catch((err: unknown) =>
+        await enqueueContributorImageBackfill(row.uri, 'on-read').catch((err: unknown) =>
           log.warn({ err, uri: row.uri, stage: 'on-read-backfill' }, 'contributor image backfill enqueue failed'),
         );
       }

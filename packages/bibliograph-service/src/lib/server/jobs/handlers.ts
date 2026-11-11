@@ -21,6 +21,7 @@ import { wireContributorsForAll } from './wire-contributors';
 import { workRecordValue } from '../book-records';
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
+import { auditedBackfill, type AuditedTask } from './backfill-audit';
 import { backfillEditionMetadata } from './format-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
 import { backfillBioForContributor } from './contributor-bio-backfill';
@@ -397,19 +398,20 @@ export async function syncIngestWorks(items: WorkItem[], log: Logger): Promise<v
  * holds them. Retrying would only burn the attempt budget, so the job ends
  * quietly and the next shelving event for that edition asks again.
  */
-export const backfillShelvingEditionTask: Task = async (payload, helpers) => {
+export const backfillShelvingEditionTask: AuditedTask = async (payload, helpers) => {
   const { uri } = payload as { uri: string };
   const log = helpers.logger as unknown as Logger;
   const [existing] = await db.select({ uri: editions.uri }).from(editions).where(eq(editions.uri, uri)).limit(1);
-  if (existing) return;
+  if (existing) return { reason: 'already_present' };
 
   const item = await fetchEditionForUri(uri, log, AbortSignal.timeout(15_000));
   if (!item) {
     log.info({ stage: 'backfill-shelving-edition', uri }, 'no provider record for edition; leaving catalog as is');
-    return;
+    return { reason: 'provider_miss' };
   }
   log.info({ stage: 'backfill-shelving-edition', uri }, 'filling catalog edition from its provider');
   await ingestEditionBatch([item], log, helpers.job.attempts);
+  return { reason: 'created' };
 };
 
 /**
@@ -427,7 +429,7 @@ async function enqueueMissingEditions(candidates: Set<string>, log: Logger): Pro
     const missing = uris.filter((uri) => !known.has(uri));
     // One statement per chunk instead of one transaction per record: a TAP page
     // can name a hundred missing editions.
-    await enqueueShelvingEditionBackfills(missing);
+    await enqueueShelvingEditionBackfills(missing, 'tap');
     if (missing.length > 0) {
       log.info({ stage: 'enqueue-missing-editions', missing: missing.length, seen: uris.length }, 'queued catalog fills');
     }
@@ -845,60 +847,66 @@ export const tapRecordDeleteBatchTask: Task = async (payload, helpers) => {
   }
 };
 
-export const backfillEditionCoverTask: Task = async (payload, helpers) => {
+export const backfillEditionCoverTask: AuditedTask = async (payload, helpers) => {
   const { uri, rkey } = payload as { uri: string; rkey: string };
   const log = helpers.logger as unknown as Logger;
   const res = await backfillCoverForEdition(uri, rkey, log);
   if (!res.updated) {
     log.info({ stage: 'backfill-edition-cover', uri, rkey, reason: res.reason }, 'cover backfill skipped');
   }
+  return { reason: res.updated ? 'ok' : res.reason };
 };
 
-export const backfillEditionDescriptionTask: Task = async (payload, helpers) => {
+export const backfillEditionDescriptionTask: AuditedTask = async (payload, helpers) => {
   const { uri } = payload as { uri: string };
   const log = helpers.logger as unknown as Logger;
   const res = await backfillDescriptionForEdition(uri, log);
   if (!res.updated) {
     log.info({ stage: 'backfill-edition-description', uri, reason: res.reason }, 'description backfill skipped');
   }
+  return { reason: res.updated ? 'ok' : res.reason };
 };
 
-export const backfillEditionFormatTask: Task = async (payload, helpers) => {
+export const backfillEditionFormatTask: AuditedTask = async (payload, helpers) => {
   const { uri } = payload as { uri: string };
   const log = helpers.logger as unknown as Logger;
   const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
   if (!row) {
     log.warn({ stage: 'backfill-edition-format', uri, reason: 'no_row' }, 'edition not in catalog; nothing to backfill');
-    return;
+    return { reason: 'no_row' };
   }
   const res = await backfillEditionMetadata(row, log);
   if (res.status !== 'updated') {
     log.info({ stage: 'backfill-edition-format', uri, status: res.status }, 'metadata backfill skipped');
   }
+  return { reason: res.status };
 };
 
-export const backfillContributorImageTask: Task = async (payload, helpers) => {
+export const backfillContributorImageTask: AuditedTask = async (payload, helpers) => {
   const { uri } = payload as { uri: string };
   const log = helpers.logger as unknown as Logger;
-  await backfillContributorImageForUri(uri, log);
+  const res = await backfillContributorImageForUri(uri, log);
+  return { reason: res.updated ? 'ok' : res.reason };
 };
 
-export const backfillContributorBioTask: Task = async (payload, helpers) => {
+export const backfillContributorBioTask: AuditedTask = async (payload, helpers) => {
   const { uri } = payload as { uri: string };
   const log = helpers.logger as unknown as Logger;
   const res = await backfillBioForContributor(uri, log);
   if (!res.updated) {
     log.info({ stage: 'backfill-contributor-bio', uri, reason: res.reason }, 'contributor bio backfill skipped');
   }
+  return { reason: res.updated ? 'ok' : res.reason };
 };
 
-export const backfillEditionIsbnTask: Task = async (payload, helpers) => {
+export const backfillEditionIsbnTask: AuditedTask = async (payload, helpers) => {
   const { uri, rkey } = payload as { uri: string; rkey: string };
   const log = helpers.logger as unknown as Logger;
   const res = await backfillIsbnForEdition(uri, rkey, log);
   if (!res.updated) {
     log.info({ stage: 'backfill-edition-isbn', uri, rkey, reason: res.reason }, 'isbn backfill skipped');
   }
+  return { reason: res.updated ? 'ok' : res.reason, detail: res.added ? { added: res.added } : undefined };
 };
 
 export const searchTaskList: TaskList = {
@@ -906,12 +914,12 @@ export const searchTaskList: TaskList = {
   'ingest-work': ingestWorkTask,
   'ingest-edition-batch': ingestEditionBatchTask,
   'ingest-work-batch': ingestWorkBatchTask,
-  'backfill-edition-cover': backfillEditionCoverTask,
-  'backfill-edition-description': backfillEditionDescriptionTask,
-  'backfill-edition-format': backfillEditionFormatTask,
-  'backfill-contributor-image': backfillContributorImageTask,
-  'backfill-contributor-bio': backfillContributorBioTask,
-  'backfill-edition-isbn': backfillEditionIsbnTask,
+  'backfill-edition-cover': auditedBackfill('backfill-edition-cover', 'edition', backfillEditionCoverTask),
+  'backfill-edition-description': auditedBackfill('backfill-edition-description', 'edition', backfillEditionDescriptionTask),
+  'backfill-edition-format': auditedBackfill('backfill-edition-format', 'edition', backfillEditionFormatTask),
+  'backfill-contributor-image': auditedBackfill('backfill-contributor-image', 'contributor', backfillContributorImageTask),
+  'backfill-contributor-bio': auditedBackfill('backfill-contributor-bio', 'contributor', backfillContributorBioTask),
+  'backfill-edition-isbn': auditedBackfill('backfill-edition-isbn', 'edition', backfillEditionIsbnTask),
 };
 
 export const tapTaskList: TaskList = {
@@ -919,7 +927,7 @@ export const tapTaskList: TaskList = {
   'tap-record-delete': tapRecordDeleteTask,
   'tap-record-upsert-batch': tapRecordUpsertBatchTask,
   'tap-record-delete-batch': tapRecordDeleteBatchTask,
-  'backfill-shelving-edition': backfillShelvingEditionTask,
+  'backfill-shelving-edition': auditedBackfill('backfill-shelving-edition', 'edition', backfillShelvingEditionTask),
 };
 
 export const allTaskList: TaskList = {

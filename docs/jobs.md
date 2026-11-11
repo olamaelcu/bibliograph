@@ -120,6 +120,28 @@ Manual one-off runs exist for each scan (`npx tsx scripts/backfill-<name>.ts
 [--dry-run] [--limit N] [--isbn X]`); `--dry-run` writes nothing and is the
 safe verification hook.
 
+## Backfill audit
+
+Since 0.5.28 (pending), every terminal-interesting backfill execution is recorded in
+`backfill_events`: one row per job run that did something (`updated`, `created`,
+`miss`, `deferred`, `blocked`, `invalid`, `failed`); the scan's `already`/`absent`
+no-ops are not recorded. Rows carry the job, resource type/uri/rkey, outcome, the
+module's own `reason`, attempts, duration, `origin` (`scan` | `on-read` |
+`admin` | `tap` | `manual`), and the raw error on failure. Instrumentation is one
+wrapper (`jobs/backfill-audit.ts`) applied at task-list registration; a failing
+audit write is logged and swallowed, never retried, never fails the job.
+
+The rows are hydrated at read time against `editions` / `contributors` / `works`
+(+ `edition_aliases` so merged-away edition uris still resolve), and surfaced at
+`/admin/backfills` — administrators-only, keyset-paginated, filterable by job,
+resource type, outcome, or free text; each row links to the resource page.
+`backfill_events` deliberately has no foreign key to `editions` (a librarian
+merge deletes editions; the audit trail must survive it). Events recorded from
+the deploy onward only; earlier runs are unrecoverable (graphile deletes
+completed jobs). Inline scripts (`backfill-formats.ts`, `backfill-works.ts`)
+run outside the worker and are not audited.
+
+
 ## Verifying on a host
 
 ```sh

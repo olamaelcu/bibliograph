@@ -232,6 +232,13 @@
       "when": 1795518400005,
       "tag": "0034_actors",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795594800000,
+      "tag": "0035_backfill_events",
+      "breakpoints": true
     }
   ]
 }

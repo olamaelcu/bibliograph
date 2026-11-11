@@ -46,6 +46,15 @@
     </a>
 
     <a class="tool" href="/admin/editions/merge">
+      <span class="title">Backfill audit</span>
+      <span class="body">
+        Every meaningful backfill run against an edition, contributor, or work —
+        what job, what happened, when. Click through to the resource.
+      </span>
+      <span class="meta">Per-run journal</span>
+    </a>
+
+    <a class="tool" href="/admin/editions/merge">
       <span class="title">Edition merge</span>
       <span class="body">
         Collapse duplicate catalog rows into one: the winner keeps its URI and absorbs every

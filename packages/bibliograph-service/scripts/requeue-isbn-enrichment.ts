@@ -139,7 +139,7 @@ async function run(): Promise<void> {
     for (const row of rows) {
       await utils.addJob(
         'backfill-edition-isbn',
-        { uri: row.uri, rkey: row.rkey },
+        { uri: row.uri, source: 'scan', rkey: row.rkey },
         { jobKey: `backfill-isbn:${row.uri}`, maxAttempts: 5 },
       );
       bar.advance();

@@ -136,11 +136,11 @@ export const actions: Actions = {
     const skipped: string[] = [];
 
     if (cover) {
-      await enqueueCoverBackfill(row.uri, row.rkey);
+      await enqueueCoverBackfill(row.uri, row.rkey, 'manual');
       queued.push('cover');
     }
     if (description) {
-      await enqueueDescriptionBackfill(row.uri);
+      await enqueueDescriptionBackfill(row.uri, 'manual');
       queued.push('description');
     }
     if (isbn) {
@@ -154,7 +154,7 @@ export const actions: Actions = {
       if (enriched) {
         skipped.push('ISBN (already enriched)');
       } else {
-        await enqueueIsbnBackfill(row.uri, row.rkey);
+        await enqueueIsbnBackfill(row.uri, row.rkey, 'manual');
         queued.push('ISBN');
       }
     }
