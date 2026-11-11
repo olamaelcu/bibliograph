@@ -329,10 +329,19 @@ mise run package-web-deb       # dpkg-deb → dist/bibliograph-web_0.1.0-1_all.d
 | `/usr/lib/systemd/system/bibliograph-web.service` | `/usr/bin/node …/build/index.js`, binds `127.0.0.1:5176` |
 
 ```bash
-sudo apt install ./dist/bibliograph-web_0.1.0-1_all.deb
+# HappyView first: `apt install ./bibliograph-web_*.deb` on its own fails on the
+# unsatisfied dependency rather than installing an edge with no upstream.
+sudo apt install ./dist/bibliograph-happyview_*.deb
+sudo apt install ./dist/bibliograph-web_*.deb
 # set HAPPYVIEW_CLIENT_KEY / HAPPYVIEW_CLIENT_SECRET in /etc/bibliograph/web.env
 sudo systemctl restart bibliograph-web
 ```
+
+`bibliograph-web` **Depends** on `bibliograph-happyview` — the edge has no
+upstream without it, and the pair is configured in that order (HappyView before
+the edge). `apt-get install ./bibliograph-web_*.deb` on its own fails with an
+unsatisfiable dependency rather than installing a service that cannot proxy
+anything.
 
 The edge holds no state and no user session: it injects the configured XRPC
 client identity and relays `Authorization`/`DPoP` untouched, so procedures still
@@ -346,7 +355,9 @@ package (the same constraint the retired application package documented).
 `bibliograph-web` and `bibliograph-happyview` install side by side: distinct
 trees under `/usr/lib`, distinct conffiles, one shared `bibliograph` sysuser that
 either package creates if it is missing. Extracting both into one root shows no
-path collisions outside the standard directories.
+path collisions outside the standard directories. The dependency is one-way —
+HappyView does not know about the edge — so HappyView can be installed, deployed
+and tested on its own, and only the edge requires the pair.
 
 ## Why a package instead of a container
 

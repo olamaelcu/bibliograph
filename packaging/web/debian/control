@@ -6,8 +6,8 @@ Architecture: @ARCH@
 Installed-Size: @SIZE@
 Maintainer: Bibliograph Maintainers <maintainers@olamaelcu.net>
 Homepage: https://biblio.livtet.olamaelcu.net
-Depends: nodejs (>= 20), adduser
-Recommends: nginx, bibliograph-happyview
+Depends: nodejs (>= 20), adduser, bibliograph-happyview
+Recommends: nginx
 Description: Bibliograph web edge (SvelteKit appview front end)
  The public SvelteKit application for Bibliograph. It serves the UI and the
  /xrpc surface, and is the only public origin: queries and procedures are
