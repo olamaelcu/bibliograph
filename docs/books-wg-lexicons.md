@@ -109,6 +109,10 @@ queues work and `packages/worker` performs it:
 - `catalog.resolve` / `catalog.search` (`lib/tasks.js`, `lib/providers`) use Google Books first;
   for an ISBN, ISBNdb only when Google Books returns nothing; Goodreads as gap-fill and identifier
   fallback, with candidates merged and de-duplicated;
+- `catalog.isbn` backs `searchEditions` ISBN identifiers: it calls ISBNdb directly by ISBN, even
+  when the local catalog already answered, and ingests up to three candidates. Without
+  `ISBNDB_API_KEY` (so no ISBNdb provider) it logs a warning and falls back to the normal
+  `catalog.resolve` provider chain, so hydration still happens without claiming an ISBNdb call;
 - `lib/ingest.js` ingests via the identifier bag, minting new rows with `editions_next_tid()` or a
   provider-prefixed rkey and extending the identifier bag of an existing edition; the edition
   trigger queues `pds_outbox`;

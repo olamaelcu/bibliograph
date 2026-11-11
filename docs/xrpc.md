@@ -60,8 +60,8 @@ does not have that gap because it indexes the record it just wrote in the same r
 
 `resolveEditions` and `searchEditions` are the other exception: they read the catalog tables, not
 `happyview_records`, and they never write catalog rows. Provider fan-out (Google Books, ISBNdb,
-Goodreads) runs asynchronously in the worker (`catalog.resolve` / `catalog.search`), not in the
-request; the response is the local catalog only and says nothing about that queued work.
+Goodreads) runs asynchronously in the worker (`catalog.resolve` / `catalog.search` / `catalog.isbn`),
+not in the request; the response is the local catalog only and says nothing about that queued work.
 
 **Catalog dependency.** Book-rendering views join `public.appview_book_lua`, the catalog read model:
 
@@ -345,6 +345,13 @@ Hydration is queued only when the local result is empty, and a repeated query is
 its TTL mark. The response carries no flag for it, so a client can only re-call with the same body
 later; an empty page may stay empty on every later call. As with `resolveEditions`, there is no
 signal for worker liveness or for a stopped worker.
+
+ISBN identifiers (`isbn13`, `isbn10`, `isbn`, case-insensitive, normalized to a checksum-valid
+ISBN-13) additionally queue a direct ISBNdb lookup (`catalog.isbn`) **even when the local result is
+non-empty** — the goal is to enrich and ingest the edition from the provider, not to fill an empty
+page. That enqueue is deduplicated by its own TTL mark. No response field signals it: the response
+shape is unchanged (`items`/`hasMore`/`total`; `editionResults` has no `pending` or `degraded`
+field), so clients learn of new editions only by re-calling later.
 
 ### Follow
 

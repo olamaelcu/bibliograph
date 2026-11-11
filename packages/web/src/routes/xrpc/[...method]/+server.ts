@@ -5,8 +5,10 @@ import { CatalogUnavailableError } from '$lib/server/catalog/db';
 import { resolveEditions, searchEditions, type Identifier } from '$lib/server/catalog/editions';
 import {
   enqueueResolveMiss,
+  enqueueIsbnHydration,
   enqueueSearchHydration
 } from '$lib/server/catalog/jobs';
+import { isbn13sFromIdentifiers } from '$lib/server/catalog/isbn';
 
 // An NSID is at least three labels: authority, name, and at least one more.
 const NSID = /^[a-zA-Z]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]([a-zA-Z0-9-]{0,62})$/;
@@ -145,6 +147,9 @@ async function handleSearch(request: Request): Promise<Response> {
 
   try {
     const results = await searchEditions({ q, title, author, identifiers, offset, limit });
+    // An ISBN is worth a direct ISBNdb lookup even when the local catalog
+    // answered: the job enriches/ingests the edition from the provider.
+    await Promise.all(isbn13sFromIdentifiers(identifiers).map(enqueueIsbnHydration));
     // Discovery only hydrates when the local catalog has nothing for the query.
     if (results.items.length === 0) {
       await enqueueSearchHydration({ q, title, author, identifiers });

@@ -34,6 +34,19 @@ const googleBody = {
   ]
 };
 
+const isbndbBook = {
+  title: 'Direct Hydration Volume',
+  title_long: 'Direct Hydration Volume: A Test',
+  authors: ['Isbn Test Author'],
+  publisher: 'Isbn Direct Press',
+  date_published: '2020',
+  pages: 200,
+  language: 'en',
+  isbn13: '9780306406157',
+  image: 'http://img.example/direct.jpg',
+  synopsis: 'A direct ISBNdb lookup.'
+};
+
 const goodreadsSearchHtml = `<table><tr itemscope>
 <td><a href="/book/show/18423"><img class="bookCover" itemprop="image" src="https://img.example/18423.jpg" /></a></td>
 <td><a class="bookTitle" itemprop="url" href="/book/show/18423.The_Left_Hand"><span itemprop='name' role='heading'>The Left Hand of Darkness</span></a>
@@ -75,6 +88,16 @@ const goodreadsBookHtml = `<html><head></head><body>
 
 let server;
 let baseUrl;
+let isbndbRequests = 0;
+
+async function cleanupHydrationRows(pool, host) {
+  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
+  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
+  await pool.query("DELETE FROM contributors WHERE name IN ('Isbn Test Author', 'Ursula K. Le Guin')");
+  await pool.query("DELETE FROM publishers WHERE name IN ('Isbn Direct Press', 'Ace')");
+  await pool.query('DELETE FROM isbndb_cache WHERE key LIKE $1', [`${baseUrl}/isbndb/%`]);
+  await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${baseUrl}/%`]);
+}
 
 before(async () => {
   server = http.createServer((request, response) => {
@@ -88,7 +111,13 @@ before(async () => {
       send(url.searchParams.get('q')?.startsWith('isbn:') ? googleBody : { totalItems: 0, items: [] });
       return;
     }
+    if (url.pathname === '/isbndb/book/9780306406157') {
+      isbndbRequests += 1;
+      send({ book: isbndbBook });
+      return;
+    }
     if (url.pathname.startsWith('/isbndb/')) {
+      isbndbRequests += 1;
       send({ book: { title: 'Unused' } });
       return;
     }
@@ -268,6 +297,91 @@ test('search falls back to Goodreads when Google finds nothing', async () => {
     await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query("DELETE FROM contributors WHERE name = 'Ursula K. Le Guin'");
     await pool.query("DELETE FROM google_books_cache WHERE key LIKE $1", [`${baseUrl}/%`]);
+    await pool.end();
+  }
+});
+
+test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  const providers = createProviders({
+    pool,
+    env: {
+      ISBNDB_API_KEY: 'test-key',
+      ISBNDB_BASE_URL: `${baseUrl}/isbndb`,
+      GOOGLE_BOOKS_BASE_URL: `${baseUrl}/google`,
+      GOODREADS_BASE_URL: `${baseUrl}/goodreads`
+    }
+  });
+  const tasks = createTasks({ pool, providers, publisherHost: 'isbn-direct.example' });
+  const helpers = { logger: { info() {}, warn() {}, error() {} } };
+
+  try {
+    await cleanupHydrationRows(pool, 'isbn-direct.example');
+    isbndbRequests = 0;
+
+    await tasks['catalog.isbn']({ isbn: '9780306406157' }, helpers);
+
+    const edition = await pool.query(
+      "SELECT uri, rkey, title, pages, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
+    );
+    assert.equal(edition.rowCount, 1);
+    assert.equal(edition.rows[0].rkey, 'isbn.9780306406157');
+    assert.equal(edition.rows[0].title, 'Direct Hydration Volume');
+    assert.equal(edition.rows[0].pages, 200);
+    assert.equal(edition.rows[0].cover_url, 'https://img.example/direct.jpg');
+
+    const identifiers = await pool.query(
+      'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',
+      [edition.rows[0].uri]
+    );
+    assert.deepEqual(identifiers.rows, [{ issuer: 'isbn13', value: '9780306406157' }]);
+
+    const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
+      edition.rows[0].uri
+    ]);
+    assert.deepEqual(outbox.rows, [
+      { collection: 'community.lexicon.media.book.edition', op: 'create' }
+    ]);
+
+    // A direct by-ISBN call, not the generic search path.
+    assert.equal(isbndbRequests, 1);
+  } finally {
+    await cleanupHydrationRows(pool, 'isbn-direct.example');
+    await pool.end();
+  }
+});
+
+test('catalog.isbn falls back to the resolve chain without ISBNdb', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  const providers = createProviders({
+    pool,
+    env: {
+      GOOGLE_BOOKS_BASE_URL: `${baseUrl}/google`,
+      ISBNDB_BASE_URL: `${baseUrl}/isbndb`,
+      GOODREADS_BASE_URL: `${baseUrl}/goodreads`
+    }
+  });
+  assert.equal(providers.providers.isbndb, null);
+  const tasks = createTasks({ pool, providers, publisherHost: 'isbn-fallback.example' });
+  const helpers = { logger: { info() {}, warn() {}, error() {} } };
+
+  try {
+    await cleanupHydrationRows(pool, 'isbn-fallback.example');
+    isbndbRequests = 0;
+
+    await tasks['catalog.isbn']({ isbn: '9780441478125' }, helpers);
+
+    const edition = await pool.query(
+      "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-fallback.example/%'"
+    );
+    assert.equal(edition.rowCount, 1);
+    assert.equal(edition.rows[0].rkey, 'gb.efdyneVzATwC');
+    assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
+
+    // Without a key the fallback never reaches ISBNdb.
+    assert.equal(isbndbRequests, 0);
+  } finally {
+    await cleanupHydrationRows(pool, 'isbn-fallback.example');
     await pool.end();
   }
 });

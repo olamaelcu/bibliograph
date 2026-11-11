@@ -1,6 +1,7 @@
 import { createOutboxPublisher, DEFAULT_BATCH } from './publish.js';
 import { publisherConfigError, resolvePublisherConfig } from './pds.js';
 import { createIngest } from './ingest.js';
+import { isbn13 as normalizeIsbn13 } from './util.js';
 
 function validIdentifier(identifier) {
   return (
@@ -71,6 +72,33 @@ export function createTasks({ pool, providers, publisherHost, publisher }) {
       const ingested = await ingestCandidates(candidates, 10);
       helpers.logger.info(
         `catalog.search: ${candidates.length} candidate(s), ${ingested} ingested`
+      );
+    },
+
+    'catalog.isbn': async (payload, helpers) => {
+      const isbn = typeof payload?.isbn === 'string' ? normalizeIsbn13(payload.isbn) : null;
+      if (!isbn) {
+        helpers.logger.warn('catalog.isbn: invalid isbn payload');
+        return;
+      }
+
+      // A direct by-ISBN lookup beats the generic fan-out, but only when
+      // ISBNdb is configured; otherwise fall back to the normal resolve chain.
+      const isbndb = providers?.providers?.isbndb;
+      let candidates;
+      if (isbndb) {
+        candidates = await isbndb.byIsbn(isbn);
+      } else {
+        helpers.logger.warn(
+          `catalog.isbn: ISBNdb is not configured (ISBNDB_API_KEY unset); ` +
+            `falling back to the resolve chain for ${isbn}`
+        );
+        candidates = await providers.resolve({ issuer: 'isbn13', value: isbn });
+      }
+
+      const ingested = await ingestCandidates(candidates, 3);
+      helpers.logger.info(
+        `catalog.isbn ${isbn}: ${candidates.length} candidate(s), ${ingested} ingested`
       );
     },
 

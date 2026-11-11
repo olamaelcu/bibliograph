@@ -56,7 +56,7 @@ function searchKey(input: {
 
 async function enqueue(
   key: string,
-  task: 'catalog.resolve' | 'catalog.search',
+  task: 'catalog.resolve' | 'catalog.search' | 'catalog.isbn',
   payload: unknown,
   ttlMs: number
 ): Promise<boolean> {
@@ -111,4 +111,12 @@ export function enqueueSearchHydration(input: {
   identifiers: Identifier[];
 }): Promise<boolean> {
   return enqueue(searchKey(input), 'catalog.search', input, SEARCH_TTL_MS);
+}
+
+/**
+ * Direct ISBNdb lookup for an ISBN seen in a search, even when the local
+ * catalog already answered, so the edition is enriched from the provider.
+ */
+export function enqueueIsbnHydration(isbn13: string): Promise<boolean> {
+  return enqueue(`isbn:${isbn13}`, 'catalog.isbn', { isbn: isbn13 }, RESOLVE_TTL_MS);
 }

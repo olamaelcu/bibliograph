@@ -77,6 +77,7 @@ and skips enqueueing.
 | --- | --- | --- |
 | `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest into the identifier bag |
 | `catalog.search` | edge on a catalog search (`job_key` deduped, 1 h TTL) | provider search → ingest up to ten candidates |
+| `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to three candidates; falls back to the normal resolve chain when ISBNdb is unconfigured |
 | `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
 
 `pds-publish` claims at most 25 ready rows for its configured publisher DID per
