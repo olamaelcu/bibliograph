@@ -115,6 +115,9 @@ end
 
 -- One shelf record (or a derived fixed shelf) as `defs#shelfView`.
 function shelf_view(uri, record)
+  -- `record` arrives as the text column; parse it or every custom shelf
+  -- renders as its rkey (the fixed shelves hide this, they match on rkey).
+  record = record_value(record)
   local rkey = rkey_of(uri)
   local view = {
     ['$type'] = 'net.olamaelcu.livtet.biblio.defs#shelfView',
