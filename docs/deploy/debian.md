@@ -315,6 +315,14 @@ boot, so a row inserted afterwards is invisible until a restart. Re-running
 reuses the pair; `hv-client --force` mints a new one, after which the edge needs
 a restart.
 
+For a host whose configuration is managed outside this package (Ansible, in
+`infra/`), the units also load `/etc/bibliograph/happyview.local` **after** the
+conffile, so that file wins. Put `DATABASE_URL` and the two secrets there and
+leave `happyview.env` untouched — a dpkg conffile edited by a configuration
+manager turns every upgrade into a prompt. `hv-client`, `happyview` and the
+deploy oneshot all load it, so the value is shared by everything that talks to
+the database.
+
 The package is `Architecture: any` because the binary links the host's glibc and
 `libssl3`, but it is only correct for the architecture of the image it was
 extracted from. It builds clean under `lintian` apart from the

@@ -8,6 +8,8 @@ After=network.target
 [Service]
 Type=oneshot
 EnvironmentFile=-/etc/bibliograph/happyview.env
+# Ansible-managed overrides; loaded after the conffile, so it wins.
+EnvironmentFile=-/etc/bibliograph/happyview.local
 ExecStart=/usr/lib/bibliograph-happyview/bin/hv-client
 RemainAfterExit=yes
 

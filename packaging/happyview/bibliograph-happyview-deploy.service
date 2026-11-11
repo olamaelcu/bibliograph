@@ -13,6 +13,8 @@ User=bibliograph
 Group=bibliograph
 WorkingDirectory=/usr/lib/bibliograph-happyview
 EnvironmentFile=/etc/bibliograph/happyview.env
+# Ansible-managed overrides; loaded after the conffile, so it wins.
+EnvironmentFile=-/etc/bibliograph/happyview.local
 # --seed mints an admin key on first run and writes it here; later runs read
 # the same file, so the upload stays authenticated without any operator step.
 # --wait covers the first start, where migrations run before the listener binds.
