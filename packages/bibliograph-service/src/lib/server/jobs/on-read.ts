@@ -12,6 +12,28 @@ import {
 type Db = typeof defaultDb;
 
 /**
+ * Opportunity budget for the read path. The hourly scans own breadth; a read
+ * that touches a thousand unchecked rows must not turn a page load into a
+ * thousand upstream lookups (a dev instance did exactly that: 57k bio jobs in
+ * 2.5 h, which saturated the worker and the Postgres slot budget). Rows over
+ * budget are skipped here and picked up by a later read or the next scan.
+ */
+const ENQUEUE_BUDGET_PER_MINUTE = Number(process.env.ON_READ_ENQUEUE_BUDGET ?? 120);
+let windowStartedAt = Date.now();
+let spent = 0;
+
+function takeEnqueueBudget(wanted: number): number {
+  const now = Date.now();
+  if (now - windowStartedAt >= 60_000) {
+    windowStartedAt = now;
+    spent = 0;
+  }
+  const granted = Math.max(0, Math.min(wanted, ENQUEUE_BUDGET_PER_MINUTE - spent));
+  spent += granted;
+  return granted;
+}
+
+/**
  * Fire-and-forget backfills for rows served on read paths (XRPC, hydration).
  * Every function here is internally fault-tolerant: a failed enqueue logs and
  * swallows, so a read never 502s because a backfill could not be queued.
@@ -39,7 +61,11 @@ export async function maybeEnqueueEditionBackfills(
       })
       .from(editions)
       .where(inArray(editions.uri, list));
-    for (const row of rows) {
+    const budgeted = rows.slice(0, takeEnqueueBudget(rows.length));
+    if (budgeted.length < rows.length) {
+      log.info({ stage: 'on-read-backfill', wanted: rows.length, granted: budgeted.length }, 'read-path backfill budget exhausted; deferring the rest');
+    }
+    for (const row of budgeted) {
       if (row.needDescription) {
         await enqueueDescriptionBackfill(row.uri, 'on-read').catch((err: unknown) =>
           log.warn({ err, uri: row.uri, stage: 'on-read-backfill' }, 'description backfill enqueue failed'),
@@ -76,7 +102,11 @@ export async function maybeEnqueueContributorBackfills(
       })
       .from(contributors)
       .where(inArray(contributors.uri, list));
-    for (const row of rows) {
+    const budgeted = rows.slice(0, takeEnqueueBudget(rows.length));
+    if (budgeted.length < rows.length) {
+      log.info({ stage: 'on-read-backfill', wanted: rows.length, granted: budgeted.length }, 'read-path backfill budget exhausted; deferring the rest');
+    }
+    for (const row of budgeted) {
       if (row.needBio) {
         await enqueueContributorBioBackfill(row.uri, 'on-read').catch((err: unknown) =>
           log.warn({ err, uri: row.uri, stage: 'on-read-backfill' }, 'contributor bio backfill enqueue failed'),
