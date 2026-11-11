@@ -143,7 +143,8 @@ bookkeeping columns).
 `editionResults` is exactly the upstream envelope: `{ items, hasMore, total? }`, with no
 `pending`/`degraded` field, so a response cannot tell a client that catalog hydration is
 outstanding. The two catalog procedures still queue `catalog.resolve` / `catalog.search` work for
-unmatched input, and that work may add editions matching a later identical request, but the only
+unmatched input (at most 10 hydration jobs per request; see the catalog discovery section), and
+that work may add editions matching a later identical request, but the only
 way to learn about it is to re-call: there is no ETag, conditional-request, stream, or
 subscription signal. Queued work is not a promise that anything will be found.
 
@@ -332,6 +333,14 @@ the query fails. Both cap `identifiers` at 100 entries and clamp `offset`/`limit
 normalization — per the lexicon. Both may queue background hydration instead of writing catalog
 rows; the response does not report whether that work is outstanding (see above).
 
+**Enqueue cap.** Both procedures queue at most 10 hydration jobs per request
+(`MAX_HYDRATION_JOBS_PER_REQUEST` in the edge route). A body may still name 100 identifiers; those
+beyond the cap are validated and matched normally, they are just not queued on this call, and a
+later call that repeats the miss can queue them. The cap is per request, not a global quota: the
+TTL marks only dedupe repeats across calls. Each queued job can spend up to 50 paid provider
+lookups in the worker, so operators should also rate-limit this anonymous surface at the reverse
+proxy.
+
 #### `community.lexicon.media.book.resolveEditions`
 
 `identifiers[]` is required and may match several editions; an edition qualifies when **any**
@@ -340,9 +349,9 @@ paged by `offset`/`limit`, with `LIMIT limit + 1` deciding `hasMore`; `total` is
 first page only. No match is an empty page (the lexicon declares no errors). Every item is an
 `editionView` whose `identifiers` begin with the atproto URI identifier.
 
-Each identifier with no matching edition in the response is enqueued as a `catalog.resolve` job
-(deduplicated by a TTL mark, so a repeat while the first job is still outstanding does not queue
-again). The response carries no flag for this: the client can only re-call with the same body
+Each identifier with no matching edition in the response is enqueued as a `catalog.resolve` job,
+up to 10 enqueues per request (deduplicated by a TTL mark, so a repeat while the first job is
+still outstanding does not queue again). The response carries no flag for this: the client can only re-call with the same body
 later. Queued work is not a promise that the provider will resolve the identifier, and a stopped
 worker leaves the work outstanding without any response signal.
 
@@ -366,7 +375,8 @@ signal for worker liveness or for a stopped worker.
 ISBN identifiers (`isbn13`, `isbn10`, `isbn`, case-insensitive, normalized to a checksum-valid
 ISBN-13) additionally queue a direct ISBNdb lookup (`catalog.isbn`) **even when the local result is
 non-empty** — the goal is to enrich and ingest the edition from the provider, not to fill an empty
-page. That enqueue is deduplicated by its own TTL mark. No response field signals it: the response
+page. Those enqueues are capped at 10 per request after dedupe and are deduplicated by their own
+TTL mark. No response field signals it: the response
 shape is unchanged (`items`/`hasMore`/`total`; `editionResults` has no `pending` or `degraded`
 field), so clients learn of new editions only by re-calling later.
 

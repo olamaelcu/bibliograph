@@ -86,12 +86,20 @@ return carries the edition's atproto URI as an `atproto` identifier. GET
 is forwarded to HappyView, including the remaining `com.atproto.*` methods
 (HappyView's own com.atproto proxy is authority-bound).
 
+Because those two procedures are anonymous and each queued hydration job can
+spend up to 50 paid provider lookups, the edge caps enqueueing at 10 hydration
+jobs per request (`MAX_HYDRATION_JOBS_PER_REQUEST`). The 100-identifier input
+cap is unchanged and every identifier is still matched; only the first 10
+misses are queued per call. The cap is per request, not a global quota, so it
+bounds the provider cost of a single body but does not rate-limit the caller.
+
 ## Catalog worker
 
 `packages/worker` is the only long-running catalog process. Graphile Worker owns
 its job table (`graphile_worker.jobs`) and the edge enqueues jobs there when
 `catalog_enqueue_marks` exists; without the worker the edge still serves reads
-and skips enqueueing.
+and skips enqueueing. The edge queues at most 10 hydration jobs per request, so
+one anonymous call cannot turn its full identifier list into paid provider work.
 
 | Task | Trigger | Work |
 | --- | --- | --- |

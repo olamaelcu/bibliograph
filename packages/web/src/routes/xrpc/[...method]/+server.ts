@@ -17,6 +17,12 @@ const NSID = /^[a-zA-Z]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]([a-zA-Z0-9-]{0,62})$/;
 // Catalog discovery is anonymous, so bound the work a body can request.
 const MAX_IDENTIFIERS = 100;
 
+// A queued hydration job spends up to CANDIDATES_PER_TASK (50) paid provider
+// lookups in the worker, and these procedures are anonymous, so one body must
+// not be able to queue the whole identifier list. The cap is per request; the
+// TTL marks dedupe repeats across calls, they are not a global quota.
+const MAX_HYDRATION_JOBS_PER_REQUEST = 10;
+
 const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
 const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
 const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
@@ -141,8 +147,13 @@ async function handleResolve(request: Request): Promise<Response> {
     const unmatched = identifiers.filter(
       (identifier) => !matched.has(`${identifier.issuer}\u0000${identifier.value}`)
     );
+    // Identifiers past the cap are still matched and answered; they are just
+    // not queued on this call, and a later call that repeats the miss can
+    // queue them.
     await Promise.all(
-      unmatched.map((identifier) => enqueueResolveMiss(identifier))
+      unmatched
+        .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
+        .map((identifier) => enqueueResolveMiss(identifier))
     );
 
     return json(results);
@@ -183,7 +194,12 @@ async function handleSearch(request: Request): Promise<Response> {
     const results = await searchEditions({ q, title, author, identifiers, offset, limit });
     // An ISBN is worth a direct ISBNdb lookup even when the local catalog
     // answered: the job enriches/ingests the edition from the provider.
-    await Promise.all(isbn13sFromIdentifiers(identifiers).map(enqueueIsbnHydration));
+    // Only the first MAX_HYDRATION_JOBS_PER_REQUEST distinct ISBNs queue.
+    await Promise.all(
+      isbn13sFromIdentifiers(identifiers)
+        .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
+        .map((isbn13) => enqueueIsbnHydration(isbn13))
+    );
     // Discovery only hydrates when the local catalog has nothing for the query.
     if (results.items.length === 0) {
       await enqueueSearchHydration({ q, title, author, identifiers });
