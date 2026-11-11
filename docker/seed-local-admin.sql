@@ -95,7 +95,8 @@ INSERT INTO happyview.happyview_api_clients
    client_type, is_active, created_by, created_at, updated_at, client_secret_hash)
 VALUES
   ('c_local_edge', 'hvc_dev_client', 'Bibliograph edge',
-   'http://127.0.0.1:5176', 'http://127.0.0.1:5176', '[]', 'atproto',
+   'http://127.0.0.1:5176', 'http://127.0.0.1:5176', '[]',
+   'atproto transition:generic',
    'confidential', 1, 'u_local_admin',
    to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
    to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
