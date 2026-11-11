@@ -1,0 +1,6 @@
+{
+    "diagnostics.globals": [
+        "params",
+        "db"
+    ]
+}
