@@ -188,13 +188,6 @@ opt-in with `--system`. Restart the browser afterwards — it caches trust
 decisions per session. `mise run hv-ca --uninstall` removes the certificate
 again.
 
-Two alternatives were considered and not used. `caddy trust` installs Caddy's CA
-only into the system store, not NSS, so Firefox and Chrome would still fail.
-`mkcert` solves the same problem but replaces Caddy's own CA with a per-machine
-one, which means generating certificates before `docker compose up` and mounting
-them into Caddy; the internal CA keeps the certificate inside the stack, and the
-only thing left to distribute is a public root.
-
 The account is already a superuser via `hv-seed`, so no post-login bootstrap
 step is needed.
 
