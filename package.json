@@ -5,6 +5,9 @@
   "type": "module",
   "packageManager": "pnpm@11.13.1",
   "scripts": {
+    "web:dev": "pnpm --filter web dev",
+    "web:build": "pnpm --filter web build",
+    "web:check": "pnpm --filter web check",
     "pkg:payload": "mise run package-payload",
     "pkg:deb": "mise run package-deb",
     "pkg:verify-deb": "mise run package-verify-deb",

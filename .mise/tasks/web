@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Run the SvelteKit edge on :5176"
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec pnpm --filter web dev --port 5176
