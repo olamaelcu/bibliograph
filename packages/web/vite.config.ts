@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 // SvelteKit 3 reads its configuration here rather than from `svelte.config.js`
 // (`config_file_unsupported`); `adapter` sits at the top level of the plugin
 // options.
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [sveltekit({ adapter: adapter({ out: 'build' }) })],
   // adapter-node's output is shipped without node_modules (see
   // .mise/tasks/package-web-payload), so every server import must be bundled.
@@ -14,7 +14,17 @@ export default defineConfig({
   // external entry wins over noExternal — hence `pg` and the UI libraries live
   // in devDependencies here, and the SSR environment is told to bundle them.
   environments: {
-    ssr: { resolve: { noExternal: true } }
+    ssr: {
+      resolve: {
+        noExternal: true,
+        // `pg` is CommonJS, and Vite's dev module runner evaluates an inlined
+        // module as ESM, where `require` does not exist — the catalog handlers
+        // answered `Internal server error: require is not defined` until this
+        // entry let Node load `pg` itself. The packaged build still bundles it
+        // (rollup handles CJS), so this is a dev-only escape hatch.
+        external: command === 'build' ? [] : ['pg']
+      }
+    }
   },
   resolve: {
     // `$lib` is SvelteKit's own alias, but declaring it here makes it
@@ -31,4 +41,4 @@ export default defineConfig({
     port: 5176,
     strictPort: true
   }
-});
+}));
