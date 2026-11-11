@@ -1,0 +1,206 @@
+# HappyView (activity plane)
+
+HappyView owns the `happyview` schema, indexes activity records, and serves the
+activity queries. Locally it runs as a self-contained atproto network: its own
+PLC directory and PDS, a Caddy that terminates TLS for the PDS, and no
+dependency on `plc.directory` or any public relay.
+
+The stack is `docker-compose.yml`; the tasks are `.mise/tasks/hv-*`.
+
+## Topology
+
+```mermaid
+flowchart LR
+  browser -->|"http://127.0.0.1:3000"| hv["happyview<br/>2.17.4"]
+  browser -->|"https://pds.127-0-0-1.sslip.io"| caddy["caddy<br/>internal CA"]
+  caddy --> pds["pds<br/>tranquil 0.7.1"]
+  hv -->|"PLC_URL"| plc["plc<br/>did-method-plc"]
+  hv -->|"DID doc → service endpoint"| caddy
+  hv -->|"RELAY_URL listRepos"| pds
+  pds -->|"registers did:plc"| plc
+  plc --> pg[("postgres: plc")]
+  pds --> pg2[("postgres: pds")]
+  hv --> pg3[("postgres: bibliograph<br/>schema happyview")]
+```
+
+| Service | Host address | Notes |
+| --- | --- | --- |
+| `happyview` | `http://127.0.0.1:3000` | dashboard at `/`, redirects to `/dashboard/`; `/xrpc/*`, `/admin/*` |
+| `pds` | `https://pds.127-0-0-1.sslip.io` | HTTPS only, via Caddy |
+| `plc` | `http://127.0.0.1:2582` | `<did>` path returns the DID document |
+| `caddy` | `:80`, `:443` | redirects 80→443; `*.pds.127-0-0-1.sslip.io` routes to the PDS |
+| `postgres` | `127.0.0.1:5432` | databases `bibliograph`, `plc`, `pds` |
+| `prometheus` | `127.0.0.1:9090` | unchanged from before HappyView |
+
+## Pinned images
+
+Pinned by **index digest**, not tag. `2.17.4` never moves, but `latest` on the
+`pds-test` images does; a digest is the only pin that survives an upstream
+rebuild.
+
+| Image | Digest |
+| --- | --- |
+| `ghcr.io/gamesgamesgamesgamesgames/happyview` | `sha256:a981c30cb2bdad83413aa3126fb0eab6782427d0565f35e8b7349c098de2c841` |
+| `ghcr.io/happyproto/pds-test/plc` | `sha256:6e61dc9c59d79cbc8b6cdcaac7464ae16258849ada92dd7cbbfc6d7979a81c3a` |
+| `ghcr.io/happyproto/pds-test/tranquil` | `sha256:96f4ce1f9eec42ca17e4f6d693f6ae842ffe1618f97c9f51c5604116fb9483ed` |
+
+`plc` is did-method-plc's own server, so the DIDs the PDS mints are real
+`did:plc` DIDs that anything pointed at `PLC_URL` can resolve. `tranquil` is the
+PDS implementation HappyView's own e2e suite runs.
+
+## Bring-up
+
+```bash
+docker compose up -d                # postgres, plc, pds, caddy, happyview, prometheus
+mise run hv-account                 # mint alice.pds.127-0-0-1.sslip.io
+mise run hv-seed                    # make it superuser; write admin key + XRPC client
+mise run hv-ca                      # export Caddy's root CA for the browser
+```
+
+On a volume created before the local network existed, `mise run hv-dbs` adds the
+`plc` and `pds` databases. `docker/postgres-init.sql` does the same on a fresh
+volume.
+
+## Provisional account
+
+| Value | |
+| --- | --- |
+| handle | `alice.pds.127-0-0-1.sslip.io` |
+| password | `Dev-account-password1` (PDS login only) |
+| DID | a `did:plc:…` registered in the local PLC — read it back with `mise run hv-seed` or `resolveHandle` |
+
+`mise run hv-account` is idempotent. Password policy is the PDS's: at least one
+uppercase letter and one digit.
+
+`mise run hv-seed` runs `docker/seed-local-admin.sql`, which writes four kinds of
+rows:
+
+| Table | Row | Why |
+| --- | --- | --- |
+| `happyview_users` | the account DID, `is_super = 1` | dashboard admits only known DIDs; superuser can manage the instance |
+| `happyview_user_permissions` | all 51 permissions | see below |
+| `happyview_api_keys` | `hv_dev_admin` | `Authorization: Bearer` on `/admin/*` |
+| `happyview_api_clients` | `hvc_dev_client` / `hvs_dev_secret` | `X-Client-Key` + `X-Client-Secret` on `/xrpc/*` |
+
+The permissions are materialised on both the user and the key deliberately: the
+API-key path computes `key.permissions ∩ user.permissions` and never consults
+`is_super` (that short-circuit exists only for cookie sessions). A superuser
+with no permission rows authenticates and then fails every request with
+`Missing permission: <perm>`.
+
+## Why each piece is shaped this way
+
+These are not arbitrary; each one is the fix for a failure observed while
+building the stack.
+
+- **`PUBLIC_URL` is `http://127.0.0.1:3000`, a loopback name.** `is_loopback_url`
+  then makes HappyView the spec's localhost OAuth client
+  (`client_id=http://localhost?...`), so the PDS synthesises its client metadata
+  instead of fetching it — TLS trust only has to work one way. The scheme must
+  be `http`: with an `https` loopback URL HappyView panics at boot with
+  `ClientMetadata(LocalhostClient(NotHttpScheme))`.
+- **The PDS hostname is `pds.127-0-0-1.sslip.io`, not `pds.localhost`.** Handle
+  domains cannot be under a reserved TLD; `createAccount` answers *"This
+  server's handle domain has a reserved TLD"* for `.localhost` and `.test`.
+  Every `*.127-0-0-1.sslip.io` name resolves to 127.0.0.1 through public DNS,
+  so no `/etc/hosts` entry is needed, and Docker network aliases cover the
+  container-to-container path.
+- **`ALLOW_PRIVATE_FETCH=true` on the PDS.** The PLC is a compose-network
+  address; without it the PDS's SSRF guard rejects its own DNS answer
+  (`no resolved address for plc is inside the allowed host reach`) and account
+  creation cannot register a `did:plc`.
+- **`CRAWLERS=""` on the PDS.** Unset, it announces every new repo to eight
+  public relays, which then try to crawl a hostname that resolves to their own
+  loopback. Empty disables the service.
+- **`ALLOW_PRIVATE_DESTINATIONS=true` on HappyView.** The PDS named in a DID
+  document is a private address here, which HappyView otherwise refuses to
+  connect to. It logs a warning at every boot while set.
+- **Caddy's CA is installed inside the HappyView container**
+  (`docker/happyview-local-entrypoint.sh`): HappyView fetches PDS authorization
+  metadata and DID documents over TLS. The reverse direction is not needed,
+  because of the loopback client above.
+- **HappyView's healthcheck probes `/health` over bash's `/dev/tcp`.** The
+  runtime image ships no `wget`, `curl`, `busybox` or `nc`, so the `wget`-based
+  probe the upstream dev compose uses can never pass; this is the one from the
+  published production compose.
+- **Jetstream is closed** (`ws://127.0.0.1:1`) so no public records enter the
+  index, and `RELAY_URL` points at the local PDS's `listRepos` so backfill can
+  enumerate the local repo. Expect a `jetstream disconnected` warning a minute.
+- **`happyview_app` has its own `search_path` (`happyview,public`)**, so
+  HappyView's unqualified migrations and `db.raw` calls land in the `happyview`
+  schema instead of colliding with the catalog's `public` tables.
+
+## Calling it from the SvelteKit edge
+
+Server-side only; HappyView is not the public origin.
+
+```ts
+const HAPPYVIEW = process.env.HAPPYVIEW_URL ?? "http://127.0.0.1:3000";
+
+// Query
+await fetch(`${HAPPYVIEW}/xrpc/net.olamaelcu.livtet.biblio.listShelves?did=${did}`, {
+  headers: {
+    "X-Client-Key": process.env.HAPPYVIEW_CLIENT_KEY!,
+    "X-Client-Secret": process.env.HAPPYVIEW_CLIENT_SECRET!,
+  },
+});
+```
+
+- **Queries** work anonymously. HappyView requires `X-Client-Key` only on
+  *authenticated* (DPoP) requests, and an unknown key is a warning, not a
+  rejection — so the header is there for rate limiting and caller attribution,
+  not access control.
+- **Procedures** need a user session. The server-side flow is: `POST
+  /oauth/dpop-keys` (client key + secret) → run OAuth against the PDS with the
+  returned keypair → `POST /oauth/sessions` → forward `Authorization: DPoP
+  <token>` plus a fresh `DPoP` proof and `X-Client-Key`. HappyView then proxies
+  the write to the PDS with its stored session.
+- **Unknown methods return 502**, not 404. Do not map that to "upstream down".
+- There is no `BASE_PATH`; routes are at the root. The previous deployment used
+  `/~/hv`.
+- The seeded client's `client_uri` is `http://127.0.0.1:5176`, so run the dev
+  server there and the `Origin` check stays quiet.
+
+## Dashboard login
+
+Open `http://127.0.0.1:3000`, redirects to `/dashboard/`, and sign in with the
+provisional handle. The redirect chain goes to
+`https://pds.127-0-0-1.sslip.io/oauth/authorize`, so the browser needs Caddy's
+root CA first:
+
+```bash
+mise run hv-ca     # writes .cache/caddy-root.crt and prints the import command
+```
+
+The account is already a superuser via `hv-seed`, so no post-login bootstrap
+step is needed.
+
+## Reset
+
+```bash
+docker compose down -v          # drops pgdata, pdsdata, caddy_data
+docker compose up -d
+mise run hv-account && mise run hv-seed && mise run hv-ca
+```
+
+To reset only HappyView's tables, drop the schema and **re-apply
+`docker/postgres-init.sql` before restarting the container**: with the schema
+missing, sqlx creates `_sqlx_migrations` in `public`, where `happyview_app` has
+no `CREATE`, and the container crash-loops on `permission denied for schema
+public`.
+
+## Known limits
+
+- **Built-in `com.atproto.*` proxy routes fail locally.** They resolve the
+  lexicon's authority DID through `PLC_URL`, which is the local directory, so
+  `com.atproto.server.describeServer` and friends answer
+  `DID document not found for did:plc:6msi3p…`. Uploaded lexicons with their own
+  Lua scripts are unaffected.
+- **Backfill is wired but unexercised.** `RELAY_URL` points at the local PDS;
+  no backfill job has been run against it.
+- **Browser OAuth consent is a manual step.** Everything server-side up to the
+  authorize URL is exercised; the consent form is not automated.
+- **`db.raw` runs on the main connection** behind HappyView's tokenizer guard
+  and logs a warning. Setting `PLUGIN_SQL_DATABASE_URL` to a least-privileged
+  `happyview_plugin` role would move it to its own pool; no such role exists
+  locally yet.

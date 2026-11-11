@@ -1,8 +1,28 @@
 # Local development
 
-The local stack is Postgres plus HappyView. Identity resolution uses the public
-PLC (`https://plc.directory`); the dashboard signs in with a real ATProto handle.
-There is no local PLC, no disposable PDS and no `.test` account flow.
+The local stack is Postgres, a local PLC directory, a local PDS, Caddy, and
+HappyView. Identity resolution and dashboard sign-in happen entirely against
+that local network — no `plc.directory`, no public relay, no real ATProto
+account. `docs/happyview.md` has the reasoning behind each setting; this page is
+the day-to-day loop.
+
+## Bringing it up
+
+```bash
+docker compose up -d          # postgres, plc, pds, caddy, happyview, prometheus
+mise run hv-account           # mint the provisional account on the local PDS
+mise run hv-seed              # make it superuser, write the admin key + XRPC client
+mise run hv-ca                # export Caddy's root CA for the browser
+```
+
+| Address | What |
+| --- | --- |
+| `http://127.0.0.1:3000` | HappyView dashboard and admin API |
+| `https://pds.127-0-0-1.sslip.io` | the local PDS (HTTPS, Caddy's internal CA) |
+| `http://127.0.0.1:2582` | the local PLC directory |
+| `postgres://bibliograph:bibliograph@127.0.0.1:5432/bibliograph` | the catalog + `happyview` schema |
+
+`mise run sql` opens psql against the same database.
 
 ## Database schemas
 
@@ -14,66 +34,56 @@ with the AppView's labeler table. It therefore runs in its own schema:
 
 `happyview_app` is a login role whose default `search_path` is
 `happyview,public`; sqlx ignores `?options=…` in the URL, so the role is what
-keeps the two apart. `docker/postgres-init.sql` creates it for the compose
-Postgres, and `hv-local` provisions it for a host-run binary.
+keeps the two apart. `docker/postgres-init.sql` creates the role, the schema and
+the `plc`/`pds` databases for the compose Postgres.
 
-HappyView stores `record` as **text JSON** and `created_at` as text. The Lua
-scripts read `appview_book_lua`, a text projection of `appview_book`, because
-HappyView's Any driver cannot decode jsonb/timestamptz columns in `db.raw`.
-The TS feed queries `happyview.happyview_records` directly.
-
-## Run it
-
-```bash
-mise run dev            # migrate, extract/start HappyView, seed local admin key,
-                        # deploy lexicons/scripts, then run worker + Vite
-```
-
-`mise run dev` uses the host binary in
-`packages/bibliograph-service/.cache/happyview` (extracted from the pinned image
-by `hv:extract`). To run HappyView itself as a container instead:
-
-```bash
-docker compose up -d postgres happyview
-```
-
-The compose HappyView uses the public PLC and the same Postgres role. The image
-entrypoint substitutes its static base path; no host-side rewrite is needed.
-
-Ports are overridable: `HAPPYVIEW_PORT` and `WEB_PORT` for the host path.
+HappyView stores `record` as **text JSON** and `created_at` as text, and its
+`db.raw` cannot decode jsonb or timestamptz columns. Lua scripts that join
+catalog data therefore read a text projection rather than the catalog tables
+directly.
 
 ## Dashboard login
 
-Open `http://127.0.0.1:3000/~/hv` (redirects to `/~/hv/dashboard/`) and sign in
-with a **real ATProto handle** you control, e.g. `yourname.bsky.social` or your
-own domain. A DID also works if its DID document exposes `#atproto_pds`.
+Open `http://127.0.0.1:3000` (redirects to `/dashboard/`) and sign in with the
+provisional account:
 
-The dashboard only admits accounts with a `happyview_users` row. On a completely
-empty instance the first login bootstraps that row; `hv:dev-auth` creates a
-local API-key user, so a later real login is refused until you authorize it:
-
-```bash
-mise run hv-authorize -- --handle=yourname.bsky.social
-# or: --did=did:plc:...
+```
+alice.pds.127-0-0-1.sslip.io / Dev-account-password1
 ```
 
-That marks the account as a superuser. The "not authorized" redirect names the
-DID that was refused.
+The redirect chain crosses to `https://pds.127-0-0-1.sslip.io/oauth/authorize`,
+so import Caddy's root CA first — `mise run hv-ca` writes it to
+`.cache/caddy-root.crt` and prints the import command. Until it is trusted the
+authorize page fails TLS.
 
-The local `.test` handles from the old mock stack cannot work: OAuth resolves a
-handle through `https://<handle>/.well-known/atproto-did`, and `.test` does not
-resolve in public DNS. That is why the mock PLC/PDS were removed.
+`mise run hv-seed` has already inserted the account into `happyview_users` as a
+superuser, so no post-login bootstrap is involved. An account that is *not*
+seeded is refused, and the refusal names its DID.
 
 ## Deploying lexicons/scripts
 
-`dev:stack` (run by `mise dev`) seeds a local `hv_` admin key and a confidential
-XPC client, then runs `hv:deploy`. To do it manually:
+Uploads go through the admin API with the seeded key:
 
 ```bash
-mise run hv-dev-auth
-HAPPYVIEW_URL=http://127.0.0.1:3000 HAPPYVIEW_ADMIN_KEY=hv_dev_admin \
-  DATABASE_URL=… pnpm --filter bibliograph-service hv:deploy
+curl -sS -X POST http://127.0.0.1:3000/admin/lexicons \
+  -H "Authorization: Bearer $HAPPYVIEW_ADMIN_KEY" \
+  -H 'content-type: application/json' \
+  -d '{"lexicon_json": …, "backfill": false, "target_collection": "…"}'
+
+curl -sS -X POST http://127.0.0.1:3000/admin/scripts \
+  -H "Authorization: Bearer $HAPPYVIEW_ADMIN_KEY" \
+  -H 'content-type: application/json' \
+  -d '{"id": "xrpc.query:net.olamaelcu.livtet.biblio.listShelves", "script_type": "lua", "body": "…"}'
 ```
 
-`hv:deploy` uploads the lexicons and Lua scripts and applies
-`happyview/sql/indexes.sql`.
+`HAPPYVIEW_ADMIN_KEY` is `hv_dev_admin` by default; see `.env.example`. Query
+scripts are keyed `xrpc.query:<nsid>` and receive the lexicon's `params`,
+`db.raw`, and the helpers in the shared prelude.
+
+## Calling HappyView from the frontend
+
+`/xrpc/*` is served by HappyView, not by the SvelteKit app, and it is not the
+public origin: proxy it server-side with `HAPPYVIEW_CLIENT_KEY` and
+`HAPPYVIEW_CLIENT_SECRET`. Queries answer anonymous callers; procedures need a
+DPoP session. `docs/happyview.md` has the header contract, the DPoP provisioning
+flow and the error mapping.

@@ -78,6 +78,12 @@ services:
       # rejects the DNS answer ("no resolved address for plc is inside the
       # allowed host reach") and account creation cannot register a did:plc.
       ALLOW_PRIVATE_FETCH: "true"
+      # Empty on purpose: unset, the PDS announces every new repo to eight public
+      # relays (bsky.network, firehose.network, …) on account creation. Those
+      # relays would then try to crawl https://pds.127-0-0-1.sslip.io, which
+      # resolves to 127.0.0.1 on their own machines. Set to a comma-separated
+      # list of relay URLs to announce to a reachable one instead.
+      CRAWLERS: ""
     volumes:
       - ./docker/pds-config.toml:/etc/tranquil-pds/config.toml:ro
       - pdsdata:/var/lib/tranquil-pds/blobs

@@ -50,8 +50,8 @@ endpoints at the edge, and forwards everything else to HappyView.
 
 Indexed collections: `net.olamaelcu.livtet.biblio.{bookShelving,shelf,shelfItem,follow,readingGoal}`,
 `net.olamaelcu.livtet.actor.profile` and `community.lexicon.media.book.review`.
-Query scripts live in `happyview/scripts/`; `pnpm hv:deploy` uploads the
-lexicons, scripts and indexes.
+Query scripts lived in the deleted package's `happyview/scripts/`; uploads now
+go through HappyView's admin API (see `docs/happyview.md`).
 
 No request path reads a user's PDS or a backlink service. A record missing from
 the index is reported missing and repaired by backfill/reconcile, not by an
