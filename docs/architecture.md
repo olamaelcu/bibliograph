@@ -44,7 +44,10 @@ are no work, contributor or publisher records.
 
 The public `/xrpc` gateway proxies `com.atproto.{repo,sync,identity}` and
 `com.atproto.server.describeServer` to the PDS, serves catalog/label/feed
-endpoints at the edge, and forwards everything else to HappyView.
+endpoints at the edge, and forwards everything else to HappyView. The edge also
+serves the two read-only books-wg procedures (`resolveEditions`,
+`searchEditions`) anonymously from the catalog tables; every `editionView` they
+return carries the edition's atproto URI as an `atproto` identifier.
 
 ## Activity
 

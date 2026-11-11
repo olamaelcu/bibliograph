@@ -12,7 +12,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
-const lexiconsDir = join(here, '..', '..', '..', 'happyview', 'lexicons');
+// HappyView's uploaded surface, plus the books-wg working set served by the edge
+// (resolveEditions / searchEditions and the edition record type).
+const lexiconsDirs = [
+  join(here, '..', '..', '..', 'happyview', 'lexicons'),
+  join(here, '..', '..', '..', 'vendor', 'books-wg-lexicons', 'lexicons')
+];
 const outFile = join(here, '..', 'src', 'lib', 'xrpc-catalog.json');
 
 /** Render a lexicon type as one readable label. */
@@ -53,30 +58,39 @@ const queries = [];
 const procedures = [];
 const records = [];
 
-for (const file of await findLexicons(lexiconsDir)) {
-  const lexicon = JSON.parse(await readFile(file, 'utf8'));
-  const main = lexicon.defs?.main;
-  const description = main?.description ?? lexicon.description ?? '';
+const seen = new Set();
 
-  if (main?.type === 'query') {
-    queries.push({
-      id: lexicon.id,
-      description,
-      params: fields(main.parameters)
-    });
-  } else if (main?.type === 'procedure') {
-    procedures.push({
-      id: lexicon.id,
-      description,
-      input: fields(main.input?.schema),
-      output: fields(main.output?.schema)
-    });
-  } else if (main?.type === 'record') {
-    records.push({
-      id: lexicon.id,
-      key: main.key ?? 'tid',
-      description
-    });
+for (const dir of lexiconsDirs) {
+  for (const file of await findLexicons(dir)) {
+    const lexicon = JSON.parse(await readFile(file, 'utf8'));
+    // The books-wg defs/review lexicons are the same files HappyView serves;
+    // keep one entry per NSID.
+    if (seen.has(lexicon.id)) continue;
+    seen.add(lexicon.id);
+
+    const main = lexicon.defs?.main;
+    const description = main?.description ?? lexicon.description ?? '';
+
+    if (main?.type === 'query') {
+      queries.push({
+        id: lexicon.id,
+        description,
+        params: fields(main.parameters)
+      });
+    } else if (main?.type === 'procedure') {
+      procedures.push({
+        id: lexicon.id,
+        description,
+        input: fields(main.input?.schema),
+        output: fields(main.output?.schema)
+      });
+    } else if (main?.type === 'record') {
+      records.push({
+        id: lexicon.id,
+        key: main.key ?? 'tid',
+        description
+      });
+    }
   }
 }
 

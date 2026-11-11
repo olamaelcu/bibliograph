@@ -10,15 +10,15 @@
     "preview": "vite preview",
     "check": "node scripts/generate-catalog.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
-  "dependencies": {
-    "@awesome.me/webawesome": "^3.11.0",
-    "lucide-static": "^1.24.0"
-  },
   "devDependencies": {
+    "@awesome.me/webawesome": "^3.14.0",
     "@sveltejs/adapter-node": "^6.0.1",
     "@sveltejs/kit": "^3.1.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@types/node": "^26.0.0",
+    "@types/pg": "^8.23.1",
+    "lucide-static": "^1.72.0",
+    "pg": "^8.23.1",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.6",
     "typescript": "^6.0.3",

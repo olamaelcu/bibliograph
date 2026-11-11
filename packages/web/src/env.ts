@@ -7,6 +7,10 @@ import { defineEnvVars } from '@sveltejs/kit/env';
 // `HAPPYVIEW_URL` has a fallback, and the AppView serves anonymous XRPC calls
 // when no client credentials are configured.
 export const variables = defineEnvVars({
+  DATABASE_URL: {
+    schema: (value) => value,
+    description: 'Postgres URL for the catalog tables served by the books-wg procedures.'
+  },
   HAPPYVIEW_URL: {
     schema: (value) => value,
     description: 'Base URL of the AppView service, e.g. http://127.0.0.1:3000.'

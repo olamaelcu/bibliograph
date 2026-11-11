@@ -42,6 +42,13 @@
     records: RecordType[];
   };
 
+  // Read-only catalog discovery is served anonymously by the edge; every other
+  // procedure writes to a PDS through a DPoP session.
+  const catalogLookups = new Set([
+    'community.lexicon.media.book.resolveEditions',
+    'community.lexicon.media.book.searchEditions'
+  ]);
+
   const prefix = 'net.olamaelcu.livtet.biblio.';
   const shortName = (id: string) => (id.startsWith(prefix) ? id.slice(prefix.length) : id);
   const anchor = (id: string) => id.replaceAll('.', '-');
@@ -50,6 +57,17 @@
   // Placeholders follow the lexicon's own constraints, so an example is a
   // shape the endpoint would actually accept.
   function sample(field: Field): unknown {
+    if (field.type.startsWith('array')) {
+      // A required array still needs at least one element to satisfy the
+      // lexicon's non-empty bound (identifiers) or the endpoint's contract.
+      if (field.type.includes('identifier')) {
+        return [{ issuer: 'isbn13', value: '9780441478125' }];
+      }
+      if (field.type.includes('strongRef')) {
+        return [{ uri: 'at://did:plc:example/collection/rkey', cid: 'bafy…' }];
+      }
+      return [];
+    }
     if (field.type.includes('strongRef')) {
       return { uri: 'at://did:plc:example/collection/rkey', cid: 'bafy…' };
     }
@@ -57,7 +75,6 @@
     if (field.format === 'at-uri') return 'at://did:plc:example/collection/rkey';
     if (field.format === 'datetime') return '2026-01-01T00:00:00.000Z';
     if (field.type === 'integer' || field.type === 'number') return field.minimum ?? 1;
-    if (field.type.startsWith('array')) return [];
     if (field.values?.length) return field.values[0];
     return `${field.name}-value`;
   }
@@ -73,6 +90,11 @@
   function procedureExample(endpoint: ProcedureEndpoint): string {
     const body: Record<string, unknown> = {};
     for (const field of endpoint.input.filter((f) => f.required)) body[field.name] = sample(field);
+    // searchEditions has no required field, but an empty body is InvalidQuery;
+    // show the smallest body the endpoint accepts.
+    if (Object.keys(body).length === 0 && endpoint.id.endsWith('searchEditions')) {
+      body.title = 'The Left Hand of Darkness';
+    }
     return [
       `curl -s -X POST "${page.url.origin}/xrpc/${endpoint.id}" \\`,
       "  -H 'content-type: application/json' \\",
@@ -207,8 +229,8 @@
       <div class="content wa-stack wa-gap-m">
         <h1>The XRPC surface</h1>
         <p class="lede">
-          The XRPC methods this service exposes: queries for reading bibliographic data, and
-          procedures for writing to the reader's PDS.
+          The XRPC methods this service exposes: queries for reading activity, and procedures for
+          catalog lookups or writes to the reader's PDS.
         </p>
         <div class="wa-cluster wa-gap-s">
           <wa-badge variant="brand">{queries.length} queries</wa-badge>
@@ -233,7 +255,7 @@
 
         <wa-callout variant="warning">
           <wa-icon slot="icon" library="lucide" name="shield-check"></wa-icon>
-          <strong>Procedures need a DPoP session.</strong>
+          <strong>Write procedures need a DPoP session.</strong>
           <p>
             A procedure writes on behalf of the signed-in reader, so it requires a DPoP-bound
             session. Without one, the service answers
@@ -292,7 +314,8 @@
         <div class="wa-stack wa-gap-2xs">
           <h2>Procedures</h2>
           <p class="muted">
-            {procedures.length} procedures write to the reader's PDS. Each requires a DPoP session.
+            {procedures.length} procedures: catalog lookups are anonymous; the rest write to the
+            reader's PDS and require a DPoP session.
           </p>
         </div>
 
@@ -302,6 +325,9 @@
             <div class="wa-stack wa-gap-m">
               <div class="wa-cluster wa-gap-s">
                 <wa-tag variant="neutral">POST</wa-tag>
+                <wa-tag variant="neutral">
+                  {catalogLookups.has(endpoint.id) ? 'anonymous' : 'DPoP'}
+                </wa-tag>
                 <span class="muted">
                   {requiredCount(endpoint.input)} required input field{requiredCount(endpoint.input) ===
                   1

@@ -8,6 +8,14 @@ import { fileURLToPath } from 'node:url';
 // options.
 export default defineConfig({
   plugins: [sveltekit({ adapter: adapter({ out: 'build' }) })],
+  // adapter-node's output is shipped without node_modules (see
+  // .mise/tasks/package-web-payload), so every server import must be bundled.
+  // Vite auto-externalizes package.json `dependencies` for SSR, and an explicit
+  // external entry wins over noExternal — hence `pg` and the UI libraries live
+  // in devDependencies here, and the SSR environment is told to bundle them.
+  environments: {
+    ssr: { resolve: { noExternal: true } }
+  },
   resolve: {
     // `$lib` is SvelteKit's own alias, but declaring it here makes it
     // explicit for code that Vite resolves outside the plugin's reach — the

@@ -14,6 +14,10 @@ Description: Bibliograph web edge (SvelteKit appview front end)
  proxied server-side to HappyView on 127.0.0.1:3000, with the edge's own XRPC
  client identity injected so a browser cannot choose it.
  .
+ Catalog discovery (community.lexicon.media.book.resolveEditions and
+ searchEditions) is served here from the catalog tables; it is anonymous and
+ query-only. All other procedures are proxied to HappyView.
+ .
  The adapter-node build is self-contained JavaScript (~2 MB) and runs on the
  host's nodejs; no runtime is bundled. Configuration lives in
  /etc/bibliograph/web.env — the HappyView client key and secret are required

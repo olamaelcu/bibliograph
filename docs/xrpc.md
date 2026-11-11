@@ -6,11 +6,13 @@ It is drawn from the deployed lexicons in `happyview/lexicons` and the handler s
 `happyview/scripts/xrpc/{query,procedure}`. The same lexicons generate the public page in
 `packages/web`.
 
-The surface is the set of uploaded lexicons: **17 queries, 15 procedures and 7 record types**, all
-under `net.olamaelcu.livtet.biblio.*` except the review record type
-(`community.lexicon.media.book.review`). HappyView's built-in `com.atproto.*` routes are not part
-of this surface — they proxy to an authority DID that the local network does not resolve — and the
-edge in `packages/web` adds no methods of its own.
+The surface is the set of uploaded lexicons plus the books-wg working set vendored at
+`vendor/books-wg-lexicons`: **17 queries, 17 procedures and 8 record types**. Two procedures
+(`community.lexicon.media.book.resolveEditions` and `searchEditions`) are anonymous catalog reads
+served by the edge in `packages/web`; the other 15 are HappyView procedures that write to a caller's
+PDS. Everything except the review and edition record types lives under
+`net.olamaelcu.livtet.biblio.*`. HappyView's built-in `com.atproto.*` routes are not part of this
+surface — they proxy to an authority DID that the local network does not resolve.
 
 ## Conventions
 
@@ -26,13 +28,21 @@ which:
   back;
 - answers `502 UpstreamUnavailable` when HappyView cannot be reached.
 
-**Auth.** Queries are anonymous. Procedures require a DPoP-bound session: `Authorization: DPoP
-<token>` plus a fresh `DPoP` proof. The edge holds no session and cannot mint one; it relays both
-headers untouched, and the token needs `transition:generic` because the write is proxied to the
-caller's PDS. Without a session every procedure answers `401` with
+The two books-wg procedures never reach HappyView: the edge dispatches them on NSID and answers them
+from the catalog tables (`editions`, `edition_identifiers`, `edition_contributors`,
+`edition_publishers`). They are `POST` by lexicon and reject `GET` with `405 MethodNotAllowed`.
+
+**Auth.** Queries are anonymous. HappyView procedures require a DPoP-bound session:
+`Authorization: DPoP <token>` plus a fresh `DPoP` proof. The edge holds no session and cannot mint
+one; it relays both headers untouched, and the token needs `transition:generic` because the write is
+proxied to the caller's PDS. Without a session those 15 procedures answer `401` with
 `XRPC procedures require DPoP authentication` before the handler runs. Handlers see the session as
 `caller_did`; every procedure that names an existing review or shelf compares it against
 `caller_did` and answers `403 Forbidden` on a mismatch.
+
+The two catalog procedures are the exception: they are read-only and anonymous, and they never
+require or read a session. They also need `DATABASE_URL`; when it is unset or the catalog is
+unreachable they answer `503 ServiceUnavailable` instead of proxying anywhere.
 
 Anonymous queries are still attributed to the edge's XRPC client key, which is the rate-limiting
 and attribution identity.
@@ -41,6 +51,10 @@ and attribution identity.
 (`uri`, `did`, `collection`, `rkey`, `record` as JSON text, `created_at`). They never read a PDS.
 Anything the index has not seen yet is absent until a backfill or reconcile indexes it; a procedure
 does not have that gap because it indexes the record it just wrote in the same request.
+
+`resolveEditions` and `searchEditions` are the other exception: they read the catalog tables, not
+`happyview_records`, and they never write. Provider fan-out (Google Books, ISBNdb, Goodreads) is not
+implemented yet; the responses are the local catalog only.
 
 **Catalog dependency.** Book-rendering views join `public.appview_book_lua`, the catalog read model:
 
@@ -76,16 +90,18 @@ min, max)`), so an out-of-range number is adjusted, not rejected.
 | Status | Error | Origin |
 | --- | --- | --- |
 | 400 | `InvalidRequest` | a required parameter is missing, or a value violates its contract: non-DID `subject`, self-follow, non-AT-URI shelf/review URI, wrong collection, bad enum (`status`, `period`), out-of-range integer, empty update, invalid `editionRef`, non-strongRef `book` |
-| 401 | `XRPC procedures require DPoP authentication` | every procedure, until a DPoP session is presented |
+| 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author` or identifier |
+| 401 | `XRPC procedures require DPoP authentication` | the 15 HappyView procedures, until a DPoP session is presented |
 | 403 | `Forbidden` | the named review or shelf belongs to another DID |
 | 404 | `NotFound` | a procedure targets a follow, review, shelf, `bookStatus` or `shelfItem` that does not exist |
 | 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing |
 | 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST |
 | 502 | `UpstreamFailure` | `shelf.addBooks` when the PDS rejects the batch |
 | 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable |
+| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails; `resolveEditions` / `searchEditions` only |
 
-Queries never answer `401`. Missing optional records are not errors: `getActorProfile` and
-`getReadingGoal` answer `200` with `null`.
+Queries and the two catalog procedures never answer `401`. Missing optional records are not errors:
+`getActorProfile` and `getReadingGoal` answer `200` with `null`.
 
 **Views.** Responses embed the lexicon's view types from `net.olamaelcu.livtet.biblio.defs`:
 `shelfView` (`uri`, `name`, optional `description`/timestamps), `bookView` (`uri`, `edition`),
@@ -93,6 +109,13 @@ Queries never answer `401`. Missing optional records are not errors: `getActorPr
 (same shape), `shelfWithBooksView` (`shelf`, `books`), and `reviewView`
 (`uri`, `did`, `record`). `edition` is the `community.lexicon.media.book.defs#editionView` built
 from the catalog.
+
+Every `editionView` in `resolveEditions` / `searchEditions` carries the edition's atproto URI as an
+identifier: `{ "issuer": "atproto", "value": "at://<did>/community.lexicon.media.book/<rkey>" }`,
+first in `identifiers` and exactly once. The view type has no `uri` field, so this identifier is the
+link back to the record; clients derive display routes such as
+`/book/<did>/<rkey>` from it. Stored identifiers follow it unchanged (`issuer`/`value`, no
+bookkeeping columns).
 
 ## Inventory
 
@@ -120,11 +143,14 @@ from the catalog.
 
 ### Procedures
 
-All procedures require a DPoP session and write to the caller's PDS, then index the accepted
-record in `happyview_records` in the same request.
+The two catalog procedures are anonymous reads over the catalog tables. The other fifteen require a
+DPoP session and write to the caller's PDS, then index the accepted record in `happyview_records` in
+the same request.
 
 | NSID | Input | Returns |
 | --- | --- | --- |
+| `community.lexicon.media.book.resolveEditions` | `identifiers[]` (required), `offset` 0, `limit` 25 (≤100) | `editionResults` |
+| `community.lexicon.media.book.searchEditions` | `q?`, `title?`, `author?`, `identifiers[]?`, `offset` 0, `limit` 25 (≤100) | `editionResults` |
 | `graph.follow` | `subject` (DID) | `{ uri, created }` |
 | `graph.unfollow` | `subject` (DID) | `{ uri }` |
 | `profile.set` | `displayName?` (≤640), `description?` (≤256), `avatarCid?` | `{ uri }` |
@@ -267,6 +293,31 @@ Pages one DID's reviews, same ordering and cursor. Returns `{ reviews, cursor? }
 Shared rules: the body must be a JSON object; ownership is checked against `caller_did` (`403`); a
 missing target is `404`; successful writes go through the PDS and are indexed in the same request.
 
+### Catalog discovery (edge)
+
+These two are `POST` by lexicon but never write and never authenticate. They are dispatched by the
+edge, read the catalog tables, and answer `503 ServiceUnavailable` when `DATABASE_URL` is unset or
+the query fails. Both cap `identifiers` at 100 entries and clamp `offset`/`limit`; a duplicate
+`(issuer, value)` pair is collapsed before the query. Identifier comparison is exact — no
+normalization — per the lexicon.
+
+#### `community.lexicon.media.book.resolveEditions`
+
+`identifiers[]` is required and may match several editions; an edition qualifies when **any**
+supplied `(issuer, value)` pair matches exactly. Results are ordered `indexed_at ASC, uri ASC`,
+paged by `offset`/`limit`, with `LIMIT limit + 1` deciding `hasMore`; `total` is counted on the
+first page only. No match is an empty page (the lexicon declares no errors). Every item is an
+`editionView` whose `identifiers` begin with the atproto URI identifier.
+
+#### `community.lexicon.media.book.searchEditions`
+
+At least one nonblank `q`, `title`, `author` or a non-empty `identifiers` array is required;
+otherwise `400 InvalidQuery`. The catalog pass ORs the supplied hints: exact identifier pairs,
+`title ILIKE`, contributor name for `author`, and for `q` a broader match over title, description,
+contributor names and identifier values. Local ranking is `identifier > title > author > text`,
+then `indexed_at DESC, uri ASC`. Provider search and ingestion are not implemented yet; the
+ranking is this catalog's relevance order, which the lexicon allows providers to define.
+
 ### Follow
 
 #### `graph.follow`
@@ -388,6 +439,7 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 | `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
 | `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
 | `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
+| `community.lexicon.media.book.edition` | `tid` | `title`, `identifiers`, `contributors`, `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
 
 The record keys are part of the contract: the queries resolve records by them. `bookStatus` derives
 from the edition URI, `shelfItem` from the shelf and edition rkeys, `readingGoal` and
@@ -404,6 +456,9 @@ a PDS with a different shape are not found by them.
   through `appview_book_lua` only.
 - No writes other than the 15 procedures; a client that writes records to its own PDS directly is
   indexed only when a backfill or reconcile runs, not per request.
+- No provider search yet: `resolveEditions` and `searchEditions` read the local catalog only, and
+  the Google Books / ISBNdb / Goodreads worker, resolution-miss cache and PDS publication of newly
+  discovered editions remain to be built.
 - No cache headers are set by the edge, and no cache-control is relayed from HappyView.
-- No search, no works/contributors/publishers records, no feed generator and no label or lexicon
-  endpoints on this surface.
+- No works/contributors/publishers records, no feed generator, and no label or lexicon endpoints on
+  this surface.
