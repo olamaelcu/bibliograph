@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { EditionRecordError, buildEditionRecord } from '../lib/edition-record.js';
 
 const edition = {
-  uri: 'at://did:web:test.example/community.lexicon.media.book/3n22xzi7cyz23',
+  uri: 'at://did:web:test.example/community.lexicon.media.book.edition/3n22xzi7cyz23',
   title: 'The Left Hand of Darkness',
   subtitle: 'A Novel',
   language: 'en',

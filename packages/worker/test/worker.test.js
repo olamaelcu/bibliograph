@@ -308,7 +308,7 @@ test('resolve hydrates the catalog from provider results', async () => {
     assertTid(edition.rows[0].rkey);
     assert.equal(
       edition.rows[0].uri,
-      `at://did:web:test.example/community.lexicon.media.book/${edition.rows[0].rkey}`
+      `at://did:web:test.example/community.lexicon.media.book.edition/${edition.rows[0].rkey}`
     );
     assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
     assert.equal(edition.rows[0].pages, 304);
@@ -375,7 +375,7 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
   });
   const tasks = createTasks({ pool, providers, publisherDid, publisherHost: PUBLISHER });
   const helpers = { logger: { info() {}, warn() {}, error() {} } };
-  const prefix = `at://${publisherDid}/community.lexicon.media.book/`;
+  const prefix = `at://${publisherDid}/community.lexicon.media.book.edition/`;
 
   try {
     await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);

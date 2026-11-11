@@ -25,8 +25,8 @@ const HOST = 'pds-test.example';
 const COLLECTION = 'community.lexicon.media.book.edition';
 const PREFIX = `at://${PUBLISHER_DID}/${COLLECTION}/`;
 const PLC_PUBLISHER_DID = 'did:plc:testpublisherauthority';
-// Edition URIs use the book collection; the outbox row uses `.edition`.
-const PLC_PREFIX = `at://${PLC_PUBLISHER_DID}/community.lexicon.media.book/`;
+// Edition URIs and the outbox row both use the `.edition` collection.
+const PLC_PREFIX = `at://${PLC_PUBLISHER_DID}/${COLLECTION}/`;
 const CONTRIBUTOR_PREFIX = 'PDS Test Contributor';
 
 const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 4 });

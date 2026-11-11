@@ -26,7 +26,7 @@ const SKIP = DATABASE_URL
 
 const SCHEMA_DIR_URL = new URL('../sql/', import.meta.url);
 const AUTHORITY = 'did:plc:catalogschemacheck';
-const COLLECTION = 'community.lexicon.media.book';
+const COLLECTION = 'community.lexicon.media.book.edition';
 const CONTRIBUTOR = 'Catalog Schema Probe Author';
 const CONTRIBUTOR_RENAMED = 'Catalog Schema Probe Author Renamed';
 const PUBLISHER = 'Catalog Schema Probe Press';

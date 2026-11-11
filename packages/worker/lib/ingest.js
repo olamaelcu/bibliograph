@@ -1,4 +1,7 @@
-const COLLECTION = 'community.lexicon.media.book';
+// The record type is `community.lexicon.media.book.edition`: the same
+// collection the outbox and `pds-publish` write to, so a catalog URI is
+// resolvable through `com.atproto.repo.getRecord`.
+const COLLECTION = 'community.lexicon.media.book.edition';
 
 function editionUri(publisherDid, rkey) {
   return `at://${publisherDid}/${COLLECTION}/${rkey}`;

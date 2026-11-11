@@ -65,7 +65,7 @@ before the script runs (`401 XRPC procedures require DPoP authentication`), and 
 carries the edition's atproto URI as an identifier:
 
 ```json
-{ "issuer": "atproto", "value": "at://did:plc:e2x3ihw2ntxt7pcgzmtu3abi/community.lexicon.media.book/3n22xzi7cyz23" }
+{ "issuer": "atproto", "value": "at://did:plc:e2x3ihw2ntxt7pcgzmtu3abi/community.lexicon.media.book.edition/3n22xzi7cyz23" }
 ```
 
 It is first in `identifiers`, exactly once, and stored identifiers follow unchanged (`issuer` and

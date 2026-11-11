@@ -134,10 +134,12 @@ Queries and the two catalog procedures never answer `401`. Missing optional reco
 from the catalog.
 
 Every `editionView` in `resolveEditions` / `searchEditions` carries the edition's atproto URI as an
-identifier: `{ "issuer": "atproto", "value": "at://<did>/community.lexicon.media.book/<rkey>" }`,
+identifier: `{ "issuer": "atproto", "value": "at://<did>/community.lexicon.media.book.edition/<rkey>" }`,
 first in `identifiers` and exactly once. The view type has no `uri` field, so this identifier is the
-link back to the record; clients derive display routes such as
-`/book/<did>/<rkey>` from it. Stored identifiers follow it unchanged (`issuer`/`value`, no
+link back to the record and resolves through `com.atproto.repo.getRecord` with
+`collection=community.lexicon.media.book.edition`; clients derive display routes such as
+`/book/<did>/<rkey>` from it (the display path may drop the collection, but the at-uri is the
+authoritative record reference). Stored identifiers follow it unchanged (`issuer`/`value`, no
 bookkeeping columns).
 
 `editionResults` is exactly the upstream envelope: `{ items, hasMore, total? }`, with no
