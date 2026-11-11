@@ -16,7 +16,7 @@ function handle()
        HAVING ($4 = '' OR min(uri) > $4)
        ORDER BY first_uri ASC
        LIMIT $5]],
-    { BOOK_SHELVING, shelvingRkey, bookUri, cursor, limit + 1 }
+    { BOOK_STATUS, shelvingRkey, bookUri, cursor, limit + 1 }
   )
 
   local dids = {}

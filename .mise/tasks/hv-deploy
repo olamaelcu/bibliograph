@@ -40,7 +40,7 @@ ADMIN_KEY = os.environ['ADMIN_KEY']
 
 # Record lexicons: target_collection is the lexicon's own NSID.
 RECORD_LEXICONS = [
-    'net.olamaelcu.livtet.biblio.bookShelving',
+    'net.olamaelcu.livtet.biblio.bookStatus',
     'net.olamaelcu.livtet.biblio.shelf',
     'net.olamaelcu.livtet.biblio.shelfItem',
     'net.olamaelcu.livtet.biblio.follow',
@@ -59,11 +59,11 @@ QUERY_LEXICONS = [
     ('net.olamaelcu.livtet.biblio.getShelf', 'net.olamaelcu.livtet.biblio.shelf'),
     ('net.olamaelcu.livtet.biblio.listShelves', 'net.olamaelcu.livtet.biblio.shelf'),
     ('net.olamaelcu.livtet.biblio.listShelvesWithBooks', 'net.olamaelcu.livtet.biblio.shelf'),
-    ('net.olamaelcu.livtet.biblio.getShelvingOfBook', 'net.olamaelcu.livtet.biblio.bookShelving'),
-    ('net.olamaelcu.livtet.biblio.getShelversOfBook', 'net.olamaelcu.livtet.biblio.bookShelving'),
-    ('net.olamaelcu.livtet.biblio.listBooksOnShelf', 'net.olamaelcu.livtet.biblio.bookShelving'),
-    ('net.olamaelcu.livtet.biblio.listRecentShelving', 'net.olamaelcu.livtet.biblio.bookShelving'),
-    ('net.olamaelcu.livtet.biblio.getBookOnShelf', 'net.olamaelcu.livtet.biblio.bookShelving'),
+    ('net.olamaelcu.livtet.biblio.getShelvingOfBook', 'net.olamaelcu.livtet.biblio.bookStatus'),
+    ('net.olamaelcu.livtet.biblio.getShelversOfBook', 'net.olamaelcu.livtet.biblio.bookStatus'),
+    ('net.olamaelcu.livtet.biblio.listBooksOnShelf', 'net.olamaelcu.livtet.biblio.bookStatus'),
+    ('net.olamaelcu.livtet.biblio.listRecentShelving', 'net.olamaelcu.livtet.biblio.bookStatus'),
+    ('net.olamaelcu.livtet.biblio.getBookOnShelf', 'net.olamaelcu.livtet.biblio.bookStatus'),
     ('net.olamaelcu.livtet.biblio.listShelfItems', 'net.olamaelcu.livtet.biblio.shelfItem'),
     ('net.olamaelcu.livtet.biblio.listShelfItemsByBook', 'net.olamaelcu.livtet.biblio.shelfItem'),
     ('net.olamaelcu.livtet.biblio.getReviewsByBook', 'community.lexicon.media.book.review'),

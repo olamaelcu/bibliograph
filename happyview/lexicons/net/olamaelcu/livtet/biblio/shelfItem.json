@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.shelfItem",
-  "description": "A book placed on one of a reader's shelves. Unlike bookShelving, which carries the reading status of a book, a shelfItem is a plain membership edge: one record per (shelf, book) pair, so a book can sit on any number of custom shelves independently of its reading status. The rkey is derived from the shelf URI and the book URI, so the same pair always lands on the same record. Written by the OAuth client (livtet-service).",
+  "description": "A book placed on one of a reader's shelves. Unlike bookStatus, which carries the reading status of an edition, a shelfItem is a plain membership edge: one record per (shelf, book) pair, so a book can sit on any number of custom shelves independently of its reading status. The rkey is `<shelf rkey>-<edition rkey>`, so the same pair always lands on the same record.",
   "defs": {
     "main": {
       "type": "record",

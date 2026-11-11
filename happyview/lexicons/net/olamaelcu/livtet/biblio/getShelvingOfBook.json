@@ -24,7 +24,7 @@
             "minimum": 1,
             "maximum": 100,
             "default": 50,
-            "description": "Maximum number of bookShelving records to return."
+            "description": "Maximum number of bookStatus records to return."
           },
           "cursor": {
             "type": "string",

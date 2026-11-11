@@ -9,7 +9,7 @@ function handle()
          AND ($2 = '' OR (created_at, uri) < ($2, $3))
        ORDER BY created_at DESC, uri DESC
        LIMIT $4]],
-    { BOOK_SHELVING, cursor.t or '', cursor.u or '', limit + 1 }
+    { BOOK_STATUS, cursor.t or '', cursor.u or '', limit + 1 }
   )
 
   local out = {}

@@ -13,7 +13,7 @@ function handle()
        WHERE collection = $1 AND did = $2 AND (record::jsonb)->'book'->>'uri' = $3
        ORDER BY uri ASC
        LIMIT $4 OFFSET $5]],
-    { BOOK_SHELVING, did, book, limit + 1, offset }
+    { BOOK_STATUS, did, book, limit + 1, offset }
   )
 
   local out = {}

@@ -23,7 +23,7 @@ function handle()
          WHERE collection = $1 AND did = $2 AND (record::jsonb)->>'shelf' = $3
          ORDER BY uri ASC
          LIMIT $4]],
-      { BOOK_SHELVING, shelf_row.did, shelf_row.uri, booksPerShelf }
+      { BOOK_STATUS, shelf_row.did, shelf_row.uri, booksPerShelf }
     )
     local books = {}
     for _, entry in ipairs(entries) do

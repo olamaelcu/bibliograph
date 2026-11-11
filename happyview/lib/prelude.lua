@@ -4,7 +4,7 @@
 -- `db.raw(sql, {args})`, `json`, and `toarray`. Query parameters are strings.
 
 SHELF_COLLECTION = 'net.olamaelcu.livtet.biblio.shelf'
-BOOK_SHELVING = 'net.olamaelcu.livtet.biblio.bookShelving'
+BOOK_STATUS = 'net.olamaelcu.livtet.biblio.bookStatus'
 SHELF_ITEM = 'net.olamaelcu.livtet.biblio.shelfItem'
 FOLLOW_COLLECTION = 'net.olamaelcu.livtet.biblio.follow'
 REVIEW_COLLECTION = 'community.lexicon.media.book.review'
@@ -198,7 +198,7 @@ local function status_for_shelf(shelf_uri)
   return nil
 end
 
--- `defs#bookShelfView` for one bookShelving row; nil when the book is unknown.
+-- `defs#bookShelfView` for one bookStatus row; nil when the book is unknown.
 function book_shelf_view(row)
   local record = record_value(row.record)
   local book_ref = record.book and record.book.uri

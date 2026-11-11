@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.getBookOnShelf",
-  "description": "Get a hydrated view of a bookShelving record.",
+  "description": "Get a hydrated view of a bookStatus record.",
   "defs": {
     "main": {
       "type": "query",
@@ -12,7 +12,7 @@
           "uri": {
             "type": "string",
             "format": "at-uri",
-            "description": "AT-URI of the bookShelving record."
+            "description": "AT-URI of the bookStatus record."
           }
         }
       },
@@ -32,7 +32,7 @@
       "errors": [
         {
           "name": "NotFound",
-          "description": "No bookShelving record exists at the given AT-URI."
+          "description": "No bookStatus record exists at the given AT-URI."
         }
       ]
     }

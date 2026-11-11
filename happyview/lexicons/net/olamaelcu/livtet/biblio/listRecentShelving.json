@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.listRecentShelving",
-  "description": "List bookShelving records across all accounts, newest first. This is the network-wide activity read: what has been put on a shelf lately, regardless of whose shelf it is. Ordered by the record's own recency, not by shelf, so a client can show a live feed without scanning individual repos.",
+  "description": "List bookStatus records across all accounts, newest first. This is the network-wide activity read: what has been marked reading/read/finished lately, regardless of whose account it is. Ordered by the record's own recency, not by shelf, so a client can show a live feed without scanning individual repos.",
   "defs": {
     "main": {
       "type": "query",
@@ -13,7 +13,7 @@
             "minimum": 1,
             "maximum": 100,
             "default": 50,
-            "description": "Maximum number of bookShelving records to return."
+            "description": "Maximum number of bookStatus records to return."
           },
           "cursor": {
             "type": "string",
