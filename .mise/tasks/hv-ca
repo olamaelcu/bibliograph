@@ -1,29 +1,107 @@
 #!/usr/bin/env bash
-#MISE description="Export Caddy's internal root CA so the browser trusts https://pds.127-0-0-1.sslip.io"
-# The PDS is served over TLS with Caddy's internal CA. Browsers do not trust it
-# until it is imported once; every device that signs in does this itself.
+#MISE description="Export Caddy's root CA and install it into the trust stores (system + Chrome/Firefox NSS)"
+# Caddy's internal CA signs the PDS certificate: an explicit cert for
+# pds.127-0-0-1.sslip.io and a wildcard for *.pds.127-0-0-1.sslip.io, which is
+# what handle hosts like alice.pds.127-0-0-1.sslip.io resolve to. Trusting the
+# root covers both.
 #
-# Chromium/Chrome: chrome://settings/certificates → Authorities → Import
-# Firefox: about:preferences#privacy → View Certificates → Authorities → Import
-# System trust (Debian/Ubuntu): see the printed command.
+# Three stores matter, and no single command writes all of them:
+#
+#   * NSS user database (~/.pki/nssdb)      — Chrome/Chromium on Linux
+#   * NSS profile databases (~/.mozilla/…)  — Firefox
+#   * system store (/usr/local/share/…)     — curl, openssl, wget, p11-kit
+#
+# The first two are per-user and need no privileges, so they are the default.
+# The system store needs root: pass --system (or answer the sudo prompt) to
+# write it too. `mise run hv-ca --system` is the one-command form.
+#
+# Idempotent: the certificate is removed under its nickname before being added,
+# so re-running does not stack duplicates. `mise run hv-ca --uninstall` removes
+# it from every store it was installed into.
 
 set -euo pipefail
 
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
 
+NICKNAME="Caddy Local Dev CA"
 OUT=".cache/caddy-root.crt"
-mkdir -p .cache
+SYSTEM_ANCHOR="/usr/local/share/ca-certificates/caddy-local-dev.crt"
+MODE="${1:-}"
+
+if [[ "$MODE" == "--help" || "$MODE" == "-h" ]]; then
+  sed -n '2,22p' "${BASH_SOURCE[0]}" | grep -v '^#MISE' | sed 's/^# \{0,1\}//'
+  exit 0
+fi
 
 if ! docker compose ps --status running --format '{{.Service}}' | grep -qx caddy; then
   echo "ERROR: the caddy service is not running; start the stack with 'docker compose up -d'" >&2
   exit 1
 fi
 
+mkdir -p .cache
 docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$OUT" >/dev/null
-echo "Exported Caddy's root CA to $OUT"
+chmod 644 "$OUT"
+
+# Every NSS database on this machine that exists. certutil needs the `sql:`
+# prefix on modern profiles; older ones use the legacy Berkeley DB layout.
+nss_databases() {
+  local db
+  [[ -f "$HOME/.pki/nssdb/cert9.db" ]] && printf '%s\n' "sql:$HOME/.pki/nssdb"
+  for db in "$HOME"/.mozilla/firefox/*/ "$HOME"/snap/firefox/common/.mozilla/firefox/*/; do
+    [[ -f "${db}cert9.db" ]] && printf '%s\n' "sql:${db%/}"
+  done
+  return 0
+}
+
+if [[ "$MODE" == "--uninstall" ]]; then
+  while read -r db; do
+    certutil -D -d "$db" -n "$NICKNAME" 2>/dev/null && echo "removed from $db"
+  done < <(nss_databases)
+  if [[ -f "$SYSTEM_ANCHOR" ]]; then
+    sudo rm -f "$SYSTEM_ANCHOR" && sudo update-ca-certificates --fresh >/dev/null && echo "removed from the system store"
+  fi
+  exit 0
+fi
+
+installed=0
+if command -v certutil >/dev/null 2>&1; then
+  while read -r db; do
+    [[ -z "$db" ]] && continue
+    certutil -D -d "$db" -n "$NICKNAME" >/dev/null 2>&1 || true
+    certutil -A -d "$db" -n "$NICKNAME" -t "C,," -i "$OUT"
+    echo "installed into $db"
+    installed=$((installed + 1))
+  done < <(nss_databases)
+else
+  echo "WARN: certutil (libnss3-tools) is missing; browsers were not configured" >&2
+fi
+
+if [[ "$installed" -eq 0 ]]; then
+  echo "WARN: no NSS database found; open Chrome or Firefox once, or run 'certutil -N -d sql:\$HOME/.pki/nssdb'" >&2
+fi
+
+if [[ "$MODE" == "--system" ]]; then
+  # Debian/Ubuntu anchor directory first; p11-kit's `trust` covers the rest.
+  if command -v update-ca-certificates >/dev/null 2>&1; then
+    sudo install -m 644 "$OUT" "$SYSTEM_ANCHOR"
+    sudo update-ca-certificates >/dev/null
+  elif command -v trust >/dev/null 2>&1; then
+    sudo trust anchor "$OUT"
+  else
+    echo "ERROR: neither update-ca-certificates nor trust is available" >&2
+    exit 1
+  fi
+  echo "installed into the system store"
+else
+  echo
+  echo "The system store (curl, openssl, wget) was not touched. Add it with:"
+  echo "  mise run hv-ca --system"
+fi
+
 echo
-echo "Import it into the browser you sign in with, or trust it system-wide:"
-echo "  sudo cp $OUT /usr/local/share/ca-certificates/caddy-local.crt && sudo update-ca-certificates"
+echo "Verify:"
+echo "  curl -sS https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.describeServer"
+echo "  certutil -L -d sql:\$HOME/.pki/nssdb -n '$NICKNAME'"
 echo
-echo "Verify afterwards:  curl -sS https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.describeServer"
+echo "Restart the browser once; it caches trust decisions per session."

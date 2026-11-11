@@ -54,7 +54,7 @@ PDS implementation HappyView's own e2e suite runs.
 docker compose up -d                # postgres, plc, pds, caddy, happyview, prometheus
 mise run hv-account                 # mint alice.pds.127-0-0-1.sslip.io
 mise run hv-seed                    # make it superuser; write admin key + XRPC client
-mise run hv-ca                      # export Caddy's root CA for the browser
+mise run hv-ca                      # trust Caddy's CA in Chrome and Firefox
 ```
 
 On a volume created before the local network existed, `mise run hv-dbs` adds the
@@ -169,8 +169,31 @@ provisional handle. The redirect chain goes to
 root CA first:
 
 ```bash
-mise run hv-ca     # writes .cache/caddy-root.crt and prints the import command
+mise run hv-ca            # Chrome and Firefox (user stores, no sudo)
+mise run hv-ca --system   # curl, openssl, wget (asks for sudo)
 ```
+
+The redirect chain crosses to `https://pds.127-0-0-1.sslip.io/oauth/authorize`,
+so the browser must trust Caddy's internal CA. `hv-ca` installs Caddy's root CA
+into every store it finds, under the nickname `Caddy Local Dev CA`:
+
+| Store | What it covers | Privileges |
+| --- | --- | --- |
+| `~/.pki/nssdb` | Chrome / Chromium | none |
+| `~/.mozilla/firefox/*/cert9.db` | Firefox, per profile | none |
+| `/usr/local/share/ca-certificates` (or p11-kit) | curl, openssl, wget, Node with `--use-system-ca` | sudo |
+
+The browser stores need no privileges and are the default; the system store is
+opt-in with `--system`. Restart the browser afterwards — it caches trust
+decisions per session. `mise run hv-ca --uninstall` removes the certificate
+again.
+
+Two alternatives were considered and not used. `caddy trust` installs Caddy's CA
+only into the system store, not NSS, so Firefox and Chrome would still fail.
+`mkcert` solves the same problem but replaces Caddy's own CA with a per-machine
+one, which means generating certificates before `docker compose up` and mounting
+them into Caddy; the internal CA keeps the certificate inside the stack, and the
+only thing left to distribute is a public root.
 
 The account is already a superuser via `hv-seed`, so no post-login bootstrap
 step is needed.

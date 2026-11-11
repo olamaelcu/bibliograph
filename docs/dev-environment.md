@@ -12,7 +12,7 @@ the day-to-day loop.
 docker compose up -d          # postgres, plc, pds, caddy, happyview, prometheus
 mise run hv-account           # mint the provisional account on the local PDS
 mise run hv-seed              # make it superuser, write the admin key + XRPC client
-mise run hv-ca                # export Caddy's root CA for the browser
+mise run hv-ca                # trust Caddy's CA in Chrome and Firefox
 ```
 
 | Address | What |
@@ -52,9 +52,10 @@ alice.pds.127-0-0-1.sslip.io / Dev-account-password1
 ```
 
 The redirect chain crosses to `https://pds.127-0-0-1.sslip.io/oauth/authorize`,
-so import Caddy's root CA first — `mise run hv-ca` writes it to
-`.cache/caddy-root.crt` and prints the import command. Until it is trusted the
-authorize page fails TLS.
+so Caddy's root CA has to be trusted first: `mise run hv-ca` installs it into
+Chrome's and Firefox's user stores, and `mise run hv-ca --system` adds it to the
+system store for curl and friends. Until it is trusted the authorize page fails
+TLS.
 
 `mise run hv-seed` has already inserted the account into `happyview_users` as a
 superuser, so no post-login bootstrap is involved. An account that is *not*
