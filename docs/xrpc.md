@@ -1,695 +1,409 @@
-# XRPC surface: current logic
+# XRPC surface: current behavior
 
-This document is the behavioral spec of the XRPC surface Bibliograph serves today: what each
-registered method accepts, what it reads, how it paginates, which errors it can produce, and how
-caching and identity work. It is drawn from the handlers in
-`packages/bibliograph-service/src/lib/server/xrpc-router.ts` and
-`packages/bibliograph-service/src/routes/xrpc/book-queries.ts`.
+This document is the behavioral spec of the XRPC surface the AppView serves today: what each
+method accepts, what it reads, how it paginates, what it writes, and which errors it can produce.
+It is drawn from the deployed lexicons in `happyview/lexicons` and the handler scripts in
+`happyview/scripts/xrpc/{query,procedure}`. The same lexicons generate the public page in
+`packages/web`.
 
-The router registers 42 methods: 14 under `com.atproto.*`, 6 under `community.lexicon.book.*`,
-20 under `net.olamaelcu.livtet.biblio.*`, plus the two feed generator methods counted with the
-`com.atproto.*` group. The final two sections record where each of them runs in the HappyView
-greenfield target.
+The surface is the set of uploaded lexicons: **17 queries, 15 procedures and 7 record types**, all
+under `net.olamaelcu.livtet.biblio.*` except the review record type
+(`community.lexicon.media.book.review`). HappyView's built-in `com.atproto.*` routes are not part
+of this surface — they proxy to an authority DID that the local network does not resolve — and the
+edge in `packages/web` adds no methods of its own.
 
 ## Conventions
 
-**Transport.** Queries are `GET /xrpc/<nsid>`, procedures are `POST /xrpc/<nsid>`. Bodies are JSON
-except for the `com.atproto.sync.*` methods, which return CAR (`application/vnd.ipld.car`).
+**Transport.** Queries are `GET /xrpc/<nsid>`; procedures are `POST /xrpc/<nsid>` with a JSON body.
+Every call reaches HappyView through the SvelteKit edge (`packages/web/src/routes/xrpc/[...method]`),
+which:
 
-**Auth.** Most queries are anonymous. A viewer is proved two ways only, through `viewerDidFromRequest`
-in `xrpc-router.ts`: a service JWT in `Authorization: Bearer` whose `lxm` matches the method
-(`verifyFeedAuth`), or the storefront cookie `bib_session`, whose opaque id is looked up in
-`web_sessions`. A bare `x-viewer-did` header is deliberately not honored — nothing verified it, so
-it would let any caller act as any DID. The feed's `dynamic` and `recommendations` generators call
-`requireFeedAuth` and reject anonymous callers.
+- accepts only `GET` and `POST`; anything else is `405 MethodNotAllowed`;
+- rejects a path that is not a plausible NSID with `400 InvalidRequest`;
+- relays only `content-type`, `accept`, `authorization` and `dpop` upstream, and adds its own
+  `X-Client-Key`/`X-Client-Secret` from the environment (the browser cannot choose them);
+- returns the upstream status and body unchanged, with only `content-type` and `dpop-nonce` relayed
+  back;
+- answers `502 UpstreamUnavailable` when HappyView cannot be reached.
 
-**Pagination.** Cursors are opaque. The shared parser accepts `<tier>:<value>` where the tier is
-`tap:` (the mirror), `con:` (Constellation) or `pds:` (a repo scan), and it keeps pre-tagging cursors
-working: a bare number is a mirror offset, anything else a Constellation cursor. `listRecentShelving`
-uses a base64url `{t,u}` keyset cursor over `(recordCreatedAt, uri)`. `listShelvesWithBooks` uses
-`tap:<last shelf uri>`. Everything else is a numeric offset, a last-DID keyset, or an opaque upstream
-cursor.
+**Auth.** Queries are anonymous. Procedures require a DPoP-bound session: `Authorization: DPoP
+<token>` plus a fresh `DPoP` proof. The edge holds no session and cannot mint one; it relays both
+headers untouched, and the token needs `transition:generic` because the write is proxied to the
+caller's PDS. Without a session every procedure answers `401` with
+`XRPC procedures require DPoP authentication` before the handler runs. Handlers see the session as
+`caller_did`; every procedure that names an existing review or shelf compares it against
+`caller_did` and answers `403 Forbidden` on a mismatch.
 
-**Errors.** The envelope is `{ "error": string, "message": string }`. Status codes in use: 400
-(`InvalidRequest`, `InvalidQuery`, `InvalidContributor`, `RecordNotFound`, `RepoNotFound`,
-`HandleNotFound`, `DidNotFound`, `LexiconNotFound`), 401, 403, 404, 429 (`RateLimited`, with
-`retry-after: 60`) and 502 (`UpstreamUnavailable`). A missing *optional* record is usually a 200 with
-`null` (`getReadingGoal`, `getActorProfile`) or an empty field (`getImageForContributor`), not an
-error.
+Anonymous queries are still attributed to the edge's XRPC client key, which is the rate-limiting
+and attribution identity.
 
-**Record provenance.** Four sources appear throughout the handlers and are named explicitly in the
-per-method notes:
+**Data source.** Queries read only the index, `happyview_records`
+(`uri`, `did`, `collection`, `rkey`, `record` as JSON text, `created_at`). They never read a PDS.
+Anything the index has not seen yet is absent until a backfill or reconcile indexes it; a procedure
+does not have that gap because it indexes the record it just wrote in the same request.
 
-- `records` — the TAP mirror. Columns `collection`, `did`, `value`, `created_at`,
-  `record_created_at`.
-- `PDS` — a direct `com.atproto.repo.getRecord` / `listRecords` read of the owner's PDS.
-- `Constellation` — the backlink service.
-- `follows` — the materialized follow index.
+**Catalog dependency.** Book-rendering views join `public.appview_book_lua`, the catalog read model:
 
-The PDS and Constellation tiers exist only because the mirror can lag, and they return a `pds:` or
-`con:` cursor so a continuation resumes the same tier. They are removed in the target.
+- `bookShelfView` needs a resolvable catalog edition, a resolvable shelf record persisted in
+  `happyview_records`, and a status (`metadata.status`, or the fixed-shelf rkey);
+- `shelfItemView` needs the edition and the shelf.
 
-**Caching.** `hooks.server.ts` applies `public, max-age=60, stale-while-revalidate=300` to
-unauthenticated GET XRPC responses that did not set their own `cache-control`. CAR responses set
-`public, max-age=60, s-maxage=300`.
+A row whose edition or shelf cannot be resolved is **dropped** from list responses; where a single
+record is named (`getBookOnShelf`), it is a `404 RecordNotFound`. A status whose `metadata.status` is
+missing is inferred from the fixed shelf rkey (`reading`, `read`, `to-read`, `dnf`) when the
+record's shelf is one of them.
 
-**Rate limiting.** Per-IP for anonymous traffic, per-DID for authenticated feed calls. The IP key is
-the last `x-forwarded-for` hop appended by our own proxy (or `x-real-ip` when present), not the first
-hop, which the caller controls.
+**Cursors.** Cursors are base64url-encoded JSON objects. A malformed cursor decodes to `{}` and
+starts at the beginning rather than erroring.
+
+| Encoding | Meaning | Methods |
+| --- | --- | --- |
+| `{ "o": <offset> }` | offset, advanced by the number of **scanned** rows (`limit + 1` when another page exists) | `getReviewsByBook`, `listReviewsByActor`, `listShelfItems`, `listShelfItemsByBook`, `getShelvingOfBook` |
+| `{ "t": <created_at>, "u": <uri> }` | keyset over `(created_at, uri)`, descending | `listBooksOnShelf`, `listRecentShelving` |
+| `{ "u": <uri> }` | keyset over `uri`, ascending; for `getShelversOfBook` it is the smallest URI seen per DID | `listShelves`, `listShelvesWithBooks`, `getShelversOfBook` |
+| raw DID | keyset over the follower DID / subject DID, ascending | `graph.listFollowers`, `graph.listFollowees` |
+
+A cursor is emitted only when the `limit + 1` probe row exists. Because list mapping can drop
+unbuildable rows, an offset cursor can return fewer than `limit` views while still pointing past
+all scanned rows; the keyset cursors share the same property (they advance from the last scanned
+row, not the last emitted view).
+
+**Limits.** Every `limit` is clamped to the lexicon's range by the handler (`int(value, default,
+min, max)`), so an out-of-range number is adjusted, not rejected.
+
+**Errors.** The envelope is `{ "error": string, "message": string }`.
+
+| Status | Error | Origin |
+| --- | --- | --- |
+| 400 | `InvalidRequest` | a required parameter is missing, or a value violates its contract: non-DID `subject`, self-follow, non-AT-URI shelf/review URI, wrong collection, bad enum (`status`, `period`), out-of-range integer, empty update, invalid `editionRef`, non-strongRef `book` |
+| 401 | `XRPC procedures require DPoP authentication` | every procedure, until a DPoP session is presented |
+| 403 | `Forbidden` | the named review or shelf belongs to another DID |
+| 404 | `NotFound` | a procedure targets a follow, review, shelf, `bookStatus` or `shelfItem` that does not exist |
+| 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing |
+| 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST |
+| 502 | `UpstreamFailure` | `shelf.addBooks` when the PDS rejects the batch |
+| 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable |
+
+Queries never answer `401`. Missing optional records are not errors: `getActorProfile` and
+`getReadingGoal` answer `200` with `null`.
+
+**Views.** Responses embed the lexicon's view types from `net.olamaelcu.livtet.biblio.defs`:
+`shelfView` (`uri`, `name`, optional `description`/timestamps), `bookView` (`uri`, `edition`),
+`bookShelfView` (`uri`, `shelf`, `book`, `metadata`, `did`, optional timestamps), `shelfItemView`
+(same shape), `shelfWithBooksView` (`shelf`, `books`), and `reviewView`
+(`uri`, `did`, `record`). `edition` is the `community.lexicon.media.book.defs#editionView` built
+from the catalog.
 
 ## Inventory
 
-| NSID | Kind | Auth | Current source | Target |
-| --- | --- | --- | --- | --- |
-| `com.atproto.identity.resolveHandle` | query | none | lex publisher config | edge (PDS proxy) |
-| `com.atproto.identity.resolveDid` | query | none | `did.ts` document | edge (PDS proxy) |
-| `com.atproto.identity.resolveIdentity` | query | none | either of the above | edge (PDS proxy) |
-| `com.atproto.sync.getRecord` | query | none | per-rkey CAR slice | edge (PDS proxy) |
-| `com.atproto.sync.getRepo` | query | none | `full.car` | edge (PDS proxy) |
-| `com.atproto.sync.getRepoStatus` | query | none | `full.car` commit | edge (PDS proxy) |
-| `com.atproto.sync.getLatestCommit` | query | none | `full.car` commit | edge (PDS proxy) |
-| `com.atproto.sync.getBlocks` | query | none | parsed `full.car` | edge (PDS proxy) |
-| `com.atproto.repo.getRecord` | query | none | Postgres catalog or CAR | edge (PDS proxy) |
-| `com.atproto.repo.describeRepo` | query | none | DID document | edge (PDS proxy) |
-| `com.atproto.lexicon.resolveLexicon` | query | none | local CAR slices | edge |
-| `com.atproto.label.queryLabels` | query | none | `labels` table | edge |
-| `com.atproto.feed.describeFeedGenerator` | query | none | static | edge |
-| `com.atproto.feed.getFeedSkeleton` | query | none; optional viewer JWT/cookie for `following`/`extended`; required service JWT for `dynamic`/`recommendations` | `records`, follow PDS reads, catalog | edge; no `recommendations` |
-| `community.lexicon.book.compatibility` | query | none | static | drop (no WG equivalent) |
-| `community.lexicon.book.searchEditions` | query | none | `editions` + providers | replace with `community.lexicon.media.book.searchEditions` (procedure, catalog lookup) |
-| `community.lexicon.book.resolveEditions` | procedure | none today | `editions.identifiers` | replace with `community.lexicon.media.book.resolveEditions` |
-| `community.lexicon.book.searchWorks` | query | none | `works` + providers | drop (no works) |
-| `community.lexicon.book.searchContributors` | query | none | `contributors` | drop (contributors are inline) |
-| `community.lexicon.book.searchPublishers` | query | none | `publishers` | drop (publishers are inline) |
-| `net.olamaelcu.livtet.biblio.graph.isFollowing` | query | none | `follows` | HappyView |
-| `net.olamaelcu.livtet.biblio.graph.listFollowers` | query | none | `follows` | HappyView |
-| `net.olamaelcu.livtet.biblio.graph.listFollowees` | query | none | `follows` | HappyView |
-| `net.olamaelcu.livtet.biblio.getReadingGoal` | query | none | reader PDS | HappyView |
-| `net.olamaelcu.livtet.biblio.getActorProfile` | query | none | reader PDS | HappyView |
-| `net.olamaelcu.livtet.biblio.searchActors` | query | none | `actors` + `records` | drop (use `app.bsky.actor.searchActors`) |
-| `net.olamaelcu.livtet.biblio.getShelf` | query | none | reader PDS | HappyView |
-| `net.olamaelcu.livtet.biblio.listShelves` | query | none | PDS first, mirror fallback | HappyView |
-| `net.olamaelcu.livtet.biblio.getImageForBook` | query | none | `editions`, `records` | edge (edition `coverUrl` only) |
-| `net.olamaelcu.livtet.biblio.getImageForContributor` | query | none | `contributors` | drop (no contributor records) |
-| `net.olamaelcu.livtet.biblio.getShelvingOfBook` | query | none | mirror + Constellation + PDS + Bookhive | HappyView; no tiers, no Bookhive |
-| `net.olamaelcu.livtet.biblio.getShelversOfBook` | query | none | mirror + Constellation + Bookhive | HappyView; no tiers, no Bookhive |
-| `net.olamaelcu.livtet.biblio.listBooksOnShelf` | query | none | mirror + PDS + Constellation | HappyView |
-| `net.olamaelcu.livtet.biblio.listShelfItems` | query | none | PDS first, mirror fallback | HappyView |
-| `net.olamaelcu.livtet.biblio.listShelfItemsByBook` | query | none | PDS first, mirror fallback | HappyView |
-| `net.olamaelcu.livtet.biblio.getReviewsByBook` | query | none | mirror + Constellation | HappyView; reads `community.lexicon.media.book.review` |
-| `net.olamaelcu.livtet.biblio.getEditionsByContributor` | query | none | `editions.contributors` | drop (use `searchEditions.author`) |
-| `net.olamaelcu.livtet.biblio.getBooks` | query | none | `editions` + aliases | replace with `net.olamaelcu.livtet.biblio.getEditions` (batch) |
-| `net.olamaelcu.livtet.biblio.listShelvesWithBooks` | query | none | mirror + catalog | HappyView |
-| `net.olamaelcu.livtet.biblio.listReviewsByActor` | query | none | mirror + PDS fallback | HappyView; reads `community.lexicon.media.book.review` |
-| `net.olamaelcu.livtet.biblio.listRecentShelving` | query | none | mirror | HappyView |
-| `net.olamaelcu.livtet.biblio.getBookOnShelf` | query | none | PDS record + catalog | HappyView |
+### Queries
 
-Two absences are deliberate and are not endpoints:
+| NSID | Params | Returns |
+| --- | --- | --- |
+| `getActorProfile` | `did` | `{ profile }` — raw `net.olamaelcu.livtet.actor.profile` record or `null` |
+| `getReadingGoal` | `did` | `{ goal }` — raw `readingGoal` record or `null` |
+| `getShelf` | `uri` | `{ shelf }` |
+| `listShelves` | `did`, `limit` 50 (≤100), `cursor` | `{ shelves, cursor? }` |
+| `listShelvesWithBooks` | `did?`, `limit` 50 (≤100), `booksPerShelf` 25 (≤100), `cursor` | `{ shelves: [{ shelf, books }], cursor? }` |
+| `getBookOnShelf` | `uri` | `{ bookShelf }` |
+| `listBooksOnShelf` | `shelf`, `limit` 50 (≤100), `cursor` | `{ bookShelves, cursor? }` |
+| `getShelvingOfBook` | `book`, `did`, `limit` 50 (≤100), `cursor` | `{ bookShelves, cursor? }` |
+| `getShelversOfBook` | `bookUri`, `shelvingRkey?` (≤512), `limit` 50 (≤100), `cursor` | `{ bookUri, dids, cursor? }` |
+| `listRecentShelving` | `limit` 50 (≤100), `cursor` | `{ bookShelves, cursor? }` |
+| `listShelfItems` | `shelf`, `limit` 50 (≤100), `cursor` | `{ items, cursor? }` |
+| `listShelfItemsByBook` | `book`, `did`, `limit` 50 (≤100), `cursor` | `{ items, cursor? }` |
+| `getReviewsByBook` | `book`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
+| `listReviewsByActor` | `did`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
+| `graph.isFollowing` | `follower`, `followed` | `{ following }` |
+| `graph.listFollowers` | `did`, `limit` 100 (≤1000), `cursor` | `{ followers, total?, cursor? }` |
+| `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total?, cursor? }` |
 
-- `net.olamaelcu.livtet.biblio.getActor` has a lexicon but no handler is registered, so it 404s at
-  the router and does not appear above.
-- `com.atproto.server.describeServer` is deliberately unimplemented.
+### Procedures
 
-`net.olamaelcu.livtet.biblio.getEditions` likewise has a lexicon in
-`packages/bibliograph-service/lexicons` but no registered handler; it is a new method in the target,
-not part of the current surface.
+All procedures require a DPoP session and write to the caller's PDS, then index the accepted
+record in `happyview_records` in the same request.
 
-## com.atproto.* (publisher repo and protocol)
+| NSID | Input | Returns |
+| --- | --- | --- |
+| `graph.follow` | `subject` (DID) | `{ uri, created }` |
+| `graph.unfollow` | `subject` (DID) | `{ uri }` |
+| `profile.set` | `displayName?` (≤640), `description?` (≤256), `avatarCid?` | `{ uri }` |
+| `readingGoal.set` | `period`, `year`, `booksGoal` | `{ uri, period, year, booksGoal }` |
+| `shelf.create` | `name` (≤128), `description?` | `{ uri }` |
+| `shelf.update` | `shelf`, `name?` (≤128), `description?` | `{ uri, updated }` |
+| `shelf.delete` | `shelf` | `{ deleted }` |
+| `shelf.addItem` | `shelf`, `book` (strongRef), `metadata?` | `{ uri }` |
+| `shelf.removeItem` | `shelf`, `book` (strongRef or `{uri}`) | `{ uri }` |
+| `shelf.addBooks` | `shelf`, `books[]` (≤100 strongRefs) | `{ added, failed }` |
+| `status.set` | `book` (strongRef), `status`, `shelf?`, `metadata?` | `{ uri, status }` |
+| `status.clear` | `book` (strongRef or `{uri}`) | `{ uri }` |
+| `review.create` | `subject` (editionRef), `rating?`, `textContent?`, `subjectRecord?`, `content?`, `flags?` | `{ uri }` |
+| `review.update` | `uri`, plus any of the `review.create` fields | `{ uri, updated }` |
+| `review.delete` | `uri` | `{ uri }` |
 
-These methods make the host look like the PDS of a single publisher DID. They serve prebuilt CAR
-files produced by `scripts/build-lex-repo.ts`; the DID document at `/.well-known/did.json` advertises
-this host as the `#atproto_pds` for the publisher DID.
-
-#### `com.atproto.identity.resolveHandle`
-
-Input `handle`. Only the configured handle (`LEX_PUBLISHER_HANDLE`, default
-`biblio.livtet.olamaelcu.net`) resolves, to `{ did }` where the DID is `LEX_PUBLISHER_DID` or
-`did:web:<handle>`. Any other handle is `400 HandleNotFound`. There is no DNS lookup.
-
-#### `com.atproto.identity.resolveDid`
-
-Input `did`. Returns `{ didDoc: getDidDocument() }` only when `did` equals the configured publisher
-DID; otherwise `400 DidNotFound`.
-
-#### `com.atproto.identity.resolveIdentity`
-
-Input `identifier`. A `did:` input is routed through `resolveDid`, anything else through
-`resolveHandle`. Returns `{ did, handle, didDoc }`. The error key follows the input shape:
-`DidNotFound` for a DID, `HandleNotFound` for a handle.
-
-#### `com.atproto.sync.getRecord`
-
-Params `did`, `collection`, `rkey`. Only `collection = com.atproto.lexicon.schema` is served: the
-handler reads `data/lex/<nsid with . → _>.car` and returns it as `application/vnd.ipld.car`. Any
-other collection, or a missing slice, is `400 RecordNotFound` — note the 400, not 404.
-
-#### `com.atproto.sync.getRepo`
-
-Params `did`, optional `since`. Only the publisher DID is served. `since` is rejected with
-`400 InvalidRequest`, because answering `since` with the full repo would look like a valid diff.
-Otherwise the response is `data/lex/full.car`.
-
-#### `com.atproto.sync.getRepoStatus`
-
-Only the publisher DID. Parses the root commit of `full.car` and returns `{ did, rev, active: true }`.
-A missing repo or commit is `400 RepoNotFound`.
-
-#### `com.atproto.sync.getLatestCommit`
-
-Only the publisher DID. Returns the root commit's `{ cid, rev }`; `400 RepoNotFound` when there is no
-repo.
-
-#### `com.atproto.sync.getBlocks`
-
-Params `did`, `cids[]`. Only the publisher DID. `full.car` is parsed once per build (cache keyed by
-file size and mtime) and block CIDs are indexed by string, so the response is a multi-block CAR
-containing only the requested blocks that exist. Missing CIDs are omitted and no root is emitted.
-`400 RepoNotFound` when the repo is absent.
-
-#### `com.atproto.repo.getRecord`
-
-Params `repo`, `collection`, `rkey`. Only the publisher DID is served.
-
-- `community.lexicon.book.edition`: load the `editions` row, wire contributor refs, build
-  `editionRecordValue`. An edition with no identifiers has no valid record form and answers
-  `404 RecordNotFound`. The CID is computed with `cidForLex`; the response is
-  `{ uri, cid, value }`. A description backfill is enqueued when `description` is missing.
-- `community.lexicon.book.work` / `.contributor` / `.publisher`: load the matching row and return
-  `workRecordValue` / `contributorRecordValue` / `publisherRecordValue`, with the CID computed the
-  same way.
-- `com.atproto.lexicon.schema`: read the per-rkey CAR slice, walk the MST for `collection/rkey`, take
-  the last CID, CBOR-decode the block and return `{ uri, cid, value }`.
-- Any other collection or repo: `400 RecordNotFound` / `400 RepoNotFound`.
-
-#### `com.atproto.repo.describeRepo`
-
-Params `repo` (DID or handle). Only the publisher identity resolves. Returns
-`{ did, didDoc, handle, handleIsCorrect, collections }`, where `collections` is exactly
-`["com.atproto.lexicon.schema"]`. `handleIsCorrect` probes
-`https://<publisher-host>/.well-known/atproto-did` at most once per 5 minutes, serves the last known
-answer on failure, and defaults to `true` when it has never succeeded.
-
-#### `com.atproto.lexicon.resolveLexicon`
-
-Params `nsid`. Serves only lexicons this host publishes, through `resolvePublishedLexicon`, returning
-`{ uri, cid, schema }` computed from the local lexicon files and CAR. An unknown NSID is
-`400 LexiconNotFound`. It performs no network lookup by design.
-
-#### `com.atproto.label.queryLabels`
-
-Params `uriPatterns[]`, `sources[]`, `cursor` (a numeric string), `limit`. Reads the `labels` table
-through `queryLabels`, maps rows with `labelToJson`, and returns `{ labels, cursor }` where the cursor
-is the next numeric `seq`.
-
-## community.lexicon.book.* (catalog)
-
-The catalog namespace. Handlers live in `book-queries.ts`; the search handlers delegate to
-`SearchService`, which owns the provider fan-out and the merge rules. Most responses carry
-`hasMore`/`total`/`degraded` flags from the sources rather than from a post-filter count.
-
-#### `community.lexicon.book.compatibility`
-
-No params. Returns a static `{ queries: [{ nsid, type }] }` listing `compatibility`,
-`searchEditions`, `resolveEditions` (procedure), `searchWorks`, `searchContributors`,
-`searchPublishers`.
-
-#### `community.lexicon.book.searchEditions`
-
-Params: `q`, `title`, `author`, `identifiers[]` (each `<type>:<value>`), `offset` (default 0),
-`limit` (default 25, max 100). No cursor.
-
-1. Trim the inputs. `400 InvalidQuery` when `q`, `title`, `author` and all identifiers are empty.
-   Identifier hints that lack both halves are dropped — they name nothing a row can match.
-2. Fold `q`, or `title + " " + author` when `q` is absent, into one text query.
-3. `SearchService.searchEditions` runs three sources in parallel: Postgres
-   (`editions.title ILIKE %text%`, plus identifier containment for each hint, plus the language
-   filter, ordered `indexed_at DESC, uri ASC`, `LIMIT limit+1`, count only on the first page),
-   Google Books, and Goodreads HTML search.
-4. Remote editions run enrichers in order Google Books → ISBNdb → Wikidata. If Google Books returns
-   nothing and the query is an ISBN, ISBNdb is tried. Goodreads results are enriched in parallel;
-   items whose normalized title already exists in the Google/ISBNdb set are dropped. Remote items
-   are sliced to `limit`.
-5. Merge remote over local by `uri`: remote wins title/subtitle/description/cover/place/year/
-   language/identifiers, local wins contributors and `indexedAt`. Slice to `limit`.
-6. Cursor is remote's or Postgres's; `total` is the maximum defined total; `hasMore` is true if any
-   source says so; `degraded` comes from the first source that reported it.
-7. Remote items are synchronously ingested into the catalog (`syncIngestEditions`) before returning.
-8. The handler maps each item to `editionViewFromItem` with contributor names, drops items with no
-   identifiers (a `defs#editionView` requires one), and enqueues edition and contributor backfills.
-   Empty contributor names increment `invalidContributorResponsesTotal`.
-
-#### `community.lexicon.book.resolveEditions`
-
-Procedure (`POST`). Input: `identifiers[]` (required), `offset` (default 0), `limit` (default 25,
-max 100). There is no auth check today. Empty `identifiers` is `400 InvalidQuery`.
-
-Each identifier becomes `editions.identifiers @> [{type,value}]`; the predicates are OR-ed, so a row
-qualifies when any supplied pair matches exactly (`url` is display-only and ignored). Rows are
-ordered `indexed_at ASC, uri ASC` with `LIMIT limit+1`, mapped with `editionItemFromRow`, then
-`editionViewFromItem`; rows with no identifiers are dropped. `hasMore` comes from the extra row.
-Edition and contributor backfills are enqueued.
-
-#### `community.lexicon.book.searchWorks`
-
-Params `q`, `id[]`, `limit` (default 20, max 100), `cursor`. `SearchService.searchWorks` queries
-Postgres (`works.title ILIKE %q%` plus identifier containment, ordered `indexed_at DESC, uri ASC`
-with a keyset cursor `(indexedAt, uri)` encoded as deflated base64url JSON) and Google Books works in
-parallel, enriches with ISBNdb work + Wikidata, falls back to ISBNdb when Google Books is empty and
-`q` is an ISBN, merges remote over local by `uri`, takes the cursor from remote or Postgres, always
-counts `total` for works, and reports `hasMore` from any source. Remote items are synchronously
-ingested (`syncIngestWorks`). The handler maps to `community.lexicon.book.work` and wires
-contributors.
-
-#### `community.lexicon.book.searchContributors`
-
-Params `q`, `id[]`, `limit` (default 20, max 100), `cursor`. Local only:
-`contributors.name ILIKE %q%`, identifier containment, `btrim(name) <> ''`, ordered
-`indexed_at DESC, uri ASC`, keyset cursor, `total` always counted. The handler re-filters with
-`validContributorName` (the lexicon requires `minLength: 1`), reports the dropped count,
-maps to `community.lexicon.book.contributor`, and enqueues contributor backfills.
-
-#### `community.lexicon.book.searchPublishers`
-
-Params `q`, `id[]`, `limit` (default 20, max 100), `cursor`. Local only:
-`publishers.name ILIKE %q%`, identifier containment, ordered `indexed_at DESC, uri ASC`, `total`
-always counted. The handler forwards the service cursor, but the service currently returns none, so
-only the first page is reachable by cursor. `imprintOf` is emitted only when it is a canonical
-AT-URI.
-
-## net.olamaelcu.livtet.biblio.* (reading activity)
-
-### Follow graph
-
-#### `net.olamaelcu.livtet.biblio.graph.isFollowing`
-
-Params `follower`, `followed` (DIDs). One primary-key probe of `follows(follower_did,
-followed_did)` returns `{ following: boolean }`. No viewer token: the follow graph is public data and
-`did` names whose edges to read.
-
-#### `net.olamaelcu.livtet.biblio.graph.listFollowers`
-
-Params `did` (the followed actor), `cursor` (last follower DID), `limit` (default 100, max 1000).
-Selects `follows.followed_did = did`, ordered `follower_did ASC`, keyset `follower_did > cursor`,
-`LIMIT limit`. `total` is counted on the first page only and runs in parallel with the page query.
-A cursor is emitted when the page is full.
-
-#### `net.olamaelcu.livtet.biblio.graph.listFollowees`
-
-Params `did`, `cursor` (last followee DID), `limit` (default 100, max 1000). Selects
-`follows.follower_did = did`, ordered `followed_did ASC`, same keyset, with the first-page total
-computed in parallel with the page.
+## Query behavior
 
 ### Reader records
 
-#### `net.olamaelcu.livtet.biblio.getReadingGoal`
+#### `getActorProfile`
 
-Param `did`. Reads `com.atproto.repo.getRecord` at
-`net.olamaelcu.livtet.biblio.readingGoal/current` from the subject's PDS, anonymously, with a 10 s
-timeout. `RecordNotFound` answers `{ goal: null }`; a malformed response also answers
-`{ goal: null }`; any other failure is `502 UpstreamUnavailable`. The raw record value is returned as
-`goal`.
+Reads the index at `at://<did>/net.olamaelcu.livtet.actor.profile/self` and returns the stored record
+as `profile`. A missing record is `200 { profile: null }`; no PDS read happens, so a profile the
+index has not seen is reported missing. The lexicon's optional `handle` is not served today: the
+handler emits only `profile`.
 
-#### `net.olamaelcu.livtet.biblio.getActorProfile`
+#### `getReadingGoal`
 
-Param `did`. Reads `com.atproto.repo.getRecord` at `net.olamaelcu.livtet.actor.profile/self` from the
-subject's PDS, with the same error mapping as `getReadingGoal`, and returns
-`{ profile: value | null }`. Note the collection: Livtet writes
-`net.olamaelcu.livtet.actor.profile`, not the vendored `...biblio.actorProfile` lexicon.
+Reads the index at `at://<did>/net.olamaelcu.livtet.biblio.readingGoal/current` and returns the
+stored record as `goal`, or `null`.
 
-#### `net.olamaelcu.livtet.biblio.searchActors`
+### Follow graph
 
-Params `q` (3–200 characters), `hasRecords[]` (at most 8 NSIDs), `offset` (default 0), `limit`
-(default 25, max 100). Reads the `actors` table. `q` matches an exact `did`, `handle ILIKE %q%`, or
-`display_name ILIKE %q%` with `%`, `_` and `\` escaped. `hasRecords` is a correlated `EXISTS` over
-`records(did, collection)` inside the same WHERE. Order `coalesce(handle, did) ASC, did ASC`,
-`LIMIT limit+1`, `OFFSET`. `hasMore` comes from the extra row; `total` is counted on the first page.
-`actorView` emits `did`, optional `handle`/`displayName`/`description`, and an `avatar` URL built as
-`https://cdn.bsky.app/img/avatar/plain/<did>/<avatarCid>`. Bounds violations are `400 InvalidQuery`.
+Follow rows are `net.olamaelcu.livtet.biblio.follow` records; the subject DID is the first path
+segment of `record.subject`, and the rkey is the subject DID too.
+
+#### `graph.isFollowing`
+
+One probe of the follower's follow collection filtered by the subject DID returns `{ following }`.
+The graph is public data; `follower` and `followed` name whose edge to read, not the caller.
+
+#### `graph.listFollowers`
+
+Rows whose `subject` DID equals `did`, ordered by the follower DID (`record.did`) ascending, keyset
+`did > cursor`. `total` is counted only when no cursor is given; a full page emits the last
+follower DID as the cursor.
+
+#### `graph.listFollowees`
+
+Rows whose record DID equals `did`, ordered by the subject DID ascending, keyset on the same value.
+`total` is counted on the first page only, and the first page is the only one that emits it. A full
+page emits the last subject DID as the cursor.
 
 ### Shelves
 
-#### `net.olamaelcu.livtet.biblio.getShelf`
+#### `getShelf`
 
-Param `uri` (shelf AT-URI). The DID is parsed from the URI and
-`net.olamaelcu.livtet.biblio.shelf/<rkey>` is read from that PDS. `RecordNotFound` maps to
-`404 RecordNotFound`; other upstream failure is 502. Builds `defs#shelfView` with
-`shelfViewFromValue` (required `name`; `description` and timestamps only when declared) and returns
-`{ shelf }`.
+Looks up `net.olamaelcu.livtet.biblio.shelf` at `uri` and returns `{ shelf }` as a `shelfView`.
+A `name` is not required in storage: the view falls back to the fixed-shelf label for the rkeys
+`reading`, `read`, `to-read`, `dnf`, then to the record's `name`, then to the rkey. Missing record:
+`404 RecordNotFound`.
 
-#### `net.olamaelcu.livtet.biblio.listShelves`
+#### `listShelves`
 
-Params `did`, `limit` (default 50), `cursor`.
+Pages the DID's shelf records ordered by `uri` ascending, keyset `uri > cursor`, and returns
+`{ shelves, cursor? }`. Fixed reading-status shelves appear only when a record exists at their
+fixed rkey; nothing is derived.
 
-- First page: `com.atproto.repo.listRecords` for the `shelf` collection on the reader's PDS; each row
-  becomes a `shelfView`; the PDS cursor is tagged `pds:<cursor>`. If the PDS scan throws, the handler
-  falls back to the mirror.
-- A `pds:` continuation resumes the PDS scan from its cursor.
-- Legacy and mirror continuation: `tap:<offset>` pages `records` for `(did, shelf)` ordered
-  `record_created_at DESC, uri DESC` with `LIMIT limit+1 OFFSET offset`.
-- On the first page only, derived Bookhive shelf containers are appended: distinct
-  `buzz.bookhive.book.status` values for the DID map to the fixed shelf rkeys (`reading`, `read`,
-  `to-read`, `dnf`); a real shelf record with the same URI wins, and the derived list is sorted by
-  URI.
-- Returns `{ shelves, cursor }`.
+#### `listShelvesWithBooks`
 
-#### `net.olamaelcu.livtet.biblio.listShelvesWithBooks`
-
-Params `did` (optional), `limit` (default 50), `booksPerShelf` (default 25, clamped 1–100), `cursor`
-which must be `tap:<shelf-uri>`; any other tier or a non-AT-URI value is `400 InvalidRequest`.
-
-- Select `shelf` records ordered `uri ASC`, keyset `uri > cursor`, `LIMIT limit+1`, scoped to `did`
-  when given.
-- First page only: derive Bookhive shelf containers from the DID's `buzz.bookhive.book` statuses and
-  append only URIs not already present.
-- For each shelf, inside one transaction with `statement_timeout = 4s` and a 5 s JS deadline, select
-  shelf entries (`shelfEntryConditions`) ordered `uri ASC`, `LIMIT booksPerShelf`. The deadline can
-  truncate the preview.
-- Hydrate books in one batch, resolve each entry (`resolveBookShelf`), drop unresolvable rows, and
-  sort with `compareShelfBooks`: `metadata.position` ascending first (a row with no position sorts
-  after every positioned row), then `uri` ascending.
-- Output `shelves: defs#shelfWithBooksView[]`; the cursor is `tap:<last shelf uri>` when another
-  shelf exists.
-
-### Shelving
-
-#### `net.olamaelcu.livtet.biblio.getShelvingOfBook`
-
-Params `book` (AT-URI), `did`, `limit` (default 50, max 100), `cursor` (interpreted as an offset).
-
-1. Mirror: `records` where `(did, bookShelving, value->'book'->>'uri' = book)`, ordered `uri ASC`,
-   `OFFSET cursor LIMIT limit+1`.
-2. If the page is short and there is no cursor: Constellation backlinks with `subject = book`, source
-   `net.olamaelcu.livtet.biblio.bookShelving` and a `did` filter, `limit` records; each backlink is
-   fetched from its PDS with concurrency 6. If Constellation returns a cursor and the page is full, it
-   is returned as the cursor.
-3. If the page is still short and there is no cursor: scan the reader's PDS `bookShelving` collection
-   page by page, keeping records whose `book.uri` equals `book`.
-4. If it is still short and there is no cursor: resolve the edition's Bookhive catalog subject (the
-   `bh.` rkey or the `bookhive` identifier URL), fetch Constellation backlinks with source
-   `buzz.bookhive.book:hiveBookUri`, read each `buzz.bookhive.book` record from its PDS, and keep
-   those with a shelf or status.
-5. Hydrate everything to `defs#bookShelfView` (book from the catalog; Bookhive rows synthesize a book
-   view from their own title and authors when the catalog row is absent).
-6. The cursor is emitted only for the mirror tier, as `offset + number of returned rows` —
-   hydration drops unresolvable rows, so the emitted count is not the scanned count.
-
-#### `net.olamaelcu.livtet.biblio.getShelversOfBook`
-
-Params `bookUri`, optional `shelvingRkey` (default: the last path segment of `bookUri`), `limit`
-(default 50), `cursor`.
-
-- Bookhive DIDs are read on every page: mirror rows matching `shelfEntryConditions({ apps:
-  ['bookhive'], bookhiveSubject })`. There is no shelf record to resolve, so they cannot be expressed
-  by the shelving cursor; they are unioned into the answer.
-- A `con:` cursor resumes Constellation backlinks for `bookUri` (source
-  `net.olamaelcu.livtet.biblio.bookShelving`) and returns distinct DIDs from the records'
-  authorities and rkeys, in record order.
-- `tap:<offset>` pages the mirror for `(collection = bookShelving, rkey = shelvingRkey,
-  book.uri = bookUri)` ordered `uri ASC`, `LIMIT limit+1`.
-- If the mirror page is full the handler emits `tap:offset+limit`; otherwise it takes the remainder
-  from Constellation, with a `con:` cursor when Constellation has more.
-- Returns `{ bookUri, dids, cursor }`.
-
-#### `net.olamaelcu.livtet.biblio.listBooksOnShelf`
-
-Params `shelf` (AT-URI; its DID is the reader), `limit` (default 50), `cursor`.
-
-- `con:` continuation: Constellation backlinks with `subject = shelf`, source
-  `net.olamaelcu.livtet.biblio.bookShelving:shelf` and a `did` filter; each record is fetched from its
-  PDS with concurrency 6, then hydrated.
-- `pds:` continuation: scan the reader's PDS `bookShelving` collection, up to 40 pages per request,
-  keeping `shelf === shelfUri`. Whole pages are consumed so no match is skipped; the cursor resumes
-  the repo cursor.
-- `tap:<offset>`: mirror `shelfEntryConditions({ shelfUris: [shelf], did })` ordered
-  `record_created_at DESC, uri DESC`, `LIMIT limit+1 OFFSET offset`.
-- First page only: after the mirror page, if it is short, the handler scans the PDS; if the merged
-  page is still empty, it pulls Constellation backlinks. The PDS scan is preferred because
-  per-record backlink reads trip the PDS rate limit.
-- Hydrates `bookShelves`; the cursor belongs to the tier that still has records.
-
-#### `net.olamaelcu.livtet.biblio.listRecentShelving`
-
-Params `limit` (default 50), `cursor` (base64url `{t,u}` keyset). Selects `shelfEntryConditions()`
-(both `bookShelving` and Bookhive `book` with a status) where `(recordCreatedAt, uri) <
-(cursor.t, cursor.u)`, ordered `record_created_at DESC, uri DESC`, `LIMIT limit+1`. Hydrates
-`bookShelfView`s. The cursor is taken from the last *scanned* row, not the last emitted view, because
-hydration drops unresolvable books.
-
-#### `net.olamaelcu.livtet.biblio.getBookOnShelf`
-
-Param `uri` (AT-URI of the shelving record). The DID is parsed from the URI; if the URI names
-`buzz.bookhive.book` the handler fetches that record from the PDS, otherwise it fetches
-`bookShelving`. A missing record is `404 RecordNotFound`. A Bookhive copy with no reading status is
-owned, not shelved, and answers `404` with that message. Hydrates to a `bookShelfView`; if the book
-cannot be resolved, the error names the catalog URI derived from the rkey.
+Pages shelf records ordered by `uri` ascending (optionally scoped to `did`), then runs one query per
+shelf for its `bookStatus` rows ordered by `uri`, capped at `booksPerShelf`, and sorts each shelf's
+books by `metadata.position` ascending (positions absent sort last), then `uri` ascending. Returns
+`{ shelves: [{ shelf, books }], cursor? }`. Rows whose edition or shelf cannot be resolved are
+dropped.
 
 ### Shelf items
 
-#### `net.olamaelcu.livtet.biblio.listShelfItems`
+#### `listShelfItems`
 
-Params `shelf` (AT-URI), `limit` (default 50, clamped 1–100), `cursor`.
+Pages `net.olamaelcu.livtet.biblio.shelfItem` rows whose `record.shelf` equals `shelf`, scoped to the
+DID parsed from the shelf URI, ordered `uri` ascending, offset cursor, and returns `{ items }` of
+`shelfItemView`. The handler validates that `shelf` is an AT-URI (`400 InvalidRequest`).
 
-- A `pds:` continuation scans the reader's `shelfItem` collection, up to 40 pages, keeping
-  `isShelfItemOf(record, shelfUri)`.
-- The first page always scans the PDS and returns immediately, because a delete is not visible to the
-  mirror until TAP consumes it. If the scan throws, the handler falls back to the mirror.
-- `tap:<offset>` pages `records` with `shelfItemConditions` ordered `uri ASC`, `LIMIT limit+1`.
-- Hydration: the shelf view comes from the mirror or from one PDS read; books are batched from the
-  catalog; missing editions are lazily resolved (at most 6 per request, 2.5 s budget, 10 min negative
-  cache), and rows still missing are dropped.
+#### `listShelfItemsByBook`
 
-#### `net.olamaelcu.livtet.biblio.listShelfItemsByBook`
+The same page, filtered by `record.book.uri` and the explicit `did`, ordered `uri` ascending, offset
+cursor.
 
-Params `book` (AT-URI), `did`, `limit` (default 50, clamped 1–100), `cursor`. Same PDS-first policy as
-`listShelfItems`, but the collection filter is `book.uri = book` and the mirror predicate is
-`shelfItemBookConditions`. Hydration batches shelf views, reads missing shelf records from the PDS
-(concurrency 6), resolves the book once, and drops rows whose shelf or book cannot be built.
+### Shelving (book status)
+
+`net.olamaelcu.livtet.biblio.bookStatus` is the reading-status record: one per (reader, edition),
+rkey = the edition rkey. `metadata.status` is required by the view.
+
+#### `getBookOnShelf`
+
+Looks up the `bookStatus` record at `uri` and returns `{ bookShelf }`. Missing record is
+`404 RecordNotFound`; an unresolvable catalog edition or shelf record is also `404 RecordNotFound`,
+with the book URI in the message.
+
+#### `listBooksOnShelf`
+
+Pages the DID's `bookStatus` rows whose `record.shelf` equals `shelf` (the DID is parsed from the
+shelf URI), keyset `(created_at, uri)` descending, and returns `{ bookShelves, cursor? }`. The
+lexicon declares `NotFound`; the handler returns an empty page instead.
+
+#### `getShelvingOfBook`
+
+Pages one reader's `bookStatus` rows where `record.book.uri` equals `book`, ordered `uri` ascending,
+offset cursor. Returns `{ bookShelves, cursor? }`.
+
+#### `getShelversOfBook`
+
+Groups `bookStatus` rows by `did` for a `(shelvingRkey, book URI)` pair and pages the groups by
+`min(uri)` ascending, returning `{ bookUri, dids, cursor? }`. `shelvingRkey` defaults to the last
+path segment of `bookUri` (the edition rkey), matching the record-key contract.
+
+#### `listRecentShelving`
+
+The network-wide activity read: `bookStatus` rows across all readers, keyset `(created_at, uri)`
+descending, `{ bookShelves, cursor? }`. It takes no DID parameter and is not scoped by account.
 
 ### Reviews
 
-#### `net.olamaelcu.livtet.biblio.getReviewsByBook`
+Reviews are `community.lexicon.media.book.review` records; `reviewView` returns the raw record.
 
-Params `book` (AT-URI), `limit` (default 25, max 100), `cursor` (an offset).
+#### `getReviewsByBook`
 
-- Resolve the edition's Bookhive catalog subject.
-- Mirror query: `(collection = bookReview AND book in {string, book.uri, book.ref})` OR
-  `(collection = buzz.bookhive.book AND hiveBookUri = subject AND coalesce(review,'') <> '')`,
-  ordered `record_created_at DESC, uri DESC`, `LIMIT limit+1 OFFSET cursor`.
-- Native rows are mapped with `reviewViewFromRow` (folds all three book ref shapes; `text` defaults to
-  `''`; `createdAt` defaults to now); Bookhive rows with `reviewViewFromBookhiveRow` (text and rating
-  from the inline `review`, `createdAt` from the record or the review).
-- First page only, when the page is short and a Bookhive subject exists: Constellation backlinks for
-  the subject (source `buzz.bookhive.book:hiveBookUri`), each record fetched from its PDS with
-  concurrency 6, keeping those with a review and appending unseen ones.
-- Returns `{ reviews, cursor }`.
+Pages reviews that either name the book in `subjectRecord` or share an identifier with the edition
+(`edition_identifiers` of `book`), ordered `created_at` descending, `uri` descending, offset cursor.
+Returns `{ reviews, cursor? }`. The lexicon declares `NotFound`; the handler returns an empty page.
 
-#### `net.olamaelcu.livtet.biblio.listReviewsByActor`
+#### `listReviewsByActor`
 
-Params `did`, `limit` (default 25), `cursor`.
+Pages one DID's reviews, same ordering and cursor. Returns `{ reviews, cursor? }`.
 
-- Mirror rows for `did` in `[bookReview, buzz.bookhive.book]` where the row is either a native review
-  or a Bookhive record with a non-empty `review` or a `stars` field; ordered
-  `record_created_at DESC, uri DESC`, `LIMIT limit+1 OFFSET offset`.
-- Map to `reviewView`; rows with no book URI are dropped.
-- First page only, when the page is short: read `com.atproto.repo.listRecords` for each collection
-  from the actor's PDS, apply the same Bookhive predicate, skip URIs already rendered, and
-  `fillEmptyMirrorRow` for rows TAP stored as `{}`.
+## Procedure behavior
 
-### Catalog books and images
+Shared rules: the body must be a JSON object; ownership is checked against `caller_did` (`403`); a
+missing target is `404`; successful writes go through the PDS and are indexed in the same request.
 
-#### `net.olamaelcu.livtet.biblio.getEditionsByContributor`
+### Follow
 
-Param `contributor` (must be a `community.lexicon.book.contributor` AT-URI), `limit` (default 20).
-Any non-contributor AT-URI is `400 InvalidContributor`. Selects `editions.uri` where
-`editions.contributors @> [{ subject: { uri: contributor } }]` (GIN index), ordered
-`created_at DESC, uri ASC` — the record's own stamp, not `indexed_at` — `LIMIT limit`. Returns
-`{ uris }` and enqueues edition and contributor backfills.
+#### `graph.follow`
 
-#### `net.olamaelcu.livtet.biblio.getBooks`
+`subject` must be a DID (`did:<method>:<identifier>`), and a reader cannot follow themselves.
+The record is keyed by the subject DID, so this is an idempotent upsert: an existing follow returns
+`{ uri, created: false }` unchanged; a new one writes `{ subject, createdAt }` and returns
+`{ uri, created: true }`.
 
-Params `uris[]` (1–100). Dedupes the input, hydrates with `hydrateBooksByUri` (each URI resolves
-through `edition-lookup`, so a retired URI collapses onto its surviving book; contributor names are
-inlined; empty-name refs are dropped), and returns one `bookView` per canonical `view.uri` — two input
-URIs naming one book produce one row. Unknown URIs are silently omitted. 502 on failure.
+#### `graph.unfollow`
 
-#### `net.olamaelcu.livtet.biblio.getImageForBook`
+Deletes the follow at the subject-DID rkey. A follow that does not exist is `404 NotFound`, not a
+silent success.
 
-Param `uri`. The URI is resolved through `resolveEditions` (aliases included). If no row exists, the
-handler validates the rkey shape: `gb.` must be a valid Google Books rkey; `bh.` is accepted as a
-Bookhive mirror and answers `404 RecordNotFound` when the row is absent; anything else is
-`400 InvalidRequest`.
+### Reader
 
-- If `cover_image_url` exists it becomes a datacenter URL, proxied through `/image/cover` when the
-  source URL is allowed, and returned directly otherwise.
-- Else, if the rkey is `bh.`, the handler finds a mirrored `buzz.bookhive.book` with a cover — first
-  by `hiveBookUri`, then by `hiveId`, three candidates each — and returns
-  `/image/bookhive/<did>/<cid>`.
-- Else it enqueues edition backfills (a no-op in steady state) and returns `{ url: undefined }`.
+#### `profile.set`
 
-#### `net.olamaelcu.livtet.biblio.getImageForContributor`
+Merge-patch of `net.olamaelcu.livtet.actor.profile/self`: `displayName` (≤640), `description`
+(≤256) and `avatarCid` are validated and copied; fields the input omits keep their stored value, and
+the create path stamps `createdAt`/`updatedAt`. At least one field is required (`400`). Returns
+`{ uri }`.
 
-Param `uri` must be a `community.lexicon.book.contributor` AT-URI; anything else is
-`400 InvalidContributor`. Selects the contributor row; missing is `404 RecordNotFound`. Returns
-`{ url }` when `image_url` exists, otherwise enqueues the image and bio resolvers (deduped by job key;
-already-checked rows are not re-enqueued) and returns `{}`.
+#### `readingGoal.set`
 
-## Feed generator
+Upsert of `readingGoal/current`: `period` ∈ `weekly|monthly|annual`, `year` 1900–9999, `booksGoal`
+≥ 1, all required integers. Returns `{ uri, period, year, booksGoal }`.
 
-#### `com.atproto.feed.describeFeedGenerator`
+### Shelves
 
-Returns the publisher DID and five feeds:
+#### `shelf.create`
 
-| Feed | Display name | Auth |
-| --- | --- | --- |
-| `public` | Bibliograph Static Feed | no auth |
-| `dynamic` | Bibliograph Dynamic Feed | auth |
-| `following` | Reviews and shelving by people you follow | auth |
-| `extended` | Reviews and shelving by people followed by the people you follow (2 hops) | auth |
-| `recommendations` | Editions readers who share your ratings also finished, layered over genre matches from your own shelf | auth |
+`name` is required and at most 128 characters; `description` is optional. The rkey is a fresh TID.
+Returns `{ uri }`.
 
-#### `com.atproto.feed.getFeedSkeleton`
+#### `shelf.update`
 
-Params `feed` (AT-URI), `cursor` (a numeric offset), `limit` (default 5, max 100). The feed type is
-the path segment after `net.olamaelcu.livtet.biblio.feed.generator/`.
+Merge-patch of an owned shelf: `name` (≤128) and `description` are applied only when present;
+`updatedAt` is always bumped. Returns `{ uri, updated }` where `updated` says whether a field was
+supplied. Missing shelf: `404 NotFound`.
 
-- `public` / `static`: newest records across `bookReview`, `bookShelving` and `buzz.bookhive.book`,
-  ordered `record_created_at DESC, uri DESC`, paged by offset. When a viewer is known, their own
-  records and authors blocked via `blockedAmong` are excluded.
-- `following`: the viewer comes from a service JWT or the session cookie. Hop 1 is the DIDs the
-  viewer follows, read from the viewer's PDS `follow` collection (at most 20 × 100 pages, 60 s memo,
-  512 entries). Blocked authors are filtered. Records are paged by those DIDs. If the viewer follows
-  nobody on offset 0, the global feed is returned; an exhausted page stays empty.
-- `extended`: hop 1 as above (excluding the viewer), then hop 2 is the union of the hop-1 follow
-  sets, read in batches of 8, capped at 500, excluding the viewer and hop 1. Same paging and fallback
-  rules.
-- `dynamic`: requires `requireFeedAuth` and has a per-DID rate limit bucket. It uses the same hop-1
-  follow graph and paging, falling back to the global feed only when the viewer follows nobody at
-  offset 0.
-- `recommendations`: requires `requireFeedAuth` and a per-DID rate limit. Reads the viewer's library
-  from their PDS (`bookShelving`, `shelfItem`, `bookReview`; 10 × 100 pages, 60 s cache). Candidate
-  sets: (a) editions of works sharing the `subjects` of currently-reading books, then of finished
-  books; (b) linklonk vote signals; (c) books mutuals shelved or reviewed
-  (`ORDER BY count(DISTINCT mutual) DESC, has_cover DESC`). Merge order is active → past → linklonk →
-  mutual, de-duplicated by `tid`; an edition with a cover may replace a coverless edition of the same
-  book in place. Every book the viewer has a record for is excluded. Returns at most 30 entries
-  (`RECOMMENDATION_LIMIT`), each with `post` = edition URI and `reason = "recommendation"`, in a
-  single page with no cursor.
-- `edition/<rkey>`: Constellation backlinks with `subject =
-  at://<publisher>/net.olamaelcu.livtet.biblio.edition/<rkey>` and source
-  `net.olamaelcu.livtet.biblio.bookReview:book.uri`, then Bookhive backlinks resolved through the
-  edition's Bookhive subject (source `buzz.bookhive.book:hiveBookUri`), with `reason` "Backlink from
-  edition review" and "Bookhive review backlink" respectively; falls back to the global DB page when
-  both are empty.
-- Unknown feed type: `{ feed: [], cursor: undefined }`.
-- `reason` strings: a review carries the reviewed book URI; shelving carries
-  `shelving:<shelf-rkey>|<book-uri>`; a Bookhive record carries `bookhive:<shelf-rkey>|<book-uri>`.
+#### `shelf.delete`
 
-## Error shapes, caching and identity
+Cascading delete of an owned shelf: every `shelfItem` and every `bookStatus` whose `record.shelf`
+equals the shelf URI is deleted first, then the shelf itself. Child records are found by scanning the
+caller's rows in both collections and comparing the decoded `shelf` field. Returns
+`{ deleted }`, counting the cascade plus the shelf record.
 
-| Status | Error values | Origin |
-| --- | --- | --- |
-| 400 | `InvalidRequest` | `sync.getRepo` with `since`; `listShelvesWithBooks` with a non-`tap:` or non-AT-URI cursor; `getImageForBook` with an unrecognized rkey shape |
-| 400 | `InvalidQuery` | `searchEditions` with no `q`/`title`/`author`/identifiers; `resolveEditions` with empty `identifiers`; `searchActors` outside `q` 3–200 or `hasRecords` > 8 |
-| 400 | `InvalidContributor` | `getEditionsByContributor`, `getImageForContributor` when the URI is not a `community.lexicon.book.contributor` AT-URI |
-| 400 | `RecordNotFound` | `sync.getRecord` for a non-lexicon collection or a missing CAR slice; `repo.getRecord` for an unknown collection |
-| 400 | `RepoNotFound` | `sync.getRepoStatus`, `sync.getLatestCommit`, `sync.getBlocks` with no repo; `repo.getRecord` for the wrong repo |
-| 400 | `HandleNotFound` | `identity.resolveHandle`, `identity.resolveIdentity` with a non-DID identifier |
-| 400 | `DidNotFound` | `identity.resolveDid`, `identity.resolveIdentity` with a DID identifier |
-| 400 | `LexiconNotFound` | `lexicon.resolveLexicon` for an unpublished NSID |
-| 401 / 403 | auth failure envelope | `requireFeedAuth` on the `dynamic` and `recommendations` generators |
-| 404 | `RecordNotFound` | `getShelf`, `getBookOnShelf`, `getImageForContributor`; `repo.getRecord` for an edition with no identifiers |
-| 429 | `RateLimited`, `retry-after: 60` | the per-IP middleware, and the per-DID bucket on authenticated feeds |
-| 502 | `UpstreamUnavailable` | a PDS or provider failure in the reader, catalog and image handlers |
+### Membership
 
-Identity is proved in exactly two ways (`viewerDidFromRequest`): a service JWT in
-`Authorization: Bearer` whose `lxm` matches the method (`verifyFeedAuth`), or the `bib_session` cookie
-resolved against `web_sessions`. Nothing else names a viewer; `x-viewer-did` is not accepted.
+#### `shelf.addItem`
 
-Two methods are deliberately absent rather than broken: `com.atproto.server.describeServer` is not
-implemented, and `net.olamaelcu.livtet.biblio.getActor` has a lexicon but no registered handler.
+Upsert of one membership edge. `book` must be a strongRef with a CID; `metadata.position` must be an
+integer ≥ 1, `metadata.notes` and `metadata.emoji` strings. The rkey is derived as
+`<shelf rkey>-<edition rkey>` (rejected if longer than 512 characters), so the pair always maps to
+one record. On an existing record the metadata is merged key-by-key (omitted keys keep their value)
+and `updatedAt` is bumped; on create the metadata object is stored as given. Returns `{ uri }`.
 
-Cache headers, exactly: unauthenticated GET XRPC responses that set none of their own get
-`public, max-age=60, stale-while-revalidate=300` from `hooks.server.ts`; every CAR response gets
-`public, max-age=60, s-maxage=300`.
+#### `shelf.removeItem`
 
-## Target disposition (HappyView greenfield)
+Deletes the derived `<shelf rkey>-<edition rkey>` record. `book` may be a strongRef or a bare
+`{ uri }`. Not on the shelf: `404 NotFound`.
 
-| Current endpoint | Disposition |
-| --- | --- |
-| `com.atproto.identity.resolveHandle` / `resolveDid` / `resolveIdentity` | Kept at the edge, protocol |
-| `com.atproto.repo.getRecord` / `describeRepo` | Kept at the edge, protocol |
-| `com.atproto.sync.getRecord` / `getRepo` / `getRepoStatus` / `getLatestCommit` / `getBlocks` | Kept at the edge, protocol |
-| `com.atproto.lexicon.resolveLexicon` | Kept at the edge, protocol |
-| `com.atproto.label.queryLabels` | Kept at the edge, protocol |
-| `com.atproto.feed.describeFeedGenerator` | Kept at the edge, protocol |
-| `com.atproto.feed.getFeedSkeleton` | Kept at the edge, protocol — four feeds only; no `recommendations` |
-| feed type `recommendations` | Dropped |
-| `net.olamaelcu.livtet.biblio.getImageForBook` | Kept at the edge, catalog — edition `coverUrl` only |
-| `net.olamaelcu.livtet.biblio.graph.isFollowing` / `listFollowers` / `listFollowees` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.getReadingGoal` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.getActorProfile` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.getShelf` / `listShelves` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.getShelvingOfBook` / `getShelversOfBook` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.listBooksOnShelf` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.listShelfItems` / `listShelfItemsByBook` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.getReviewsByBook` / `listReviewsByActor` | Kept at HappyView |
-| `net.olamaelcu.livtet.biblio.listShelvesWithBooks` / `listRecentShelving` / `getBookOnShelf` | Kept at HappyView |
-| `community.lexicon.book.searchEditions` | Replaced by `community.lexicon.media.book.searchEditions` (procedure) |
-| `community.lexicon.book.resolveEditions` | Replaced by `community.lexicon.media.book.resolveEditions` (procedure) |
-| `net.olamaelcu.livtet.biblio.getBooks` | Replaced by `net.olamaelcu.livtet.biblio.getEditions` (batch query) |
-| `community.lexicon.book.compatibility` | Dropped — no WG equivalent |
-| `community.lexicon.book.searchWorks` | Dropped — no works |
-| `community.lexicon.book.searchContributors` | Dropped — contributors are inline |
-| `community.lexicon.book.searchPublishers` | Dropped — publishers are inline |
-| `net.olamaelcu.livtet.biblio.getEditionsByContributor` | Dropped — use `searchEditions.author` |
-| `net.olamaelcu.livtet.biblio.getImageForContributor` | Dropped — no contributor records |
-| `net.olamaelcu.livtet.biblio.searchActors` | Dropped — use `app.bsky.actor.searchActors` |
+#### `shelf.addBooks`
 
-The two replacement procedures are catalog lookups over `editions`, `edition_identifiers` and
-`edition_contributors`. Both are read-only and served at the edge.
+Batch upsert of up to 100 strongRefs. Each entry is validated independently; invalid entries
+(missing CID, malformed URI, duplicate derived rkey inside the request, rkey over 512 characters)
+are counted in `failed` instead of failing the call. Valid entries are written in parallel with
+`Record.save_all`; an existing record has its `shelf`, `book` and `updatedAt` refreshed (its
+`metadata` is left alone, unlike `shelf.addItem`). A PDS rejection is `502 UpstreamFailure`. Returns
+`{ added, failed }`.
 
-The target namespace `community.lexicon.media.book.compatibility` is also not served: there is no WG
-definition for it.
+### Reading status
 
-Dropped along with the endpoints: works, contributor records, publisher records, Bookhive, voting and
-edition→work linking. `setEditionWorkLink` belongs to that work-link surface, though no such XRPC
-handler is registered today: the `net.olamaelcu.livtet.biblio.editionWorkLink` record is written by
-the storefront's vote flow through OAuth, not through an XRPC procedure.
+#### `status.set`
 
-Deleted behavior: every `tap:`/`con:`/`pds:` tier, every per-request PDS read, every Constellation
-call, `web_sessions` viewer resolution, the `follows` and `records` projections, and every Bookhive
-branch. HappyView's index becomes the only activity source; a record missing from the index is
-reported missing and repaired by backfill/reconcile, not by an inline fallback.
+Upsert of `bookStatus` at the edition rkey. Requires a strongRef `book` (CID included) and a
+`status` ∈ `to-read|reading|read|dnf`; `shelf` is optional but must be one of the caller's shelves.
+`metadata` may carry `startedAt`/`finishedAt` (strings), `position` (integer ≥ 1), `notes` and
+`emoji` (strings). On an existing record the metadata is merged, `status` is overwritten,
+`createdAt` survives and `updatedAt` is bumped. Returns `{ uri, status }`.
 
-Wire changes are expected: the `community.lexicon.book.*` namespace is not served, works,
-contributors and publishers are gone, and `searchEditions` / `resolveEditions` move from GET (and
-one POST) to POST procedures. The current surface above is history; the table below is the contract.
+#### `status.clear`
 
-## Target surface
+Deletes the `bookStatus` at the edition rkey derived from `book` (strongRef or bare `{ uri }`). No
+status: `404 NotFound`. Returns `{ uri }`.
 
-| NSID | Method | Home | Behavior |
+### Reviews
+
+#### `review.create`
+
+Creates a review at a fresh TID, so rereads can be separate records. `subject` must be an
+`editionRef` with a non-empty `title`, a non-empty `identifiers` array and a `contributors` array
+(it may be empty). At least one of `rating` (integer 1–20) or non-empty `textContent` is required.
+`subjectRecord` must be an AT-URI when present; `content` and `flags` must be objects. Returns
+`{ uri }`.
+
+#### `review.update`
+
+Merge-patch of an owned review (otherwise `403`). Any of `subject`, `rating`, `textContent`,
+`subjectRecord`, `content`, `flags` may be supplied and are validated as in `review.create`; omitted
+fields keep their value. The resulting record must still carry a rating or non-empty text content.
+The review lexicon has no `updatedAt`, so `createdAt` is left unchanged. Returns `{ uri, updated }`
+where `updated` is whether any field was supplied.
+
+#### `review.delete`
+
+Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's review: `403`; missing:
+`404 NotFound`. Returns `{ uri }`.
+
+## Record types
+
+| Collection | Key | Required fields | Written by |
 | --- | --- | --- | --- |
-| `com.atproto.identity.resolveHandle` / `resolveDid` / `resolveIdentity` | GET | edge → PDS | Proxy publisher identity; no local CAR. |
-| `com.atproto.repo.getRecord` / `describeRepo` | GET | edge → PDS | Proxy; catalog records are read from the PDS. |
-| `com.atproto.sync.*` | GET | edge → PDS | Proxy `getRecord`, `getRepo`, `getRepoStatus`, `getLatestCommit`, `getBlocks`. |
-| `com.atproto.lexicon.resolveLexicon` | GET | edge | Local lexicon map; `{uri,cid,schema}`. |
-| `com.atproto.label.queryLabels` | GET | edge | `labels` table. |
-| `com.atproto.feed.describeFeedGenerator` | GET | edge | Four feeds: `public`, `following`, `extended`, `dynamic`. |
-| `com.atproto.feed.getFeedSkeleton` | GET | edge | Reviews (`community.lexicon.media.book.review`) and shelving; service JWT for personalized feeds. |
-| `community.lexicon.media.book.searchEditions` | POST | edge | Record lookup: `q`/`title` → title ILIKE; `author` → contributor name; `identifiers` → exact `(issuer,value)`; `offset`/`limit`; returns `defs#editionResults`. |
-| `community.lexicon.media.book.resolveEditions` | POST | edge | `identifiers[]` required; OR across exact pairs; returns `defs#editionResults`. |
-| `net.olamaelcu.livtet.biblio.getEditions` | GET | edge | `uris[]` (1–100); batch `defs#bookView` (`{uri, edition}`); unknown omitted. |
-| `net.olamaelcu.livtet.biblio.getImageForBook` | GET | edge | `uri` → edition `coverUrl`; 404 absent. |
-| `net.olamaelcu.livtet.biblio.graph.isFollowing` / `listFollowers` / `listFollowees` | GET | HappyView | `happyview_records` follow rows. |
-| `getReadingGoal` / `getActorProfile` | GET | HappyView | Indexed records at `readingGoal/current` and `net.olamaelcu.livtet.actor.profile/self`. |
-| `getShelf` / `listShelves` | GET | HappyView | Shelf records; no Bookhive containers. |
-| `getShelvingOfBook` / `getShelversOfBook` | GET | HappyView | `bookShelving` rows only; no tiers. |
-| `listBooksOnShelf` / `listShelfItems` / `listShelfItemsByBook` | GET | HappyView | Shelf/shelfItem rows joined to `appview_book`. |
-| `getReviewsByBook` / `listReviewsByActor` | GET | HappyView | `community.lexicon.media.book.review` rows; match by `subjectRecord` or identifier overlap. |
-| `listShelvesWithBooks` / `listRecentShelving` / `getBookOnShelf` | GET | HappyView | Bookshelf views from `bookShelving` only. |
-| `community.lexicon.media.book.edition` | record | PDS | Published by the outbox worker; not indexed by HappyView. |
-| `community.lexicon.media.book.review` | record | user PDS | Indexed by HappyView; read by review queries. |
+| `net.olamaelcu.livtet.biblio.shelf` | `any` — TID for custom shelves, fixed `reading`/`read`/`to-read`/`dnf` for the reading-status shelves | `name` (≤128), `createdAt`, `updatedAt`; optional `description` | `shelf.create`, `shelf.update` |
+| `net.olamaelcu.livtet.biblio.shelfItem` | `any` — `<shelf rkey>-<edition rkey>` by contract | `shelf`, `book`, `createdAt`, `updatedAt`; optional `metadata` (`position` ≥ 1, `notes`, `emoji`) | `shelf.addItem`, `shelf.addBooks` |
+| `net.olamaelcu.livtet.biblio.bookStatus` | `any` — the edition rkey by contract | no record-level `required`; the view needs `metadata.status` (`to-read`/`reading`/`read`/`dnf`) plus a resolvable `book` and `shelf`; `book` is a strongRef; optional `startedAt`, `finishedAt`, `position`, `notes`, `emoji` | `status.set` |
+| `net.olamaelcu.livtet.biblio.follow` | `any` — the subject DID by contract | `subject` (DID), `createdAt` | `graph.follow` |
+| `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
+| `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
+| `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
 
-Procedures: exactly `searchEditions` and `resolveEditions`, both read-only. There is no
-`setEditionWorkLink`, no vote/link procedure, and no write procedure of any kind, so the deployment
-has no end-user OAuth: clients write their own records to their own PDS.
+The record keys are part of the contract: the queries resolve records by them. `bookStatus` derives
+from the edition URI, `shelfItem` from the shelf and edition rkeys, `readingGoal` and
+`actor.profile` from their literal keys, and the follow graph from the subject DID. A writer that
+invents its own scheme produces records the queries cannot see. `shelf.delete` and `status.clear`
+also rely on these derivations (and on `record.shelf`/`record.book`), so records written directly to
+a PDS with a different shape are not found by them.
+
+## What the surface does not do
+
+- No PDS reads on the query path, no Constellation, no tiered cursors (`tap:`/`con:`/`pds:`), no
+  Bookhive branches: the index is the only activity source.
+- No `com.atproto.*` or `community.lexicon.book.*` handlers are exposed here; the catalog is read
+  through `appview_book_lua` only.
+- No writes other than the 15 procedures; a client that writes records to its own PDS directly is
+  indexed only when a backfill or reconcile runs, not per request.
+- No cache headers are set by the edge, and no cache-control is relayed from HappyView.
+- No search, no works/contributors/publishers records, no feed generator and no label or lexicon
+  endpoints on this surface.
