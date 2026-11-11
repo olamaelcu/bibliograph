@@ -2900,8 +2900,7 @@ router.addQuery(describeFeedGeneratorSchema, {
         {
           uri: `at://${PUBLISHER_DID}/net.olamaelcu.livtet.biblio.feed.generator/recommendations`,
           displayName: 'Bibliograph For You',
-          description:
-            'Books you have not shelved that share genres with what you are reading and what you have read',
+          description: 'Editions readers who share your ratings also finished, layered over genre matches from your own shelf',
           requiresAuth: true,
         },
       ],
@@ -2967,7 +2966,13 @@ router.addQuery(getFeedSkeletonSchema, {
      * needs a bounded candidate set per page.
      */
     async function feedAuthorDids(viewerDid: string, kind: string): Promise<string[]> {
-      const hop1 = ((await followedDidsFromPds(viewerDid)) ?? []).slice(0, MAX_FEED_HOP1);
+      const hop1raw = await followedDidsFromPds(viewerDid);
+      // Extended is a discovery surface: your own records are yours, not
+      // something your 1-hop network produced, so a self-follow must not leak
+      // them in. `following` deliberately keeps its raw set.
+      const hop1 = (hop1raw ?? [])
+        .filter((did) => (kind === 'extended' ? did !== viewerDid : true))
+        .slice(0, MAX_FEED_HOP1);
       if (kind === 'following' || hop1.length === 0) return kind === 'following' ? hop1 : [];
       // 2 hops, all of it read from the hop-1 members' own repos.
       const hop2 = await followSetsOf(hop1, MAX_FEED_HOP2);
@@ -3066,11 +3071,13 @@ router.addQuery(getFeedSkeletonSchema, {
       const hasMore = rows.length > limitNum;
       let filtered = rows;
       if (viewerDidFromRequest !== undefined && rows.length > 0) {
+        // Own records never belong in a discovery surface.
+        filtered = filtered.filter((row) => row.did !== viewerDidFromRequest);
         const blocked = await blockedAmong(viewerDidFromRequest, [
-          ...new Set(rows.map((row) => row.did)),
+          ...new Set(filtered.map((row) => row.did)),
         ], log);
         if (blocked.size > 0) {
-          filtered = rows.filter((row) => !blocked.has(row.did));
+          filtered = filtered.filter((row) => !blocked.has(row.did));
         }
       }
       const page = hasMore ? filtered.slice(0, limitNum) : filtered;

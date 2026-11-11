@@ -23,6 +23,7 @@ import type { Nsid } from '@atcute/lexicons';
 import { db as defaultDb } from './db';
 import { pdsClient } from './pds/resolve';
 import { mutualsFor } from './marco';
+import { linklonkHits, readViewerSignals } from './linklonk';
 import { createLogger } from './logger';
 import type { DbExecutor } from './stats';
 
@@ -139,7 +140,13 @@ async function listPdsValues(
       log.warn({ err, did, collection, page }, 'recommendation: PDS page failed');
       return values.length > 0 ? values : null;
     }
-    const records = asRecord(raw).records;
+    // The atcute client returns a `{ok,data}` envelope; a naive `raw.records`
+    // read silently collects nothing.
+    const wrapper = raw as { ok?: unknown; data?: unknown };
+    const body = wrapper.ok === true && wrapper.data && typeof wrapper.data === 'object'
+      ? wrapper.data
+      : raw;
+    const records = asRecord(body).records;
     if (!Array.isArray(records)) {
       log.warn({ did, collection }, 'recommendation: listRecords shape unexpected');
       return values.length > 0 ? values : null;
@@ -147,7 +154,7 @@ async function listPdsValues(
     for (const record of records) {
       values.push(asRecord(record).value);
     }
-    const next = asRecord(raw).cursor;
+    const next = asRecord(body).cursor;
     if (typeof next !== 'string' || next === '') break;
     cursor = next;
   }
@@ -365,11 +372,12 @@ export function mergeRecommendations(params: {
   active: readonly RecommendationHit[];
   past: readonly RecommendationHit[];
   mutual?: readonly RecommendationHit[];
+  linklonk?: readonly RecommendationHit[];
   excludedTids: ReadonlySet<string>;
   excludedUris: ReadonlySet<string>;
   limit: number;
 }): string[] {
-  const { active, past, excludedTids, excludedUris, limit, mutual } = params;
+  const { active, past, excludedTids, excludedUris, limit, mutual, linklonk } = params;
   const cap = Math.min(Math.max(limit, 0), RECOMMENDATION_LIMIT);
   const picked: string[] = [];
   /** tid → index in `picked`, so a later edition can replace it in place. */
@@ -397,6 +405,7 @@ export function mergeRecommendations(params: {
 
   for (const hit of active) consider(hit);
   for (const hit of past) consider(hit);
+  for (const hit of linklonk ?? []) consider(hit);
   for (const hit of mutual ?? []) consider(hit);
 
   return picked;
@@ -456,23 +465,26 @@ export async function recommendBookUris(
   const cap = Math.min(Math.max(limit, 1), RECOMMENDATION_LIMIT);
 
   const mutuals = viewerDid ? await mutualsFor(viewerDid, log) : [];
+  const wanted = cap * 4;
+  const signals = viewerDid ? await readViewerSignals(viewerDid, log) : null;
+  const signalCount = signals ? signals.up.size + signals.down.size : 0;
   const nothingToSeed = library.reading.length === 0 && library.read.length === 0;
-  if (nothingToSeed && mutuals.length === 0) return [];
+  if (nothingToSeed && mutuals.length === 0 && signalCount === 0) return [];
 
   const excludedUris = new Set(library.shelved);
   const excludedTids = await tidsFor([...excludedUris], exec);
-  // Over-fetch per list: exclusions and edition-level dedupe eat into the page.
-  const wanted = cap * 4;
-  const [active, past, mutual] = await Promise.all([
+  const [active, past, mutual, linklonk] = await Promise.all([
     candidateHits(library.reading, wanted, exec),
     candidateHits(library.read, wanted, exec),
     mutualCandidateHits(mutuals, wanted, exec),
+    signals ? linklonkHits(viewerDid!, signals, wanted, log, exec) : Promise.resolve([]),
   ]);
 
   return mergeRecommendations({
     active,
     past,
     mutual,
+    linklonk,
     excludedTids,
     excludedUris,
     limit: cap,
