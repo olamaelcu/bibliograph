@@ -5,11 +5,20 @@ the same shape as the Livtet platform package (`../platform/debian`): a prebuilt
 payload under `/usr/lib`, a conffile under `/etc`, systemd-owned writable paths,
 and an nginx site generated around a debconf-selected port.
 
+> **The combined `bibliograph` package is retired.** Its drizzle migrator and
+> `bibliograph-migrate.service` no longer exist, and a fresh database does not
+> need them. Current deployments install `bibliograph-web`,
+> `bibliograph-worker` and `bibliograph-happyview`. The catalog schema is
+> bootstrapped once from the versioned SQL in `packages/worker/sql/` — see
+> [`../operations/fresh-database.md`](../operations/fresh-database.md). The rest
+> of this page documents the retired package and the packages that replaced it;
+> where it mentions migrations, treat those as historical.
+
 ## Layout
 
 | Path | Contents | Managed by |
 | --- | --- | --- |
-| `/usr/lib/bibliograph` | vite output, the TypeScript sources `tsx` runs, generated lexicon modules, drizzle migrations, production `node_modules` | dpkg (read-only) |
+| `/usr/lib/bibliograph` | retired combined payload; current packages use `/usr/lib/bibliograph-web` and `/usr/lib/bibliograph-worker` | dpkg (read-only) |
 | `/etc/bibliograph/bibliograph.env` | All runtime configuration | dpkg conffile |
 | `/etc/bibliograph/port.conf` | `PORT=…`, rendered from debconf | postinst |
 | `/etc/nginx/sites-enabled/bibliograph-platform` | TLS server block + reverse proxy | dpkg conffile |
@@ -18,27 +27,29 @@ and an nginx site generated around a debconf-selected port.
 | `/var/log/bibliograph` | pino per-process log files | systemd `LogsDirectory` |
 | `/usr/lib/systemd/system/bibliograph.service` | web process | dpkg |
 | `/usr/lib/systemd/system/bibliograph-worker.service` | catalog jobs + PDS outbox | dpkg |
-| `/usr/lib/systemd/system/bibliograph-migrate.service` | oneshot migrator | dpkg |
 | `/usr/lib/sysusers.d/bibliograph.conf` | `bibliograph` system user | dpkg |
 
 There is no state directory for the application itself: every piece of state is
 in PostgreSQL. `/var/lib/bibliograph` exists only to hold the lexicon CAR files
 that the XRPC lex publisher serves.
 
-## Three units, not one
+## Units
 
-The Livtet package runs a single process. Bibliograph has three:
+The retired combined package ran one process plus a drizzle migrator. Current
+deployments install separate packages:
 
 | Unit | Runs | Why separate |
 | --- | --- | --- |
-| `bibliograph.service` | `tsx server.ts` | The WebSocket label stream needs the `upgrade` event, so the package runs the custom entrypoint, not `build/index.js` |
-| `bibliograph-worker.service` | `tsx worker.ts` | catalog enrichment and the PDS outbox must survive web restarts and back off on their own |
-| `bibliograph-migrate.service` | `tsx src/lib/server/db/migrate.ts` | `Type=oneshot`, `Requires=`d by both. No `RemainAfterExit`, so it re-runs every time either unit starts — that is how an upgrade applies new migrations |
+| `bibliograph-web.service` | adapter-node `build/index.js` | the public edge; binds loopback and is proxied by nginx |
+| `bibliograph-worker.service` | `node index.js` | catalog hydration and the PDS outbox must survive edge restarts and back off on their own |
+| `happyview.service` | HappyView's host binary | activity index and Lua queries; loopback only |
 
-The migrator fails closed: any unrecognized PostgreSQL error aborts it, and the
-units that require it refuse to start, rather than serving traffic against a
-stale schema. It is idempotent — drizzle records applied migrations in
-`drizzle.__drizzle_migrations`.
+There is **no `bibliograph-migrate.service` and no drizzle migrator**. A fresh
+database is bootstrapped once with the versioned SQL (`mise run
+catalog-schema`, or the documented `psql` command in
+[`../operations/fresh-database.md`](../operations/fresh-database.md)). Later
+numbered SQL files are applied the same way. Neither long-running unit migrates
+on start, and no unit refuses to start because a migration is pending.
 
 ### Shutdown
 
@@ -47,7 +58,7 @@ Both long-running units stop on SIGTERM in well under a second:
 | Process | What it does |
 | --- | --- |
 | `bibliograph-worker` | stops the outbox interval and lets graphile finish the current job, then exits 0 |
-| `bibliograph.service` | `server.close()` + `closeAllConnections()`, then exits 0; a 10 s timer exits 1 if sockets refuse to go |
+| `bibliograph-web` | `server.close()` + `closeAllConnections()`, then exits 0; a 10 s timer exits 1 if sockets refuse to go |
 
 Signal handlers are registered *before* the dependency graph is imported — the
 worker therefore uses `await import()` for its two internal modules, since a
@@ -106,8 +117,10 @@ su - postgres -c "createuser bibliograph --pwprompt"
 su - postgres -c "createdb -O bibliograph bibliograph"
 ```
 
-or point `DATABASE_URL` at a remote server and open the firewall. Migrations run
-automatically on service start.
+or point `DATABASE_URL` at a remote server and open the firewall. Nothing
+migrates automatically on service start: apply the catalog schema once with
+`mise run catalog-schema` (or the `psql` command in
+[`../operations/fresh-database.md`](../operations/fresh-database.md)).
 
 ### Activity plane and PDS
 
@@ -155,7 +168,8 @@ lexicon map; the protocol endpoints (`com.atproto.repo.*`, `sync.*`,
 
 `apt upgrade` treats `/etc/bibliograph/bibliograph.env` as a conffile and prompts
 instead of overwriting local edits. debhelper's generated `postinst` restarts
-both long-running units after an upgrade, which re-runs the migrator.
+both long-running units after an upgrade. Catalog schema upgrades, when a release
+ships a new numbered SQL file, are applied with `mise run catalog-schema`.
 
 ## nginx and TLS
 
@@ -392,7 +406,7 @@ rationale for what replaced it.
 
 | Container deploy (before) | Debian package (now) |
 | --- | --- |
-| `ENTRYPOINT` ran the migrator then exec'd the web process | dedicated oneshot unit, `Requires=`d by both long-running units |
+| `ENTRYPOINT` ran the old migrator then exec'd the web process | no migrator; the schema is applied once from `packages/worker/sql/`, then separate web/worker units start |
 | process types declared in a `Procfile` | `bibliograph-worker.service` (catalog jobs + PDS outbox) |
 | environment baked into the image | `/etc/bibliograph/bibliograph.env` conffile, 0640 root:root, read by PID 1 |
 | `EXPOSE 5000`, `HOST=0.0.0.0` behind the platform proxy | unit binds `127.0.0.1`; the package ships the nginx site that proxies to it |
@@ -408,4 +422,6 @@ apt-mark hold bibliograph
 ```
 
 Schema changes are forward-only: an older package must not be run against a
-database a newer one has migrated.
+database a newer one has migrated. Apply new numbered files from
+`packages/worker/sql/` before starting the new units; the files are additive and
+idempotent, and never drop existing data.

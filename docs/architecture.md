@@ -72,6 +72,11 @@ import is performed. The catalog grows organically through XRPC traffic — a
 miss queues worker hydration, which mints editions under the configured
 authority — so publication needs only the configured publisher account.
 
+A fresh deployment needs no old database and no old service: the catalog schema
+is created from `packages/worker/sql/` (`mise run catalog-schema`), which also
+creates the `appview_book`/`appview_book_lua` read models. See
+[`operations/fresh-database.md`](operations/fresh-database.md).
+
 The public `/xrpc` gateway serves the two read-only books-wg procedures
 (`resolveEditions`, `searchEditions`) anonymously from the catalog tables, with
 CORS because Livtet calls them from the browser; every `editionView` they

@@ -324,11 +324,11 @@ public`.
   `com.atproto.server.describeServer` and friends answer
   `DID document not found for did:plc:6msi3p…`. Uploaded lexicons with their own
   Lua scripts are unaffected.
-- **Six queries depend on `public.appview_book_lua`**, the catalog read model
-  the deleted app owned. It still exists in this volume (the database predates
-  the removal) and the catalog tables it reads are intact, so book-rendering
-  queries work. `docker compose down -v` takes it with them; those queries would
-  then answer 404 "catalog edition is missing" instead of rendering books.
+- **Six queries depend on `public.appview_book_lua`**, the catalog read model.
+  It is created by the versioned schema (`mise run catalog-schema`), so a fresh
+  database or a fresh compose volume works after that command; no old service
+  is required. Without the view, book-rendering queries answer 404 "catalog
+  edition is missing" instead of rendering books.
 - **Local records bypass schema validation.** The PDS resolves lexicons from the
   public authority, so compose blocks that host (see above) and every write
   answers `validationStatus: "unknown"`. A typo in a record shape will not be

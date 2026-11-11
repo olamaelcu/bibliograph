@@ -23,7 +23,8 @@ surface — is in [`docs/xrpc.md`](docs/xrpc.md).
 | PDS (rsky-pds) | Debian package | publisher repo, lexicons, catalog edition records |
 
 One Postgres database serves both the catalog tables and HappyView's index.
-Activity Lua reads a single `appview_book` view; no other catalog coupling exists
+Activity Lua reads a single `appview_book_lua` view (a text projection of
+`appview_book`); no other catalog coupling exists
 at read time.
 
 ## Contexts and records
@@ -87,12 +88,17 @@ end-user OAuth.
 ## Development
 
 ```bash
-mise run db-migrate     # apply drizzle migrations
+mise run catalog-schema # create/upgrade the catalog schema (idempotent, no data loss)
 mise run hv-deploy      # upload lexicons/scripts, apply activity indexes
 mise run hv-extract     # extract the pinned HappyView binary into .cache
 mise run hv-dev-auth    # seed local HappyView admin/client credentials
 mise run dev            # HappyView + worker + web
 ```
+
+A fresh database needs no migration or seed: `mise run catalog-schema` creates
+the catalog tables and read views, and the catalog grows from XRPC traffic. The
+old combined package and its drizzle migrator are retired. See
+[`docs/operations/fresh-database.md`](docs/operations/fresh-database.md).
 
 Identity resolution uses the public PLC; the HappyView dashboard signs in with a
 real ATProto handle. See [`docs/dev-environment.md`](docs/dev-environment.md).
