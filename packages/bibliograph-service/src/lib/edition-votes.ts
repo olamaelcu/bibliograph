@@ -18,6 +18,7 @@ export type EditionFormState = {
   ok?: boolean;
   applied?: string;
   requested?: boolean;
+  backfill?: boolean;
 };
 
 /** Everything the edition view needs, in one shape. */

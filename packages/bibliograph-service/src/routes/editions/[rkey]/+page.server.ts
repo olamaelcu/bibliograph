@@ -9,6 +9,7 @@ import { PUBLISHER_DID } from '$lib/server/did';
 import { clearLabel, grantLabel, hasLabel, isLibrarian } from '$lib/server/labeler/labels';
 import { deleteEditionAndLinkedWork } from '$lib/server/catalog-delete';
 import { applicationFor, isAdministrator, requestLibrarianAccess } from '$lib/server/labeler/librarian';
+import { enqueueDescriptionBackfill, enqueueFormatBackfill } from '$lib/server/jobs/enqueue';
 import { CONTROVERSIAL_LABEL } from '$lib/server/labeler/vocabulary';
 import { log, searchService } from '$lib/server/xrpc-router';
 import type { Actions, PageServerLoad } from './$types';
@@ -132,6 +133,22 @@ export const actions: Actions = {
     if (currently) await clearLabel(uri, CONTROVERSIAL_LABEL);
     else await grantLabel(uri, CONTROVERSIAL_LABEL);
     return { ok: true, controversial: !currently };
+  },
+
+  /** Queue the description + goodreads-metadata backfills for this edition (administrators only). */
+  runBackfill: async ({ params, locals }) => {
+    const next = `/editions/${params.rkey}`;
+    if (!locals.viewer) redirect(303, `/login?next=${encodeURIComponent(next)}`);
+    if (!(await isAdministrator(locals.viewer.did))) {
+      return fail(403, { error: 'Only administrators can queue backfills.' });
+    }
+    const uri = editionUriForRkey(params.rkey, PUBLISHER_DID);
+    await Promise.all([enqueueDescriptionBackfill(uri), enqueueFormatBackfill(uri)]);
+    log.info(
+      { stage: 'edition-backfill', rkey: params.rkey, did: locals.viewer.did },
+      'description+metadata backfill queued by administrator',
+    );
+    return { ok: true, backfill: true };
   },
 
   /** Ask an admin to issue the librarian label to the signed-in account. */

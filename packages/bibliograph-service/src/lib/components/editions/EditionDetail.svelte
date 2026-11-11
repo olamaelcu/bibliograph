@@ -172,9 +172,23 @@
     {form}
     success={form?.requested
       ? "Librarian access requested."
+      : form?.backfill
+        ? "Backfill queued for this edition."
       : "Vote recorded in your repository."}
   />
   <ControversialToggle {controversial} {canLabel} />
+
+  {#if canLabel}
+    <form method="POST" action="?/runBackfill" class="backfill-form">
+      <wa-button type="submit" appearance="outlined" size="s">
+        Queue description + metadata backfill
+      </wa-button>
+      <span class="muted small">
+        Google Books (description) + Goodreads (format, pages, year, language). Fills
+        missing fields only; runs on the worker.
+      </span>
+    </form>
+  {/if}
 
   <RecordBody
     description={value.description}
@@ -237,6 +251,13 @@
     gap: var(--wa-space-s);
     align-items: center;
     margin-block-start: var(--wa-space-s);
+  }
+  .backfill-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--wa-space-s);
+    align-items: center;
+    margin-block-end: var(--wa-space-s);
   }
   .small {
     font-size: var(--wa-font-size-s);

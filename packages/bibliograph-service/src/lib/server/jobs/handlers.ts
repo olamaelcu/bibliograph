@@ -21,6 +21,7 @@ import { wireContributorsForAll } from './wire-contributors';
 import { workRecordValue } from '../book-records';
 import { backfillCoverForEdition } from './cover-backfill';
 import { backfillDescriptionForEdition } from './description-backfill';
+import { backfillEditionMetadata } from './format-backfill';
 import { backfillContributorImageForUri } from './contributor-image-backfill';
 import { backfillIsbnForEdition } from './isbn-backfill';
 import { fetchEditionForUri } from '../shelving/edition-fetch';
@@ -861,6 +862,20 @@ export const backfillEditionDescriptionTask: Task = async (payload, helpers) => 
   }
 };
 
+export const backfillEditionFormatTask: Task = async (payload, helpers) => {
+  const { uri } = payload as { uri: string };
+  const log = helpers.logger as unknown as Logger;
+  const [row] = await db.select().from(editions).where(eq(editions.uri, uri)).limit(1);
+  if (!row) {
+    log.warn({ stage: 'backfill-edition-format', uri, reason: 'no_row' }, 'edition not in catalog; nothing to backfill');
+    return;
+  }
+  const res = await backfillEditionMetadata(row, log);
+  if (res.status !== 'updated') {
+    log.info({ stage: 'backfill-edition-format', uri, status: res.status }, 'metadata backfill skipped');
+  }
+};
+
 export const backfillContributorImageTask: Task = async (payload, helpers) => {
   const { uri } = payload as { uri: string };
   const log = helpers.logger as unknown as Logger;
@@ -883,6 +898,7 @@ export const searchTaskList: TaskList = {
   'ingest-work-batch': ingestWorkBatchTask,
   'backfill-edition-cover': backfillEditionCoverTask,
   'backfill-edition-description': backfillEditionDescriptionTask,
+  'backfill-edition-format': backfillEditionFormatTask,
   'backfill-contributor-image': backfillContributorImageTask,
   'backfill-edition-isbn': backfillEditionIsbnTask,
 };

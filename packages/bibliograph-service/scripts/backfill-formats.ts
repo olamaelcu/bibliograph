@@ -19,32 +19,17 @@
 // Requires DATABASE_URL.
 //
 
-import { and, asc, eq, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, isNull, or, sql, type SQL } from "drizzle-orm";
 import { setTimeout as sleep } from "node:timers/promises";
 import { db } from "../src/lib/server/db/index";
-import {
-  editionGoodreadsBackfill,
-  editions,
-} from "../src/lib/server/db/schema";
+import { editions } from "../src/lib/server/db/schema";
 import { createLogger } from "../src/lib/server/logger";
-import { editionRecordCid, rowIdentifiers } from "../src/lib/server/edition-record";
-import { wireContributorsFor } from "../src/lib/server/jobs/wire-contributors";
+import { rowIdentifiers } from "../src/lib/server/edition-record";
 import {
-  identifierKey,
-  isbn13FromAny,
-  isbnValueFromIdentifier,
-  providerIdentifier,
-  sameIdentifier,
-  type Identifier,
-} from "../src/lib/server/identifiers";
-import {
-  GoodreadsBlockedError,
-  fetchGoodreadsBook,
-} from "../src/lib/server/api/goodreads";
-import {
-  MAX_IDENTIFIERS,
-  mergeIsbnIdentifiers,
-} from "../src/lib/server/isbn/merge";
+  backfillEditionMetadata,
+  isbnForRow,
+} from "../src/lib/server/jobs/format-backfill";
+import { isbn13FromAny } from "../src/lib/server/identifiers";
 import { ProgressBar } from "./lib/progress";
 import type { EditionRow } from "../src/lib/server/db/schema";
 
@@ -74,75 +59,6 @@ const MISSING = and(
     isNull(editions.language),
   ),
 )!;
-
-const LANGUAGE_TAGS: Record<string, string> = {
-  english: "en",
-  german: "de",
-  french: "fr",
-  spanish: "es",
-  italian: "it",
-  portuguese: "pt",
-  dutch: "nl",
-  swedish: "sv",
-  norwegian: "no",
-  danish: "da",
-  finnish: "fi",
-  polish: "pl",
-  russian: "ru",
-  japanese: "ja",
-  chinese: "zh",
-  korean: "ko",
-  arabic: "ar",
-  hebrew: "he",
-  turkish: "tr",
-  czech: "cs",
-  greek: "el",
-  hungarian: "hu",
-  romanian: "ro",
-  ukrainian: "uk",
-};
-
-function languageTag(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  const value = raw.trim();
-  if (/^[a-z]{2,3}(?:-[A-Za-z0-9]+)*$/.test(value)) return value;
-  return LANGUAGE_TAGS[value.toLowerCase()];
-}
-
-function appendIdentifier(
-  identifiers: readonly Identifier[],
-  identifier: Identifier,
-): Identifier[] {
-  if (
-    identifiers.length >= MAX_IDENTIFIERS ||
-    identifiers.some((current) => sameIdentifier(current, identifier))
-  ) {
-    return [...identifiers];
-  }
-  return [...identifiers, identifier];
-}
-
-function identifiersChanged(
-  before: readonly Identifier[],
-  after: readonly Identifier[],
-): boolean {
-  return (
-    before.length !== after.length ||
-    before.some((identifier, index) => {
-      const next = after[index];
-      return !next || identifierKey(identifier) !== identifierKey(next);
-    })
-  );
-}
-
-/** The ISBN a row carries, as the hyphenless ISBN-13 the record stores. */
-function isbnForRow(identifiers: readonly Identifier[]): string | undefined {
-  for (const identifier of identifiers) {
-    const isbn = isbnValueFromIdentifier(identifier);
-    if (isbn) return isbn;
-  }
-  return undefined;
-}
 
 async function main(): Promise<void> {
   if (!process.env.DATABASE_URL) {
@@ -232,203 +148,25 @@ async function main(): Promise<void> {
       // Rows written before the identifier migration still hold the legacy
       // `{ uri, resource }` pair, so normalise once and use that from here on.
       const currentIdentifiers = rowIdentifiers(row.identifiers);
-      const rowIsbn = isbnForRow(currentIdentifiers);
-      if (!rowIsbn) {
-        skipped += 1;
-        bar.advance();
-        continue;
-      }
-
-      try {
-        const found = await fetchGoodreadsBook(rowIsbn);
-        if (!found) {
-          skipped += 1;
-          notFound += 1;
-          log.warn(
-            {
-              event: "goodreads-book-not-found",
-              stage: "backfill-formats",
-              uri: row.uri,
-              isbn: rowIsbn,
-            },
-            "goodreads book not found",
-          );
-          await db
-            .insert(editionGoodreadsBackfill)
-            .values({
-              uri: row.uri,
-              status: "not_found",
-              reason: "not_found",
-              checkedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: editionGoodreadsBackfill.uri,
-              set: {
-                status: "not_found",
-                reason: "not_found",
-                checkedAt: new Date(),
-              },
-            });
-          bar.advance();
-          if (stopForFailures()) break run;
-          if (hardLimit !== undefined && total >= hardLimit) break;
-          if (total < outstanding) await sleep(REQUEST_SPACING_MS);
-          continue;
-        }
-
-        const isbnMerge = mergeIsbnIdentifiers(
-          currentIdentifiers,
-          [found.isbn10, found.isbn13].filter(
-            (value): value is string => value !== undefined,
-          ),
-        );
-        let nextIdentifiers = isbnMerge.identifiers;
-        if (found.asin) {
-          nextIdentifiers = appendIdentifier(nextIdentifiers, {
-            type: "asin",
-            value: found.asin,
-          });
-        }
-        // `url` keeps the Goodreads page for display; the stored identity is
-        // the provider domain plus the book's own id.
-        nextIdentifiers = appendIdentifier(
-          nextIdentifiers,
-          providerIdentifier("goodreads", found.url),
-        );
-
-        const nextFormat = row.format ?? found.format;
-        const nextPages = row.pages ?? found.pages;
-        const nextPublishedYear = row.publishedYear ?? found.publishedYear;
-        const nextLanguage = row.language ?? languageTag(found.language);
-        const identifiersMoved = identifiersChanged(
-          currentIdentifiers,
-          nextIdentifiers,
-        );
-        const changed =
-          (row.format === null && nextFormat != null) ||
-          (row.pages === null && nextPages != null) ||
-          (row.publishedYear === null && nextPublishedYear != null) ||
-          (row.language === null && nextLanguage != null) ||
-          identifiersMoved;
-
-        if (!changed) {
-          skipped += 1;
-          log.info(
-            {
-              stage: "backfill-formats",
-              uri: row.uri,
-              isbn: rowIsbn,
-              reason: "already_have_fields",
-            },
-            "nothing to write",
-          );
-        } else if (dry) {
-          skipped += 1;
-          log.info(
-            {
-              stage: "backfill-formats",
-              uri: row.uri,
-              isbn: rowIsbn,
-              format: nextFormat,
-              pages: nextPages,
-              publishedYear: nextPublishedYear,
-              language: nextLanguage,
-              identifiers: nextIdentifiers,
-              publisher: found.publisher,
-              publishedDate: found.publishedDate,
-              genres: found.genres.map((genre) => genre.name),
-              contributors: found.contributors,
-              source: found.url,
-            },
-            "dry-run: would update",
-          );
-        } else {
-          const set: Partial<typeof editions.$inferInsert> = {
-            format: nextFormat ?? null,
-            pages: nextPages ?? null,
-            publishedYear: nextPublishedYear ?? null,
-            language: nextLanguage ?? null,
-            identifiers: nextIdentifiers,
-            indexedAt: new Date(),
-          };
-          // These fields live in the record; changing one must move the CID so
-          // a record read and the AppView cannot disagree.
-          if (
-            (row.pages === null && nextPages != null) ||
-            (row.format === null && nextFormat != null) ||
-            identifiersMoved ||
-            (row.publishedYear === null && nextPublishedYear != null) ||
-            (row.language === null && nextLanguage != null)
-          ) {
-            // `defs#contributor` inlines names, so the strongRefs are expanded
-            // the same way the response boundary expands them before hashing.
-            const contributors = await wireContributorsFor(db, row.contributors);
-            const cid = await editionRecordCid(row, {
-              pages: row.pages === null ? nextPages : undefined,
-              identifiers: nextIdentifiers,
-              publishedYear: nextPublishedYear,
-              language: nextLanguage,
-              format: nextFormat,
-              contributors,
-            });
-            // `null` means the value is not a valid record (no identifiers),
-            // which the ISBN filter above already rules out.
-            if (cid) set.cid = cid;
+      const rowIsbn = isbnForRow(currentIdentifiers); // imported from the new module
+      if (rowIsbn) {
+        try {
+          const res = await backfillEditionMetadata(row, log, { dry: dry });
+          if (res.status === 'not_found') { notFound += 1; if (stopForFailures()) break run; }
+          else if (res.status === 'already_complete' || res.status === 'no_isbn' || res.status === 'no_change' || res.status === 'dry_run') { skipped += 1; }
+          else if (res.status === 'updated') { updated += 1; }
+          else if (res.status === 'blocked') {
+            blocked += 1;
+            stopped = 'blocked';
+            break run;
           }
-          await db.update(editions).set(set).where(eq(editions.uri, row.uri));
-          await db
-            .insert(editionGoodreadsBackfill)
-            .values({
-              uri: row.uri,
-              status: "updated",
-              checkedAt: new Date(),
-            })
-            .onConflictDoUpdate({
-              target: editionGoodreadsBackfill.uri,
-              set: { status: "updated", reason: null, checkedAt: new Date() },
-            });
-          updated += 1;
-          log.info(
-            {
-              stage: "backfill-formats",
-              uri: row.uri,
-              isbn: rowIsbn,
-              format: nextFormat,
-              pages: nextPages,
-              publishedYear: nextPublishedYear,
-              language: nextLanguage,
-              identifiers: nextIdentifiers,
-              publisher: found.publisher,
-              publishedDate: found.publishedDate,
-              genres: found.genres.map((genre) => genre.name),
-              contributors: found.contributors,
-              source: found.url,
-            },
-            "edition metadata backfilled",
-          );
+        } catch (err) {
+          failed += 1;
+          log.error({ stage: 'backfill-formats', err, uri: row.uri, isbn: rowIsbn }, 'update failed');
+          if (stopForFailures()) break run;
         }
-      } catch (err) {
-        if (err instanceof GoodreadsBlockedError) {
-          blocked += 1;
-          stopped = "blocked";
-          log.error(
-            {
-              event: "goodreads-blocked",
-              status: err.status,
-              stage: "backfill-formats",
-              uri: row.uri,
-              isbn: rowIsbn,
-            },
-            "goodreads blocked the backfill; stopping",
-          );
-          break run;
-        }
-        failed += 1;
-        log.error(
-          { stage: "backfill-formats", err, uri: row.uri, isbn: rowIsbn },
-          "update failed",
-        );
-        if (stopForFailures()) break run;
+      } else {
+        skipped += 1;
       }
       bar.advance();
       if (hardLimit !== undefined && total >= hardLimit) break;
