@@ -129,6 +129,13 @@ building the stack.
 - **`happyview_app` has its own `search_path` (`happyview,public`)**, so
   HappyView's unqualified migrations and `db.raw` calls land in the `happyview`
   schema instead of colliding with the catalog's `public` tables.
+- **The PDS cannot reach its lexicon authority** (`extra_hosts` maps
+  `biblio.livtet.olamaelcu.net` to the container's own loopback). These NSIDs
+  resolve through DNS TXT to that host, and its published `follow` schema types
+  `subject` as an at-uri — so every local follow write was rejected with
+  `Invalid field 'subject': invalid format: AtUri`. With the fetch failing, the
+  PDS records `validationStatus: unknown` and accepts the record. The cost is
+  that no record in this network is validated against the deployed schemas.
 
 ## Calling it from the SvelteKit edge
 
@@ -322,19 +329,10 @@ public`.
   the removal) and the catalog tables it reads are intact, so book-rendering
   queries work. `docker compose down -v` takes it with them; those queries would
   then answer 404 "catalog edition is missing" instead of rendering books.
-- **The PDS validates against the *published* lexicons, not ours.** It resolves
-  the NSID authority through DNS TXT (`_lexicon.livtet.olamaelcu.net` →
-  `did:web:biblio.livtet.olamaelcu.net`) and fetches the schema from there. A
-  collection it cannot find is accepted with `validationStatus: "unknown"`
-  (`bookStatus` works), but a collection whose published schema disagrees with
-  our local one is rejected: `follow` fails with
-  `Invalid field 'subject': invalid format: AtUri`, because the published
-  schema types `subject` as an at-uri while ours is a DID. Fixing that means
-  republishing the lexicon at the authority — the local stack cannot override
-  it.
-- **`graph.follow` therefore cannot write locally**, until the published
-  `follow` schema is corrected. `shelf.create`, `status.set` and the rest are
-  unaffected.
+- **Local records bypass schema validation.** The PDS resolves lexicons from the
+  public authority, so compose blocks that host (see above) and every write
+  answers `validationStatus: "unknown"`. A typo in a record shape will not be
+  caught locally the way it would against a published schema.
 - **The edge holds no user session.** `packages/web` injects its XRPC client
   key/secret and relays `Authorization`/`DPoP`; it never runs an OAuth flow or
   stores tokens. A caller that wants procedures must bring a DPoP session

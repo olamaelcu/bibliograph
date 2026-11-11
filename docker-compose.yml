@@ -84,6 +84,14 @@ services:
       # resolves to 127.0.0.1 on their own machines. Set to a comma-separated
       # list of relay URLs to announce to a reachable one instead.
       CRAWLERS: ""
+    # The public lexicon authority this network's NSIDs resolve to. Pointing it
+    # at the container's own loopback makes the fetch fail, and the PDS then
+    # records `validationStatus: unknown` instead of validating against schemas
+    # this repo has diverged from (the published `follow` types `subject` as an
+    # at-uri). Keeps the local network hermetic: no record here is checked
+    # against the deployed lexicons.
+    extra_hosts:
+      - "biblio.livtet.olamaelcu.net:127.0.0.1"
     volumes:
       - ./docker/pds-config.toml:/etc/tranquil-pds/config.toml:ro
       - pdsdata:/var/lib/tranquil-pds/blobs
