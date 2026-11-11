@@ -1,71 +1,79 @@
-# Local identity + activity stack
+# Local development
 
-Development and E2E runs must not mint accounts on the public network, and the
-activity plane must run against a real HappyView binary. The local stack
-therefore replaces two public services and pins a real third:
-
-- **Mock PLC** (`scripts/mock-plc.ts`) — a disposable DID registry. It answers
-  `GET /:did`, accepts `POST /:did` from a PDS, and exposes `POST /admin/dids`.
-  It does not validate PLC operations or signatures.
-- **Disposable PDS** — the Bluesky dev image in `docker-compose.yml`, configured
-  with `PDS_DID_PLC_URL=http://plc:2582` and `.test` handles.
-- **HappyView** — the published image, extracted into `packages/bibliograph-service/.cache/happyview` by
-  `mise run hv-extract` (Docker is used only to obtain the binary).
-
-The app reads `PLC_DIRECTORY_URL` in `did-document-resolver.ts`. Unset, `did:plc`
-resolution goes through `plc.directory`.
-
-Inside the compose network, HappyView must address the PLC by service name:
-`PLC_URL=http://plc:2582`. Loopback (`127.0.0.1`) inside that container is the
-container itself. The compose `happyview` service sets this; a host-run binary
-reads `PLC_DIRECTORY_URL` (or `HAPPYVIEW_PLC_URL`) instead.
+The local stack is Postgres plus HappyView. Identity resolution uses the public
+PLC (`https://plc.directory`); the dashboard signs in with a real ATProto handle.
+There is no local PLC, no disposable PDS and no `.test` account flow.
 
 ## Database schemas
 
 HappyView creates unqualified tables, including a `labels` table that collides
-with the AppView's labeler table. Run HappyView with a dedicated schema:
-
-```sql
-CREATE SCHEMA happyview;
-```
+with the AppView's labeler table. It therefore runs in its own schema:
 
 - App: `DATABASE_URL=…/bibliograph` (public only).
-- HappyView: `HAPPYVIEW_DATABASE_URL=…/bibliograph?options=-csearch_path%3Dhappyview%2Cpublic`.
+- HappyView: `HAPPYVIEW_DATABASE_URL=postgres://happyview_app:happyview@…/bibliograph`.
 
-Its `record` column is **text JSON**, not jsonb, and `created_at` is text. Lua
-reads `appview_book_lua`, a text projection of `appview_book`, because
+`happyview_app` is a login role whose default `search_path` is
+`happyview,public`; sqlx ignores `?options=…` in the URL, so the role is what
+keeps the two apart. `docker/postgres-init.sql` creates it for the compose
+Postgres, and `hv-local` provisions it for a host-run binary.
+
+HappyView stores `record` as **text JSON** and `created_at` as text. The Lua
+scripts read `appview_book_lua`, a text projection of `appview_book`, because
 HappyView's Any driver cannot decode jsonb/timestamptz columns in `db.raw`.
-The TS feed queries the `happyview.happyview_records` table directly.
+The TS feed queries `happyview.happyview_records` directly.
 
 ## Run it
 
 ```bash
-mise run stack          # postgres + mock PLC + disposable PDS
-# or, containerized HappyView:
-docker compose up -d postgres plc happyview
-mise run hv-extract     # copy the pinned HappyView binary/static/migrations into .cache
-mise run hv-dev-auth    # seed a local admin key + XRPC client (prints env values)
-mise run db-migrate
-mise run hv-deploy
-mise run hv-dev         # run the extracted binary
-mise run dev-seed       # create reader.test and write a shelf
+mise run dev            # migrate, extract/start HappyView, seed local admin key,
+                        # deploy lexicons/scripts, then run worker + Vite
 ```
 
-The postgres init script creates the `happyview` schema and the
-`happyview_app` role. It runs only on a fresh `pgdata` volume; to re-run it,
-`docker compose down -v` first.
+`mise run dev` uses the host binary in
+`packages/bibliograph-service/.cache/happyview` (extracted from the pinned image
+by `hv:extract`). To run HappyView itself as a container instead:
 
-`hv-dev-auth` prints `HAPPYVIEW_ADMIN_KEY`, `HAPPYVIEW_CLIENT_KEY` and
-`HAPPYVIEW_CLIENT_SECRET`; put them in `.env` for `hv:deploy` and the edge.
+```bash
+docker compose up -d postgres happyview
+```
 
-`dev-seed` prints the DID and shelf URI. Add `-- --book=<edition-uri>` to also
-write a `bookShelving` record. Nothing is sent to the public PLC or a public
-PDS.
+The compose HappyView uses the public PLC and the same Postgres role. The image
+entrypoint substitutes its static base path; no host-side rewrite is needed.
 
-## Limits
+Ports are overridable: `HAPPYVIEW_PORT` and `WEB_PORT` for the host path.
 
-- Handles under `.test` are not publicly resolvable. Address accounts by DID.
-- The mock PLC keeps one document per DID, not a PLC operation log.
-- The compose PDS is a development target, not rsky-pds. Protocol behavior the
-  AppView relies on is shared; production deploys still use rsky.
-- The dashboard needs the static sentinel replaced; `hv-extract` does that.
+## Dashboard login
+
+Open `http://127.0.0.1:3000/~/hv` (redirects to `/~/hv/dashboard/`) and sign in
+with a **real ATProto handle** you control, e.g. `yourname.bsky.social` or your
+own domain. A DID also works if its DID document exposes `#atproto_pds`.
+
+The dashboard only admits accounts with a `happyview_users` row. On a completely
+empty instance the first login bootstraps that row; `hv:dev-auth` creates a
+local API-key user, so a later real login is refused until you authorize it:
+
+```bash
+mise run hv-authorize -- --handle=yourname.bsky.social
+# or: --did=did:plc:...
+```
+
+That marks the account as a superuser. The "not authorized" redirect names the
+DID that was refused.
+
+The local `.test` handles from the old mock stack cannot work: OAuth resolves a
+handle through `https://<handle>/.well-known/atproto-did`, and `.test` does not
+resolve in public DNS. That is why the mock PLC/PDS were removed.
+
+## Deploying lexicons/scripts
+
+`dev:stack` (run by `mise dev`) seeds a local `hv_` admin key and a confidential
+XPC client, then runs `hv:deploy`. To do it manually:
+
+```bash
+mise run hv-dev-auth
+HAPPYVIEW_URL=http://127.0.0.1:3000 HAPPYVIEW_ADMIN_KEY=hv_dev_admin \
+  DATABASE_URL=… pnpm --filter bibliograph-service hv:deploy
+```
+
+`hv:deploy` uploads the lexicons and Lua scripts and applies
+`happyview/sql/indexes.sql`.

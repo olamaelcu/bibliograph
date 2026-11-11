@@ -7,7 +7,6 @@ _.file = ".env"
 DATABASE_URL = "postgres://bibliograph:bibliograph@localhost:5432/bibliograph"
 # HappyView tables live in their own schema; keep DATABASE_URL public-only.
 HAPPYVIEW_DATABASE_URL = "postgres://happyview_app:happyview@localhost:5432/bibliograph"
-PLC_DIRECTORY_URL = "http://127.0.0.1:2582"
 
 [tasks.web-dev]
 run = ["pnpm run dev --host"]
@@ -15,21 +14,16 @@ run = ["pnpm run dev --host"]
 [tasks.worker-dev]
 run = ["pnpm run worker"]
 
-[tasks.stack]
-description = "Start the local Postgres + mock PLC + disposable PDS"
-run = ["docker compose up --detach plc pds postgres"]
 
-[tasks.mock-plc]
-description = "Run the mock PLC directory alone (PORT=2582)"
-run = ["pnpm --filter bibliograph-service mock-plc"]
 
-[tasks.dev-seed]
-description = "Create a local .test account on the dev PDS and write a shelf (no network account)"
-run = ["pnpm --filter bibliograph-service dev:seed"]
 
 [tasks.hv-extract]
 description = "Extract the pinned HappyView image's binary/static/migrations into .cache/happyview"
 run = ["pnpm --filter bibliograph-service hv:extract"]
+
+[tasks.hv-authorize]
+description = "Authorize a handle or DID for the HappyView dashboard (local DB only)"
+run = ["pnpm --filter bibliograph-service hv:authorize"]
 
 [tasks.hv-dev-auth]
 description = "Seed a local HappyView admin key and XRPC client (local DB only)"

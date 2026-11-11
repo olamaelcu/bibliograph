@@ -36,7 +36,9 @@ async function replaceSentinel(dir: string): Promise<void> {
 		if (!/\.(?:html|js|css|json|txt|svg|map)$/i.test(entry.name)) continue;
 		const before = await readFile(path, 'utf8');
 		if (!before.includes('__HAPPYVIEW_BP__')) continue;
-		await writeFile(path, before.replaceAll('__HAPPYVIEW_BP__', '/~/hv'));
+		// The image's entrypoint replaces `/__HAPPYVIEW_BP__` (with the leading
+		// slash); replacing only the token would leave `//~/hv`.
+		await writeFile(path, before.replaceAll('/__HAPPYVIEW_BP__', '/~/hv'));
 	}
 }
 
@@ -120,10 +122,7 @@ async function serve(): Promise<void> {
 			PORT: process.env.HAPPYVIEW_PORT ?? '3000',
 			SESSION_SECRET:
 				process.env.SESSION_SECRET ?? 'local-dev-session-secret-0123456789-0123456789-0123456789',
-			PLC_URL:
-				process.env.HAPPYVIEW_PLC_URL ??
-				process.env.PLC_DIRECTORY_URL ??
-				'https://plc.directory',
+			PLC_URL: 'https://plc.directory',
 			ALLOW_PRIVATE_DESTINATIONS: 'true',
 		},
 	});

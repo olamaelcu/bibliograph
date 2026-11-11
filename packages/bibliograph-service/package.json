@@ -26,12 +26,11 @@
     "goodreads:book": "tsx scripts/goodreads-book.ts",
     "hv:deploy": "tsx happyview/deploy.ts",
     "pds:publish-lexicons": "tsx scripts/pds-publish-lexicons.ts",
-    "mock-plc": "tsx scripts/mock-plc.ts",
-    "dev:seed": "tsx scripts/dev-seed-activity.ts",
     "hv:extract": "tsx scripts/hv-local.ts extract",
     "hv:dev": "tsx scripts/hv-local.ts run",
     "hv:dev-auth": "tsx scripts/hv-dev-auth.ts",
-    "dev:stack": "tsx scripts/dev.ts"
+    "dev:stack": "tsx scripts/dev.ts",
+    "hv:authorize": "tsx scripts/hv-authorize.ts"
   },
   "dependencies": {
     "@atcute/atproto": "^4.0.4",

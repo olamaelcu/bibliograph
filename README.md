@@ -89,15 +89,14 @@ end-user OAuth.
 ```bash
 mise run db-migrate     # apply drizzle migrations
 mise run hv-deploy      # upload lexicons/scripts, apply activity indexes
-mise run stack          # Postgres + mock PLC + disposable local PDS
 mise run hv-extract     # extract the pinned HappyView binary into .cache
 mise run hv-dev-auth    # seed local HappyView admin/client credentials
-mise run dev-seed       # create reader.test and write a shelf (no network account)
 mise run dev            # HappyView + worker + web
 ```
 
-`PLC_DIRECTORY_URL` points `did:plc` resolution at the mock PLC; see
-[`docs/dev-environment.md`](docs/dev-environment.md). The web process serves `/xrpc/*` in both dev and production; HappyView is an
+Identity resolution uses the public PLC; the HappyView dashboard signs in with a
+real ATProto handle. See [`docs/dev-environment.md`](docs/dev-environment.md).
+The web process serves `/xrpc/*` in both dev and production; HappyView is an
 internal upstream at `HAPPYVIEW_URL`. `.env.example` is the canonical
 configuration schema.
 

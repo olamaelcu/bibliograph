@@ -1,13 +1,7 @@
-# Local development stack: Postgres, a mock PLC directory, and a disposable PDS.
+# Local development stack: Postgres and a HappyView container.
 #
-# Nothing here touches the public network: the PDS creates `.test` accounts and
-# registers them with the mock PLC, and the app resolves did:plc documents from
-# that PLC via PLC_DIRECTORY_URL. `pnpm dev:seed` writes activity records into a
-# local account; no real account is minted.
-#
-# The PDS image is the same Bluesky dev build livtet's E2E suite uses. The
-# production target is rsky-pds; protocol behavior that matters for this AppView
-# (repo reads, listRecords, getRecord) is shared.
+# Identity resolution uses the public PLC (`https://plc.directory`); the
+# dashboard signs in with a real ATProto handle. There is no local PLC or PDS.
 services:
   postgres:
     image: postgres:18.4
@@ -27,87 +21,22 @@ services:
       timeout: 3s
       retries: 5
 
-  plc:
-    image: node:26-alpine
-    restart: unless-stopped
-    working_dir: /app/packages/bibliograph-service
-    command: ["node", "scripts/mock-plc.ts"]
-    volumes:
-      - .:/app
-      - plcdata:/data
-    environment:
-      HOST: 0.0.0.0
-      PORT: "2582"
-    ports:
-      - "2582:2582"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -qO- http://127.0.0.1:2582/_health >/dev/null || exit 1",
-        ]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-
-  pds:
-    image: ghcr.io/happyproto/pds-test/pds-spaces-alpha:latest
-    platform: linux/amd64
-    restart: unless-stopped
-    user: root
-    depends_on:
-      plc:
-        condition: service_healthy
-    ports:
-      - "2583:2583"
-    environment:
-      PDS_HOSTNAME: localhost
-      PDS_PORT: "2583"
-      PDS_DEV_MODE: "true"
-      PDS_DATA_DIRECTORY: /tmp/pds
-      PDS_BLOBSTORE_DISK_LOCATION: /tmp/pds/blocks
-      PDS_JWT_SECRET: dev-only-jwt-secret
-      PDS_ADMIN_PASSWORD: dev-only-admin-password
-      PDS_DID_PLC_URL: http://plc:2582
-      PDS_SERVICE_HANDLE_DOMAINS: .test
-      PDS_INVITE_REQUIRED: "false"
-      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: ee69c68a213e447d2c0881ef7a8a3e821c9500344bbaafe8011f057597eb8d58
-    volumes:
-      - pdsdata:/tmp/pds
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -qO- http://127.0.0.1:2583/xrpc/_health >/dev/null || exit 1",
-        ]
-      interval: 3s
-      timeout: 3s
-      retries: 60
-      start_period: 5s
-
   happyview:
     image: ghcr.io/gamesgamesgamesgamesgames/happyview:2.17.4
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-      plc:
-        condition: service_healthy
     ports:
       - "3000:3000"
     environment:
       DATABASE_URL: postgres://happyview_app:happyview@postgres:5432/bibliograph
       PUBLIC_URL: http://127.0.0.1:3000
-      # BASE_PATH: /~/hv
+      BASE_PATH: /~/hv
       STATIC_DIR: /srv/static
       HOST: 0.0.0.0
       PORT: "3000"
       SESSION_SECRET: local-dev-session-secret-0123456789-0123456789-0123456789
-      # Compose DNS, not loopback: inside this container 127.0.0.1 is itself.
-      PLC_URL: http://plc:2582
-      JETSTREAM_URL: ws://127.0.0.1:1
-      RELAY_URL: http://127.0.0.1:1
-      ALLOW_PRIVATE_DESTINATIONS: "true"
     healthcheck:
       test:
         [
@@ -137,6 +66,4 @@ services:
 
 volumes:
   pgdata:
-  plcdata:
-  pdsdata:
   promdata:
