@@ -25,6 +25,20 @@ fi
 docker compose exec -T postgres psql -q -U bibliograph -d bibliograph \
   -v did="$did" < docker/seed-local-admin.sql >/dev/null
 
+# HappyView answers only registered hosts: its JSON routes (including `/config`,
+# which the dashboard fetches on load) return 421 "Unknown host" otherwise, and
+# the primary domain is PUBLIC_URL. Registering `localhost` keeps the dashboard
+# usable at either spelling. A loopback domain reuses the primary loopback OAuth
+# client, so this adds a host and no second client.
+if ! curl -s -H "Authorization: Bearer hv_dev_admin" http://127.0.0.1:3000/admin/domains \
+     | grep -q '"url":"http://localhost:3000"'; then
+  curl -s -X POST -H "Authorization: Bearer hv_dev_admin" \
+       -H 'content-type: application/json' \
+       -d '{"url":"http://localhost:3000"}' \
+       http://127.0.0.1:3000/admin/domains >/dev/null
+  echo "registered http://localhost:3000 as an alias domain"
+fi
+
 cat <<EOF
 seeded HappyView for $HANDLE ($did)
 

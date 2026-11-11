@@ -63,23 +63,20 @@ seeded is refused, and the refusal names its DID.
 
 ## Deploying lexicons/scripts
 
-Uploads go through the admin API with the seeded key:
-
 ```bash
-curl -sS -X POST http://127.0.0.1:3000/admin/lexicons \
-  -H "Authorization: Bearer $HAPPYVIEW_ADMIN_KEY" \
-  -H 'content-type: application/json' \
-  -d '{"lexicon_json": …, "backfill": false, "target_collection": "…"}'
-
-curl -sS -X POST http://127.0.0.1:3000/admin/scripts \
-  -H "Authorization: Bearer $HAPPYVIEW_ADMIN_KEY" \
-  -H 'content-type: application/json' \
-  -d '{"id": "xrpc.query:net.olamaelcu.livtet.biblio.listShelves", "script_type": "lua", "body": "…"}'
+mise run hv-deploy
 ```
 
-`HAPPYVIEW_ADMIN_KEY` is `hv_dev_admin` by default; see `.env.example`. Query
-scripts are keyed `xrpc.query:<nsid>` and receive the lexicon's `params`,
-`db.raw`, and the helpers in the shared prelude.
+Uploads the 24 lexicons in `happyview/lexicons/` and the 17 Lua queries in
+`happyview/scripts/xrpc/query/`, each with the `target_collection` from the
+original deploy script, then applies `happyview/sql/indexes.sql` through the
+compose Postgres. Re-running is safe: HappyView bumps the revision instead of
+erroring, and the index SQL is `IF NOT EXISTS`.
+
+It talks to the admin API with `HAPPYVIEW_ADMIN_KEY` (`hv_dev_admin` by default;
+see `.env.example`). Query scripts are keyed `xrpc.query:<nsid>` and receive the
+lexicon's `params`, `db.raw`, and the helpers that `happyview/lib/prelude.lua`
+inlines into each script.
 
 ## Calling HappyView from the frontend
 

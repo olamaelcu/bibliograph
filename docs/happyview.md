@@ -191,6 +191,14 @@ again.
 The account is already a superuser via `hv-seed`, so no post-login bootstrap
 step is needed.
 
+HappyView answers only hosts registered as domains; anything else gets `421
+Unknown host` from `/config` and the dashboard renders blank. The primary domain
+is `PUBLIC_URL` (`127.0.0.1:3000`), and `hv-seed` registers `localhost:3000` as
+an alias so either spelling loads. A login *started* at `localhost:3000` still
+returns to `127.0.0.1:3000/auth/callback`, because the loopback client's
+redirect is built from `PUBLIC_URL` — use `127.0.0.1` when you intend to sign
+in, or flip `PUBLIC_URL` and re-seed if you prefer `localhost` as canonical.
+
 ## Reset
 
 ```bash
@@ -212,6 +220,11 @@ public`.
   `com.atproto.server.describeServer` and friends answer
   `DID document not found for did:plc:6msi3p…`. Uploaded lexicons with their own
   Lua scripts are unaffected.
+- **Six queries depend on `public.appview_book_lua`**, the catalog read model
+  the deleted app owned. It still exists in this volume (the database predates
+  the removal) and the catalog tables it reads are intact, so book-rendering
+  queries work. `docker compose down -v` takes it with them; those queries would
+  then answer 404 "catalog edition is missing" instead of rendering books.
 - **Backfill is wired but unexercised.** `RELAY_URL` points at the local PDS;
   no backfill job has been run against it.
 - **Browser OAuth consent is a manual step.** Everything server-side up to the
