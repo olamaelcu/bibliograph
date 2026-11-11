@@ -1,3 +1,33 @@
+bibliograph (0.5.28) unstable; urgency=high
+
+  * Fix: production Postgres ran out of connection slots (SQLSTATE 53300),
+    answering 500 to XRPC calls — searchEditions among them — from 05:19 UTC.
+    Every pool was left at the pg default of 10, so the web process (read pool
+    + enqueue pool), the worker (search + tap task pools) and the tap consumer
+    together could ask for more than the host's `max_connections = 50` allows
+    once traffic expanded all of them at once. Pools are now bounded and
+    env-tunable, leaving ~20 slots of headroom: web `PG_POOL_MAX` (5), enqueue
+    `ENQUEUE_POOL_MAX` (3), worker `GRAPHILE_WORKER_POOL_SEARCH` (4) /
+    `GRAPHILE_WORKER_POOL_TAP` (6). No behaviour changes otherwise.
+  * New: backfill audit log. `backfill_events` (migration 0035) records one row
+    per terminal-interesting backfill execution — job, resource type/uri/rkey,
+    outcome, reason, attempts, duration, origin (scan | on-read | admin | tap |
+    manual), and the error on failure — for all seven backfill tasks. Rows are
+    written by one wrapper (`jobs/backfill-audit.ts`) that swallows its own
+    failures, so audit can never fail a job; the scan's already/absent no-ops
+    are not recorded. `/admin/backfills` renders them administrators-only,
+    keyset-paginated and filterable, each row linking to the edition,
+    contributor or work it touched (merged-away editions resolve through
+    `edition_aliases`). History starts at this deploy: graphile deletes
+    completed jobs, so earlier runs are unrecoverable, and inline scripts
+    (`backfill-formats.ts`) run outside the worker and are not audited.
+  * `backfill_events` is append-only and deliberately has no foreign key to
+    `editions` — a librarian merge deletes edition rows, and the audit trail
+    must outlive them. No automated prune yet; interesting-only recording keeps
+    steady state near 30k rows/day.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 00:28:00 -0500
+
 bibliograph (0.5.27) unstable; urgency=high
 
   * Fix: clients replaying a pre-0.5.26 uncompressed search cursor were still
