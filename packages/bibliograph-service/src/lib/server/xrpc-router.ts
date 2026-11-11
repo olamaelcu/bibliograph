@@ -130,6 +130,7 @@ import {
 } from './bookhive/keys';
 import { BOOKHIVE_BACKLINK_SOURCE, normalizeBookhiveBook, shelfForBookhiveStatus } from './bookhive/records';
 import { enqueueDescriptionBackfill } from './jobs/enqueue';
+import { blockedAmong } from './marco';
 import {
   maybeEnqueueContributorBackfills,
   maybeEnqueueEditionBackfills,
@@ -3053,7 +3054,7 @@ router.addQuery(getFeedSkeletonSchema, {
     }
 
     // ── Helper: paginate DB records ───────────────────────────────────
-    async function paginateFromDb(offsetNum: number, limitNum: number) {
+    async function paginateFromDb(offsetNum: number, limitNum: number, viewerDidFromRequest?: string) {
       const rows = await db
         .select()
         .from(records)
@@ -3063,7 +3064,16 @@ router.addQuery(getFeedSkeletonSchema, {
         .offset(offsetNum);
 
       const hasMore = rows.length > limitNum;
-      const page = hasMore ? rows.slice(0, limitNum) : rows;
+      let filtered = rows;
+      if (viewerDidFromRequest !== undefined && rows.length > 0) {
+        const blocked = await blockedAmong(viewerDidFromRequest, [
+          ...new Set(rows.map((row) => row.did)),
+        ], log);
+        if (blocked.size > 0) {
+          filtered = rows.filter((row) => !blocked.has(row.did));
+        }
+      }
+      const page = hasMore ? filtered.slice(0, limitNum) : filtered;
       const outCursor = hasMore ? String(offsetNum + limitNum) : undefined;
       return { feed: dbToFeed(page), cursor: outCursor };
     }
@@ -3078,7 +3088,12 @@ router.addQuery(getFeedSkeletonSchema, {
       /** How many authors the viewer follows here; 0 means "show the network feed". */
       let followedCount = 0;
       if (viewerDid && (feedType === 'following' || feedType === 'extended')) {
-        const ids = await feedAuthorDids(viewerDid, feedType);
+        let ids = await feedAuthorDids(viewerDid, feedType);
+        const blocked = await blockedAmong(viewerDid, ids, log);
+        if (blocked.size > 0) {
+          log.info({ stage: 'feed.marco', feedType, dropped: blocked.size }, 'filtered blocked authors from feed');
+          ids = ids.filter((id) => !blocked.has(id));
+        }
         followedCount = ids.length;
         if (ids.length > 0) {
           const reviewRows = await db.select().from(records).where(
@@ -3097,7 +3112,7 @@ router.addQuery(getFeedSkeletonSchema, {
       // page of a followed-users feed is the end of that feed: answering it with
       // the global feed (and a global cursor) makes the client paginate forever.
       if (offset === 0 && followedCount === 0) {
-        const result = await paginateFromDb(offset, limit);
+        const result = await paginateFromDb(offset, limit, viewerDid ?? undefined);
         feed = result.feed;
         outCursor = result.cursor;
       }
@@ -3127,6 +3142,11 @@ router.addQuery(getFeedSkeletonSchema, {
       let followingDids: string[] = [];
       try {
         followingDids = await feedAuthorDids(userDid, 'following');
+        const blocked = await blockedAmong(userDid, followingDids, log);
+        if (blocked.size > 0) {
+          log.info({ stage: 'feed.marco', feedType: 'dynamic', dropped: blocked.size }, 'filtered blocked authors from feed');
+          followingDids = followingDids.filter((did) => !blocked.has(did));
+        }
       } catch (err) {
         log.warn({ err, userDid }, 'feed: could not read follow graph for dynamic feed');
       }
@@ -3159,7 +3179,7 @@ router.addQuery(getFeedSkeletonSchema, {
       // exhausted page of the personalised feed must stay empty, or a paging
       // client is handed unrelated reviews it never terminates on.
       if (offset === 0 && followingDids.length === 0) {
-        const result = await paginateFromDb(offset, limit);
+        const result = await paginateFromDb(offset, limit, userDid);
         feed = result.feed;
         outCursor = result.cursor;
       }
@@ -3190,7 +3210,7 @@ router.addQuery(getFeedSkeletonSchema, {
 
       const wanted = Math.min(limit, RECOMMENDATION_LIMIT);
       const library = await readViewerLibrary(userDid);
-      const uris = library ? await recommendBookUris(library, wanted) : [];
+      const uris = library ? await recommendBookUris(library, wanted, undefined, userDid) : [];
       const feed = uris.map((uri) => ({ post: uri, reason: 'recommendation' }));
       return json({ feed } as unknown as v.InferXRPCBodyOutput<typeof getFeedSkeletonSchema['output']>);
     }

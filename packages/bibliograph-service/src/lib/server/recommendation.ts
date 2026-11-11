@@ -22,6 +22,7 @@ import { sql } from 'drizzle-orm';
 import type { Nsid } from '@atcute/lexicons';
 import { db as defaultDb } from './db';
 import { pdsClient } from './pds/resolve';
+import { mutualsFor } from './marco';
 import { createLogger } from './logger';
 import type { DbExecutor } from './stats';
 
@@ -363,11 +364,12 @@ async function candidateHits(
 export function mergeRecommendations(params: {
   active: readonly RecommendationHit[];
   past: readonly RecommendationHit[];
+  mutual?: readonly RecommendationHit[];
   excludedTids: ReadonlySet<string>;
   excludedUris: ReadonlySet<string>;
   limit: number;
 }): string[] {
-  const { active, past, excludedTids, excludedUris, limit } = params;
+  const { active, past, excludedTids, excludedUris, limit, mutual } = params;
   const cap = Math.min(Math.max(limit, 0), RECOMMENDATION_LIMIT);
   const picked: string[] = [];
   /** tid → index in `picked`, so a later edition can replace it in place. */
@@ -395,7 +397,50 @@ export function mergeRecommendations(params: {
 
   for (const hit of active) consider(hit);
   for (const hit of past) consider(hit);
+  for (const hit of mutual ?? []) consider(hit);
+
   return picked;
+}
+
+/**
+ * Books mutuals of the viewer shelved or reviewed — the social half of the
+ * signal. `mutuals` comes from the viewer's network graph (marco Intersect
+ * OUT∩IN); the join against the local mirror stays if the caller has no
+ * mutuals or marco is down.
+ */
+async function mutualCandidateHits(
+  mutualDids: readonly string[],
+  wanted: number,
+  exec: DbExecutor,
+): Promise<RecommendationHit[]> {
+  if (mutualDids.length === 0) return [];
+  const result = await exec.execute<{
+    uri: string;
+    tid: string;
+    mutuals: number;
+    has_cover: boolean;
+  }>(sql`
+    SELECT e.uri, e.tid, count(DISTINCT r.did)::int AS mutuals,
+           (e.cover_image_url IS NOT NULL) AS has_cover
+    FROM records r
+    JOIN editions e
+      ON e.uri = coalesce(r.value->>'book', r.value->'book'->>'uri', r.value->'book'->>'ref')
+    WHERE r.did = ANY(ARRAY[${sql.join(mutualDids.map((did) => sql`${did}`), sql`, `)}])
+      AND r.collection IN (
+        'net.olamaelcu.livtet.biblio.bookShelving',
+        'net.olamaelcu.livtet.biblio.bookReview',
+        'buzz.bookhive.book'
+      )
+    GROUP BY e.uri, e.tid, has_cover
+    ORDER BY mutuals DESC, has_cover DESC
+    LIMIT ${wanted}
+  `);
+  return result.rows.map((row) => ({
+    uri: row.uri,
+    tid: row.tid,
+    overlap: row.mutuals,
+    hasCover: row.has_cover === true,
+  }));
 }
 
 /**
@@ -406,22 +451,28 @@ export async function recommendBookUris(
   library: ViewerLibrary,
   limit: number,
   exec: DbExecutor = defaultDb,
+  viewerDid?: string,
 ): Promise<string[]> {
   const cap = Math.min(Math.max(limit, 1), RECOMMENDATION_LIMIT);
-  if (library.reading.length === 0 && library.read.length === 0) return [];
+
+  const mutuals = viewerDid ? await mutualsFor(viewerDid, log) : [];
+  const nothingToSeed = library.reading.length === 0 && library.read.length === 0;
+  if (nothingToSeed && mutuals.length === 0) return [];
 
   const excludedUris = new Set(library.shelved);
   const excludedTids = await tidsFor([...excludedUris], exec);
   // Over-fetch per list: exclusions and edition-level dedupe eat into the page.
   const wanted = cap * 4;
-  const [active, past] = await Promise.all([
+  const [active, past, mutual] = await Promise.all([
     candidateHits(library.reading, wanted, exec),
     candidateHits(library.read, wanted, exec),
+    mutualCandidateHits(mutuals, wanted, exec),
   ]);
 
   return mergeRecommendations({
     active,
     past,
+    mutual,
     excludedTids,
     excludedUris,
     limit: cap,
