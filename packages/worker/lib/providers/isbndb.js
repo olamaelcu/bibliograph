@@ -1,5 +1,10 @@
 import { createGate, isbn13 as normalizeIsbn13, cleanString, stripHtml } from '../util.js';
 import { createJsonCache, fetchJson } from './http.js';
+import {
+  DEFAULT_ISBNDB_DAILY_LIMIT,
+  parseDailyLimit,
+  reserveDailyCall
+} from './usage.js';
 
 const gate = createGate(1000);
 
@@ -38,18 +43,47 @@ export function candidateFromIsbndb(book) {
   return candidate;
 }
 
-export function createIsbndb({ pool, apiKey, baseUrl, fetchImpl = fetch }) {
+export function createIsbndb({
+  pool,
+  apiKey,
+  baseUrl,
+  dailyLimit = DEFAULT_ISBNDB_DAILY_LIMIT,
+  fetchImpl = fetch,
+  logger = console
+}) {
   if (!apiKey) return null;
-  const cache = pool ? createJsonCache(pool, 'isbndb_cache') : null;
+  // The daily cap cannot be enforced without the shared counter, and an
+  // unenforced metered provider is worse than a loud configuration error.
+  if (!pool) throw new Error('createIsbndb requires a Postgres pool for daily quota accounting');
+
+  const limit = parseDailyLimit(dailyLimit, logger);
+  const cache = createJsonCache(pool, 'isbndb_cache');
   const headers = { authorization: apiKey, accept: 'application/json' };
+  // Warn at most once per process per UTC day: an exhausted quota lasts until
+  // midnight UTC, so repeating it on every miss would drown the log.
+  let exhaustedDay;
 
   async function query(url) {
-    if (cache) {
-      const cached = await cache.get(url);
-      if (cached !== undefined) return cached;
+    const cached = await cache.get(url);
+    if (cached !== undefined) return cached;
+
+    // Reserve before the request: failed attempts still count (billing and
+    // attempt semantics), and concurrent workers cannot exceed the limit.
+    const calls = await reserveDailyCall(pool, { limit });
+    if (calls === null) {
+      const day = new Date().toISOString().slice(0, 10);
+      if (exhaustedDay !== day) {
+        exhaustedDay = day;
+        logger?.warn?.(
+          `worker: ISBNdb daily quota exhausted (${limit} calls per UTC day); ` +
+            'skipping the network and falling back to Google Books/Goodreads'
+        );
+      }
+      return undefined;
     }
+
     const body = await gate(() => fetchJson(fetchImpl, url, { headers }));
-    if (body !== undefined && cache) await cache.put(url, url, body);
+    if (body !== undefined) await cache.put(url, url, body);
     return body;
   }
 

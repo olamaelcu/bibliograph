@@ -24,7 +24,7 @@ const SKIP = DATABASE_URL
   ? false
   : 'set CATALOG_SCHEMA_TEST_DATABASE_URL to an empty scratch database';
 
-const SCHEMA_URL = new URL('../sql/0001-catalog-schema.sql', import.meta.url);
+const SCHEMA_DIR_URL = new URL('../sql/', import.meta.url);
 const AUTHORITY = 'did:plc:catalogschemacheck';
 const COLLECTION = 'community.lexicon.media.book';
 const CONTRIBUTOR = 'Catalog Schema Probe Author';
@@ -69,7 +69,12 @@ let editionUri;
 let editionRkey;
 
 async function applySchema() {
-  await pool.query(await fs.readFile(SCHEMA_URL, 'utf8'));
+  const files = (await fs.readdir(SCHEMA_DIR_URL))
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
+  for (const file of files) {
+    await pool.query(await fs.readFile(new URL(file, SCHEMA_DIR_URL), 'utf8'));
+  }
 }
 
 async function cleanup() {
@@ -114,6 +119,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'isbndb_cache',
       'pds_cids',
       'pds_outbox',
+      'provider_daily_usage',
       'publishers'
     ]]
   );
@@ -129,6 +135,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'isbndb_cache',
       'pds_cids',
       'pds_outbox',
+      'provider_daily_usage',
       'publishers'
     ]
   );

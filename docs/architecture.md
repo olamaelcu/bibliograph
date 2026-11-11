@@ -118,6 +118,30 @@ Google Books asks for its maximum page (`maxResults=40`) and ISBNdb search asks
 for `pageSize=50` (the API's default is 20), so a single provider call can be
 shorter than the cap.
 
+ISBNdb is the only metered provider, so it has a hard daily cap. After a cache
+miss and before the HTTP request, the client atomically reserves one call in
+`provider_daily_usage` (`provider`, UTC `day`, `calls`) with
+`INSERT … ON CONFLICT (provider, day) DO UPDATE SET calls = calls + 1 WHERE calls < $limit RETURNING calls`.
+The primary key makes the reservation safe across worker processes and
+restarts, and an empty `RETURNING` means the quota is exhausted. In that case
+the provider makes no network call, logs one warning per process per UTC day,
+and returns an empty result so the normal fallback chain continues with Google
+Books then Goodreads. Cache hits do not reserve anything, and a failed HTTP
+attempt keeps its reservation because the call was attempted (billing
+semantics). `ISBNDB_DAILY_LIMIT` defaults to `5000` and must be a positive
+integer; `0`/negative is invalid and falls back to `5000` with a warning — it is
+not an "unlimited" switch.
+
+The worker starts a dependency-free Prometheus endpoint on
+`WORKER_METRICS_HOST:WORKER_METRICS_PORT` (default `127.0.0.1:9464`) serving
+`/metrics`. Each scrape reads the database and exposes
+`bibliograph_isbndb_calls_today`, `bibliograph_isbndb_daily_limit` and
+`bibliograph_isbndb_calls_remaining` (`max(0, limit - calls)`). A scrape that
+cannot query the database answers `500`; a port that cannot be bound is logged
+and leaves the worker running. The default loopback bind keeps the endpoint off
+the network; set `WORKER_METRICS_HOST=0.0.0.0` only for a container/host
+scraper and firewall the port accordingly (see `prometheus.yml`).
+
 `pds-publish` claims at most 25 ready rows for its configured publisher DID per
 batch with `FOR UPDATE SKIP LOCKED` and a five-minute lease, so several worker
 processes can share the database. Claiming writes `claimed_at`; the PDS call happens outside a

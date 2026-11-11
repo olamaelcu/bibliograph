@@ -44,6 +44,18 @@ deployments install separate packages:
 | `bibliograph-worker.service` | `node index.js` | catalog hydration and the PDS outbox must survive edge restarts and back off on their own |
 | `happyview.service` | HappyView's host binary | activity index and Lua queries; loopback only |
 
+### Worker metrics
+
+`bibliograph-worker` serves Prometheus metrics at `/metrics` on
+`WORKER_METRICS_HOST:WORKER_METRICS_PORT` from `/etc/bibliograph/worker.env`.
+The defaults are `127.0.0.1:9464`, so the endpoint is loopback-only and not
+exposed by the package. It reports the ISBNdb daily quota:
+`bibliograph_isbndb_calls_today`, `bibliograph_isbndb_daily_limit` and
+`bibliograph_isbndb_calls_remaining`. If a scraper on another host or in a
+container must reach it, set `WORKER_METRICS_HOST=0.0.0.0` and open TCP 9464 in
+the host firewall; otherwise keep the default. The worker logs a bind failure
+and keeps hydrating/publishing if the port is unavailable.
+
 There is **no `bibliograph-migrate.service` and no drizzle migrator**. A fresh
 database is bootstrapped once with the versioned SQL (`mise run
 catalog-schema`, or the documented `psql` command in

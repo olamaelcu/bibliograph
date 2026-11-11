@@ -9,6 +9,8 @@ import { candidatesFromBookPage, candidatesFromSearchPage } from '../lib/provide
 import { createProviders } from '../lib/providers/index.js';
 import { createTasks } from '../lib/tasks.js';
 import { isbn10To13, stripHtml } from '../lib/util.js';
+import { ensureSupportSchema } from '../lib/setup.js';
+import { createMetricsServer } from '../lib/metrics.js';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph';
@@ -138,6 +140,7 @@ const CAP_BOOKS = Array.from({ length: 60 }, (_, index) => ({
 
 let googleRequests = 0;
 let goodreadsRequests = 0;
+const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
 
 async function cleanupHydrationRows(pool, host) {
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
@@ -209,6 +212,15 @@ before(async () => {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  // The ISBNdb provider reserves calls in provider_daily_usage, which the
+  // worker creates at boot. Tests exercise that same boot path.
+  const schemaPool = new pg.Pool({ connectionString: DATABASE_URL, max: 1 });
+  try {
+    await ensureSupportSchema(schemaPool);
+  } finally {
+    await schemaPool.end();
+  }
 });
 
 after(async () => {
@@ -685,5 +697,173 @@ test('search ingests at most 50 candidates', async () => {
   } finally {
     await cleanupHydrationRows(pool, 'cap.example');
     await pool.end();
+  }
+});
+
+test('ISBNdb reserves a call per cache miss and stops at the UTC daily limit', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  try {
+    await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
+    isbndbRequests = 0;
+
+    const providers = createProviders({
+      pool,
+      logger: silentLogger,
+      env: {
+        ISBNDB_API_KEY: 'test-key',
+        ISBNDB_DAILY_LIMIT: '2',
+        ISBNDB_BASE_URL: `${baseUrl}/isbndb`
+      }
+    });
+    const isbndb = providers.providers.isbndb;
+    assert.ok(isbndb);
+
+    const results = [];
+    for (const isbn of [isbn13For(801), isbn13For(802), isbn13For(803)]) {
+      results.push(await isbndb.byIsbn(isbn));
+    }
+
+    assert.equal(isbndbRequests, 2, 'exactly the quota reaches the stub network');
+    assert.deepEqual(results[0], []);
+    assert.deepEqual(results[1], []);
+    assert.deepEqual(results[2], [], 'the exhausted call returns an empty result without HTTP');
+
+    const usage = await pool.query(
+      "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
+        "AND day = (now() AT TIME ZONE 'UTC')::date"
+    );
+    assert.equal(usage.rows[0]?.calls, 2);
+  } finally {
+    await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
+    await pool.end();
+  }
+});
+
+test('an ISBNdb cache hit does not consume the daily quota', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  try {
+    await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
+    isbndbRequests = 0;
+
+    const providers = createProviders({
+      pool,
+      logger: silentLogger,
+      env: {
+        ISBNDB_API_KEY: 'test-key',
+        ISBNDB_DAILY_LIMIT: '2',
+        ISBNDB_BASE_URL: `${baseUrl}/isbndb`
+      }
+    });
+    const isbndb = providers.providers.isbndb;
+    const isbn = isbn13For(811);
+
+    await isbndb.byIsbn(isbn);
+    await isbndb.byIsbn(isbn);
+
+    assert.equal(isbndbRequests, 1, 'the second lookup is served from isbndb_cache');
+    const usage = await pool.query(
+      "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
+        "AND day = (now() AT TIME ZONE 'UTC')::date"
+    );
+    assert.equal(usage.rows[0]?.calls, 1);
+  } finally {
+    await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
+    await pool.end();
+  }
+});
+
+test('a previous UTC day at the limit does not block today', async () => {
+  const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
+  try {
+    await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
+    await pool.query(
+      "INSERT INTO provider_daily_usage (provider, day, calls) " +
+        "VALUES ('isbndb', (now() AT TIME ZONE 'UTC')::date - 1, 2)"
+    );
+    isbndbRequests = 0;
+
+    const providers = createProviders({
+      pool,
+      logger: silentLogger,
+      env: {
+        ISBNDB_API_KEY: 'test-key',
+        ISBNDB_DAILY_LIMIT: '2',
+        ISBNDB_BASE_URL: `${baseUrl}/isbndb`
+      }
+    });
+
+    await providers.providers.isbndb.byIsbn(isbn13For(821));
+
+    assert.equal(isbndbRequests, 1, 'today starts a fresh budget after the UTC rollover');
+    const today = await pool.query(
+      "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
+        "AND day = (now() AT TIME ZONE 'UTC')::date"
+    );
+    assert.equal(today.rows[0]?.calls, 1);
+    const yesterday = await pool.query(
+      "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
+        "AND day = (now() AT TIME ZONE 'UTC')::date - 1"
+    );
+    assert.equal(yesterday.rows[0]?.calls, 2);
+  } finally {
+    await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
+    await pool.end();
+  }
+});
+
+test('the worker metrics endpoint exposes the ISBNdb quota gauges', async () => {
+  const server = createMetricsServer({
+    pool: { query: async () => ({ rows: [{ calls: 1234 }] }) },
+    limit: 5000,
+    logger: silentLogger
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/metrics`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /^text\/plain; version=0\.0\.4/);
+
+    const body = await response.text();
+    for (const name of [
+      'bibliograph_isbndb_calls_today',
+      'bibliograph_isbndb_daily_limit',
+      'bibliograph_isbndb_calls_remaining'
+    ]) {
+      assert.match(body, new RegExp(`^# HELP ${name} .+$`, 'm'));
+      assert.match(body, new RegExp(`^# TYPE ${name} gauge$`, 'm'));
+    }
+    assert.match(body, /^bibliograph_isbndb_calls_today 1234$/m);
+    assert.match(body, /^bibliograph_isbndb_daily_limit 5000$/m);
+    assert.match(body, /^bibliograph_isbndb_calls_remaining 3766$/m);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('a metrics database failure returns 500 instead of crashing', async () => {
+  const server = createMetricsServer({
+    pool: {
+      query: async () => {
+        throw new Error('database unavailable');
+      }
+    },
+    limit: 5000,
+    logger: silentLogger
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/metrics`);
+    assert.equal(response.status, 500);
+    assert.match(await response.text(), /metrics unavailable/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });

@@ -10,8 +10,8 @@ publisher authority is fixed before the first edition is minted.
 The retired `packages/bibliograph-service` package — and its drizzle migrator,
 `drizzle.__drizzle_migrations` and `bibliograph-migrate.service` — is **not**
 required. It no longer exists in this repository. Graphile creates its own
-schema; the worker creates `catalog_enqueue_marks` at boot; the catalog tables
-come from the versioned SQL below.
+schema; the worker creates `catalog_enqueue_marks` and `provider_daily_usage`
+at boot; the catalog tables come from the versioned SQL below.
 
 ## 1. Create the database
 
@@ -74,6 +74,8 @@ What is created:
   editions get a 13-character TID rkey, never an ISBN);
 - `pds_outbox` (+ the ready index) and `pds_cids`;
 - the provider caches `google_books_cache` and `isbndb_cache`;
+- `provider_daily_usage` (`provider`, UTC `day`, `calls`), the per-provider
+  daily call counter the worker reserves ISBNdb requests in;
 - the outbox triggers for editions, identifiers, contributors, publishers and
   contributor/publisher renames;
 - `appview_book` and `appview_book_lua`.
@@ -107,7 +109,8 @@ run it before applying the catalog schema for a one-pass setup.
 ## 3. Start the processes
 
 ```bash
-# worker: creates graphile_worker + catalog_enqueue_marks, drains pds_outbox
+# worker: creates graphile_worker + catalog_enqueue_marks + provider_daily_usage,
+# drains pds_outbox
 DATABASE_URL=… ATP_SERVICE_DID=did:plc:… PDS_URL=… \
   PDS_ACCOUNT_DID=did:plc:… PDS_ACCOUNT_PASSWORD=… \
   pnpm --filter worker start
@@ -119,10 +122,11 @@ DATABASE_URL=… HAPPYVIEW_URL=… pnpm --filter web start
 DATABASE_URL=postgres://happyview_app:…@localhost:5432/bibliograph …
 ```
 
-The worker creates its own support objects; do not create Graphile's schema by
-hand. Without publisher credentials the worker still hydrates the catalog and
-queues `pds_outbox` rows — it logs that `pds-publish` is disabled and retries
-nothing until credentials are supplied.
+The worker creates its own support objects (`catalog_enqueue_marks` and
+`provider_daily_usage`); do not create Graphile's schema by hand. Without
+publisher credentials the worker still hydrates the catalog and queues
+`pds_outbox` rows — it logs that `pds-publish` is disabled and retries nothing
+until credentials are supplied.
 
 ### Publisher credentials
 

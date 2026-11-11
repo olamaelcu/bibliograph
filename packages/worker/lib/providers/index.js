@@ -2,10 +2,17 @@ import { mergeCandidates, isbn13 as normalizeIsbn13, cleanString } from '../util
 import { createGoogleBooks } from './google-books.js';
 import { createIsbndb } from './isbndb.js';
 import { createGoodreads } from './goodreads.js';
+import { parseDailyLimit } from './usage.js';
 
 const ISBN_ISSUERS = new Set(['isbn13', 'isbn10', 'isbn']);
 
-export function createProviders({ pool, env = process.env, fetchImpl = fetch } = {}) {
+export function createProviders({
+  pool,
+  env = process.env,
+  fetchImpl = fetch,
+  logger = console,
+  isbndbDailyLimit
+} = {}) {
   const google = createGoogleBooks({
     pool,
     apiKey: env.GOOGLE_BOOKS_API_KEY || undefined,
@@ -16,10 +23,13 @@ export function createProviders({ pool, env = process.env, fetchImpl = fetch } =
     pool,
     apiKey: env.ISBNDB_API_KEY || undefined,
     baseUrl: env.ISBNDB_BASE_URL || 'https://api2.isbndb.com',
+    dailyLimit: isbndbDailyLimit ?? parseDailyLimit(env.ISBNDB_DAILY_LIMIT, logger),
+    logger,
     fetchImpl
   });
   const goodreads = createGoodreads({
     baseUrl: env.GOODREADS_BASE_URL || 'https://www.goodreads.com',
+    logger,
     fetchImpl
   });
 

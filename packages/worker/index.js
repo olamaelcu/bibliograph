@@ -5,6 +5,8 @@ import { createTasks } from './lib/tasks.js';
 import { createOutboxPublisher } from './lib/publish.js';
 import { resolvePublisherAuthority, resolvePublisherConfig } from './lib/pds.js';
 import { ensureSupportSchema } from './lib/setup.js';
+import { startMetricsServer } from './lib/metrics.js';
+import { parseDailyLimit } from './lib/providers/usage.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -21,7 +23,16 @@ const concurrency = Number.parseInt(process.env.GRAPHILE_WORKER_CONCURRENCY ?? '
 const pool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
 await ensureSupportSchema(pool);
 
-const providers = createProviders({ pool });
+const isbndbDailyLimit = parseDailyLimit(process.env.ISBNDB_DAILY_LIMIT);
+const providers = createProviders({ pool, isbndbDailyLimit });
+
+// Metrics are best-effort: a port conflict must not stop hydration/publishing.
+let metricsServer;
+try {
+  metricsServer = await startMetricsServer({ pool, limit: isbndbDailyLimit });
+} catch (error) {
+  console.error(`worker: metrics server disabled — ${error.message}`);
+}
 
 // The PDS publisher is configured or loud about it. The worker still runs the
 // hydration tasks without credentials; only pds-publish is unavailable.
@@ -71,6 +82,8 @@ const publisherLabel = publisher ? publisher.config.publisherDid : publisherDid;
 console.log(
   `worker: ready (concurrency=${concurrency}, publisher=${publisherLabel}, ` +
     `isbndb=${providers.providers.isbndb ? 'enabled' : 'disabled'}, ` +
+    `isbndb-daily-limit=${isbndbDailyLimit}, ` +
+    `metrics=${metricsServer ? 'enabled' : 'disabled'}, ` +
     `pds-publish=${publisher ? 'enabled' : 'disabled'})`
 );
 
@@ -89,5 +102,8 @@ if (publisher) {
 try {
   await runner.promise;
 } finally {
+  if (metricsServer) {
+    await new Promise((resolve) => metricsServer.close(resolve));
+  }
   await pool.end();
 }

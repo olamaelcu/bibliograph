@@ -19,3 +19,14 @@ scrape_configs:
       - targets: ["tap:2481"]
         labels:
           service: tap
+
+  # The worker's metrics server binds 127.0.0.1:9464 by default. Prometheus runs
+  # in compose and reaches the host through host.docker.internal, so the
+  # compose/dev worker must set WORKER_METRICS_HOST=0.0.0.0; a production host
+  # can keep the loopback default and scrape it locally instead.
+  - job_name: bibliograph-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:9464"]
+        labels:
+          service: bibliograph-worker
