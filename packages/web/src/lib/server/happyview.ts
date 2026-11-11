@@ -1,10 +1,10 @@
-import { env } from '$env/dynamic/private';
+import { env } from "$env/dynamic/private";
 
 /** Upstream request headers worth relaying; everything else is hop-by-hop. */
-const FORWARDED_REQUEST_HEADERS = ['content-type', 'accept', 'authorization', 'dpop'] as const;
+const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "authorization", "dpop"] as const;
 
 /** Response headers the caller needs back (XRPC errors and DPoP replay data). */
-const FORWARDED_RESPONSE_HEADERS = ['content-type', 'dpop-nonce'] as const;
+const FORWARDED_RESPONSE_HEADERS = ["content-type", "dpop-nonce"] as const;
 
 /**
  * The envelope a script's `fail()` returns.
@@ -15,13 +15,13 @@ const FORWARDED_RESPONSE_HEADERS = ['content-type', 'dpop-nonce'] as const;
  * here is what turns `fail(404, 'RecordNotFound', …)` into an actual 404 for
  * every caller.
  */
-const SCRIPT_FAILURE = '__bib_http';
+const SCRIPT_FAILURE = "__bib_http";
 
 type ScriptFailure = { status: number; body: unknown };
 
 function scriptFailure(status: number, body: unknown): ScriptFailure | null {
   if (!Number.isInteger(status) || status < 400 || status > 599) return null;
-  if (body === null || typeof body !== 'object') return null;
+  if (body === null || typeof body !== "object") return null;
   return { status, body };
 }
 
@@ -37,7 +37,7 @@ function scriptFailure(status: number, body: unknown): ScriptFailure | null {
  */
 function unwrapScriptFailure(bytes: ArrayBuffer, contentType: string | null): ScriptFailure | null {
   if (bytes.byteLength === 0) return null;
-  if (contentType === null || !contentType.toLowerCase().includes('application/json')) {
+  if (contentType === null || !contentType.toLowerCase().includes("application/json")) {
     return null;
   }
 
@@ -48,18 +48,18 @@ function unwrapScriptFailure(bytes: ArrayBuffer, contentType: string | null): Sc
     return null;
   }
 
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const keys = Object.keys(parsed);
   if (keys.length !== 1 || keys[0] !== SCRIPT_FAILURE) return null;
 
   const envelope = (parsed as Record<string, unknown>)[SCRIPT_FAILURE];
-  if (envelope === null || typeof envelope !== 'object') return null;
+  if (envelope === null || typeof envelope !== "object") return null;
   const { status, body } = envelope as Record<string, unknown>;
 
   return scriptFailure(status as number, body);
 }
 
-const DEFAULT_HAPPYVIEW_URL = 'http://127.0.0.1:3000';
+const DEFAULT_HAPPYVIEW_URL = "http://127.0.0.1:3000";
 
 /**
  * The client identity belongs to this server, never to the browser.
@@ -69,8 +69,8 @@ const DEFAULT_HAPPYVIEW_URL = 'http://127.0.0.1:3000';
  */
 function clientHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
-  if (env.HAPPYVIEW_CLIENT_KEY) headers['x-client-key'] = env.HAPPYVIEW_CLIENT_KEY;
-  if (env.HAPPYVIEW_CLIENT_SECRET) headers['x-client-secret'] = env.HAPPYVIEW_CLIENT_SECRET;
+  if (env.HAPPYVIEW_CLIENT_KEY) headers["x-client-key"] = env.HAPPYVIEW_CLIENT_KEY;
+  if (env.HAPPYVIEW_CLIENT_SECRET) headers["x-client-secret"] = env.HAPPYVIEW_CLIENT_SECRET;
   return headers;
 }
 
@@ -100,20 +100,20 @@ export async function forward(method: string, request: Request): Promise<Respons
 
   for (const [name, value] of Object.entries(clientHeaders())) headers.set(name, value);
 
-  const body = request.method === 'POST' ? await request.arrayBuffer() : undefined;
+  const body = request.method === "POST" ? await request.arrayBuffer() : undefined;
 
   let upstream: Response;
   try {
-    const base = (env.HAPPYVIEW_URL || DEFAULT_HAPPYVIEW_URL).replace(/\/+$/, '');
+    const base = (env.HAPPYVIEW_URL || DEFAULT_HAPPYVIEW_URL).replace(/\/+$/, "");
     upstream = await fetch(`${base}/xrpc/${method}${url.search}`, {
       method: request.method,
       headers,
-      body
+      body,
     });
   } catch {
-    return new Response(JSON.stringify({ error: 'UpstreamUnavailable' }), {
+    return new Response(JSON.stringify({ error: "UpstreamUnavailable" }), {
       status: 502,
-      headers: { 'content-type': 'application/json' }
+      headers: { "content-type": "application/json" },
     });
   }
 
@@ -129,18 +129,18 @@ export async function forward(method: string, request: Request): Promise<Respons
   // as a `200`. Only a `200` can be one: any other status is HappyView itself
   // answering, and that answer is already the right one.
   if (upstream.status === 200) {
-    const failure = unwrapScriptFailure(bytes, upstream.headers.get('content-type'));
+    const failure = unwrapScriptFailure(bytes, upstream.headers.get("content-type"));
     if (failure !== null) {
-      response.set('content-type', 'application/json');
+      response.set("content-type", "application/json");
       return new Response(JSON.stringify(failure.body), {
         status: failure.status,
-        headers: response
+        headers: response,
       });
     }
   }
 
   return new Response(bytes, {
     status: upstream.status,
-    headers: response
+    headers: response,
   });
 }
