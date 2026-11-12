@@ -178,10 +178,14 @@ backlog for the configured publisher DID: `bibliograph_pds_outbox_ready`
 (claimable now: same collection, `attempts < 10`, due and unleased),
 `bibliograph_pds_outbox_parked` (`attempts >= 10`) and
 `bibliograph_pds_outbox_oldest_age_seconds` (age of the oldest claimable row,
-`0` when none). In-memory provider attempt/retry/request counters and breaker
-states are rendered by the same worker. A scrape that cannot query the
-database answers `500`; a port that cannot be bound is logged and leaves the
-worker running. The default loopback bind keeps the endpoint off the network;
+`0` when none). The same scrape collects process gauges
+(`bibliograph_process_resident_memory_bytes`,
+`bibliograph_process_cpu_seconds_total`, `bibliograph_process_uptime_seconds`,
+`bibliograph_nodejs_heap_used_bytes`). In-memory provider
+attempt/retry/request counters and breaker states are rendered by the same
+worker. A scrape that cannot query the database answers `500`; a port that
+cannot be bound is logged and leaves the worker running. The default loopback
+bind keeps the endpoint off the network;
 set `WORKER_METRICS_HOST=0.0.0.0` only for a container/host scraper and
 firewall the port accordingly (see `prometheus.yml`).
 

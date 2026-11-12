@@ -69,12 +69,28 @@ export async function readOutboxStats(pool, { publisherDid, leaseMs = DEFAULT_LE
   };
 }
 
+/**
+ * Process gauges for one scrape. Read live (not cached) so uptime, CPU and
+ * memory reflect the worker at scrape time; injectable for tests.
+ */
+export function readProcessMetrics(source = process) {
+  const memory = source.memoryUsage();
+  const cpu = source.cpuUsage();
+  return {
+    residentMemoryBytes: nonNegative(memory.rss),
+    cpuSeconds: nonNegative((cpu.user + cpu.system) / 1_000_000),
+    uptimeSeconds: nonNegative(source.uptime()),
+    heapUsedBytes: nonNegative(memory.heapUsed)
+  };
+}
+
 /** Render the Prometheus text exposition for quota, outbox and provider telemetry. */
 export function renderMetrics({
   calls,
   limit,
   providerMetrics,
-  outbox = { ready: 0, parked: 0, oldestAgeSeconds: 0 }
+  outbox = { ready: 0, parked: 0, oldestAgeSeconds: 0 },
+  runtime = readProcessMetrics()
 }) {
   const used = Number.isFinite(calls) && calls > 0 ? Math.trunc(calls) : 0;
   const cap = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : 0;
@@ -84,6 +100,18 @@ export function renderMetrics({
     '# HELP bibliograph_worker_up Whether this worker process is answering scrapes.',
     '# TYPE bibliograph_worker_up gauge',
     'bibliograph_worker_up 1',
+    '# HELP bibliograph_process_resident_memory_bytes Resident set size of the worker process.',
+    '# TYPE bibliograph_process_resident_memory_bytes gauge',
+    `bibliograph_process_resident_memory_bytes ${nonNegative(runtime.residentMemoryBytes)}`,
+    '# HELP bibliograph_process_cpu_seconds_total Total user and system CPU time spent by the worker process, in seconds.',
+    '# TYPE bibliograph_process_cpu_seconds_total gauge',
+    `bibliograph_process_cpu_seconds_total ${nonNegative(runtime.cpuSeconds)}`,
+    '# HELP bibliograph_process_uptime_seconds Time since the worker process started, in seconds.',
+    '# TYPE bibliograph_process_uptime_seconds gauge',
+    `bibliograph_process_uptime_seconds ${nonNegative(runtime.uptimeSeconds)}`,
+    '# HELP bibliograph_nodejs_heap_used_bytes V8 heap used by the worker process.',
+    '# TYPE bibliograph_nodejs_heap_used_bytes gauge',
+    `bibliograph_nodejs_heap_used_bytes ${nonNegative(runtime.heapUsedBytes)}`,
     '# HELP bibliograph_isbndb_calls_today ISBNdb calls reserved for the current UTC day.',
     '# TYPE bibliograph_isbndb_calls_today gauge',
     `bibliograph_isbndb_calls_today ${used}`,
