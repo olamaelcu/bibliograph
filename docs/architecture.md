@@ -227,12 +227,15 @@ Author keys are expanded through `/authors/<key>.json` (bounded to ten names
 per lookup, cached within that lookup). Requests carry a descriptive
 User-Agent and pass through one serializing politeness gate; timeouts, retries
 and the `openlibrary` breaker come from the shared provider HTTP layer. Author
-search (`/search/authors.json`) and detail (`/authors/<key>.json`) normalize to
-read-only contributor candidates: `displayName`, optional `nameInverted`,
+search (`/search/authors.json`) and detail (`/authors/<key>.json`) both normalize
+to read-only contributor candidates: `displayName`, optional `nameInverted`,
 description, image URL, full `born`/`died` dates, an `openlibrary` author-key
 identifier and reliable `remote_ids` (Wikidata, VIAF, ISNI, Goodreads, etc.).
-Partial or ambiguous dates are omitted, and contributor candidates never carry
-edition roles.
+The admin contributor search calls only the author-search endpoint; the detail
+lookup (`author()`/`byAuthorKey()`) is provider-only and has no admin route or
+UI. Search documents may therefore omit bio, photos and `remote_ids`. Partial
+or ambiguous dates are omitted, and contributor candidates never carry edition
+roles.
 
 The worker starts a dependency-free Prometheus endpoint on
 `WORKER_METRICS_HOST:WORKER_METRICS_PORT` (default `127.0.0.1:9464`) serving
@@ -355,8 +358,10 @@ inline fallback.
 - The admin UI and worker expose a read-only contributor search:
   `POST /admin/api/contributor-search` in the web edge forwards to the worker's
   `POST /contributor-search` with a bounded `q` (200 characters) and `limit`
-  (1–50, default 20). It returns normalized OpenLibrary contributor candidates
-  for inspection; there is deliberately no contributor import or write path.
+  (1–50, default 20). It returns OpenLibrary author-search candidates for
+  inspection; it does not expand each result through author detail, so bio,
+  photo and external identifiers may be absent. There is deliberately no
+  contributor detail route, import or write path.
 
 ## Lexicon provenance
 

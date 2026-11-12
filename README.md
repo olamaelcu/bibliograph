@@ -123,11 +123,14 @@ OpenLibrary uses `https://openlibrary.org` by default (override with
 serializes requests through a polite gate. Edition search asks for 40 results
 with an explicit field list; an ISBN lookup expands the edition's work for a
 missing description and its author keys for contributor names. Author search
-(`/search/authors.json`) and author detail (`/authors/<key>.json`) feed the
-read-only contributor search at `POST /admin/api/contributor-search` in the web
-admin UI; that endpoint returns descriptive candidates and cannot import or
-publish contributors. Date fields accept only unambiguous full dates; a
-partial or unparseable birth/death date is omitted.
+(`/search/authors.json`) and author detail (`/authors/<key>.json`) both normalize
+to contributor candidates. The read-only admin search at
+`POST /admin/api/contributor-search` calls the author-search endpoint only, so
+its results may lack bio, photo and external identifiers; author detail is
+exposed by the provider (for a later lookup) but has no admin route or UI. The
+endpoint returns descriptive candidates and cannot import or publish
+contributors. Date fields accept only unambiguous full dates; a partial or
+unparseable birth/death date is omitted.
 
 Google Books and ISBNdb answers are cached in Postgres (`google_books_cache` /
 `isbndb_cache`). ISBNdb is metered: after a cache miss the worker atomically
