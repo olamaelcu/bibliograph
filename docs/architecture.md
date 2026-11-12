@@ -31,6 +31,15 @@ contributor/publisher/identifier arrays exist only in two places:
 That keeps a contributor rename or merge to one row instead of every edition
 that credits it.
 
+The storage columns predate lexicon.community PR #18: `contributors.name` holds
+the display name and `edition_contributors.role` may hold either an ONIX
+Codelist 17 code or a legacy kebab-case token (`author`, `foreword`, …). No
+migration rewrites them. Every lexicon boundary maps to the current shape:
+`buildEditionRecord` emits `displayName` and a code, the edge's
+`editionView` (`contributor-roles.ts`) does the same, and HappyView's
+`prelude.lua` applies the identical table. Unknown role tokens pass through
+because the lexicon's `knownValues` list is open.
+
 New editions always get a TID rkey from `editions_next_tid()` (a 13-character
 base32-sortable `[234567abcdefghijklmnopqrstuvwxyz]` string), minted in
 `packages/worker/lib/ingest.js`; the rkey is never derived from a provider id or

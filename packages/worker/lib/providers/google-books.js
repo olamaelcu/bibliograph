@@ -1,4 +1,5 @@
 import { createGate, isbn13 as normalizeIsbn13, cleanString, stripHtml } from '../util.js';
+import { DEFAULT_CONTRIBUTOR_ROLE } from '../contributor-roles.js';
 import { createJsonCache, fetchJson } from './http.js';
 
 const gate = createGate(150);
@@ -35,7 +36,7 @@ export function candidateFromVolume(item) {
     title: cleanString(info.title),
     contributors: [...new Set((info.authors ?? []).map(cleanString).filter(Boolean))].map((name) => ({
       name,
-      role: 'author'
+      role: DEFAULT_CONTRIBUTOR_ROLE
     }))
   };
 

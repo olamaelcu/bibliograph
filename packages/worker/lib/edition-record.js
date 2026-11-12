@@ -10,6 +10,8 @@
  * otherwise have to own every cover byte.
  */
 
+import { normalizeContributorRole } from './contributor-roles.js';
+
 export class EditionRecordError extends Error {
   constructor(message) {
     super(message);
@@ -82,12 +84,16 @@ function seriesValue(value) {
 }
 
 function contributorValue(row) {
-  const name = nonEmptyString(row.name);
-  if (!name) return undefined;
+  // New rows use the lexicon's `displayName`; rows ingested under the old
+  // books-wg draft stored the same value in `name`.
+  const displayName = nonEmptyString(row.displayName) ?? nonEmptyString(row.name);
+  if (!displayName) return undefined;
+  const nameInverted = nonEmptyString(row.nameInverted) ?? nonEmptyString(row.name_inverted);
   const identifiers = identifierArray(row.identifiers);
   return {
-    name,
-    role: nonEmptyString(row.role) ?? 'author',
+    displayName,
+    ...(nameInverted ? { nameInverted } : {}),
+    role: normalizeContributorRole(row.role),
     ...(identifiers.length > 0 ? { identifiers } : {}),
     ...(nonEmptyString(row.ref) ? { ref: row.ref } : {})
   };

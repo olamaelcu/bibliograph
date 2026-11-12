@@ -5,6 +5,7 @@ import pg from 'pg';
 
 import { createTasks } from '../lib/tasks.js';
 import { createIngest } from '../lib/ingest.js';
+import { normalizeContributorRole } from '../lib/contributor-roles.js';
 import {
   DEFAULT_BATCH,
   claimBatch,
@@ -215,8 +216,8 @@ async function makeEdition({
     createdAt,
     identifiers: storedIdentifiers.rows,
     contributors: storedContributors.rows.map((row) => ({
-      name: row.name,
-      role: row.role,
+      displayName: row.name,
+      role: normalizeContributorRole(row.role),
       ...(row.identifiers?.length ? { identifiers: row.identifiers } : {}),
       ...(row.ref ? { ref: row.ref } : {})
     })),

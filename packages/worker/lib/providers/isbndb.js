@@ -1,4 +1,5 @@
 import { createGate, isbn13 as normalizeIsbn13, cleanString, stripHtml } from '../util.js';
+import { DEFAULT_CONTRIBUTOR_ROLE } from '../contributor-roles.js';
 import { createJsonCache, fetchJsonResponse } from './http.js';
 import {
   DEFAULT_ISBNDB_DAILY_LIMIT,
@@ -89,7 +90,7 @@ export function candidateFromIsbndb(book) {
     title: cleanString(book.title),
     contributors: [...new Set((book.authors ?? []).map(cleanString).filter(Boolean))].map((name) => ({
       name,
-      role: 'author'
+      role: DEFAULT_CONTRIBUTOR_ROLE
     }))
   };
 

@@ -1,6 +1,8 @@
 // The record type is `community.lexicon.media.book.edition`: the same
 // collection the outbox and `pds-publish` write to, so a catalog URI is
 // resolvable through `com.atproto.repo.getRecord`.
+import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
+
 const COLLECTION = 'community.lexicon.media.book.edition';
 
 function editionUri(publisherDid, rkey) {
@@ -134,7 +136,16 @@ async function fillMissingFields(client, uri, candidate) {
 async function linkContributors(client, uri, contributors) {
   let position = 1;
   for (const contributor of contributors ?? []) {
-    if (typeof contributor?.name !== 'string' || contributor.name.trim() === '') continue;
+    // Lexicon-shaped callers send `displayName`; provider candidates and the
+    // internal admin transport use `name`. Accept both so old and new clients
+    // ingest the same rows.
+    const displayName =
+      typeof contributor?.displayName === 'string' && contributor.displayName.trim() !== ''
+        ? contributor.displayName
+        : typeof contributor?.name === 'string' && contributor.name.trim() !== ''
+          ? contributor.name
+          : undefined;
+    if (!displayName) continue;
     const identifiers = JSON.stringify(
       Array.isArray(contributor.identifiers) ? contributor.identifiers : []
     );
@@ -143,7 +154,7 @@ async function linkContributors(client, uri, contributors) {
        VALUES ($1, $2::jsonb)
        ON CONFLICT (lower(name), identifiers) DO UPDATE SET name = EXCLUDED.name
        RETURNING id`,
-      [contributor.name, identifiers]
+      [displayName, identifiers]
     );
     const contributorId = inserted.rows[0].id;
     await client.query(
@@ -153,7 +164,13 @@ async function linkContributors(client, uri, contributors) {
          contributor_id = EXCLUDED.contributor_id,
          role = EXCLUDED.role,
          ref = EXCLUDED.ref`,
-      [uri, contributorId, position, contributor.role ?? 'author', contributor.ref ?? null]
+      [
+        uri,
+        contributorId,
+        position,
+        normalizeContributorRole(contributor.role ?? DEFAULT_CONTRIBUTOR_ROLE),
+        contributor.ref ?? null
+      ]
     );
     position += 1;
   }

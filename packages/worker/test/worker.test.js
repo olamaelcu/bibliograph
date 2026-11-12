@@ -379,7 +379,7 @@ test('resolve hydrates the catalog from provider results', async () => {
        WHERE ec.edition_uri = $1`,
       [edition.rows[0].uri]
     );
-    assert.deepEqual(contributors.rows, [{ name: 'Ursula K. Le Guin', role: 'author' }]);
+    assert.deepEqual(contributors.rows, [{ name: 'Ursula K. Le Guin', role: 'A01' }]);
 
     const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
       edition.rows[0].uri

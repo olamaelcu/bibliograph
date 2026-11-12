@@ -51,12 +51,12 @@ test('builds the lexicon record from catalog rows', () => {
     ],
     contributors: [
       {
-        name: 'Ursula K. Le Guin',
-        role: 'author',
+        displayName: 'Ursula K. Le Guin',
+        role: 'A01',
         identifiers: [{ issuer: 'viaf', value: '123456' }],
         ref: 'at://did:plc:example/app.bsky.actor.profile/self'
       },
-      { name: 'C. J. Cherryh', role: 'foreword' }
+      { displayName: 'C. J. Cherryh', role: 'A23' }
     ],
     createdAt: '2026-01-02T03:04:05.000Z',
     subtitle: 'A Novel',
@@ -128,4 +128,32 @@ test('refuses a record with no title or created_at', () => {
     () => buildEditionRecord({ edition: { ...edition, created_at: 'not-a-date' }, identifiers }),
     /created_at/
   );
+});
+
+test('accepts ONIX codes, displayName and nameInverted from newer rows', () => {
+  const record = buildEditionRecord({
+    edition,
+    identifiers,
+    contributors: [
+      {
+        displayName: 'Ursula K. Le Guin',
+        nameInverted: 'Le Guin, Ursula K.',
+        role: 'B06'
+      }
+    ]
+  });
+
+  assert.deepEqual(record.contributors, [
+    { displayName: 'Ursula K. Le Guin', nameInverted: 'Le Guin, Ursula K.', role: 'B06' }
+  ]);
+});
+
+test('defaults a missing contributor role to A01', () => {
+  const record = buildEditionRecord({
+    edition,
+    identifiers,
+    contributors: [{ name: 'Anonymous' }]
+  });
+
+  assert.deepEqual(record.contributors, [{ displayName: 'Anonymous', role: 'A01' }]);
 });

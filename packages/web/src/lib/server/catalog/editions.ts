@@ -1,4 +1,5 @@
 import { catalogPool } from './db';
+import { normalizeContributorRole } from './contributor-roles';
 
 export type Identifier = {
   issuer: string;
@@ -7,7 +8,8 @@ export type Identifier = {
 };
 
 export type ContributorView = {
-  name: string;
+  displayName: string;
+  nameInverted?: string;
   role?: string;
   identifiers?: Identifier[];
   ref?: string;
@@ -108,8 +110,8 @@ function editionView(
     contributors: contributors
       .filter((contributor) => contributor.name !== '')
       .map((contributor) => ({
-        name: contributor.name,
-        role: contributor.role,
+        displayName: contributor.name,
+        role: normalizeContributorRole(contributor.role),
         ...(contributor.identifiers?.length ? { identifiers: contributor.identifiers } : {}),
         ...(contributor.ref ? { ref: contributor.ref } : {})
       })),

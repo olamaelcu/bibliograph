@@ -1,30 +1,15 @@
 import { createGate, cleanString, isbn13 as normalizeIsbn13, stripHtml } from '../util.js';
+import { normalizeContributorRole } from '../contributor-roles.js';
 import { fetchText } from './http.js';
 
 const gate = createGate(1000);
 const USER_AGENT =
   'Mozilla/5.0 (compatible; Bibliograph/0.1; +https://biblio.livtet.olamaelcu.net)';
 
-const ROLE_MAP = {
-  author: 'author',
-  'co-author': 'co-author',
-  editor: 'editor',
-  translator: 'translator',
-  narrator: 'narrator',
-  illustrator: 'illustrator',
-  photographer: 'photographer',
-  foreword: 'foreword',
-  preface: 'preface',
-  penciller: 'penciller',
-  inker: 'inker',
-  colorist: 'colorist',
-  letterer: 'letterer'
-};
-
 function role(value) {
-  if (typeof value !== 'string') return 'author';
+  if (typeof value !== 'string') return normalizeContributorRole();
   const token = value.trim().toLowerCase().replace(/\s+/g, '-');
-  return ROLE_MAP[token] ?? token;
+  return normalizeContributorRole(token);
 }
 
 function nextData(html) {
@@ -121,7 +106,9 @@ export function candidatesFromSearchPage(html) {
       row
     )?.[1];
     const authorName = stripHtml(author);
-    if (authorName) candidate.contributors.push({ name: authorName, role: 'author' });
+    if (authorName) {
+      candidate.contributors.push({ name: authorName, role: normalizeContributorRole() });
+    }
 
     const cover = /class="bookCover"[^>]*src="([^"]+)"/.exec(row)?.[1];
     if (cover) candidate.coverUrl = cover.replace(/^http:/, 'https:');

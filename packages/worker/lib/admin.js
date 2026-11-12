@@ -11,6 +11,7 @@
 import http from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createIngest } from './ingest.js';
+import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
 import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
 
 export const DEFAULT_ADMIN_HOST = '127.0.0.1';
@@ -107,9 +108,14 @@ function contributorList(value) {
   const contributors = [];
   for (const entry of value) {
     if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const name = stringValue(entry.name);
+    // Lexicon-shaped input uses `displayName`; the admin UI round-trips the
+    // internal candidate shape and uses `name`.
+    const name = stringValue(entry.displayName) ?? stringValue(entry.name);
     if (!name) continue;
-    const contributor = { name, role: stringValue(entry.role) ?? 'author' };
+    const contributor = {
+      name,
+      role: normalizeContributorRole(entry.role ?? DEFAULT_CONTRIBUTOR_ROLE)
+    };
     const identifiers = identifierList(entry.identifiers);
     if (identifiers.length > 0) contributor.identifiers = identifiers;
     const ref = stringValue(entry.ref);

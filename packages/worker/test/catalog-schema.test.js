@@ -252,7 +252,7 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   assert.deepEqual(contributors.rows, [{
     name: CONTRIBUTOR,
     position: 1,
-    role: 'author',
+    role: 'A01',
     ref: 'at://did:plc:probecontributor/community.lexicon.media.book.contributor/1',
     identifiers: [{ issuer: 'orcid', value: '0000-0002-1825-0097' }]
   }]);
@@ -370,7 +370,7 @@ test('appview_book_lua exposes the text shape prelude.lua expects', { skip: SKIP
   assert.deepEqual(contributors, [{
     position: 1,
     name: CONTRIBUTOR,
-    role: 'author',
+    role: 'A01',
     identifiers: [{ issuer: 'orcid', value: '0000-0002-1825-0097' }],
     ref: 'at://did:plc:probecontributor/community.lexicon.media.book.contributor/1'
   }]);
@@ -383,7 +383,7 @@ test('appview_book_lua exposes the text shape prelude.lua expects', { skip: SKIP
   });
   assert.deepEqual(editionViewContributors, [{
     name: CONTRIBUTOR,
-    role: 'author',
+    role: 'A01',
     identifiers: [{ issuer: 'orcid', value: '0000-0002-1825-0097' }],
     ref: 'at://did:plc:probecontributor/community.lexicon.media.book.contributor/1'
   }]);

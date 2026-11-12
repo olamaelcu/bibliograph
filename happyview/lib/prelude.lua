@@ -152,6 +152,34 @@ function json_value(raw, fallback)
 end
 
 -- `community.lexicon.media.book.defs#editionView` from appview_book_lua.
+-- Contributor roles are ONIX Codelist 17 codes (lexicon.community PR #18);
+-- rows ingested before that change stored the old kebab-case tokens. Keep this
+-- table in sync with packages/worker/lib/contributor-roles.js.
+local LEGACY_CONTRIBUTOR_ROLES = {
+  author = 'A01',
+  ['co-author'] = 'A01',
+  editor = 'B01',
+  translator = 'B06',
+  narrator = 'E03',
+  illustrator = 'A12',
+  photographer = 'A08',
+  foreword = 'A23',
+  preface = 'A15',
+  penciller = 'A07',
+  inker = 'A46',
+  colorist = 'A47',
+  letterer = 'A48',
+  ['posthumous-completer'] = 'Z05'
+}
+
+local function contributor_role(value)
+  if type(value) ~= 'string' then return 'A01' end
+  local token = value:match('^%s*(.-)%s*$')
+  if token == '' then return 'A01' end
+  if token:match('^%u%d%d$') then return token end
+  return LEGACY_CONTRIBUTOR_ROLES[token:lower()] or token
+end
+
 function edition_view(uri)
   if uri == nil then return nil end
   local rows = db.raw('SELECT * FROM appview_book_lua WHERE uri = $1 LIMIT 1', { uri })
@@ -160,7 +188,7 @@ function edition_view(uri)
 
   local contributors = {}
   for _, entry in ipairs(json_value(row.contributors, {})) do
-    local contributor = { name = entry.name, role = entry.role or 'author' }
+    local contributor = { displayName = entry.name, role = contributor_role(entry.role) }
     if entry.identifiers ~= nil and #entry.identifiers > 0 then contributor.identifiers = entry.identifiers end
     if entry.ref ~= nil and entry.ref ~= json.null then contributor.ref = entry.ref end
     contributors[#contributors + 1] = contributor

@@ -1,4 +1,5 @@
 import { catalogPool } from '../catalog/db';
+import { normalizeContributorRole } from '../catalog/contributor-roles';
 import { loadAdminEditions } from './editions';
 import type { PoolClient } from 'pg';
 import {
@@ -72,10 +73,11 @@ function uniqueContributors(records: AdminEdition[]): AdminContributor[] {
   const contributors: AdminContributor[] = [];
   for (const record of records) {
     for (const contributor of record.contributors) {
-      const key = `${contributor.id}\u0000${contributor.role}`;
+      const role = normalizeContributorRole(contributor.role);
+      const key = `${contributor.id}\u0000${role}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      contributors.push(contributor);
+      contributors.push({ ...contributor, role });
     }
   }
   return contributors;
