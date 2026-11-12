@@ -1,5 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { Pool } from 'pg';
+import { CatalogUnavailableError } from './errors';
 
 /**
  * The catalog lives in this deployment's own Postgres; queries read the
@@ -9,12 +10,7 @@ import { Pool } from 'pg';
  * A missing `DATABASE_URL` is a deployment error, but it must not crash the
  * process at import time: XRPC passthrough still works without catalog access.
  */
-export class CatalogUnavailableError extends Error {
-  constructor(message = 'catalog database is not configured') {
-    super(message);
-    this.name = 'CatalogUnavailableError';
-  }
-}
+export { CatalogUnavailableError };
 
 // SvelteKit dev reloads modules; keep one pool across reloads.
 const shared = globalThis as typeof globalThis & { __bibliographCatalogPool?: Pool };

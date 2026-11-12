@@ -204,6 +204,11 @@
             "type": "ref",
             "ref": "community.lexicon.media.book.defs#identifier"
           }
+        },
+        "ref": {
+          "type": "string",
+          "description": "Optional enrichment reference to a publisher record. Mirrors defs#contributor.ref. This property is a local extension to PR #18: the upstream books-wg/lexicon.community definition does not carry it yet, so a strict consumer that validates against the community schema treats it as unknown. It is a plain at-uri rather than a strongRef on purpose: a CID here would change on every publisher edit and force a republish of every edition that credits the publisher.",
+          "format": "at-uri"
         }
       }
     },

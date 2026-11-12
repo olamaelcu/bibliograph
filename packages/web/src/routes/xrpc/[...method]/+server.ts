@@ -3,8 +3,36 @@ import type { RequestHandler } from "./$types";
 import { metrics, recordCatalogQuery } from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
 import { isPdsRead, proxyPdsRead } from "$lib/server/pds";
-import { CatalogUnavailableError } from "$lib/server/catalog/db";
+import { catalogPool } from "$lib/server/catalog/db";
+import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import { resolveEditions, searchEditions, type Identifier } from "$lib/server/catalog/editions";
+import { catalogPreflight, withCatalogCors } from "$lib/server/catalog/cors";
+import {
+  EntityQueryError,
+  EntityUriError,
+  CONTRIBUTOR_COLLECTION,
+  getContributor,
+  getPublisher,
+  listEditionsByContributor,
+  parseEntityUri,
+  resolveContributors,
+  resolvePublishers,
+  searchContributors,
+  searchPublishers,
+} from "$lib/server/catalog/entities";
+import {
+  ENTITY_METHODS,
+  ENTITY_PROCEDURES,
+  ENTITY_QUERIES,
+  GET_CONTRIBUTOR,
+  GET_PUBLISHER,
+  LIST_EDITIONS_BY_CONTRIBUTOR,
+  RESOLVE_CONTRIBUTORS,
+  RESOLVE_PUBLISHERS,
+  SEARCH_CONTRIBUTORS,
+  SEARCH_PUBLISHERS,
+} from "$lib/server/catalog/entity-methods";
+import { decodeOffsetCursor } from "$lib/server/catalog/sql";
 import {
   enqueueResolveMiss,
   enqueueIsbnHydration,
@@ -34,39 +62,6 @@ const MAX_HYDRATION_JOBS_PER_REQUEST = 10;
 const RESOLVE_EDITIONS = "community.lexicon.media.book.resolveEditions";
 const SEARCH_EDITIONS = "community.lexicon.media.book.searchEditions";
 const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
-
-/**
- * CORS for the two catalog procedures only. Livtet's search and contributor
- * pages call them from the browser, so the preflight and the responses both
- * need to answer without credentials. Nothing else on this surface is a
- * browser-facing API, so no other route gains CORS.
- */
-const CATALOG_CORS = {
-  "Access-Control-Allow-Origin": "*",
-  Vary: "Origin",
-} as const;
-
-function catalogPreflight(): Response {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      ...CATALOG_CORS,
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "content-type",
-      "Access-Control-Max-Age": "86400",
-    },
-  });
-}
-
-function withCatalogCors(response: Response): Response {
-  const headers = new Headers(response.headers);
-  for (const [name, value] of Object.entries(CATALOG_CORS)) headers.set(name, value);
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-}
 
 function methodNotAllowed(): Response {
   return json({ error: "MethodNotAllowed" }, { status: 405 });
@@ -116,14 +111,6 @@ function optionalString(value: unknown): string | undefined | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed === "" ? undefined : trimmed;
-}
-
-function catalogFailure(error: unknown): Response {
-  if (error instanceof CatalogUnavailableError) {
-    return fail(503, "ServiceUnavailable", "catalog database is not configured");
-  }
-  console.error("[xrpc] catalog query failed", error);
-  return fail(503, "ServiceUnavailable", "catalog unavailable");
 }
 
 async function handleResolve(request: Request): Promise<Response> {
@@ -249,6 +236,111 @@ async function handleSearch(request: Request): Promise<Response> {
   }
 }
 
+/** Parse an integer query parameter, clamped to [min, max]; null when it is not one. */
+function queryInteger(
+  value: string | null,
+  fallback: number,
+  min: number,
+  max: number,
+): number | null {
+  if (value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return null;
+  return Math.min(Math.max(parsed, min), max);
+}
+
+/**
+ * Entity getters and searches. They read the catalog tables, never a PDS, and
+ * are anonymous like the books-wg procedures.
+ */
+async function handleEntityGet(request: Request, method: string): Promise<Response> {
+  const params = new URL(request.url).searchParams;
+  try {
+    const pool = catalogPool();
+    if (method === GET_CONTRIBUTOR || method === GET_PUBLISHER) {
+      const uri = params.get("uri");
+      if (uri === null || uri === "") {
+        return fail(400, "InvalidRequest", "`uri` is required");
+      }
+      if (method === GET_CONTRIBUTOR) {
+        const contributor = await getContributor(pool, uri);
+        if (contributor === null) {
+          return fail(404, "RecordNotFound", "no contributor has that URI");
+        }
+        return json({ contributor });
+      }
+      const publisher = await getPublisher(pool, uri);
+      if (publisher === null) return fail(404, "RecordNotFound", "no publisher has that URI");
+      return json({ publisher });
+    }
+
+    if (method === LIST_EDITIONS_BY_CONTRIBUTOR) {
+      const contributor = params.get("contributor");
+      if (contributor === null || contributor === "") {
+        return fail(400, "InvalidRequest", "`contributor` is required");
+      }
+      if (parseEntityUri(contributor, CONTRIBUTOR_COLLECTION) === null) {
+        return fail(400, "InvalidRequest", "`contributor` must be a contributor record at-uri");
+      }
+      const limit = queryInteger(params.get("limit"), 25, 1, 100);
+      if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+      const page = await listEditionsByContributor(pool, {
+        contributor,
+        offset: decodeOffsetCursor(params.get("cursor")),
+        limit,
+      });
+      if (page === null) return fail(404, "RecordNotFound", "no contributor has that URI");
+      return json(page);
+    }
+
+    const q = (params.get("q") ?? "").trim();
+    if (q === "") return fail(400, "InvalidQuery", "`q` is required");
+    if (q.length > 256) return fail(400, "InvalidRequest", "`q` is limited to 256 characters");
+    const limit = queryInteger(params.get("limit"), 25, 1, 100);
+    if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+    const cursor = params.get("cursor") ?? undefined;
+    const results =
+      method === SEARCH_CONTRIBUTORS
+        ? await searchContributors(pool, { q, limit, cursor })
+        : await searchPublishers(pool, { q, limit, cursor });
+    return json(results);
+  } catch (error) {
+    if (error instanceof EntityUriError) return fail(400, "InvalidRequest", error.message);
+    if (error instanceof EntityQueryError) return fail(400, "InvalidQuery", error.message);
+    return catalogFailure(error);
+  }
+}
+
+/** Identifier lookups: exact pairs in a JSON body, paged like resolveEditions. */
+async function handleEntityResolve(request: Request, method: string): Promise<Response> {
+  const body = await readBody(request);
+  if (body === null) return fail(400, "InvalidRequest", "the request body must be a JSON object");
+
+  const identifiers = parseIdentifiers(body.identifiers);
+  if (identifiers === null || identifiers.length === 0 || identifiers.length > MAX_IDENTIFIERS) {
+    return fail(
+      400,
+      "InvalidRequest",
+      `identifiers must be a non-empty array of at most ${MAX_IDENTIFIERS} issuer/value pairs`,
+    );
+  }
+  const offset = boundedInteger(body.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+  const limit = boundedInteger(body.limit, 25, 1, 100);
+  if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
+  if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
+
+  try {
+    const pool = catalogPool();
+    const results =
+      method === RESOLVE_CONTRIBUTORS
+        ? await resolveContributors(pool, { identifiers, offset, limit })
+        : await resolvePublishers(pool, { identifiers, offset, limit });
+    return json(results);
+  } catch (error) {
+    return catalogFailure(error);
+  }
+}
+
 /**
  * Catalog discovery is served here, from the deployment's own catalog tables,
  * because the books-wg lexicons call them read-only procedures that must stay
@@ -258,7 +350,7 @@ async function handleSearch(request: Request): Promise<Response> {
  * Every other XRPC call is relayed to the AppView unchanged; the edge adds its
  * own client identity, and callers may present their own credentials.
  */
-export const GET: RequestHandler = ({ params, request }) => {
+export const GET: RequestHandler = async ({ params, request }) => {
   if (!NSID.test(params.method)) {
     return json({ error: "InvalidRequest" }, { status: 400 });
   }
@@ -266,8 +358,13 @@ export const GET: RequestHandler = ({ params, request }) => {
   // GET-only pair, and `public` is the only anonymous feed.
   if (params.method === DESCRIBE_FEED_GENERATOR) return describeFeedGenerator();
   if (params.method === GET_FEED_SKELETON) return getFeedSkeleton(request);
-  // Both books-wg methods are procedures.
-  if (EDGE_PROCEDURES.has(params.method)) return methodNotAllowed();
+  if (ENTITY_QUERIES.has(params.method)) {
+    return withCatalogCors(await handleEntityGet(request, params.method));
+  }
+  // The books-wg and entity procedures are POST-only.
+  if (EDGE_PROCEDURES.has(params.method) || ENTITY_PROCEDURES.has(params.method)) {
+    return methodNotAllowed();
+  }
   // Publisher-record reads go to the PDS; other com.atproto methods still go
   // to HappyView below.
   if (isPdsRead(params.method)) return proxyPdsRead(params.method, request);
@@ -281,6 +378,11 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (isFeedMethod(params.method)) return methodNotAllowed();
   if (params.method === RESOLVE_EDITIONS) return withCatalogCors(await handleResolve(request));
   if (params.method === SEARCH_EDITIONS) return withCatalogCors(await handleSearch(request));
+  if (ENTITY_PROCEDURES.has(params.method)) {
+    return withCatalogCors(await handleEntityResolve(request, params.method));
+  }
+  // Entity getters and searches are GET-only.
+  if (ENTITY_QUERIES.has(params.method)) return methodNotAllowed();
   return forward(params.method, request);
 };
 
@@ -288,8 +390,10 @@ export const PUT: RequestHandler = () => methodNotAllowed();
 export const PATCH: RequestHandler = () => methodNotAllowed();
 export const DELETE: RequestHandler = () => methodNotAllowed();
 export const OPTIONS: RequestHandler = ({ params }) => {
-  // Only the browser-called catalog procedures answer a preflight; every other
+  // Only the browser-called catalog methods answer a preflight; every other
   // path keeps the surface's 405.
-  if (EDGE_PROCEDURES.has(params.method)) return catalogPreflight();
+  if (EDGE_PROCEDURES.has(params.method) || ENTITY_METHODS.has(params.method)) {
+    return catalogPreflight();
+  }
   return methodNotAllowed();
 };

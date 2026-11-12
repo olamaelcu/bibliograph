@@ -58,7 +58,10 @@ const isbndbBook = {
   date_published: '2020',
   pages: 200,
   language: 'en',
-  isbn13: '9780306406157',
+  // A fresh ISBN: the development catalog may already own a real one, and a
+  // direct lookup updates the edition that owns the identifier instead of
+  // minting a test-authority row.
+  isbn13: '9780306406164',
   image: 'http://img.example/direct.jpg',
   synopsis: 'A direct ISBNdb lookup.'
 };
@@ -142,15 +145,48 @@ let googleRequests = 0;
 let goodreadsRequests = 0;
 const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
 
+/**
+ * Put shared rows back the way the tests found them. A test ingest mints an
+ * `at_uri` for a contributor/publisher that may already exist in the populated
+ * development catalog; deleting that row would violate the edition FK, so the
+ * row stays and only the test-authority pointer is cleared.
+ */
+async function releaseTestEntityUris(pool, authority) {
+  const prefix = `at://${authority}/%`;
+  await pool.query(
+    `UPDATE contributors SET at_uri = NULL
+      WHERE at_uri LIKE $1
+        AND name IN ('Isbn Test Author', 'Ursula K. Le Guin', 'Isbn Order Author')`,
+    [prefix]
+  );
+  await pool.query(
+    `UPDATE publishers SET at_uri = NULL
+      WHERE at_uri LIKE $1
+        AND name IN ('Isbn Direct Press', 'Ace', 'Isbn Order Press')`,
+    [prefix]
+  );
+}
+
 async function cleanupHydrationRows(pool, host) {
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
+  await pool.query(
+    `DELETE FROM contributors c
+      WHERE c.name IN ('Isbn Test Author', 'Ursula K. Le Guin', 'Isbn Order Author')
+        AND NOT EXISTS (
+          SELECT 1 FROM edition_contributors ec WHERE ec.contributor_id = c.id
+        )`
+  );
+  await pool.query(
+    `DELETE FROM publishers p
+      WHERE p.name IN ('Isbn Direct Press', 'Ace', 'Isbn Order Press')
+        AND NOT EXISTS (
+          SELECT 1 FROM edition_publishers ep WHERE ep.publisher_id = p.id
+        )`
+  );
+  await releaseTestEntityUris(pool, `did:web:${host}`);
+  // Last: deleting an entity with an at_uri queues its outbox delete, so the
+  // row cleanup above must finish before the outbox is swept.
   await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
-  await pool.query(
-    "DELETE FROM contributors WHERE name IN ('Isbn Test Author', 'Ursula K. Le Guin', 'Isbn Order Author')"
-  );
-  await pool.query(
-    "DELETE FROM publishers WHERE name IN ('Isbn Direct Press', 'Ace', 'Isbn Order Press')"
-  );
   await pool.query('DELETE FROM isbndb_cache WHERE key LIKE $1', [`${baseUrl}/isbndb/%`]);
   await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${baseUrl}/%`]);
 }
@@ -171,7 +207,7 @@ before(async () => {
       else send(query?.startsWith('isbn:') ? googleBody : { totalItems: 0, items: [] });
       return;
     }
-    if (url.pathname === '/isbndb/book/9780306406157') {
+    if (url.pathname === '/isbndb/book/9780306406164') {
       isbndbRequests += 1;
       send({ book: isbndbBook });
       return;
@@ -404,9 +440,22 @@ test('resolve hydrates the catalog from provider results', async () => {
     assert.equal(same.rows[0].uri, firstUri, 'identity is the identifier bag, not the rkey');
   } finally {
     await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
+    await pool.query(
+      `DELETE FROM contributors c
+        WHERE c.name = 'Ursula K. Le Guin'
+          AND NOT EXISTS (
+            SELECT 1 FROM edition_contributors ec WHERE ec.contributor_id = c.id
+          )`
+    );
+    await pool.query(
+      `DELETE FROM publishers p
+        WHERE p.name = 'Ace'
+          AND NOT EXISTS (
+            SELECT 1 FROM edition_publishers ep WHERE ep.publisher_id = p.id
+          )`
+    );
+    await releaseTestEntityUris(pool, 'did:web:test.example');
     await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:web:test.example/%'");
-    await pool.query("DELETE FROM contributors WHERE name = 'Ursula K. Le Guin'");
-    await pool.query("DELETE FROM publishers WHERE name = 'Ace'");
     await pool.query("DELETE FROM google_books_cache WHERE key LIKE $1", [`${baseUrl}/%`]);
     await pool.end();
   }
@@ -462,9 +511,22 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
     assert.equal(new Set(editions.rows.map((row) => row.rkey)).size, 2);
   } finally {
     await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+    await pool.query(
+      `DELETE FROM contributors c
+        WHERE c.name = 'Ursula K. Le Guin'
+          AND NOT EXISTS (
+            SELECT 1 FROM edition_contributors ec WHERE ec.contributor_id = c.id
+          )`
+    );
+    await pool.query(
+      `DELETE FROM publishers p
+        WHERE p.name = 'Ace'
+          AND NOT EXISTS (
+            SELECT 1 FROM edition_publishers ep WHERE ep.publisher_id = p.id
+          )`
+    );
+    await releaseTestEntityUris(pool, publisherDid);
     await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
-    await pool.query("DELETE FROM contributors WHERE name = 'Ursula K. Le Guin'");
-    await pool.query("DELETE FROM publishers WHERE name = 'Ace'");
     await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${baseUrl}/%`]);
     await pool.end();
   }
@@ -498,8 +560,15 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
     assert.equal(edition.rows[0].cover_url, 'https://img.example/18423.jpg');
   } finally {
     await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
+    await pool.query(
+      `DELETE FROM contributors c
+        WHERE c.name = 'Ursula K. Le Guin'
+          AND NOT EXISTS (
+            SELECT 1 FROM edition_contributors ec WHERE ec.contributor_id = c.id
+          )`
+    );
+    await releaseTestEntityUris(pool, 'did:web:test.example');
     await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:web:test.example/%'");
-    await pool.query("DELETE FROM contributors WHERE name = 'Ursula K. Le Guin'");
     await pool.query("DELETE FROM google_books_cache WHERE key LIKE $1", [`${baseUrl}/%`]);
     await pool.end();
   }
@@ -523,7 +592,7 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
     await cleanupHydrationRows(pool, 'isbn-direct.example');
     isbndbRequests = 0;
 
-    await tasks['catalog.isbn']({ isbn: '9780306406157' }, helpers);
+    await tasks['catalog.isbn']({ isbn: '9780306406164' }, helpers);
 
     const edition = await pool.query(
       "SELECT uri, rkey, title, pages, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
@@ -538,7 +607,7 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
       'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',
       [edition.rows[0].uri]
     );
-    assert.deepEqual(identifiers.rows, [{ issuer: 'isbn13', value: '9780306406157' }]);
+    assert.deepEqual(identifiers.rows, [{ issuer: 'isbn13', value: '9780306406164' }]);
 
     const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
       edition.rows[0].uri

@@ -1,0 +1,44 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getPublisher",
+  "description": "Fetch one catalog publisher record by its AT-URI. This is an anonymous catalog read served by the bibliograph edge from the catalog tables; it is never handled by HappyView.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uri"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of a net.olamaelcu.livtet.biblio.publisher record. A URI from another collection is rejected rather than looked up."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["publisher"],
+          "properties": {
+            "publisher": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#publisherView"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "The uri is missing, malformed, or not a publisher record URI."
+        },
+        {
+          "name": "RecordNotFound",
+          "description": "No catalog publisher has that URI."
+        }
+      ]
+    }
+  }
+}

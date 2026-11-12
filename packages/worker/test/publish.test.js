@@ -244,12 +244,13 @@ async function makeEdition({
 async function cleanup() {
   await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [`${PREFIX}%`]);
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`${PREFIX}%`]);
-  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${PREFIX}%`]);
   await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
-  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
   await pool.query('DELETE FROM contributors WHERE name LIKE $1', [`${CONTRIBUTOR_PREFIX}%`]);
   await pool.query('DELETE FROM publishers WHERE name LIKE $1', ['PDS Test Publisher%']);
+  // Row deletes queue outbox rows (entity deletes included), so sweep last.
+  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${PREFIX}%`]);
+  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
 }
 
 before(async () => {

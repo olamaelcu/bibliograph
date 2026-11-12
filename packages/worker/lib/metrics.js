@@ -11,7 +11,7 @@ import http from 'node:http';
 
 import { DEFAULT_ISBNDB_DAILY_LIMIT, readDailyCalls } from './providers/usage.js';
 import { renderProviderMetrics } from './providers/resilience.js';
-import { DEFAULT_LEASE_MS, MAX_ATTEMPTS, OUTBOX_COLLECTION } from './publish.js';
+import { DEFAULT_LEASE_MS, MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from './publish.js';
 
 const CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 const DEFAULT_HOST = '127.0.0.1';
@@ -32,7 +32,7 @@ function nonNegative(value) {
 /**
  * Aggregate the pds_outbox backlog for one scrape.
  *
- * `ready` mirrors the claim predicate in publish.js (same collection, attempt
+ * `ready` mirrors the claim predicate in publish.js (same collections, attempt
  * cap, due time and lease), so it counts exactly the rows the next drain could
  * pick up. `parked` counts rows that exhausted MAX_ATTEMPTS and are only
  * visible to an operator. One aggregate query over the partial ready index;
@@ -56,9 +56,9 @@ export async function readOutboxStats(pool, { publisherDid, leaseMs = DEFAULT_LE
          )
        )), 0) AS oldest_age_seconds
      FROM pds_outbox
-     WHERE collection = $1
+     WHERE collection = ANY($1::text[])
        AND ($4::text IS NULL OR starts_with(uri, 'at://' || $4 || '/'))`,
-    [OUTBOX_COLLECTION, MAX_ATTEMPTS, leaseSeconds, publisherDid ?? null]
+    [OUTBOX_COLLECTIONS, MAX_ATTEMPTS, leaseSeconds, publisherDid ?? null]
   );
 
   const row = result.rows[0] ?? {};

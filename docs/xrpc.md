@@ -8,11 +8,15 @@ It is drawn from the deployed lexicons in `happyview/lexicons` and the handler s
 
 The surface is the set of uploaded lexicons plus the book lexicons imported from
 [lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest) into
-`happyview/lexicons/community/lexicon/media/book/`: **17 queries, 17 procedures and 8 record
-types**. Two procedures
-(`community.lexicon.media.book.resolveEditions` and `searchEditions`) are anonymous catalog reads
-served by the edge in `packages/web`; the other 15 are HappyView procedures that write to a caller's
-PDS. Everything except the review and edition record types lives under
+`happyview/lexicons/community/lexicon/media/book/` and the edge-served entity lexicons under
+`happyview/lexicons/net/olamaelcu/livtet/biblio/`: **22 queries, 19 procedures and 10 record
+types**. Nine methods are anonymous catalog reads served by the edge in `packages/web`: the two
+books-wg procedures (`community.lexicon.media.book.resolveEditions` and `searchEditions`) and the
+seven entity methods under `net.olamaelcu.livtet.biblio.*` (`getContributor`, `getPublisher`,
+`listEditionsByContributor`, `resolveContributors`, `resolvePublishers`, `searchContributors`,
+`searchPublishers`). The other 15
+procedures are HappyView procedures that write to a caller's PDS. Everything except the review and
+edition record types lives under
 `net.olamaelcu.livtet.biblio.*`. HappyView's built-in `com.atproto.*` routes are not part of this
 surface — they proxy to an authority DID that the local network does not resolve. The edge proxies
 exactly two read-only `com.atproto` methods, `repo.getRecord` and `repo.listRecords`, to the PDS.
@@ -23,8 +27,8 @@ exactly two read-only `com.atproto` methods, `repo.getRecord` and `repo.listReco
 Every call reaches HappyView through the SvelteKit edge (`packages/web/src/routes/xrpc/[...method]`),
 which:
 
-- accepts only `GET` and `POST`; `OPTIONS` is answered only as a CORS preflight for the two catalog
-  procedures and is `405 MethodNotAllowed` everywhere else;
+- accepts only `GET` and `POST`; `OPTIONS` is answered only as a CORS preflight for the nine
+  edge-served catalog methods and is `405 MethodNotAllowed` everywhere else;
 - rejects a path that is not a plausible NSID with `400 InvalidRequest`;
 - relays only `content-type`, `accept`, `authorization` and `dpop` upstream, and adds its own
   `X-Client-Key`/`X-Client-Secret` from the environment (the browser cannot choose them);
@@ -43,11 +47,11 @@ com.atproto.repo.getRecord` and `GET com.atproto.repo.listRecords` are proxied t
 timeout is `502 UpstreamUnavailable`; an unset `PDS_URL` is `503 ServiceUnavailable` with a message
 naming the missing setting. Every other `com.atproto.*` method still goes to HappyView.
 
-The two catalog procedures are the only browser-facing part of the surface: Livtet's search and
-contributor pages call them directly. `OPTIONS` on either NSID answers `204` with
-`Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: POST, OPTIONS`,
+The nine catalog methods are the only browser-facing part of the surface: Livtet's search and
+contributor pages call them directly. `OPTIONS` on any of their NSIDs answers `204` with
+`Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, POST, OPTIONS`,
 `Access-Control-Allow-Headers: content-type`, `Access-Control-Max-Age: 86400` and `Vary: Origin`;
-their `POST` responses carry `Access-Control-Allow-Origin: *` and `Vary: Origin`, including errors.
+their responses (including errors) carry `Access-Control-Allow-Origin: *` and `Vary: Origin`.
 No credentials are allowed, and no other NSID gains CORS.
 
 The two books-wg procedures never reach HappyView: the edge dispatches them on NSID and answers them
@@ -55,6 +59,13 @@ from the catalog tables (`editions`, `edition_identifiers`, `edition_contributor
 `edition_publishers`). They are `POST` by lexicon and reject `GET` with `405 MethodNotAllowed`.
 They never write catalog rows; when the local catalog cannot answer, they may queue a hydration job
 and mark it in `catalog_enqueue_marks`.
+
+The seven entity methods never reach HappyView either. They read `contributors` / `publishers` /
+`edition_contributors` (plus `pds_cids` for the last published CID on the two getters) and never
+read a PDS or write a row. The two getters, the editions-by-contributor listing and the two searches
+are `GET`; the two resolvers are `POST` because the identifier array travels in a JSON body. A wrong
+verb is `405 MethodNotAllowed`. They do not queue hydration: contributor and publisher rows are only
+populated by ingest and catalog curation.
 
 The feed generator is also served at the edge, from `happyview.happyview_records`, never from
 HappyView. `GET com.atproto.feed.describeFeedGenerator` is anonymous and advertises exactly four
@@ -73,7 +84,7 @@ proxied to the caller's PDS. Without a session those 15 procedures answer `401` 
 `caller_did`; every procedure that names an existing review or shelf compares it against
 `caller_did` and answers `403 Forbidden` on a mismatch.
 
-The two catalog procedures are the exception: they are read-only and anonymous, and they never
+The nine catalog methods are the exception: they are read-only and anonymous, and they never
 require or read a session. They also need `DATABASE_URL`; when it is unset or the catalog is
 unreachable they answer `503 ServiceUnavailable` instead of proxying anywhere.
 
@@ -121,6 +132,7 @@ and answers `400 InvalidRequest` when it is not the expected `{c,u}` object.
 | `{ "o": <offset> }` | offset, advanced by the number of **emitted** rows (`limit`); the `limit + 1` probe row only decides whether another page exists | `getReviewsByBook`, `listReviewsByActor`, `listShelfItems`, `listShelfItemsByBook`, `getShelvingOfBook` |
 | `{ "t": <created_at>, "u": <uri> }` | keyset over `(created_at, uri)`, descending | `listBooksOnShelf`, `listRecentShelving` |
 | `{ "u": <uri> }` | keyset over `uri`, ascending; for `getShelversOfBook` it is the smallest URI seen per DID | `listShelves`, `listShelvesWithBooks`, `getShelversOfBook` |
+| `{ "o": <offset> }` | offset, advanced by the emitted page size | `listEditionsByContributor`, `searchContributors`, `searchPublishers` |
 | raw DID | keyset over the follower DID / subject DID, ascending | `graph.listFollowers`, `graph.listFollowees` |
 | `{ "c": <createdAt>, "u": <uri> }` | keyset over the record's own `createdAt` (text order) and `uri`, descending; `c` may be `null` for a row without `createdAt` | `com.atproto.feed.getFeedSkeleton` |
 
@@ -141,18 +153,18 @@ back to the default. The feed generator defaults to 20 and clamps to 1–100; a 
 | Status | Error | Origin |
 | --- | --- | --- |
 | 400 | `InvalidRequest` | a required parameter is missing, or a value violates its contract: non-DID `subject`, self-follow, non-AT-URI shelf/review URI, wrong collection, bad enum (`status`, `period`), out-of-range integer, empty update, invalid `editionRef`, non-strongRef `book` |
-| 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author` or identifier |
+| 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author` or identifier; `searchContributors` / `searchPublishers` without a nonblank `q` |
 | 401 | `XRPC procedures require DPoP authentication` | the 15 HappyView procedures, until a DPoP session is presented |
 | 401 | `AuthRequired` | a personalized feed (`following`/`extended`/`dynamic`) without a valid service JWT |
 | 403 | `Forbidden` | the named review or shelf belongs to another DID |
 | 404 | `NotFound` | a procedure targets a follow, review, shelf, `bookStatus` or `shelfItem` that does not exist |
-| 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing |
+| 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing; `getContributor` / `getPublisher` / `listEditionsByContributor` when no catalog row has the URI |
 | 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST, and for `POST` on the two feed methods |
 | 502 | `UpstreamFailure` | any procedure when the PDS rejects a save, delete or batch |
 | 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable, or when a PDS-proxied read fails or times out |
-| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (`resolveEditions` / `searchEditions` / `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
+| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (the two books-wg procedures, the seven entity methods, `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
 
-Queries, the two catalog procedures and the `public` feed never answer `401`. Missing optional
+Queries, the nine catalog methods and the `public` feed never answer `401`. Missing optional
 records are not errors: `getActorProfile` and `getReadingGoal` answer `200` with `null`.
 
 **Views.** Responses embed the lexicon's view types from `net.olamaelcu.livtet.biblio.defs`:
@@ -161,6 +173,15 @@ records are not errors: `getActorProfile` and `getReadingGoal` answer `200` with
 (same shape), `shelfWithBooksView` (`shelf`, `books`), and `reviewView`
 (`uri`, `did`, `record`). `edition` is the `community.lexicon.media.book.defs#editionView` built
 from the catalog.
+
+The entity methods use `defs#contributorView` and `defs#publisherView`: `uri` plus the record's
+fields (`displayName`/`name`, optional `description`, `imageUrl`, `identifiers`, the strict
+`YYYY-MM-DD` dates, `createdAt`). The two getters also return `cid`, the last published record CID
+from `pds_cids`; list responses omit it. `image` is present only when the published record carries
+a blob the publishing repo owns (the catalog emits `imageUrl` only).
+
+`listEditionsByContributor` items use `defs#bookView` (`uri` plus the edition's `editionView`), the
+same shape the activity queries embed, so the client can render and link the edition directly.
 
 Every `editionView` in `resolveEditions` / `searchEditions` carries the edition's atproto URI as an
 identifier: `{ "issuer": "atproto", "value": "at://<did>/community.lexicon.media.book.edition/<rkey>" }`,
@@ -207,10 +228,15 @@ signal. Queued work is not a promise that anything will be found.
 | `graph.isFollowing` | `follower`, `followed` | `{ following }` |
 | `graph.listFollowers` | `did`, `limit` 100 (≤1000), `cursor` | `{ followers, total, cursor? }` |
 | `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total, cursor? }` |
+| `getContributor` | `uri` (at-uri) | `{ contributor }` |
+| `getPublisher` | `uri` (at-uri) | `{ publisher }` |
+| `listEditionsByContributor` | `contributor` (at-uri), `limit` 25 (≤100), `cursor` | `{ items, cursor?, total? }` |
+| `searchContributors` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |
+| `searchPublishers` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |
 
 ### Procedures
 
-The two catalog procedures are anonymous reads over the catalog tables. The other fifteen require a
+The nine catalog methods are anonymous reads over the catalog tables. The other fifteen require a
 DPoP session and write to the caller's PDS, then index the accepted record in `happyview_records` in
 the same request.
 
@@ -218,6 +244,8 @@ the same request.
 | --- | --- | --- |
 | `community.lexicon.media.book.resolveEditions` | `identifiers[]` (required), `offset` 0, `limit` 25 (≤100) | `editionResults` |
 | `community.lexicon.media.book.searchEditions` | `q?`, `title?`, `author?`, `identifiers[]?`, `offset` 0, `limit` 25 (≤100) | `editionResults` |
+| `resolveContributors` | `identifiers[]` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
+| `resolvePublishers` | `identifiers[]` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
 | `graph.follow` | `subject` (DID) | `{ uri, created }` |
 | `graph.unfollow` | `subject` (DID) | `{ uri }` |
 | `profile.set` | `displayName?` (≤640), `description?` (≤256), `avatarCid?` | `{ uri }` |
@@ -484,6 +512,47 @@ ingest the edition from the provider, not to fill an empty page. Only the first
 each is deduplicated by its own TTL mark. No response field signals queued work: the response shape
 is unchanged (`items`/`hasMore`/`total`; `editionResults` has no `pending` or `degraded` field), so
 clients learn of new editions only by re-calling later.
+
+### Entity records (edge)
+
+The seven entity methods are anonymous catalog reads like the books-wg pair: the edge
+dispatches them on NSID, they read `contributors` / `publishers` (never a PDS), and they answer
+`503 ServiceUnavailable` when `DATABASE_URL` is unset or the query fails. They never queue
+hydration — contributor and publisher rows are populated by ingest and catalog curation, not by a
+provider lookup — and they never write a row. `getContributor`, `getPublisher`,
+`listEditionsByContributor`, `searchContributors` and
+`searchPublishers` are `GET`; `resolveContributors` / `resolvePublishers` are `POST` because the
+identifier array travels in a JSON body.
+
+**Identity.** The only accepted URI is
+`at://<did>/net.olamaelcu.livtet.biblio.contributor/<rkey>` (or `.publisher`). A missing, malformed
+or wrong-collection `uri` is `400 InvalidRequest`, never a lookup; a well-formed URI with no catalog
+row is `404 RecordNotFound`. The two getters return `cid` (the last CID from `pds_cids`) so a caller
+can build a strongRef without a second read; list items omit it. Empty optional fields are omitted
+from the view rather than sent as `null`. Dates are the stored strict `YYYY-MM-DD` values; the
+method does not re-validate them, because the builder rejected an invalid one at publish time.
+
+**Resolvers.** `identifiers[]` is required, capped at 100 pairs, and each pair matches by exact
+`(issuer, value)` containment in the row's identifier array — no normalization. A row matching
+several pairs appears once. Results are ordered `lower(name), uri`, paged by `offset`/`limit`, with
+`LIMIT limit + 1` deciding `hasMore`; `total` is counted on the first page only. No match is an
+empty page (the lexicon declares no `RecordNotFound` for a resolver). Because identifiers are
+sparse in the current catalog, a resolver usually answers empty until curation adds pairs.
+
+**Search.** `q` is required and trimmed; blank is `400 InvalidQuery` and longer than 256 characters
+is `400 InvalidRequest`. Matching is an escaped `ILIKE` over the display name and every identifier
+value. Ranking is exact name (case-insensitive) first, then name prefix, then substring, with a
+stable `lower(name), uri` tie-break. Pagination is the offset cursor `{ "o": <offset> }`; an
+emitted cursor advances by the number of items returned, and a malformed cursor restarts at 0.
+
+**Editions by contributor.** `contributor` must be a contributor record at-uri, validated like the
+getter: a malformed URI or another collection is `400 InvalidRequest`, and a URI with no catalog row
+is `404 RecordNotFound`. The query resolves the contributor, then matches `edition_contributors` to
+`editions`. Every credited edition is returned **regardless of role** (author, translator,
+illustrator, … appear together), and `EXISTS` keeps a person credited twice on one edition from
+duplicating it. Items are `defs#bookView` (`uri` + `editionView`). Order is
+`editions.created_at DESC, uri ASC`; `total` is the distinct credited-edition count on the first
+page; `limit` defaults to 25 (max 100) and `cursor` is the same offset cursor as the searches.
 
 ### Follow
 

@@ -49,22 +49,64 @@ an ISBN. Identity is the identifier bag: an ingest first looks up
 bags therefore mint two different TIDs, while re-resolving the same identifier
 always lands on the same edition URI.
 
+## Entity records
+
+Contributors and publishers are published records too:
+`net.olamaelcu.livtet.biblio.contributor` and
+`net.olamaelcu.livtet.biblio.publisher`, both `key: tid`, both under the same
+publisher authority as editions. Their fields mirror
+`community.lexicon.media.book.defs#contributor` / `#publisher` (`displayName`,
+`name`, `identifiers`) and add `description`, `imageUrl`, an optional `image`
+blob (the catalog publishes the URL only; it does not own image bytes), and
+strict `YYYY-MM-DD` dates (`born`/`died`, `started`/`ended`). Lexicon strings
+cannot carry a regex, so the builders validate the pattern *and* the calendar
+and reject `2023-02-29`, a partial date or a non-http image URL; the row parks
+with the reason instead of publishing an invalid record.
+
+A contributor or publisher row gets its address the first time it is written:
+`linkContributors` / `linkPublisher` mint
+`at://<authority>/<collection>/<tid>` in the same transaction as the row, and
+the entity trigger queues the record. Rows that predate the feature have a NULL
+`at_uri` and are minted once by `node index.js --prepare-entities` (the
+`entities.prepare` worker task), which also queues the editions crediting them.
+The task is idempotent; `--phase=editions` is the post-publish republish pass
+for editions whose records were published before the refs existed.
+
+Editions link to the records with `defs#contributor.ref` (already in the shared
+lexicon) and a local `defs#publisher.ref` extension mirroring it. Both are
+plain at-uris, not strongRefs: a CID would change on every entity edit and
+force a republish of every edition that credits the entity. The per-edge
+`edition_contributors.ref` override wins over the entity URI
+(`COALESCE(ec.ref, c.at_uri)` in the read models). Renaming an entity changes
+only its record; merging keeps the base row's URI, repoints the links, and
+queues a delete for the absorbed record.
+
 ## Publication
 
-Triggers on `editions` and its child tables write `pds_outbox` rows. The
-`pds-publish` graphile task drains them into the publisher PDS with
-`com.atproto.repo.applyWrites`; `pds_cids` records the last published CID so the
-worker chooses create/update without a read. Only editions are published — there
-are no work, contributor or publisher records.
+Triggers on `editions`, its child tables, `contributors` and `publishers` write
+`pds_outbox` rows for three collections: the edition record, the contributor
+record and the publisher record. The `pds-publish` graphile task drains every
+collection in one pass with `com.atproto.repo.applyWrites`; `pds_cids` records
+the last published CID so the worker chooses create/update without a read. An
+entity trigger skips a NULL `at_uri`, so applying the schema queues nothing by
+itself.
 
-The record value is rebuilt from the catalog at publish time
-(`packages/worker/lib/edition-record.js`), not stored in `pds_outbox.value`.
+The record value is rebuilt from the catalog at publish time — editions with
+`buildEditionRecord` (`packages/worker/lib/edition-record.js`), entities with
+`buildContributorRecord` / `buildPublisherRecord` (`entity-record.js`) — not
+stored in `pds_outbox.value`.
 Identifiers come from `edition_identifiers`, contributors from
 `edition_contributors` + `contributors` in `position` order, and the single
 publisher from the lowest-position `edition_publishers` row. `coverUrl` is a
 URL only; catalog editions never embed blobs, so the publisher repo does not own
 cover bytes. An edition without an identifier row is not lexicon-valid and the
 publish is retried as a failure (the outbox row names the reason).
+
+Ordering between collections is irrelevant: a missing `ref` target is optional
+enrichment and self-heals on the next edition republish. Publication can only
+drain while the publisher session is healthy; after ten failed attempts a row
+parks, and the 0004 rollout therefore starts by renewing the PDS token (84 rows
+were parked on `ExpiredToken` before this change).
 
 The authority in the URI is the publisher identity: `ATP_SERVICE_DID`, else
 `did:web:<ATP_SERVICE_HOST>`. New editions mint their URI from that identity,
@@ -87,9 +129,14 @@ creates the `appview_book`/`appview_book_lua` read models. See
 [`operations/fresh-database.md`](operations/fresh-database.md).
 
 The public `/xrpc` gateway serves the two read-only books-wg procedures
-(`resolveEditions`, `searchEditions`) anonymously from the catalog tables, with
-CORS because Livtet calls them from the browser; every `editionView` they
-return carries the edition's atproto URI as an `atproto` identifier. GET
+(`resolveEditions`, `searchEditions`) and the seven entity methods
+(`getContributor`, `getPublisher`, `listEditionsByContributor`,
+`resolveContributors`, `resolvePublishers`, `searchContributors`,
+`searchPublishers`) anonymously from the catalog tables, with CORS because
+Livet calls them from the browser; every `editionView` they return carries the
+edition's atproto URI as an `atproto` identifier. Entity
+reads include the last published CID on the two getters and never read a PDS.
+GET
 `com.atproto.repo.getRecord` and `com.atproto.repo.listRecords` are proxied to
 `PDS_URL`, so clients read publisher records through the edge. Everything else
 is forwarded to HappyView, including the remaining `com.atproto.*` methods

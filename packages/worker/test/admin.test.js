@@ -64,10 +64,21 @@ async function cleanup() {
   if (!pool) return;
   const prefix = `at://${AUTHORITY}/%`;
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
-  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [prefix]);
-  await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE name = $1', [CONTRIBUTOR]);
   await pool.query('DELETE FROM publishers WHERE name = $1', [PUBLISHER]);
+  // A shared row that a real edition still credits stays; clear only the
+  // test-authority pointer this suite minted on it.
+  await pool.query('UPDATE contributors SET at_uri = NULL WHERE name = $1 AND at_uri LIKE $2', [
+    CONTRIBUTOR,
+    `at://${AUTHORITY}/%`
+  ]);
+  await pool.query('UPDATE publishers SET at_uri = NULL WHERE name = $1 AND at_uri LIKE $2', [
+    PUBLISHER,
+    `at://${AUTHORITY}/%`
+  ]);
+  // Entity deletes/updates above queue outbox rows, so sweep it last.
+  await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [prefix]);
+  await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [prefix]);
   if (providerBase) {
     await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${providerBase}/%`]);
     await pool.query('DELETE FROM isbndb_cache WHERE key LIKE $1', [`${providerBase}/%`]);

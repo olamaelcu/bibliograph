@@ -54,12 +54,50 @@ The PR's substantive changes are in `defs.json` and `edition.json`:
 Existing catalog rows keep the old `name`/kebab-role shape. No database migration is performed:
 `buildEditionRecord` and the `editionView` mappers emit `displayName` and an ONIX code, while
 ingest accepts `displayName` or `name` and normalizes known roles to codes for new rows.
-`nameInverted` is accepted by the record builder when a row carries it, but the catalog has no
-column for it, so it is not persisted; adding it needs a schema migration.
+`nameInverted` is accepted by the record builder when a row carries it; `0004-entity-records.sql`
+adds the `contributors.name_inverted` column so it can be persisted.
 
 Both new methods are `type: procedure` with a JSON body and `application/json` output, but they are
 **read-only**: `resolveEditions` has no declared errors, `searchEditions` declares
 `InvalidQuery` for a blank cross-field input. Neither takes an attestation or writes a record.
+
+## Our own entity record types
+
+Besides the imported edition type, the catalog publishes two records of its own, under the same
+authority and TID scheme:
+
+| NSID | Lexicon | Notes |
+| --- | --- | --- |
+| `net.olamaelcu.livtet.biblio.contributor` | `happyview/lexicons/net/olamaelcu/livtet/biblio/contributor.json` | `key: tid`; required `displayName`, `createdAt` |
+| `net.olamaelcu.livtet.biblio.publisher` | `happyview/lexicons/net/olamaelcu/livtet/biblio/publisher.json` | `key: tid`; required `name`, `createdAt` |
+
+Both reuse the shared field names (`displayName`, `nameInverted`, `name`, `identifiers` with
+`community.lexicon.media.book.defs#identifier` items) and add `description`, `imageUrl`, an
+optional `image` blob, and dates: `born`/`died` for a contributor, `started`/`ended` for a
+publisher. The URI authority is `ATP_SERVICE_DID`, the rkey is a 13-character TID from
+`editions_next_tid()`, and the record is queued on the `pds_outbox` under its own collection.
+
+Dates are strict full calendar dates, `YYYY-MM-DD`. Lexicon strings have no `pattern` field (the
+specification defines none), so the pattern cannot live in the schema; the property description
+states it and `packages/worker/lib/entity-record.js` validates the text *and* the calendar,
+rejecting partial dates, `2023-02-29` and an impossible month/day. The edge returns the stored
+value unchanged.
+
+`image` is legal only when the blob belongs to the repository containing the record. The catalog
+publisher does not own image bytes and the worker has no `uploadBlob`, so catalog records carry
+`imageUrl` only; a self-published record may carry the blob.
+
+Editions link to the records through `defs#contributor.ref` (already native to PR #18) and a local
+`defs#publisher.ref` added to the vendored `defs.json`. The publisher property is an **extension**:
+it mirrors `contributor.ref` (`format: at-uri`, optional enrichment, never required for display),
+and until books-wg/lexicon.community adds it upstream a strict consumer sees an unknown object
+property. It is deliberately a plain at-uri, not a strongRef: a CID would change on every entity
+edit and force a republish of every edition crediting the entity. Raise it upstream as a separate
+change.
+
+Both record lexicons and the seven entity XRPC lexicons are **edge-served**. They are not in
+`hv-deploy`'s allowlists (`happyview/bin/hv-deploy`), which would upload a script that does not
+exist; `publish-lex` still writes their `com.atproto.lexicon.schema` records.
 
 ## They cannot live in HappyView
 
@@ -75,24 +113,29 @@ before the script runs (`401 XRPC procedures require DPoP authentication`), and 
 
 ## Where the code lives
 
-- **Dispatch**: `packages/web/src/routes/xrpc/[...method]/+server.ts` answers the two NSIDs before
-  `forward()`, so the passthrough proxy stays the default. `GET` on either NSID is
-  `405 MethodNotAllowed`.
-- **Catalog layer**: `packages/web/src/lib/server/catalog/{db,editions}.ts`. `db.ts` owns one pooled
+- **Dispatch**: `packages/web/src/routes/xrpc/[...method]/+server.ts` answers the nine catalog
+  NSIDs before `forward()`, so the passthrough proxy stays the default. `GET` on a procedure and
+  `POST` on a getter/search is `405 MethodNotAllowed`; `OPTIONS` answers a CORS preflight for all
+  nine (`catalog/cors.ts`, `catalog/entity-methods.ts`).
+- **Catalog layer**: `packages/web/src/lib/server/catalog/{db,editions,entities,entity-methods,cors,sql}.ts`. `db.ts` owns one pooled
   `pg` client (`DATABASE_URL`, cached on `globalThis` across dev reloads); `editions.ts` maps rows
   from `editions`, `edition_identifiers`, `edition_contributors` and `edition_publishers` to
   `community.lexicon.media.book.defs#editionView`, including the `series` object and contributor
-  `displayName`/ONIX `role` (`contributor-roles.ts`).
+  `displayName`/ONIX `role` (`contributor-roles.ts`); `entities.ts` implements the seven entity
+  methods over `contributors`/`publishers`/`edition_contributors` + `pds_cids`, including
+  `listEditionsByContributor`, which joins `edition_contributors` to `editions` and returns
+  `defs#bookView` items (all credited roles, no duplicate editions).
 - **Configuration**: `DATABASE_URL` is declared in `packages/web/src/env.ts`; the deployment
-  template is `packaging/web/web.env` (unset → the two methods answer `503 ServiceUnavailable`
+  template is `packaging/web/web.env` (unset → the catalog methods answer `503 ServiceUnavailable`
   instead of taking the edge down).
 - **Worker**: `packages/worker` (`index.js`, `lib/providers`, `lib/ingest.js`, `lib/tasks.js`,
-  `lib/publish.js`) consumes `catalog.resolve` / `catalog.search` / `pds-publish`. The Debian unit
+  `lib/publish.js`, `lib/entity-record.js`, `lib/prepare-entities.js`) consumes `catalog.resolve` /
+  `catalog.search` / `pds-publish` / `entities.prepare`. The Debian unit
   is `packaging/worker/bibliograph-worker.service`, running
   `/usr/bin/node /usr/lib/bibliograph-worker/index.js` with `/etc/bibliograph/worker.env`.
 - **Public catalogue**: `packages/web/scripts/generate-catalog.mjs` reads `happyview/lexicons`
-  only (de-duplicated by NSID), so the generated page lists the two procedures and the `edition`
-  record type from the PR #18 imports. The books-wg submodule is no longer a catalog input.
+  only (de-duplicated by NSID), so the generated page lists the imported PR #18 types and the
+  local entity records/queries. The books-wg submodule is no longer a catalog input.
 
 ## Edition identifiers point back at the record
 
@@ -193,6 +236,9 @@ Honest limits:
 
 - The catalog publisher must publish `community.lexicon.media.book.edition` records against the
   imported `happyview/lexicons/community/lexicon/media/book/edition.json` (PR #18).
+- The same publisher publishes `net.olamaelcu.livtet.biblio.contributor` and `.publisher`
+  records. `pds-publish` drains all three collections; an entity row is queued only once it has an
+  `at_uri`, which ingest mints and `node index.js --prepare-entities` backfills for existing rows.
 - Publish every local schema with `mise run publish-lex` (or
   `node scripts/publish-lexicons.mjs`). It writes each `happyview/lexicons/**/*.json` as a
   `com.atproto.lexicon.schema` record (rkey = NSID, record = document plus `$type`) to the
@@ -208,6 +254,8 @@ Honest limits:
   (`book.media.lexicon.community`) is not ours; their records exist but are not authoritative.
   `com.atproto.lexicon.resolveLexicon` is not implemented by the PDS (400 `InvalidRequest` with a
   session, 401 `AuthMissing` without one); the biblio edge requires DPoP/space credentials.
+  The new entity record and query names (`contributor`, `publisher`, `getContributor`, …) are
+  direct children of `biblio`, so they need no new TXT.
 - The publisher identity is the configured `did:plc` account (`ATP_SERVICE_DID`; the
   `did:web:<ATP_SERVICE_HOST>` form is a local/test fallback). Publication requires that account to
   be provisioned on the PDS; the catalog itself is not seeded, imported or migrated from a previous
@@ -226,7 +274,18 @@ Honest limits:
   `A23`), ONIX pass-through, `displayName`/`nameInverted` and the `A01` default. The same mapping
   is duplicated in `packages/web/src/lib/server/catalog/contributor-roles.ts` and
   `happyview/lib/views.lua`; keep the three tables in sync.
+- `pnpm verify:lex` performs the offline structural check: NSID/path agreement, allowed fields per
+  definition type (so a non-spec `pattern` or `minItems` is rejected), ref resolution across the
+  tree, required/params names, record key types and primary-definition rules. `publish-lex` does
+  its own structural validation before writing.
+- `entity-record.test.js` covers the entity builders (dates, identifiers, image URLs, required
+  fields); `publish-entities.test.js` covers the multi-collection claim and builder dispatch;
+  `catalog-schema.test.js` covers the triggers and `entities.prepare` idempotence; and
+  `packages/web/test/entities.test.ts` covers URI validation, mapping, resolver containment,
+  search escaping/pagination and the CORS/method classification. No PDS or network write is
+  exercised.
 - Open items to raise upstream: an asynchronous-hydration signal for `editionResults`; array bounds
   use `minLength` instead of `minItems`; `editionView` carries no CID, while
   writes such as `shelf.addItem` need `{ uri, cid }` strongRefs, so a resolving client still has to
-  fetch the record for the CID.
+  fetch the record for the CID. `defs#publisher.ref` is the local extension to propose alongside
+  those.

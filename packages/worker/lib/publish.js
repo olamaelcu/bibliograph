@@ -26,13 +26,23 @@ import {
   buildEditionRecord
 } from './edition-record.js';
 import {
+  CONTRIBUTOR_COLLECTION,
+  ENTITY_COLLECTIONS,
+  EntityRecordError,
+  buildEntityRecord
+} from './entity-record.js';
+import {
   PublisherConfigError,
   createPdsPublisher,
   publisherConfigError,
   resolvePublisherConfig
 } from './pds.js';
 
-export const OUTBOX_COLLECTION = 'community.lexicon.media.book.edition';
+export const EDITION_COLLECTION = 'community.lexicon.media.book.edition';
+
+/** Every collection `pds-publish` drains. Add a builder before adding one here. */
+export const OUTBOX_COLLECTIONS = Object.freeze([EDITION_COLLECTION, ...ENTITY_COLLECTIONS]);
+
 export const MAX_ATTEMPTS = 10;
 export const DEFAULT_BATCH = 25;
 export const DEFAULT_LEASE_MS = 5 * 60 * 1000;
@@ -60,13 +70,18 @@ function isRecordNotFound(error) {
  */
 export async function claimBatch(
   pool,
-  { limit = DEFAULT_BATCH, leaseMs = DEFAULT_LEASE_MS, publisherDid } = {}
+  {
+    limit = DEFAULT_BATCH,
+    leaseMs = DEFAULT_LEASE_MS,
+    publisherDid,
+    collections = OUTBOX_COLLECTIONS
+  } = {}
 ) {
   const result = await pool.query(
     `WITH candidates AS (
        SELECT uri
          FROM pds_outbox
-        WHERE collection = $1
+        WHERE collection = ANY($1::text[])
           AND next_at <= now()
           AND attempts < $2
           AND (claimed_at IS NULL OR claimed_at < now() - make_interval(secs => $3))
@@ -82,7 +97,7 @@ export async function claimBatch(
       RETURNING o.uri, o.collection, o.rkey, o.op, o.attempts,
                 o.claimed_at::text AS claimed_at, o.updated_at::text AS updated_at`,
     [
-      OUTBOX_COLLECTION,
+      collections,
       MAX_ATTEMPTS,
       Math.max(1, Math.ceil(leaseMs / 1000)),
       limit,
@@ -92,7 +107,7 @@ export async function claimBatch(
   return result.rows;
 }
 
-async function loadSnapshot(pool, uri) {
+async function loadEditionSnapshot(pool, uri) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -114,7 +129,7 @@ async function loadSnapshot(pool, uri) {
       [uri]
     );
     const contributors = await client.query(
-      `SELECT c.name, ec.role, c.identifiers, ec.ref
+      `SELECT c.name, ec.role, c.identifiers, COALESCE(ec.ref, c.at_uri) AS ref
          FROM edition_contributors ec
          JOIN contributors c ON c.id = ec.contributor_id
         WHERE ec.edition_uri = $1
@@ -122,7 +137,7 @@ async function loadSnapshot(pool, uri) {
       [uri]
     );
     const publisher = await client.query(
-      `SELECT p.name, p.identifiers
+      `SELECT p.name, p.identifiers, p.at_uri AS ref
          FROM edition_publishers ep
          JOIN publishers p ON p.id = ep.publisher_id
         WHERE ep.edition_uri = $1
@@ -147,12 +162,41 @@ async function loadSnapshot(pool, uri) {
   }
 }
 
-function writeRecordValue(snapshot) {
+/**
+ * One entity row, by the URI the outbox names. The table is chosen from the
+ * collection constant, never from caller input.
+ */
+async function loadEntitySnapshot(pool, uri, collection) {
+  const isContributor = collection === CONTRIBUTOR_COLLECTION;
+  const table = isContributor ? 'contributors' : 'publishers';
+  const columns = isContributor
+    ? 'at_uri, name, name_inverted, description, image_url, born, died, identifiers, created_at'
+    : 'at_uri, name, description, image_url, started, ended, identifiers, created_at';
+
+  const [row, cid] = await Promise.all([
+    pool.query(`SELECT ${columns} FROM ${table} WHERE at_uri = $1`, [uri]),
+    pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [uri])
+  ]);
+  if (row.rowCount === 0) return undefined;
+  return { collection, row: row.rows[0], cid: cid.rows[0]?.cid };
+}
+
+async function loadSnapshot(pool, uri, collection) {
+  if (collection === EDITION_COLLECTION) return loadEditionSnapshot(pool, uri);
+  return loadEntitySnapshot(pool, uri, collection);
+}
+
+function writeRecordValue(entry, snapshot) {
   try {
-    return buildEditionRecord(snapshot);
+    return entry.collection === EDITION_COLLECTION
+      ? buildEditionRecord(snapshot)
+      : buildEntityRecord(entry.collection, snapshot.row);
   } catch (error) {
-    if (error instanceof EditionRecordError) throw error;
-    throw new EditionRecordError(error?.message ?? String(error));
+    if (error instanceof EditionRecordError || error instanceof EntityRecordError) throw error;
+    if (entry.collection === EDITION_COLLECTION) {
+      throw new EditionRecordError(error?.message ?? String(error));
+    }
+    throw new EntityRecordError(error?.message ?? String(error));
   }
 }
 
@@ -161,11 +205,17 @@ function writeRecordValue(snapshot) {
  * create/update; `{ uri }`, or nothing for an already-absent record, on delete).
  */
 export async function publishEntry({ pds, publisherDid, pool, entry, logger = console }) {
+  if (!OUTBOX_COLLECTIONS.includes(entry.collection)) {
+    throw new Error(
+      `outbox row ${entry.uri} names an unpublished collection ${entry.collection}; ` +
+        'refusing to guess a record builder'
+    );
+  }
   if (!entry.uri.startsWith(`at://${publisherDid}/`)) {
     throw new PublisherConfigError(
       `outbox row ${entry.uri} does not belong to the publisher repo ${publisherDid}; ` +
-        'the catalog editions were created under another identity. Fix ATP_SERVICE_HOST/' +
-        'ATP_SERVICE_DID or rewrite the edition URIs — publishing it would create a record ' +
+        'the catalog rows were created under another identity. Fix ATP_SERVICE_HOST/' +
+        'ATP_SERVICE_DID or rewrite the catalog URIs — publishing it would create a record ' +
         'at a different address than the catalog advertises'
     );
   }
@@ -184,14 +234,16 @@ export async function publishEntry({ pds, publisherDid, pool, entry, logger = co
     }
   }
 
-  const snapshot = await loadSnapshot(pool, entry.uri);
+  const snapshot = await loadSnapshot(pool, entry.uri, entry.collection);
   if (!snapshot) {
-    throw new EditionRecordError(
-      `edition ${entry.uri} is gone from the catalog but the outbox row is not a delete; ` +
-        'leaving it for a later retry'
-    );
+    const message =
+      `${entry.uri} is gone from the catalog but the outbox row is not a delete; ` +
+      'leaving it for a later retry';
+    throw entry.collection === EDITION_COLLECTION
+      ? new EditionRecordError(message)
+      : new EntityRecordError(message);
   }
-  const value = writeRecordValue(snapshot);
+  const value = writeRecordValue(entry, snapshot);
   const operation = snapshot.cid ? 'update' : 'create';
 
   logger.info?.(

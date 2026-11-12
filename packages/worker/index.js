@@ -8,6 +8,7 @@ import { ensureSupportSchema } from './lib/setup.js';
 import { startMetricsServer } from './lib/metrics.js';
 import { startAdminServer } from './lib/admin.js';
 import { parseDailyLimit } from './lib/providers/usage.js';
+import { prepareEntityRecords } from './lib/prepare-entities.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -23,6 +24,26 @@ const concurrency = Number.parseInt(process.env.GRAPHILE_WORKER_CONCURRENCY ?? '
 
 const pool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
 await ensureSupportSchema(pool);
+
+// Operator entry point for the one-off entity rollout:
+//
+//   node index.js --prepare-entities            # mint + queue records/editions
+//   node index.js --prepare-entities --phase=editions  # republish pass
+//
+// It only writes catalog/outbox rows; `pds-publish` (the worker task) is what
+// actually publishes them. Running it twice is safe: the mint phase finds no
+// NULL at_uri rows the second time.
+if (process.argv.includes('--prepare-entities')) {
+  const phaseArg = process.argv.find((arg) => arg.startsWith('--phase='));
+  const phase = phaseArg ? phaseArg.slice('--phase='.length) : 'mint';
+  try {
+    const summary = await prepareEntityRecords(pool, { authority: publisherDid, phase });
+    console.log(`worker: entities.prepare[${phase}] ${JSON.stringify(summary)}`);
+  } finally {
+    await pool.end();
+  }
+  process.exit(0);
+}
 
 const isbndbDailyLimit = parseDailyLimit(process.env.ISBNDB_DAILY_LIMIT);
 const providers = createProviders({ pool, isbndbDailyLimit });

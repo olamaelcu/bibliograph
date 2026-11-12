@@ -2,6 +2,7 @@
 // collection the outbox and `pds-publish` write to, so a catalog URI is
 // resolvable through `com.atproto.repo.getRecord`.
 import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
+import { CONTRIBUTOR_COLLECTION, PUBLISHER_COLLECTION } from './entity-record.js';
 
 const COLLECTION = 'community.lexicon.media.book.edition';
 
@@ -133,7 +134,7 @@ async function fillMissingFields(client, uri, candidate) {
   );
 }
 
-async function linkContributors(client, uri, contributors) {
+async function linkContributors(client, uri, contributors, authority) {
   let position = 1;
   for (const contributor of contributors ?? []) {
     // Lexicon-shaped callers send `displayName`; provider candidates and the
@@ -150,11 +151,13 @@ async function linkContributors(client, uri, contributors) {
       Array.isArray(contributor.identifiers) ? contributor.identifiers : []
     );
     const inserted = await client.query(
-      `INSERT INTO contributors (name, identifiers)
-       VALUES ($1, $2::jsonb)
-       ON CONFLICT (lower(name), identifiers) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-      [displayName, identifiers]
+      `INSERT INTO contributors (name, identifiers, at_uri)
+       VALUES ($1, $2::jsonb, 'at://' || $3 || '/' || $4 || '/' || editions_next_tid())
+       ON CONFLICT (lower(name), identifiers) DO UPDATE SET
+         name = EXCLUDED.name,
+         at_uri = COALESCE(contributors.at_uri, EXCLUDED.at_uri)
+       RETURNING id, at_uri`,
+      [displayName, identifiers, authority, CONTRIBUTOR_COLLECTION]
     );
     const contributorId = inserted.rows[0].id;
     await client.query(
@@ -176,15 +179,17 @@ async function linkContributors(client, uri, contributors) {
   }
 }
 
-async function linkPublisher(client, uri, publisher) {
+async function linkPublisher(client, uri, publisher, authority) {
   if (typeof publisher?.name !== 'string' || publisher.name.trim() === '') return;
   const identifiers = JSON.stringify(Array.isArray(publisher.identifiers) ? publisher.identifiers : []);
   const inserted = await client.query(
-    `INSERT INTO publishers (name, identifiers)
-     VALUES ($1, $2::jsonb)
-     ON CONFLICT (lower(name), identifiers) DO UPDATE SET name = EXCLUDED.name
-     RETURNING id`,
-    [publisher.name, identifiers]
+    `INSERT INTO publishers (name, identifiers, at_uri)
+     VALUES ($1, $2::jsonb, 'at://' || $3 || '/' || $4 || '/' || editions_next_tid())
+     ON CONFLICT (lower(name), identifiers) DO UPDATE SET
+       name = EXCLUDED.name,
+       at_uri = COALESCE(publishers.at_uri, EXCLUDED.at_uri)
+     RETURNING id, at_uri`,
+    [publisher.name, identifiers, authority, PUBLISHER_COLLECTION]
   );
   await client.query(
     `INSERT INTO edition_publishers (edition_uri, publisher_id, position)
@@ -239,8 +244,8 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
         );
       }
 
-      await linkContributors(client, uri, candidate.contributors);
-      await linkPublisher(client, uri, candidate.publisher);
+      await linkContributors(client, uri, candidate.contributors, authority);
+      await linkPublisher(client, uri, candidate.publisher, authority);
 
       await client.query('COMMIT');
       return { uri, created };

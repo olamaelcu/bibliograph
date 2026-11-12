@@ -1,0 +1,72 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.resolvePublishers",
+  "description": "Resolve catalog publishers by exact (issuer, value) identifiers. Read-only, anonymous, and served by the bibliograph edge from the catalog tables; a miss is an empty page rather than an error.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["identifiers"],
+          "properties": {
+            "identifiers": {
+              "type": "array",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "Identifier pairs to match. Duplicate pairs are collapsed; matching compares issuer and value exactly, without normalization.",
+              "items": {
+                "type": "ref",
+                "ref": "community.lexicon.media.book.defs#identifier"
+              }
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "Number of matching publishers to skip."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 25,
+              "description": "Maximum number of publishers to return."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["items", "hasMore"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.defs#publisherView"
+              }
+            },
+            "hasMore": {
+              "type": "boolean",
+              "description": "Whether another page exists."
+            },
+            "total": {
+              "type": "integer",
+              "description": "Total matching publishers. Present on the first page only."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "identifiers is missing, empty, over 100 entries, or contains a malformed pair."
+        }
+      ]
+    }
+  }
+}

@@ -98,6 +98,31 @@ index, so a fresh deployment's feeds are empty until Jetstream, a HappyView
 procedure write, or HappyView's existing `/admin/backfill` indexes activity for
 a DID (see [`../xrpc.md`](../xrpc.md#feed-generator-edge)).
 
+### Entity records
+
+`0004-entity-records.sql` adds the contributor/publisher record columns, their
+outbox triggers and the ref-bearing read models. It is additive and queues
+nothing on its own: the trigger skips a NULL `at_uri`, and existing rows stay
+NULL until the worker mints them.
+
+After the schema is applied and the worker has the publisher credentials, run
+the one-off rollout once:
+
+```bash
+node index.js --prepare-entities                   # mint + queue records and editions
+node index.js --prepare-entities --phase=editions  # post-publish republish pass
+```
+
+The task (also enqueueable as `entities.prepare` with `{ "phase": "mint" }`)
+mints `at://<ATP_SERVICE_DID>/net.olamaelcu.livtet.biblio.{contributor,publisher}/<tid>`
+for every row that has no URI, queues the records, and queues the editions that
+credit them. It is idempotent: a second run finds nothing to mint. Neither
+phase publishes; `pds-publish` does, so the publisher session must be healthy
+first. A row parks after ten failed publishes, and a stale token parks the
+whole backlog (`ExpiredToken` parked 84 edition rows before this feature), so
+renew `PDS_ACCESS_TOKEN`/the app password before running the entity pass.
+Watch `bibliograph_pds_outbox_parked` while it drains.
+
 What is created:
 
 - `editions`, `edition_identifiers`, `contributors`, `edition_contributors`,
@@ -110,6 +135,11 @@ What is created:
   daily call counter the worker reserves ISBNdb requests in;
 - the outbox triggers for editions, identifiers, contributors, publishers and
   contributor/publisher renames;
+- `0004-entity-records.sql` adds `contributors.at_uri` / `name_inverted` /
+  `description` / `image_url` / `born` / `died` and `publishers.at_uri` /
+  `description` / `image_url` / `started` / `ended`, the partial unique URI
+  indexes, the identifier GIN indexes, and the generic `pds_enqueue_entity()`
+  trigger for contributor/publisher records;
 - `appview_book` and `appview_book_lua`.
 
 ### Why two read views

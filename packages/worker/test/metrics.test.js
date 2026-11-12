@@ -7,7 +7,8 @@ import {
   readProcessMetrics,
   renderMetrics
 } from '../lib/metrics.js';
-import { MAX_ATTEMPTS, OUTBOX_COLLECTION } from '../lib/publish.js';
+import { MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from '../lib/publish.js';
+
 
 /**
  * The worker scrape owns the outbox backlog gauges: one aggregate query that
@@ -111,7 +112,9 @@ test('the outbox aggregate mirrors the claim predicate and coerces pg strings', 
   assert.match(sql, /next_at <= now\(\)/);
   assert.match(sql, /make_interval\(secs => \$3\)/);
   assert.match(sql, /starts_with\(uri, 'at:\/\/' \|\| \$4 \|\| '\/'\)/);
-  assert.deepEqual(values, [OUTBOX_COLLECTION, MAX_ATTEMPTS, 300, 'did:web:test.example']);
+  assert.deepEqual(values, [OUTBOX_COLLECTIONS, MAX_ATTEMPTS, 300, 'did:web:test.example']);
+  assert.ok(values[0].includes('net.olamaelcu.livtet.biblio.contributor'));
+  assert.ok(values[0].includes('net.olamaelcu.livtet.biblio.publisher'));
 });
 
 test('malformed aggregate values never become NaN or negative gauges', async () => {

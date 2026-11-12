@@ -1,0 +1,44 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getContributor",
+  "description": "Fetch one catalog contributor record by its AT-URI. This is an anonymous catalog read served by the bibliograph edge from the catalog tables; it is never handled by HappyView.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uri"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of a net.olamaelcu.livtet.biblio.contributor record. A URI from another collection is rejected rather than looked up."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["contributor"],
+          "properties": {
+            "contributor": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#contributorView"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "The uri is missing, malformed, or not a contributor record URI."
+        },
+        {
+          "name": "RecordNotFound",
+          "description": "No catalog contributor has that URI."
+        }
+      ]
+    }
+  }
+}

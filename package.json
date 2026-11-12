@@ -7,8 +7,10 @@
     "web:dev": "pnpm --filter web dev",
     "web:build": "pnpm --filter web build",
     "web:check": "pnpm --filter web check",
+    "web:test": "pnpm --filter web test",
     "worker:dev": "pnpm --filter worker start",
-    "worker:test": "pnpm --filter worker test"
+    "worker:test": "pnpm --filter worker test",
+    "verify:lex": "node scripts/verify-lexicons.mjs"
   },
   "engines": {
     "node": "26.3.0"

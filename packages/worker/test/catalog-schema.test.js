@@ -18,6 +18,7 @@ import pg from 'pg';
 
 import { createIngest } from '../lib/ingest.js';
 import { claimBatch, completeEntry } from '../lib/publish.js';
+import { prepareEntityRecords } from '../lib/prepare-entities.js';
 
 const DATABASE_URL = process.env.CATALOG_SCHEMA_TEST_DATABASE_URL;
 const SKIP = DATABASE_URL
@@ -162,10 +163,11 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_contributor_editions',
       'pds_enqueue_edition',
       'pds_enqueue_edition_child',
+      'pds_enqueue_entity',
       'pds_enqueue_publisher_editions'
     ]]
   );
-  assert.equal(functions.rows.length, 6);
+  assert.equal(functions.rows.length, 7);
 
   const triggers = await pool.query(
     `SELECT tgname FROM pg_trigger t
@@ -178,10 +180,12 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     triggers.rows.map((row) => row.tgname),
     [
       'pds_enqueue_contributor_edits',
+      'pds_enqueue_contributor_record',
       'pds_enqueue_contributors',
       'pds_enqueue_editions',
       'pds_enqueue_identifiers',
       'pds_enqueue_publisher_edits',
+      'pds_enqueue_publisher_record',
       'pds_enqueue_publishers'
     ]
   );
@@ -269,6 +273,35 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
     position: 1,
     identifiers: [{ issuer: 'isni', value: '0000000121032683' }]
   }]);
+
+  // Ingest mints an address for each entity, and the 0004 trigger queues the
+  // record next to the edition.
+  const entities = await pool.query(
+    `SELECT 'contributor' AS kind, at_uri FROM contributors WHERE name = $1
+     UNION ALL
+     SELECT 'publisher' AS kind, at_uri FROM publishers WHERE name = $2
+     ORDER BY kind`,
+    [CONTRIBUTOR, PUBLISHER]
+  );
+  assert.equal(entities.rowCount, 2);
+  for (const entity of entities.rows) {
+    assert.match(
+      entity.at_uri,
+      new RegExp(
+        `^at://${AUTHORITY}/net\\.olamaelcu\\.livtet\\.biblio\\.(contributor|publisher)/` +
+          '[234567abcdefghijklmnopqrstuvwxyz]{13}$'
+      )
+    );
+  }
+
+  const entityOutbox = await pool.query(
+    'SELECT collection, op FROM pds_outbox WHERE collection <> $1 ORDER BY collection',
+    [OUTBOX_COLLECTION]
+  );
+  assert.deepEqual(entityOutbox.rows, [
+    { collection: 'net.olamaelcu.livtet.biblio.contributor', op: 'create' },
+    { collection: 'net.olamaelcu.livtet.biblio.publisher', op: 'create' }
+  ]);
 
   const outbox = await pool.query(
     'SELECT collection, rkey, op, value, attempts FROM pds_outbox WHERE uri = $1',
@@ -389,9 +422,13 @@ test('appview_book_lua exposes the text shape prelude.lua expects', { skip: SKIP
   }]);
 
   assert.deepEqual(JSON.parse(row.series), candidate.series);
+  const publisherAtUri = (
+    await pool.query('SELECT at_uri FROM publishers WHERE name = $1', [PUBLISHER])
+  ).rows[0].at_uri;
   assert.deepEqual(JSON.parse(row.publisher), {
     name: PUBLISHER,
-    identifiers: [{ issuer: 'isni', value: '0000000121032683' }]
+    identifiers: [{ issuer: 'isni', value: '0000000121032683' }],
+    ref: publisherAtUri
   });
   assert.deepEqual(JSON.parse(row.identifiers), [
     { issuer: 'googlebooks', value: 'schema-probe-volume' },
@@ -399,8 +436,27 @@ test('appview_book_lua exposes the text shape prelude.lua expects', { skip: SKIP
   ]);
 });
 
+test('identifier containment matches the edge resolve query', { skip: SKIP }, async () => {
+  const pairs = [JSON.stringify([{ issuer: 'orcid', value: '0000-0002-1825-0097' }])];
+  const hit = await pool.query(
+    'SELECT at_uri FROM contributors WHERE identifiers @> ANY($1::jsonb[])',
+    [pairs]
+  );
+  assert.equal(hit.rowCount, 1);
+
+  const miss = await pool.query(
+    'SELECT at_uri FROM contributors WHERE identifiers @> ANY($1::jsonb[])',
+    [[JSON.stringify([{ issuer: 'orcid', value: 'missing' }])]]
+  );
+  assert.equal(miss.rowCount, 0);
+});
+
 test('claimBatch, completeEntry and pds_cids work against the fresh schema', { skip: SKIP }, async () => {
-  const claimed = await claimBatch(pool, { publisherDid: AUTHORITY, limit: 10 });
+  const claimed = await claimBatch(pool, {
+    publisherDid: AUTHORITY,
+    limit: 10,
+    collections: [OUTBOX_COLLECTION]
+  });
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].uri, editionUri);
   assert.equal(claimed[0].rkey, editionRkey);
@@ -430,7 +486,11 @@ test('contributor/publisher edits and edition deletes enqueue update/delete and 
   ]);
   assert.deepEqual(renamed.rows[0], { op: 'update', rkey: editionRkey });
 
-  let claimed = await claimBatch(pool, { publisherDid: AUTHORITY, limit: 10 });
+  let claimed = await claimBatch(pool, {
+    publisherDid: AUTHORITY,
+    limit: 10,
+    collections: [OUTBOX_COLLECTION]
+  });
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].op, 'update');
   assert.equal(
@@ -449,7 +509,11 @@ test('contributor/publisher edits and edition deletes enqueue update/delete and 
   );
   assert.deepEqual(publisherRenamed.rows[0], { op: 'update', rkey: editionRkey });
 
-  claimed = await claimBatch(pool, { publisherDid: AUTHORITY, limit: 10 });
+  claimed = await claimBatch(pool, {
+    publisherDid: AUTHORITY,
+    limit: 10,
+    collections: [OUTBOX_COLLECTION]
+  });
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].op, 'update');
   assert.equal(
@@ -464,7 +528,11 @@ test('contributor/publisher edits and edition deletes enqueue update/delete and 
   ]);
   assert.deepEqual(deleted.rows[0], { op: 'delete', rkey: editionRkey });
 
-  claimed = await claimBatch(pool, { publisherDid: AUTHORITY, limit: 10 });
+  claimed = await claimBatch(pool, {
+    publisherDid: AUTHORITY,
+    limit: 10,
+    collections: [OUTBOX_COLLECTION]
+  });
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].op, 'delete');
   assert.equal(await completeEntry(pool, claimed[0], { operation: 'delete' }), true);
@@ -473,4 +541,69 @@ test('contributor/publisher edits and edition deletes enqueue update/delete and 
   assert.equal(cids.rowCount, 0);
   const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [editionUri]);
   assert.equal(outbox.rowCount, 0);
+});
+
+test('entity records are claimed across collections and keep their CIDs', { skip: SKIP }, async () => {
+  const claimed = await claimBatch(pool, { publisherDid: AUTHORITY, limit: 10 });
+  assert.deepEqual(
+    claimed.map((entry) => entry.collection).sort(),
+    ['net.olamaelcu.livtet.biblio.contributor', 'net.olamaelcu.livtet.biblio.publisher']
+  );
+
+  for (const entry of claimed) {
+    assert.equal(await completeEntry(pool, entry, { cid: `bafy${entry.rkey}` }), true);
+  }
+
+  const remaining = await pool.query(
+    'SELECT 1 FROM pds_outbox WHERE collection <> $1',
+    [OUTBOX_COLLECTION]
+  );
+  assert.equal(remaining.rowCount, 0);
+
+  const cids = await pool.query('SELECT uri FROM pds_cids WHERE uri LIKE $1', [
+    `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.%`
+  ]);
+  assert.equal(cids.rowCount, 2);
+});
+
+test('entities.prepare mints once, queues the record, and is idempotent', { skip: SKIP }, async () => {
+  const inserted = await pool.query(
+    `INSERT INTO contributors (name, identifiers)
+     VALUES ($1, '[]'::jsonb)
+     RETURNING id, at_uri`,
+    ['Catalog Schema Probe Prepare']
+  );
+  assert.equal(inserted.rows[0].at_uri, null);
+
+  const quiet = { info() {} };
+  const first = await prepareEntityRecords(pool, { authority: AUTHORITY, logger: quiet });
+  assert.equal(first.contributorsMinted, 1);
+  assert.equal(first.publishersMinted, 0);
+  assert.equal(first.editionsQueued, 0);
+
+  const minted = await pool.query('SELECT at_uri FROM contributors WHERE id = $1', [
+    inserted.rows[0].id
+  ]);
+  assert.match(
+    minted.rows[0].at_uri,
+    new RegExp(
+      `^at://${AUTHORITY}/net\\.olamaelcu\\.livtet\\.biblio\\.contributor/` +
+        '[234567abcdefghijklmnopqrstuvwxyz]{13}$'
+    )
+  );
+  const queued = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
+    minted.rows[0].at_uri
+  ]);
+  assert.deepEqual(queued.rows, [
+    { collection: 'net.olamaelcu.livtet.biblio.contributor', op: 'create' }
+  ]);
+
+  const second = await prepareEntityRecords(pool, { authority: AUTHORITY, logger: quiet });
+  assert.deepEqual(second, {
+    phase: 'mint',
+    contributorsMinted: 0,
+    publishersMinted: 0,
+    entityRowsQueued: 0,
+    editionsQueued: 0
+  });
 });

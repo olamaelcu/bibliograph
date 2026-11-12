@@ -1,206 +1,21 @@
 import { catalogPool } from './db';
-import { normalizeContributorRole } from './contributor-roles';
+import { likePattern } from './sql';
+import {
+  EDITION_COLUMNS,
+  hydrate,
+  type EditionResults,
+  type EditionRow,
+  type Identifier
+} from './edition-view';
 
-export type Identifier = {
-  issuer: string;
-  value: string;
-  url?: string;
-};
-
-export type ContributorView = {
-  displayName: string;
-  nameInverted?: string;
-  role?: string;
-  identifiers?: Identifier[];
-  ref?: string;
-};
-
-export type PublisherView = { name: string; identifiers?: Identifier[] };
-
-export type SeriesView = { name: string; position?: string; display?: string };
-
-export type EditionView = {
-  title: string;
-  identifiers: Identifier[];
-  contributors: ContributorView[];
-  createdAt: string;
-  coverUrl?: string;
-  subtitle?: string;
-  language?: string;
-  publishedDate?: string;
-  publisher?: PublisherView;
-  format?: string;
-  pages?: number;
-  durationSeconds?: number;
-  chapters?: number;
-  series?: SeriesView;
-  bookEdition?: string;
-  description?: string;
-};
-
-export type EditionResults = { items: EditionView[]; hasMore: boolean; total?: number };
-
-/** A global token for "this value is the atproto URI of the edition". */
-export const AT_URI_ISSUER = 'atproto';
-
-type EditionRow = {
-  uri: string;
-  title: string;
-  subtitle: string | null;
-  language: string | null;
-  published_date: string | null;
-  format: string | null;
-  pages: number | null;
-  duration_seconds: number | null;
-  chapters: number | null;
-  series: SeriesView | null;
-  book_edition: string | null;
-  description: string | null;
-  cover_url: string | null;
-  created_at: Date;
-};
-
-type IdentifierRow = { edition_uri: string; issuer: string; value: string };
-type ContributorRow = {
-  edition_uri: string;
-  name: string;
-  role: string;
-  identifiers: Identifier[] | null;
-  ref: string | null;
-};
-type PublisherRow = { edition_uri: string; name: string; identifiers: Identifier[] | null };
-
-const EDITION_COLUMNS = `
-  e.uri, e.title, e.subtitle, e.language, e.published_date, e.format, e.pages,
-  e.duration_seconds, e.chapters, e.series, e.book_edition, e.description,
-  e.cover_url, e.created_at`;
-
-function atUriIdentifier(uri: string): Identifier {
-  return { issuer: AT_URI_ISSUER, value: uri };
-}
-
-function optional<T>(value: T | null | undefined): T | undefined {
-  return value === null || value === undefined ? undefined : value;
-}
-
-function editionView(
-  row: EditionRow,
-  identifiers: IdentifierRow[],
-  contributors: ContributorRow[],
-  publisher: PublisherRow | undefined
-): EditionView {
-  // The edition view has no `uri` field, so the record URI travels as an
-  // identifier: clients rebuild links such as /book/<did>/<rkey> from it.
-  const seen = new Set<string>();
-  const bag: Identifier[] = [];
-  const stored: Identifier[] = identifiers.map((identifier) => ({
-    issuer: identifier.issuer,
-    value: identifier.value
-  }));
-  for (const identifier of [atUriIdentifier(row.uri), ...stored]) {
-    const key = `${identifier.issuer}\u0000${identifier.value}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    bag.push(identifier);
-  }
-
-  const view: EditionView = {
-    title: row.title,
-    identifiers: bag,
-    contributors: contributors
-      .filter((contributor) => contributor.name !== '')
-      .map((contributor) => ({
-        displayName: contributor.name,
-        role: normalizeContributorRole(contributor.role),
-        ...(contributor.identifiers?.length ? { identifiers: contributor.identifiers } : {}),
-        ...(contributor.ref ? { ref: contributor.ref } : {})
-      })),
-    createdAt: new Date(row.created_at).toISOString()
-  };
-
-  const coverUrl = optional(row.cover_url);
-  if (coverUrl) view.coverUrl = coverUrl;
-  const subtitle = optional(row.subtitle);
-  if (subtitle) view.subtitle = subtitle;
-  const language = optional(row.language);
-  if (language) view.language = language;
-  const publishedDate = optional(row.published_date);
-  if (publishedDate) view.publishedDate = publishedDate;
-  const format = optional(row.format);
-  if (format) view.format = format;
-  const pages = optional(row.pages);
-  if (pages !== undefined) view.pages = pages;
-  const durationSeconds = optional(row.duration_seconds);
-  if (durationSeconds !== undefined) view.durationSeconds = durationSeconds;
-  const chapters = optional(row.chapters);
-  if (chapters !== undefined) view.chapters = chapters;
-  if (row.series && typeof row.series.name === 'string' && row.series.name !== '') {
-    view.series = {
-      name: row.series.name,
-      ...(typeof row.series.position === 'string' ? { position: row.series.position } : {}),
-      ...(typeof row.series.display === 'string' ? { display: row.series.display } : {})
-    };
-  }
-  const bookEdition = optional(row.book_edition);
-  if (bookEdition) view.bookEdition = bookEdition;
-  const description = optional(row.description);
-  if (description) view.description = description;
-  if (publisher) {
-    view.publisher = {
-      name: publisher.name,
-      ...(publisher.identifiers?.length ? { identifiers: publisher.identifiers } : {})
-    };
-  }
-
-  return view;
-}
-
-async function hydrate(rows: EditionRow[]): Promise<EditionView[]> {
-  if (rows.length === 0) return [];
-  const pool = catalogPool();
-  const uris = rows.map((row) => row.uri);
-
-  const [identifierResult, contributorResult, publisherResult] = await Promise.all([
-    pool.query<IdentifierRow>(
-      `SELECT edition_uri, issuer, value FROM edition_identifiers
-       WHERE edition_uri = ANY($1) ORDER BY issuer, value`,
-      [uris]
-    ),
-    pool.query<ContributorRow>(
-      `SELECT ec.edition_uri, c.name, ec.role, c.identifiers, ec.ref
-       FROM edition_contributors ec
-       JOIN contributors c ON c.id = ec.contributor_id
-       WHERE ec.edition_uri = ANY($1)
-       ORDER BY ec.edition_uri, ec.position`,
-      [uris]
-    ),
-    pool.query<PublisherRow>(
-      `SELECT ep.edition_uri, p.name, p.identifiers
-       FROM edition_publishers ep
-       JOIN publishers p ON p.id = ep.publisher_id
-       WHERE ep.edition_uri = ANY($1)
-       ORDER BY ep.edition_uri, ep.position`,
-      [uris]
-    )
-  ]);
-
-  const identifiers = new Map<string, IdentifierRow[]>();
-  for (const row of identifierResult.rows) {
-    identifiers.set(row.edition_uri, [...(identifiers.get(row.edition_uri) ?? []), row]);
-  }
-  const contributors = new Map<string, ContributorRow[]>();
-  for (const row of contributorResult.rows) {
-    contributors.set(row.edition_uri, [...(contributors.get(row.edition_uri) ?? []), row]);
-  }
-  const publishers = new Map<string, PublisherRow>();
-  for (const row of publisherResult.rows) {
-    if (!publishers.has(row.edition_uri)) publishers.set(row.edition_uri, row);
-  }
-
-  return rows.map((row) =>
-    editionView(row, identifiers.get(row.uri) ?? [], contributors.get(row.uri) ?? [], publishers.get(row.uri))
-  );
-}
+export type {
+  ContributorView,
+  EditionResults,
+  EditionView,
+  Identifier,
+  PublisherView,
+  SeriesView
+} from './edition-view';
 
 /** SQL fragment matching any of the supplied identifier pairs. */
 function identifierMatch(
@@ -255,17 +70,13 @@ export async function resolveEditions(input: {
 
   const [page, counted] = await Promise.all([pagePromise, totalPromise]);
   const rows = page.rows.slice(0, input.limit);
-  const items = await hydrate(rows);
+  const items = await hydrate(pool, rows);
 
   return {
     items,
     hasMore: page.rows.length > input.limit,
     ...(counted ? { total: counted.rows[0]?.n ?? 0 } : {})
   };
-}
-
-function likePattern(value: string): string {
-  return `%${value.replace(/[\\%_]/g, '\\$&')}%`;
 }
 
 export async function searchEditions(input: {
@@ -364,7 +175,7 @@ export async function searchEditions(input: {
 
   const [page, counted] = await Promise.all([pagePromise, totalPromise]);
   const rows = page.rows.slice(0, input.limit);
-  const items = await hydrate(rows);
+  const items = await hydrate(pool, rows);
 
   return {
     items,

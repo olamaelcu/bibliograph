@@ -436,6 +436,122 @@
           "description": "The review record value."
         }
       }
+    },
+    "contributorView": {
+      "type": "object",
+      "description": "A contributor record with the address it is published at.",
+      "required": ["uri", "displayName", "createdAt"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the contributor record."
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "CID of the last published version of the record, when the catalog has published it. Omitted from list responses."
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The contributor's display name."
+        },
+        "nameInverted": {
+          "type": "string",
+          "description": "Name in filing or sorting order, when known."
+        },
+        "description": {
+          "type": "string",
+          "description": "Biography or description of the contributor."
+        },
+        "imageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Portrait image URL, when the record carries one."
+        },
+        "image": {
+          "type": "blob",
+          "accept": ["image/*"],
+          "description": "Portrait image blob, when the publishing repository owns the bytes."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "community.lexicon.media.book.defs#identifier"
+          },
+          "description": "Identifiers denoting the contributor."
+        },
+        "born": {
+          "type": "string",
+          "description": "Birth date, exactly YYYY-MM-DD."
+        },
+        "died": {
+          "type": "string",
+          "description": "Death date, exactly YYYY-MM-DD."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "When the contributor record was created."
+        }
+      }
+    },
+    "publisherView": {
+      "type": "object",
+      "description": "A publisher record with the address it is published at.",
+      "required": ["uri", "name", "createdAt"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the publisher record."
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid",
+          "description": "CID of the last published version of the record, when the catalog has published it. Omitted from list responses."
+        },
+        "name": {
+          "type": "string",
+          "description": "Publisher name."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the publisher."
+        },
+        "imageUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Logo or image URL, when the record carries one."
+        },
+        "image": {
+          "type": "blob",
+          "accept": ["image/*"],
+          "description": "Logo or image blob, when the publishing repository owns the bytes."
+        },
+        "identifiers": {
+          "type": "array",
+          "items": {
+            "type": "ref",
+            "ref": "community.lexicon.media.book.defs#identifier"
+          },
+          "description": "Identifiers denoting the publisher."
+        },
+        "started": {
+          "type": "string",
+          "description": "Date the publisher began operating, exactly YYYY-MM-DD."
+        },
+        "ended": {
+          "type": "string",
+          "description": "Date the publisher ceased operating, exactly YYYY-MM-DD."
+        },
+        "createdAt": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.defs#timestamp",
+          "description": "When the publisher record was created."
+        }
+      }
     }
   }
 }

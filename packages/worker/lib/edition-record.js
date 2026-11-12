@@ -11,6 +11,7 @@
  */
 
 import { normalizeContributorRole } from './contributor-roles.js';
+import { httpUrl, identifier, identifierArray, nonEmptyString } from './record-fields.js';
 
 export class EditionRecordError extends Error {
   constructor(message) {
@@ -19,49 +20,8 @@ export class EditionRecordError extends Error {
   }
 }
 
-function nonEmptyString(value) {
-  return typeof value === 'string' && value.trim() !== '' ? value : undefined;
-}
-
-function identifier(value) {
-  if (value === null || typeof value !== 'object') return undefined;
-  const issuer = nonEmptyString(value.issuer);
-  const id = nonEmptyString(value.value);
-  if (!issuer || !id) return undefined;
-  return {
-    issuer,
-    value: id,
-    ...(nonEmptyString(value.url) ? { url: value.url } : {})
-  };
-}
-
-/** Stored identifiers are jsonb; tolerate both parsed arrays and JSON text. */
-function identifierArray(value) {
-  let list = value;
-  if (typeof list === 'string') {
-    try {
-      list = JSON.parse(list);
-    } catch {
-      return [];
-    }
-  }
-  if (!Array.isArray(list)) return [];
-  return list.map(identifier).filter(Boolean);
-}
-
 function positiveInteger(value) {
   return Number.isInteger(value) && value >= 0 ? value : undefined;
-}
-
-function httpUrl(value) {
-  const text = nonEmptyString(value);
-  if (!text) return undefined;
-  try {
-    const url = new URL(text);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? text : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function seriesValue(value) {
@@ -106,7 +66,11 @@ function publisherValue(row) {
   const identifiers = identifierArray(row.identifiers);
   return {
     name,
-    ...(identifiers.length > 0 ? { identifiers } : {})
+    ...(identifiers.length > 0 ? { identifiers } : {}),
+    // `defs#publisher.ref` is the catalog's local mirror of
+    // `defs#contributor.ref`: optional enrichment, a plain at-uri, and never a
+    // strongRef (a CID would force an edition republish on every entity edit).
+    ...(nonEmptyString(row.ref) ? { ref: row.ref } : {})
   };
 }
 

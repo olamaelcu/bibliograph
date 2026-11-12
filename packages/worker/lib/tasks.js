@@ -2,6 +2,7 @@ import { createOutboxPublisher, DEFAULT_BATCH } from './publish.js';
 import { publisherConfigError, resolvePublisherConfig } from './pds.js';
 import { createIngest } from './ingest.js';
 import { isbn13 as normalizeIsbn13 } from './util.js';
+import { prepareEntityRecords } from './prepare-entities.js';
 
 /** Upper bound on editions one catalog task ingests; providers may return fewer. */
 export const CANDIDATES_PER_TASK = 50;
@@ -123,6 +124,20 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         `pds-publish: ${result.published} published, ${result.failed} failed, ` +
           `${result.batches} batch(es)`
       );
+    },
+
+    // Operator-only: mints record URIs for rows that predate the feature and
+    // queues the records (and the editions that credit them). Nothing is minted
+    // automatically; `phase: 'editions'` is the post-publish republish pass.
+    'entities.prepare': async (payload, helpers) => {
+      const phase = payload?.phase === 'editions' ? 'editions' : 'mint';
+      const result = await prepareEntityRecords(pool, {
+        authority: publisherDid,
+        phase,
+        batchSize: Number.isInteger(payload?.batchSize) ? payload.batchSize : undefined,
+        logger: helpers.logger
+      });
+      helpers.logger.info(`entities.prepare[${phase}]: ${JSON.stringify(result)}`);
     }
   };
 }
