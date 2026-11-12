@@ -88,7 +88,10 @@ that role exists, to `bibliograph-web`. Create `bibliograph-web` before the
 deploy if `web.env` uses it as its read-only role; without `USAGE` on `happyview`
 and `SELECT` on `happyview.happyview_records` the edge answers
 `com.atproto.feed.describeFeedGenerator` / `getFeedSkeleton` with
-`503 ServiceUnavailable` while the rest of the edge keeps working.
+`503 ServiceUnavailable` while the rest of the edge keeps working. The feed
+methods also require `FEED_GENERATOR_DID` in `web.env` (and `PLC_URL` for
+`following`/`extended`/`dynamic`); neither has a code default, and a missing
+value answers `503` the same way.
 
 There is no feed backfill table or worker task either: feeds read the HappyView
 index, so a fresh deployment's feeds are empty until Jetstream, a HappyView

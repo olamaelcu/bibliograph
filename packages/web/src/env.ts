@@ -39,13 +39,13 @@ export const variables = defineEnvVars({
       'Loopback base URL of the worker admin API used by /admin for provider search and ingest.'
   },
   FEED_GENERATOR_DID: {
-    schema: (value) => value ?? 'did:web:biblio.livtet.olamaelcu.net',
+    schema: (value) => value,
     description:
-      'DID the edge feed generator advertises and accepts as the aud authority; also the authority of every feed URI.'
+      'Required. DID the edge feed generator advertises and accepts as the aud authority; also the authority of every feed URI. There is no code default: feed methods answer 503 when it is unset.'
   },
   PLC_URL: {
-    schema: (value) => value ?? 'https://plc.directory',
+    schema: (value) => value,
     description:
-      'PLC directory used to resolve did:plc service-token issuers for personalized feeds.'
+      'Required for personalized feeds. PLC directory used to resolve did:plc service-token issuers; there is no code default, so following/extended/dynamic answer 503 when it is unset or blank.'
   }
 });

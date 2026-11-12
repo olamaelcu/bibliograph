@@ -26,8 +26,6 @@ export const FEED_COLLECTION = 'net.olamaelcu.livtet.biblio.feed.generator';
 export const DESCRIBE_FEED_GENERATOR = 'com.atproto.feed.describeFeedGenerator';
 export const GET_FEED_SKELETON = 'com.atproto.feed.getFeedSkeleton';
 
-const DEFAULT_FEED_GENERATOR_DID = 'did:web:biblio.livtet.olamaelcu.net';
-const DEFAULT_PLC_URL = 'https://plc.directory';
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
@@ -39,8 +37,20 @@ export function isFeedMethod(method: string): boolean {
   return method === DESCRIBE_FEED_GENERATOR || method === GET_FEED_SKELETON;
 }
 
-export function feedGeneratorDid(): string {
-  return env.FEED_GENERATOR_DID ?? DEFAULT_FEED_GENERATOR_DID;
+/** The configured generator DID, or `null` when `FEED_GENERATOR_DID` is unset. */
+export function feedGeneratorDid(): string | null {
+  const did = env.FEED_GENERATOR_DID?.trim();
+  return did === undefined || did === '' ? null : did;
+}
+
+/** The configured PLC directory, or `null` when `PLC_URL` is unset or blank. */
+function plcUrl(): string | null {
+  const url = env.PLC_URL?.trim();
+  return url === undefined || url === '' ? null : url;
+}
+
+function missingConfig(name: string): Response {
+  return fail(503, ERROR_UNAVAILABLE, `${name} is not configured`);
 }
 
 function feedUri(did: string, kind: FeedKind): string {
@@ -73,16 +83,16 @@ function bearerToken(header: string | null): string | null {
 
 let resolverCache: { plcUrl: string; resolve: DidResolver } | undefined;
 
-function didResolver(): DidResolver {
-  const plcUrl = env.PLC_URL ?? DEFAULT_PLC_URL;
-  if (resolverCache?.plcUrl !== plcUrl) {
-    resolverCache = { plcUrl, resolve: createDidResolver({ plcUrl }) };
+function didResolver(url: string): DidResolver {
+  if (resolverCache?.plcUrl !== url) {
+    resolverCache = { plcUrl: url, resolve: createDidResolver({ plcUrl: url }) };
   }
   return resolverCache.resolve;
 }
 
 export function describeFeedGenerator(): Response {
   const did = feedGeneratorDid();
+  if (did === null) return missingConfig('FEED_GENERATOR_DID');
   return json({
     did,
     feeds: FEED_KINDS.map((kind) => ({ uri: feedUri(did, kind) }))
@@ -97,6 +107,7 @@ export function describeFeedGenerator(): Response {
 export async function getFeedSkeleton(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const did = feedGeneratorDid();
+  if (did === null) return missingConfig('FEED_GENERATOR_DID');
 
   const rawFeed = url.searchParams.get('feed');
   if (rawFeed === null || rawFeed === '') {
@@ -106,7 +117,6 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
   if (kind === null) {
     return fail(400, ERROR_INVALID_REQUEST, 'the feed parameter is not a feed of this generator');
   }
-
   const limit = parseLimit(url.searchParams.get('limit'));
   if (limit === null) {
     return fail(400, ERROR_INVALID_REQUEST, 'limit must be an integer between 1 and 100');
@@ -120,6 +130,10 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
 
   let viewerDid: string | null = null;
   if (kind !== 'public') {
+    // `public` is anonymous and needs no DID resolution; the personalized kinds
+    // need the PLC directory before they verify a token or touch the database.
+    const plc = plcUrl();
+    if (plc === null) return missingConfig('PLC_URL');
     const token = bearerToken(request.headers.get('authorization'));
     if (token === null) {
       return fail(401, ERROR_AUTH_REQUIRED, 'this feed requires an atproto service token');
@@ -127,7 +141,7 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
     try {
       viewerDid = await verifyFeedServiceJwt(token, {
         audience: `${did}#atproto_feed`,
-        resolveDid: didResolver()
+        resolveDid: didResolver(plc)
       });
     } catch (error) {
       if (error instanceof FeedAuthError) {

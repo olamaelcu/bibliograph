@@ -58,9 +58,10 @@ The feed generator is also served at the edge, from `happyview.happyview_records
 HappyView. `GET com.atproto.feed.describeFeedGenerator` is anonymous and advertises exactly four
 feeds; `GET com.atproto.feed.getFeedSkeleton` serves their skeletons. Both are `GET`-only — `POST`
 on either NSID is `405 MethodNotAllowed` like every other non-GET verb. The generator DID is
-`FEED_GENERATOR_DID` (default `did:web:biblio.livtet.olamaelcu.net`) and the feed URIs are
+`FEED_GENERATOR_DID`, which is required and has no code default; the feed URIs are
 `at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/<kind>` for `public`,
-`following`, `extended` and `dynamic`. There is no `recommendations` feed.
+`following`, `extended` and `dynamic`. When `FEED_GENERATOR_DID` is unset both methods answer
+`503 ServiceUnavailable`. There is no `recommendations` feed.
 
 **Auth.** Queries are anonymous. HappyView procedures require a DPoP-bound session:
 `Authorization: DPoP <token>` plus a fresh `DPoP` proof. The edge holds no session and cannot mint
@@ -79,8 +80,10 @@ Feed skeletons have their own contract: `public` is anonymous, while `following`
 compact JWT against the issuer DID document's `#atproto` Multikey (ES256K or ES256), requires
 `iss` to be a DID, `aud` exactly `<FEED_GENERATOR_DID>#atproto_feed`, `lxm` exactly
 `com.atproto.feed.getFeedSkeleton`, and sane `iat`/`exp`. `did:plc` issuers resolve through
-`PLC_URL` (default `https://plc.directory`), `did:web` through its standard document URL, and both
-are cached briefly. A missing or invalid token is `401 AuthRequired`; the request never falls back
+`PLC_URL`, a required setting with no code default (`did:web` through its standard document URL),
+and both are cached briefly. When `PLC_URL` is unset or blank the three personalized feeds answer
+`503 ServiceUnavailable` before authentication or any query; `public` does not need it.
+A missing or invalid token is `401 AuthRequired`; the request never falls back
 to the public feed. No `x-viewer-did` header is trusted.
 
 Anonymous queries are still attributed to the edge's XRPC client key, which is the rate-limiting

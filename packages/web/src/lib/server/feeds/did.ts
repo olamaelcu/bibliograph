@@ -3,8 +3,8 @@ import type { DidDocument, DidResolver } from './auth';
 /**
  * DID document resolution for feed service-JWT verification.
  *
- * `did:plc` is read from the configured PLC directory (the public one unless
- * `PLC_URL` names a local network); `did:web` follows the method spec. The
+ * `did:plc` is read from the configured PLC directory (`PLC_URL`, which the
+ * caller supplies; there is no default); `did:web` follows the method spec. The
  * result is cached briefly because a feed page verifies one token, and a
  * caller retrying a page should not re-fetch the same document.
  */

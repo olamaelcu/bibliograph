@@ -101,14 +101,17 @@ edge (`packages/web/src/lib/server/feeds/`), not HappyView: a skeleton is one SQ
 `net.olamaelcu.livtet.biblio.bookStatus`, ordered newest first by the record's own `createdAt` and
 then `uri`. There is no worker task and no Lua script for feeds.
 
-The generator DID is `FEED_GENERATOR_DID` (default `did:web:biblio.livtet.olamaelcu.net`) and its
-feed URIs are `at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/<kind>` for
+The generator DID is `FEED_GENERATOR_DID`; it is required configuration with no code default, and
+its feed URIs are `at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/<kind>` for
 `public`, `following`, `extended` and `dynamic`; `recommendations` is dropped. `public` is
 anonymous. The other three require an atproto service JWT whose compact signature verifies against
 the issuer DID document's `#atproto` Multikey (ES256K/ES256), with `aud` exactly
 `<FEED_GENERATOR_DID>#atproto_feed` and `lxm` exactly `com.atproto.feed.getFeedSkeleton`; `did:plc`
-issuers resolve through `PLC_URL`, `did:web` through its standard document URL, and both are cached
-briefly. A missing or invalid token is `401`, never a silent public page. `following` pages records
+issuers resolve through `PLC_URL`, which is required for those feeds and has no code default,
+`did:web` through its standard document URL, and both are cached
+briefly. When `FEED_GENERATOR_DID` is unset both feed methods answer `503 ServiceUnavailable`;
+when `PLC_URL` is unset the three personalized feeds answer `503` while `public` keeps working.
+A missing or invalid token is `401`, never a silent public page. `following` pages records
 by DIDs the viewer follows (excluding the viewer), `extended` adds their followees (capped at 500
 DIDs), and `dynamic` is the viewer plus their follow set.
 

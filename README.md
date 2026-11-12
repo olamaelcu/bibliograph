@@ -84,10 +84,13 @@ The admin import UI lives at `/admin/import/isbn` and is gated on `ADMIN_TOKEN`.
 `public` needs no token. The other three authenticate with an atproto service
 JWT (`lxm = com.atproto.feed.getFeedSkeleton`) whose signature is verified
 against the issuer DID document's `#atproto` Multikey, with `aud` exactly
-`<FEED_GENERATOR_DID>#atproto_feed`. The generator DID is `FEED_GENERATOR_DID`
-(default `did:web:biblio.livtet.olamaelcu.net`); `did:plc` signers resolve
-through `PLC_URL` (default `https://plc.directory`). There is no browser session
-and no end-user OAuth, and no `recommendations` feed.
+`<FEED_GENERATOR_DID>#atproto_feed`. Both `FEED_GENERATOR_DID` and `PLC_URL`
+are required configuration with no code default: a deployment must set them
+explicitly. Without `FEED_GENERATOR_DID` both feed methods answer
+`503 ServiceUnavailable`; without `PLC_URL` the personalized feeds
+(`following`, `extended`, `dynamic`) answer `503` while `public` keeps working.
+`did:plc` signers resolve through `PLC_URL`. There is no browser session and no
+end-user OAuth, and no `recommendations` feed.
 
 ## Development
 
