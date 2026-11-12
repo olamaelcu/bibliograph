@@ -264,7 +264,6 @@ ssh veve@lescayes.ts.olamaelcu.net \
   'systemctl status bibliograph-happyview-deploy --no-pager -n 5'
 ssh veve@lescayes.ts.olamaelcu.net 'curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:5176/'
 curl -s -o /dev/null -w '%{http_code}\n' https://biblio.livtet.olamaelcu.net/
-curl -s -o /dev/null -w '%{http_code}\n' https://biblio.livtet.olamaelcu.net/health
 ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u happyview -n 30 --no-pager'
 ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u bibliograph-happyview-deploy -n 20 --no-pager'
 ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u bibliograph-worker -n 30 --no-pager'
@@ -299,8 +298,11 @@ curl -s -X POST -H 'content-type: application/json' \
   https://biblio.livtet.olamaelcu.net/xrpc/community.lexicon.media.book.resolveEditions
 # feed generator
 curl -s https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.feed.describeFeedGenerator
-curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.feed.getFeedSkeleton?feed=at://<FEED_GENERATOR_DID>/app.bsky.feed.generator/public'
+curl -s 'https://biblio.livtet.olamaelcu.net/xrpc/com.atproto.feed.getFeedSkeleton?feed=at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/public'
 ```
+
+The edge has no `/health` route; `GET /` is the liveness check (the deploy
+script and the public curl above both use it).
 
 Read the bodies: `503` on catalog methods means `web.env` has no catalog
 `DATABASE_URL`; `503` on feeds means `FEED_GENERATOR_DID` (or `PLC_URL` for
