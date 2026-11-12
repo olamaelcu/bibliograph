@@ -109,11 +109,25 @@ HappyView. The full request/response contract is in
 
 ## Providers
 
-Catalog hydration uses **ISBNdb → Google Books → Goodreads**, stopping at the
-first provider that returns candidates, for both ISBN lookups and text
-searches. `googlebooks` and `goodreads` identifiers resolve directly against
-their own provider; without `ISBNDB_API_KEY` the chain starts at Google Books.
-Each worker task ingests at most 50 candidates.
+Catalog hydration uses **ISBNdb → Google Books → OpenLibrary → Goodreads**,
+stopping at the first provider that returns candidates, for both ISBN lookups
+and text searches. Structured APIs come before Goodreads' HTML scraping;
+OpenLibrary is keyless and public, so it is a cheap fallback after the two
+keyed providers. `googlebooks`, `openlibrary` and `goodreads` identifiers
+resolve directly against their own provider (`openlibrary` accepts edition
+`OL…M` and work `OL…W` keys); without `ISBNDB_API_KEY` the chain starts at
+Google Books. Each worker task ingests at most 50 candidates.
+
+OpenLibrary uses `https://openlibrary.org` by default (override with
+`OPENLIBRARY_BASE_URL`), needs no API key, sends a descriptive User-Agent and
+serializes requests through a polite gate. Edition search asks for 40 results
+with an explicit field list; an ISBN lookup expands the edition's work for a
+missing description and its author keys for contributor names. Author search
+(`/search/authors.json`) and author detail (`/authors/<key>.json`) feed the
+read-only contributor search at `POST /admin/api/contributor-search` in the web
+admin UI; that endpoint returns descriptive candidates and cannot import or
+publish contributors. Date fields accept only unambiguous full dates; a
+partial or unparseable birth/death date is omitted.
 
 Google Books and ISBNdb answers are cached in Postgres (`google_books_cache` /
 `isbndb_cache`). ISBNdb is metered: after a cache miss the worker atomically

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import pg from 'pg';
 
-import { createProviders } from '../lib/providers/index.js';
+import { createProviders as createProviderSet } from '../lib/providers/index.js';
 import { startAdminServer } from '../lib/admin.js';
 import { ensureSupportSchema } from '../lib/setup.js';
 
@@ -56,9 +56,17 @@ let unconfiguredProviders;
 let googleRequests = 0;
 let isbndbRequests = 0;
 let goodreadsRequests = 0;
+let openlibraryRequests = 0;
 const requestedQueries = [];
 
 const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
+
+function createProviders(options = {}) {
+  return createProviderSet({
+    ...options,
+    env: { OPENLIBRARY_BASE_URL: `${providerBase}/openlibrary`, ...options.env }
+  });
+}
 
 async function cleanup() {
   if (!pool) return;
@@ -191,6 +199,68 @@ before(async () => {
       return;
     }
 
+    if (url.pathname === '/openlibrary/search.json') {
+      openlibraryRequests += 1;
+      requestedQueries.push({ provider: 'openlibrary', query: url.searchParams.get('q') });
+      send({
+        docs: [
+          {
+            key: '/works/OL900W',
+            title: 'Admin Probe Edition',
+            author_name: [CONTRIBUTOR],
+            author_key: ['OL900A'],
+            isbn: [ISBN],
+            edition_key: ['OL901M'],
+            publisher: [PUBLISHER],
+            first_publish_year: 2024,
+            cover_i: 321
+          }
+        ]
+      });
+      return;
+    }
+
+    if (url.pathname === `/openlibrary/isbn/${ISBN}.json`) {
+      openlibraryRequests += 1;
+      requestedQueries.push({ provider: 'openlibrary', query: ISBN });
+      send({
+        key: '/books/OL901M',
+        title: 'Admin Probe Edition',
+        authors: [{ key: '/authors/OL900A', name: CONTRIBUTOR }],
+        isbn_13: [ISBN],
+        isbn_10: [],
+        publishers: [PUBLISHER],
+        publish_date: '2024',
+        number_of_pages: 211,
+        description: 'An admin probe edition.'
+      });
+      return;
+    }
+
+    if (url.pathname === '/openlibrary/search/authors.json') {
+      openlibraryRequests += 1;
+      requestedQueries.push({
+        provider: 'openlibrary-authors',
+        query: url.searchParams.get('q'),
+        limit: url.searchParams.get('limit')
+      });
+      send({
+        numFound: 2,
+        docs: [
+          { key: 'OL900A', name: CONTRIBUTOR, birth_date: '1930-01-02' },
+          { key: 'OL901A', name: 'Partial Probe Author', birth_date: '1930' }
+        ]
+      });
+      return;
+    }
+
+    if (url.pathname.startsWith('/openlibrary/')) {
+      openlibraryRequests += 1;
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+
     response.writeHead(404);
     response.end('not found');
   });
@@ -202,6 +272,7 @@ before(async () => {
   const env = {
     GOOGLE_BOOKS_BASE_URL: `${providerBase}/google`,
     GOODREADS_BASE_URL: `${providerBase}/goodreads`,
+    OPENLIBRARY_BASE_URL: `${providerBase}/openlibrary`,
     GOOGLE_BOOKS_API_KEY: '',
     ISBNDB_API_KEY: 'test-key',
     ISBNDB_BASE_URL: `${providerBase}/isbndb`,
@@ -302,6 +373,7 @@ test('provider search selects only the requested provider', async () => {
   googleRequests = 0;
   isbndbRequests = 0;
   goodreadsRequests = 0;
+  openlibraryRequests = 0;
   requestedQueries.length = 0;
 
   const google = await post(admin, '/provider-search', {
@@ -316,6 +388,19 @@ test('provider search selects only the requested provider', async () => {
   assert.deepEqual(
     { googleRequests, isbndbRequests, goodreadsRequests },
     { googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0 }
+  );
+
+  const openlibrary = await post(admin, '/provider-search', {
+    provider: 'openlibrary',
+    query: 'admin probe'
+  });
+  assert.equal(openlibrary.status, 200);
+  const openlibraryBody = await openlibrary.json();
+  assert.equal(openlibraryBody.candidates.length, 1);
+  assert.equal(openlibraryBody.candidates[0].title, 'Admin Probe Edition');
+  assert.deepEqual(
+    { googleRequests, isbndbRequests, goodreadsRequests, openlibraryRequests },
+    { googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0, openlibraryRequests: 1 }
   );
 
   const isbndb = await post(admin, '/provider-search', {
@@ -348,7 +433,7 @@ test('provider search selects only the requested provider', async () => {
 test('an ISBN query routes to byIsbn/byIdentifier for each provider', async () => {
   requestedQueries.length = 0;
 
-  for (const provider of ['googlebooks', 'isbndb', 'goodreads']) {
+  for (const provider of ['googlebooks', 'isbndb', 'openlibrary', 'goodreads']) {
     const response = await post(admin, '/provider-search', { provider, query: ISBN });
     assert.equal(response.status, 200, `${provider} answered ${response.status}`);
     const body = await response.json();
@@ -357,10 +442,12 @@ test('an ISBN query routes to byIsbn/byIdentifier for each provider', async () =
 
   assert.deepEqual(
     requestedQueries.map((entry) => entry.provider).sort(),
-    ['goodreads', 'googlebooks']
+    ['goodreads', 'googlebooks', 'openlibrary']
   );
   const google = requestedQueries.find((entry) => entry.provider === 'googlebooks');
   assert.equal(google.query, `isbn:${ISBN}`);
+  const openlibrary = requestedQueries.find((entry) => entry.provider === 'openlibrary');
+  assert.equal(openlibrary.query, ISBN);
 });
 
 test('ISBNdb search answers a clear 503 when the provider is not configured', async () => {
@@ -419,10 +506,74 @@ test('ingest rejects a candidate without identifiers', async () => {
 });
 
 test('unknown providers and empty queries are bad requests', async () => {
-  const unknown = await post(admin, '/provider-search', { provider: 'openlibrary', query: 'x' });
+  const unknown = await post(admin, '/provider-search', { provider: 'nope', query: 'x' });
   assert.equal(unknown.status, 400);
   const empty = await post(admin, '/provider-search', { provider: 'googlebooks', query: '   ' });
   assert.equal(empty.status, 400);
+});
+
+test('contributor search returns normalized read-only candidates', async () => {
+  openlibraryRequests = 0;
+  requestedQueries.length = 0;
+
+  const response = await post(admin, '/contributor-search', {
+    q: 'probe author',
+    limit: 10
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.query, 'probe author');
+  assert.equal(body.limit, 10);
+  assert.equal(body.contributors.length, 2);
+  assert.deepEqual(body.contributors[0], {
+    displayName: CONTRIBUTOR,
+    identifiers: [{ issuer: 'openlibrary', value: 'OL900A' }],
+    key: 'OL900A',
+    born: '1930-01-02'
+  });
+  assert.equal(body.contributors[0].role, undefined, 'contributor search has no edition roles');
+  assert.equal(
+    body.contributors[1].born,
+    undefined,
+    'a bare year is omitted instead of guessed'
+  );
+  assert.equal(openlibraryRequests, 1);
+  assert.deepEqual(requestedQueries, [
+    { provider: 'openlibrary-authors', query: 'probe author', limit: '10' }
+  ]);
+});
+
+test('contributor search validates q and bounds the limit', async () => {
+  const missing = await post(admin, '/contributor-search', {});
+  assert.equal(missing.status, 400);
+  assert.match((await missing.json()).message, /q is required/);
+
+  const blank = await post(admin, '/contributor-search', { q: '   ' });
+  assert.equal(blank.status, 400);
+
+  const tooLong = await post(admin, '/contributor-search', { q: 'x'.repeat(201) });
+  assert.equal(tooLong.status, 400);
+  assert.match((await tooLong.json()).message, /at most 200/);
+
+  for (const limit of [0, 51, 1.5, 'many']) {
+    const bounded = await post(admin, '/contributor-search', { q: 'probe author', limit });
+    assert.equal(bounded.status, 400, `limit ${JSON.stringify(limit)} must be rejected`);
+    assert.match((await bounded.json()).message, /limit must be an integer between 1 and 50/);
+  }
+
+  const max = await post(admin, '/contributor-search', { q: 'probe author', limit: 50 });
+  assert.equal(max.status, 200);
+});
+
+test('contributor search requires the admin token and is POST-only', async () => {
+  const unauthorized = await post(admin, '/contributor-search', { q: 'x' }, null);
+  assert.equal(unauthorized.status, 401);
+
+  const response = await fetch(`${admin.url}/contributor-search`, {
+    method: 'GET',
+    headers: { authorization: `Bearer ${TOKEN}` }
+  });
+  assert.equal(response.status, 405);
 });
 
 test('publisher search returns ISBNdb publisher names', async () => {

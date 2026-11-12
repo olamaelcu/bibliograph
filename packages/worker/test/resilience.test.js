@@ -400,6 +400,7 @@ test('provider fallback continues to Google when ISBNdb is open', async () => {
       ISBNDB_DAILY_LIMIT: '100',
       ISBNDB_BASE_URL: 'https://provider.test/isbndb',
       GOOGLE_BOOKS_BASE_URL: 'https://provider.test/google',
+      OPENLIBRARY_BASE_URL: 'https://provider.test/openlibrary',
       GOODREADS_BASE_URL: 'https://provider.test/goodreads'
     },
     isbndbDailyLimit: 100,
@@ -475,7 +476,7 @@ test('renderMetrics includes provider labels, counters, and breaker state', asyn
     text,
     /^bibliograph_provider_retries_total\{provider="googlebooks",reason="status_503"\} 1$/m
   );
-  for (const provider of ['googlebooks', 'isbndb', 'goodreads']) {
+  for (const provider of ['googlebooks', 'isbndb', 'openlibrary', 'goodreads']) {
     assert.match(
       text,
       new RegExp(`^bibliograph_provider_breaker_state\\{provider="${provider}"\\} 0$`, 'm')

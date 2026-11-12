@@ -5,6 +5,8 @@
     identifierText,
     type AdminEdition,
     type Candidate,
+    type ContributorCandidate,
+    type ContributorSearchResponse,
     type IngestResponse,
     type LinkMode,
     type MergeField,
@@ -20,6 +22,7 @@
   const PROVIDER_LABELS: Record<Provider, string> = {
     googlebooks: 'Google Books',
     isbndb: 'ISBNdb',
+    openlibrary: 'OpenLibrary',
     goodreads: 'Goodreads'
   };
 
@@ -102,6 +105,37 @@
       ingestStatus = { ...ingestStatus };
       delete ingestStatus[key];
       searchError = error instanceof Error ? error.message : 'Ingestion failed.';
+    }
+  }
+
+  // ── Contributor search (OpenLibrary, read-only) ───────────────────────────
+  let contributorQuery = $state('');
+  let contributors = $state<ContributorCandidate[]>([]);
+  let contributorSearching = $state(false);
+  let contributorError = $state<string | null>(null);
+
+  async function runContributorSearch() {
+    contributorError = null;
+    if (contributorQuery.trim() === '') {
+      contributorError = 'Enter an author name.';
+      return;
+    }
+    contributorSearching = true;
+    try {
+      const response = await fetch('/admin/api/contributor-search', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ q: contributorQuery, limit: 20 })
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as ContributorSearchResponse;
+      contributors = Array.isArray(body.contributors) ? body.contributors : [];
+      if (contributors.length === 0) contributorError = 'OpenLibrary returned no contributors.';
+    } catch (error) {
+      contributorError = error instanceof Error ? error.message : 'The search failed.';
+      contributors = [];
+    } finally {
+      contributorSearching = false;
     }
   }
 
@@ -681,6 +715,91 @@
                               ? 'Ingested'
                               : 'Ingest'}
                         </wa-button>
+                      </div>
+                    </div>
+                  </div>
+                </wa-card>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </wa-card>
+
+      <wa-card with-header appearance="outlined">
+        <h2 slot="header">Contributor search (OpenLibrary, read-only)</h2>
+        <div class="wa-stack wa-gap-m">
+          <p class="muted">
+            Look up descriptive author data for catalog contributor records. Results include the
+            OpenLibrary author key, reliable external identifiers and full dates only. This panel
+            does not import or publish contributors.
+          </p>
+          <div class="admin-form-grid">
+            <div class="field field-grow">
+              <span class="field-label">Author name</span>
+              <wa-input
+                aria-label="Author name"
+                role="textbox"
+                tabindex="0"
+                value={contributorQuery}
+                placeholder="Author name"
+                oninput={(event: Event) => (contributorQuery = valueOf(event))}
+                onkeydown={(event: KeyboardEvent) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void runContributorSearch();
+                  }
+                }}
+              ></wa-input>
+            </div>
+            <div class="admin-form-action">
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <wa-button
+                variant="brand"
+                disabled={contributorSearching}
+                onclick={() => void runContributorSearch()}
+              >
+                {contributorSearching ? 'Searching…' : 'Search contributors'}
+              </wa-button>
+            </div>
+          </div>
+
+          {#if contributorError}
+            <wa-callout variant="danger">{contributorError}</wa-callout>
+          {/if}
+
+          {#if contributors.length > 0}
+            <div class="admin-results">
+              {#each contributors as contributor (contributor.key ?? contributor.displayName)}
+                <wa-card appearance="outlined" class="admin-result">
+                  <div class="admin-result-row">
+                    {#if contributor.imageUrl}
+                      <img
+                        class="admin-cover"
+                        src={contributor.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                      />
+                    {/if}
+                    <div class="wa-stack wa-gap-2xs admin-result-body">
+                      <div class="wa-cluster wa-gap-s wa-align-items-baseline">
+                        <strong>{contributor.displayName}</strong>
+                        {#if contributor.born}
+                          <span class="muted">born {contributor.born}</span>
+                        {/if}
+                        {#if contributor.died}
+                          <span class="muted">died {contributor.died}</span>
+                        {/if}
+                      </div>
+                      {#if contributor.description}
+                        <span class="muted admin-small">{contributor.description}</span>
+                      {/if}
+                      <div class="wa-cluster wa-gap-2xs">
+                        {#each contributor.identifiers as identifier (identifierText(identifier))}
+                          <wa-tag size="small" variant="neutral">
+                            {identifierText(identifier)}
+                          </wa-tag>
+                        {/each}
                       </div>
                     </div>
                   </div>

@@ -1,13 +1,13 @@
 /**
  * Dependency-free retry, circuit breaker, and telemetry for provider HTTP.
  *
- * Each provider identity (`googlebooks`, `isbndb`, `goodreads`) gets its own
- * breaker and counters. The layer wraps the raw `fetch` implementation, so it
+ * Each provider identity (`googlebooks`, `isbndb`, `openlibrary`, `goodreads`)
+ * gets its own breaker and counters. The layer wraps the raw `fetch`, so it
  * sees every attempt while the provider's quota/cache logic still runs once per
  * logical query: retries never reserve another ISBNdb call.
  */
 
-export const PROVIDER_IDS = ['googlebooks', 'isbndb', 'goodreads'];
+export const PROVIDER_IDS = ['googlebooks', 'isbndb', 'openlibrary', 'goodreads'];
 
 /** Transient statuses worth another attempt. 400/401/403/404 are answers, not outages. */
 export const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);

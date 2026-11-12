@@ -8,6 +8,7 @@ const TIMEOUT_MS = 20_000;
 /** Worker admin routes the edge proxies; anything else is a programming error. */
 export type AdminWorkerPath =
   | '/provider-search'
+  | '/contributor-search'
   | '/ingest'
   | '/publisher-search'
   | '/publisher-books'

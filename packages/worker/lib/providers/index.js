@@ -1,6 +1,7 @@
 import { mergeCandidates, isbn13 as normalizeIsbn13, cleanString } from '../util.js';
 import { createGoogleBooks } from './google-books.js';
 import { createIsbndb } from './isbndb.js';
+import { createOpenLibrary } from './openlibrary.js';
 import { createGoodreads } from './goodreads.js';
 import { parseDailyLimit } from './usage.js';
 import { createProviderHttp, createProviderMetrics } from './resilience.js';
@@ -29,6 +30,12 @@ export function createProviders({
     fetchImpl,
     metrics
   });
+  const openlibraryHttp = createProviderHttp({
+    ...resilience,
+    provider: 'openlibrary',
+    fetchImpl,
+    metrics
+  });
   const goodreadsHttp = createProviderHttp({
     ...resilience,
     provider: 'goodreads',
@@ -49,6 +56,10 @@ export function createProviders({
     logger,
     fetchImpl: isbndbHttp.fetch,
     breaker: isbndbHttp.breaker
+  });
+  const openlibrary = createOpenLibrary({
+    baseUrl: env.OPENLIBRARY_BASE_URL || 'https://openlibrary.org',
+    fetchImpl: openlibraryHttp.fetch
   });
   const goodreads = createGoodreads({
     baseUrl: env.GOODREADS_BASE_URL || 'https://www.goodreads.com',
@@ -86,16 +97,21 @@ export function createProviders({
     if (issuer === 'goodreads') {
       return mergeCandidates(await goodreads.byId(identifier.value));
     }
+    if (issuer === 'openlibrary') {
+      return mergeCandidates(await openlibrary.byIdentifier(identifier.value));
+    }
     if (!ISBN_ISSUERS.has(issuer)) return [];
 
     const isbn = normalizeIsbn13(identifier.value);
     if (!isbn) return [];
 
-    // ISBNdb owns the ISBN space; Google and Goodreads are fallbacks. The
-    // breaker lets an open ISBNdb skip straight to them.
+    // ISBNdb owns the ISBN space; Google Books and the keyless structured
+    // OpenLibrary API come next, and Goodreads HTML scraping is the last
+    // resort. The breaker lets an open ISBNdb skip straight to the rest.
     const steps = [];
     if (isbndb) steps.push(['isbndb', () => isbndb.byIsbn(isbn)]);
     steps.push(['googlebooks', () => google.byIsbn(isbn)]);
+    steps.push(['openlibrary', () => openlibrary.byIsbn(isbn)]);
     steps.push(['goodreads', () => goodreads.byIdentifier(isbn)]);
     return mergeCandidates(await firstCandidates(`isbn:${isbn}`, steps));
   }
@@ -114,6 +130,9 @@ export function createProviders({
       steps.push(['isbndb', () => (isbn13 ? isbndb.byIsbn(isbn13) : isbndb.search(text))]);
     }
     steps.push(['googlebooks', () => google.search(input)]);
+    // A structured API before Goodreads' HTML scraping: OpenLibrary answers
+    // editions/works directly and needs no key or quota reservation.
+    if (text) steps.push(['openlibrary', () => openlibrary.search(input)]);
     if (text) steps.push(['goodreads', () => goodreads.search(text)]);
     return mergeCandidates(await firstCandidates(text ?? 'search', steps));
   }
@@ -121,11 +140,12 @@ export function createProviders({
   return {
     resolve,
     search,
-    providers: { google, isbndb, goodreads },
+    providers: { google, isbndb, openlibrary, goodreads },
     metrics,
     resilience: {
       googlebooks: googleHttp.breaker,
       isbndb: isbndbHttp.breaker,
+      openlibrary: openlibraryHttp.breaker,
       goodreads: goodreadsHttp.breaker
     }
   };

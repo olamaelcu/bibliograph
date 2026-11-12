@@ -1,6 +1,6 @@
 /** Types shared by the admin server routes and the browser-side curation UI. */
 
-export const PROVIDERS = ['googlebooks', 'isbndb', 'goodreads'] as const;
+export const PROVIDERS = ['googlebooks', 'isbndb', 'openlibrary', 'goodreads'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 export type Identifier = { issuer: string; value: string };
@@ -44,6 +44,24 @@ export type Candidate = {
 export type ProviderSearchResponse = {
   provider: Provider;
   candidates: Candidate[];
+};
+
+/** A read-only OpenLibrary contributor candidate; no roles (those are edition credits). */
+export type ContributorCandidate = {
+  displayName: string;
+  nameInverted?: string;
+  description?: string;
+  imageUrl?: string;
+  born?: string;
+  died?: string;
+  identifiers: Identifier[];
+  key?: string;
+};
+
+export type ContributorSearchResponse = {
+  query: string;
+  limit: number;
+  contributors: ContributorCandidate[];
 };
 
 export type IngestResponse = {

@@ -14,7 +14,10 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
   const { provider, query } = body;
   if (typeof provider !== 'string' || !(PROVIDERS as readonly string[]).includes(provider)) {
     return json(
-      { error: 'BadRequest', message: 'provider must be googlebooks, isbndb or goodreads' },
+      {
+        error: 'BadRequest',
+        message: 'provider must be googlebooks, isbndb, openlibrary or goodreads'
+      },
       { status: 400, headers: NO_STORE }
     );
   }

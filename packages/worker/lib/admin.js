@@ -13,11 +13,12 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createIngest } from './ingest.js';
 import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
 import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
+import { openLibraryBookKey } from './providers/openlibrary.js';
 
 export const DEFAULT_ADMIN_HOST = '127.0.0.1';
 export const DEFAULT_ADMIN_PORT = 9465;
 const MAX_BODY_BYTES = 1024 * 1024;
-const PROVIDERS = new Set(['googlebooks', 'isbndb', 'goodreads']);
+const PROVIDERS = new Set(['googlebooks', 'isbndb', 'openlibrary', 'goodreads']);
 // Publisher name length is shared by search and import so a name that previews
 // can always be imported; ISBNdb publisher names are short in practice.
 const PUBLISHER_NAME_MAX = 150;
@@ -25,6 +26,11 @@ const PUBLISHER_SEARCH_PAGE_SIZE = 50;
 const PUBLISHER_PAGE_SIZE_MAX = 100;
 const PUBLISHER_IMPORT_PAGE_SIZE_DEFAULT = 100;
 const PUBLISHER_IMPORT_MAX_PAGES = 5;
+// OpenLibrary author search is unbounded text; keep an operator query small
+// enough to be cheap upstream and a bounded page of results for the UI.
+const CONTRIBUTOR_QUERY_MAX = 200;
+const CONTRIBUTOR_LIMIT_DEFAULT = 20;
+const CONTRIBUTOR_LIMIT_MAX = 50;
 // ISBNdb accepts YYYY, YYYY-MM and YYYY-MM-DD; zero padding makes a plain
 // string comparison the correct range check.
 const DATE_FILTER = /^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?)?$/;
@@ -203,7 +209,7 @@ export async function searchProvider(providers, provider, query) {
   if (!PROVIDERS.has(provider)) {
     throw new AdminRequestError(
       400,
-      'provider must be one of googlebooks, isbndb or goodreads'
+      'provider must be one of googlebooks, isbndb, openlibrary or goodreads'
     );
   }
   const text = cleanString(query);
@@ -218,6 +224,12 @@ export async function searchProvider(providers, provider, query) {
   if (provider === 'isbndb') {
     const isbndb = isbndbOr503(providers);
     return isbn ? isbndb.byIsbn(isbn) : isbndb.search(text);
+  }
+  if (provider === 'openlibrary') {
+    const openlibrary = providers.providers.openlibrary;
+    if (isbn) return openlibrary.byIsbn(isbn);
+    if (openLibraryBookKey(text)) return openlibrary.byIdentifier(text);
+    return openlibrary.search({ q: text });
   }
   return isbn
     ? providers.providers.goodreads.byIdentifier(isbn)
@@ -284,6 +296,15 @@ function publisherQueryInput(body) {
   if (!query) throw new AdminRequestError(400, 'query is required');
   if (query.length > PUBLISHER_NAME_MAX) {
     throw new AdminRequestError(400, `query must be at most ${PUBLISHER_NAME_MAX} characters`);
+  }
+  return query;
+}
+
+function contributorQueryInput(body) {
+  const query = stringValue(body.q);
+  if (!query) throw new AdminRequestError(400, 'q is required');
+  if (query.length > CONTRIBUTOR_QUERY_MAX) {
+    throw new AdminRequestError(400, `q must be at most ${CONTRIBUTOR_QUERY_MAX} characters`);
   }
   return query;
 }
@@ -361,6 +382,25 @@ export function createAdminHandler({ providers, ingest, token, logger = console 
         const body = objectBody(await readJson(request));
         const candidates = await searchProvider(providers, body.provider, body.query);
         sendJson(response, 200, { provider: body.provider, candidates });
+        return;
+      }
+
+      if (url.pathname === '/contributor-search') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const body = objectBody(await readJson(request));
+        const query = contributorQueryInput(body);
+        const limit = boundedInteger(body.limit, 'limit', {
+          fallback: CONTRIBUTOR_LIMIT_DEFAULT,
+          min: 1,
+          max: CONTRIBUTOR_LIMIT_MAX
+        });
+        const contributors = await providers.providers.openlibrary.searchContributors(query, {
+          limit
+        });
+        sendJson(response, 200, { query, limit, contributors });
         return;
       }
 

@@ -191,11 +191,15 @@ one anonymous call cannot turn its full identifier list into paid provider work.
 | `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to 50 candidates; falls back to the resolve chain when ISBNdb is unconfigured or returns nothing |
 | `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
 
-Provider precedence is ISBNdb → Google Books → Goodreads for ISBN lookups, and
-ISBNdb → Google Books → Goodreads for text searches, stopping at the first
-provider that returns candidates (no fan-out merge across providers). When
-`ISBNDB_API_KEY` is unset the chain starts at Google Books. `googlebooks` and
-`goodreads` identifiers still resolve directly against their own provider.
+Provider precedence is ISBNdb → Google Books → OpenLibrary → Goodreads, for
+both ISBN lookups and text searches, stopping at the first provider that
+returns candidates (no fan-out merge across providers). Structured APIs come
+before Goodreads' HTML scraping; OpenLibrary's public API needs no key, so it
+sits after the two keyed providers and before the scrape. When `ISBNDB_API_KEY`
+is unset the chain starts at Google Books. `googlebooks`, `openlibrary` and
+`goodreads` identifiers still resolve directly against their own provider;
+OpenLibrary accepts edition (`OL…M`) and work (`OL…W`) keys and expands a work
+through its editions endpoint.
 `CANDIDATES_PER_TASK = 50` in `packages/worker/lib/tasks.js` bounds each task;
 Google Books asks for its maximum page (`maxResults=40`) and ISBNdb search asks
 for `pageSize=50` (the API's default is 20), so a single provider call can be
@@ -209,11 +213,26 @@ The primary key makes the reservation safe across worker processes and
 restarts, and an empty `RETURNING` means the quota is exhausted. In that case
 the provider makes no network call, logs one warning per process per UTC day,
 and returns an empty result so the normal fallback chain continues with Google
-Books then Goodreads. Cache hits do not reserve anything, and a failed HTTP
+Books, OpenLibrary then Goodreads. Cache hits do not reserve anything, and a failed HTTP
 attempt keeps its reservation because the call was attempted (billing
 semantics). `ISBNDB_DAILY_LIMIT` defaults to `5000` and must be a positive
 integer; `0`/negative is invalid and falls back to `5000` with a warning — it is
 not an "unlimited" switch.
+
+OpenLibrary is keyless and uses `OPENLIBRARY_BASE_URL` (default
+`https://openlibrary.org`). Edition search requests 40 documents with an
+explicit `fields` list; `/isbn/<isbn>.json` and `/books/<key>.json` provide
+editions, and a missing edition description is filled from the work record.
+Author keys are expanded through `/authors/<key>.json` (bounded to ten names
+per lookup, cached within that lookup). Requests carry a descriptive
+User-Agent and pass through one serializing politeness gate; timeouts, retries
+and the `openlibrary` breaker come from the shared provider HTTP layer. Author
+search (`/search/authors.json`) and detail (`/authors/<key>.json`) normalize to
+read-only contributor candidates: `displayName`, optional `nameInverted`,
+description, image URL, full `born`/`died` dates, an `openlibrary` author-key
+identifier and reliable `remote_ids` (Wikidata, VIAF, ISNI, Goodreads, etc.).
+Partial or ambiguous dates are omitted, and contributor candidates never carry
+edition roles.
 
 The worker starts a dependency-free Prometheus endpoint on
 `WORKER_METRICS_HOST:WORKER_METRICS_PORT` (default `127.0.0.1:9464`) serving
@@ -333,6 +352,11 @@ inline fallback.
   created, already indexed or failed, plus the page to resume from.
   Books without a checksum-valid ISBN-13 are excluded, because the ISBNdb
   candidate parser requires one.
+- The admin UI and worker expose a read-only contributor search:
+  `POST /admin/api/contributor-search` in the web edge forwards to the worker's
+  `POST /contributor-search` with a bounded `q` (200 characters) and `limit`
+  (1–50, default 20). It returns normalized OpenLibrary contributor candidates
+  for inspection; there is deliberately no contributor import or write path.
 
 ## Lexicon provenance
 

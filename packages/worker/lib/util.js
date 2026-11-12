@@ -82,6 +82,10 @@ export function candidateKey(candidate) {
   if (google) return `gb:${google.value}`;
   const goodreads = candidate.identifiers.find((identifier) => identifier.issuer === 'goodreads');
   if (goodreads) return `gr:${goodreads.value}`;
+  const openlibrary = candidate.identifiers.find(
+    (identifier) => identifier.issuer === 'openlibrary'
+  );
+  if (openlibrary) return `ol:${openlibrary.value}`;
   return `title:${candidate.title.toLowerCase()}|${(candidate.contributors[0]?.name ?? '').toLowerCase()}`;
 }
 
