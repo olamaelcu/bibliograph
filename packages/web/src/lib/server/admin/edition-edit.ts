@@ -58,14 +58,9 @@ function normalizeRef(raw: string): string {
   return ref;
 }
 
-async function findEditionUri(
-  client: Pool,
-  ref: string,
-  forUpdate: boolean
-): Promise<string | null> {
+async function findEditionUri(client: Pool, ref: string): Promise<string | null> {
   const result = await client.query<{ uri: string }>(
-    `SELECT uri FROM editions WHERE uri = $1 OR rkey = $1 LIMIT 1
-     ${forUpdate ? 'FOR UPDATE' : ''}`,
+    'SELECT uri FROM editions WHERE uri = $1 OR rkey = $1 LIMIT 1',
     [normalizeRef(ref)]
   );
   return result.rows[0]?.uri ?? null;
@@ -76,7 +71,7 @@ export async function loadEditionForEdit(
   pool: Pool,
   ref: string
 ): Promise<AdminEdition | null> {
-  const uri = await findEditionUri(pool, ref, false);
+  const uri = await findEditionUri(pool, ref);
   if (uri === null) return null;
   const records = await loadAdminEditionsFrom(pool, [uri]);
   return records[0] ?? null;
