@@ -15,7 +15,7 @@
     "pkg:worker-payload": "mise run package-worker-payload",
     "pkg:worker-deb": "mise run package-worker-deb",
     "pkg:verify-deb": "mise run package-verify-deb",
-    "pkg:deploy": "mise run deploy-deb",
+    "pkg:deploy": "mise run deploy",
     "pkg:tls": "mise run enable-tls",
     "pkg:publish-lex": "mise run publish-lex"
   },

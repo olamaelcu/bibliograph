@@ -56,6 +56,10 @@ done
 The `bibliograph-worker` package ships the same files at
 `/usr/lib/bibliograph-worker/sql/`; use that path on an installed host.
 
+`mise run deploy` applies them on a host automatically: after installing the
+worker package and before restarting the units (see
+[`../deploy/debian.md`](../deploy/debian.md)).
+
 The files are **idempotent and additive**:
 
 - `CREATE TABLE / SEQUENCE / INDEX IF NOT EXISTS`;

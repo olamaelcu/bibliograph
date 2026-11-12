@@ -1,14 +1,34 @@
 #!/usr/bin/env bash
-#MISE description="Deploy the newest built .deb to a host over ssh (no build; run 'mise run package-deb' first)"
-# Thin wrapper. Upload, install, restart and verification live in ./deploy.sh so
-# there is exactly one implementation, the same split platform's deploy /
-# deploy-host pair uses.
+#MISE description="Build happyview, worker and web, then deploy them in dependency order"
+#MISE depends=["package-hv-deb", "package-worker-deb", "package-web-deb"]
+# Thin wrapper. Build selection, upload, install order, database prerequisites
+# and verification live in ./deploy.sh, so there is exactly one implementation.
+#
+# The three deb tasks above run before this script and must all succeed: nothing
+# is uploaded or installed after a partial build. Install order on the host is
+# dependency-first — bibliograph-happyview, then bibliograph-worker (whose
+# /usr/lib/bibliograph-worker/sql/ is applied next), then bibliograph-web
+# (Depends: bibliograph-happyview) last, so the edge is never exposed before its
+# upstream and the worker.
+#
+# A host with the retired combined `bibliograph` package is detected in
+# preflight. Without --replace-legacy the deploy aborts before uploading;
+# with it, the old package is stopped/purged before the worker install and the
+# new vhost plus an HTTPS loopback check are required before DEPLOY_OK.
+# Before upload, --replace-legacy also requires a staged worker.env with a valid
+# DATABASE_URL, a staged web.env with HAPPYVIEW_URL (PORT optional), working
+# nginx and the vhost certificate; otherwise the old package/site is untouched.
 #
 # Usage:
-#   mise run deploy                    newest dist/bibliograph_*.deb -> veve@lescayes.ts.olamaelcu.net
-#   mise run deploy -- alice@server    another host
+#   mise run deploy                          -> veve@lescayes.ts.olamaelcu.net
+#   mise run deploy -- alice@server          another host
 #   DEPLOY_HOST=alice@server mise run deploy
-#   PKG=dist/bibliograph_0.1.3_amd64.deb mise run deploy
+#   mise run deploy -- --dry-run             select/print the plan; no ssh
+#   mise run deploy -- --print-remote        print the remote script
+#   mise run deploy -- --replace-legacy      stop/purge the retired combined
+#                                            package and cut over explicitly
+#   mise run deploy -- --skip-db             database provisioned elsewhere
+#   mise run deploy -- --help                full option list
 
 set -euo pipefail
 

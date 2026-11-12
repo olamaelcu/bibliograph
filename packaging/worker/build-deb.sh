@@ -46,6 +46,12 @@ install -d "$STAGE$LIVE"
 cp -a "$PAYLOAD/." "$STAGE$LIVE/"
 rm -rf "$STAGE$LIVE/test"
 
+# The versioned catalog schema. `mise run catalog-schema` applies it locally;
+# `mise run deploy` applies the installed copy on the host, so a fresh
+# deployment never needs this checkout or a second upload.
+install -d "$STAGE$LIVE/sql"
+cp -a packages/worker/sql/. "$STAGE$LIVE/sql/"
+
 install -D -m 0644 packaging/worker/worker.env "$STAGE/etc/bibliograph/worker.env"
 install -D -m 0644 packaging/worker/bibliograph-worker.service \
   "$UNIT_DIR/bibliograph-worker.service"
@@ -76,6 +82,8 @@ chmod 0644 "$DEBIAN_DIR/control"
 [[ -f "$STAGE$LIVE/node_modules/graphile-worker/package.json" ]] \
   || die "payload lost graphile-worker"
 [[ -f "$STAGE$LIVE/node_modules/pg/package.json" ]] || die "payload lost pg"
+compgen -G "$STAGE$LIVE/sql/*.sql" >/dev/null \
+  || die "payload lost the catalog schema SQL (packages/worker/sql)"
 command -v node >/dev/null || echo "WARN: node is not on PATH on this build host" >&2
 
 say "Building the package"
