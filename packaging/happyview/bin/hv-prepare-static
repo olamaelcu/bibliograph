@@ -1,0 +1,41 @@
+#!/bin/sh
+# Apply BASE_PATH to HappyView's prebuilt dashboard before the service starts.
+#
+# The upstream image ships a static tree built with the literal sentinel
+# /__HAPPYVIEW_BP__ and a .base-path-pending marker; its entrypoint.sh replaces
+# the sentinel (or strips it when BASE_PATH is unset) on first start. The Debian
+# package copies the same tree and runs the binary directly, so the rewrite has
+# to happen here instead. Without it the dashboard HTML/JS asks for assets at
+# /__HAPPYVIEW_BP__/... while the server only serves them under BASE_PATH, and
+# every page renders unstyled and non-interactive.
+#
+# One-shot by design, matching upstream: the marker is removed after the first
+# run, so changing BASE_PATH later needs a package reinstall (dpkg restores the
+# marker) rather than rewriting already-substituted asset text.
+set -eu
+
+BASE_PATH="${BASE_PATH:-}"
+STATIC_DIR="${STATIC_DIR:-/usr/lib/bibliograph-happyview/static}"
+SENTINEL="/__HAPPYVIEW_BP__"
+MARKER="$STATIC_DIR/.base-path-pending"
+
+[ -f "$MARKER" ] || exit 0
+
+if [ -n "$BASE_PATH" ]; then
+    case "$BASE_PATH" in
+        /*) ;;
+        *)
+            echo "hv-prepare-static: BASE_PATH must start with '/' (got: $BASE_PATH)" >&2
+            exit 1
+            ;;
+    esac
+    # Config::from_env accepts and strips one trailing slash; match it so the
+    # sentinel replacement and the server's routes agree.
+    BASE_PATH="${BASE_PATH%/}"
+fi
+
+find "$STATIC_DIR" -type f \
+    \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.txt' \) \
+    -exec sed -i "s|${SENTINEL}|${BASE_PATH}|g" {} +
+
+rm -f "$MARKER"

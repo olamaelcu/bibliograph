@@ -54,6 +54,15 @@ install -D -m 0755 happyview/bin/hv-deploy "$STAGE$LIVE/bin/hv-deploy"
 install -D -m 0644 happyview/sql/client-bootstrap.sql "$STAGE$LIVE/sql/client-bootstrap.sql"
 install -D -m 0755 happyview/bin/hv-client "$STAGE$LIVE/bin/hv-client"
 install -D -m 0644 happyview/bin/hvlib.py "$STAGE$LIVE/bin/hvlib.py"
+install -D -m 0755 packaging/happyview/bin/hv-prepare-static \
+  "$STAGE$LIVE/bin/hv-prepare-static"
+
+# Host-level example for exposing the dashboard at /hv to tailnet clients.
+# Not installed into sites-enabled; the operator includes it from the vhost.
+install -D -m 0644 packaging/happyview/nginx/hv-tailnet.conf \
+  "$STAGE/usr/share/bibliograph-happyview/nginx/hv-tailnet.conf"
+install -D -m 0644 packaging/happyview/nginx/edge-loopback.conf \
+  "$STAGE/usr/share/bibliograph-happyview/nginx/edge-loopback.conf"
 
 install -D -m 0644 packaging/happyview/happyview.env \
   "$STAGE/etc/bibliograph/happyview.env"
@@ -103,6 +112,8 @@ chmod 0644 "$DEBIAN_DIR/control"
 [[ -x "$STAGE$LIVE/happyview" ]] || die "binary is not executable in the tree"
 [[ -x "$STAGE$LIVE/bin/hv-deploy" ]] || die "deploy tool is not executable"
 [[ -x "$STAGE$LIVE/bin/hv-client" ]] || die "client seeder is not executable"
+[[ -x "$STAGE$LIVE/bin/hv-prepare-static" ]] \
+  || die "static base-path helper is not executable"
 [[ -n "$(find "$STAGE$LIVE/migrations/postgres" -name '*.sql' -print -quit)" ]] \
   || die "no migrations staged"
 [[ -n "$(find "$STAGE$LIVE/lexicons" -name '*.json' -print -quit)" ]] \

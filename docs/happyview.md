@@ -170,8 +170,8 @@ await fetch(`${HAPPYVIEW}/xrpc/net.olamaelcu.livtet.biblio.listShelves?did=${did
   `Authorization: DPoP <token>` plus a fresh `DPoP` proof on the proxied call.
   HappyView proxies the write to the PDS with its stored session.
 - **Unknown methods return 502**, not 404. Do not map that to "upstream down".
-- There is no `BASE_PATH`; routes are at the root. The previous deployment used
-  `/~/hv`.
+- `BASE_PATH` is supported and moves every route under it; `/health` stays at
+  the root. See [Production: tailnet-only dashboard at `/hv`](#production-tailnet-only-dashboard-at-hv).
 - The seeded client's `client_uri` is `http://127.0.0.1:5176`, so the dev server
   binds `127.0.0.1` (not `localhost`, which Vite resolves to `::1`, leaving the
   origin mismatched) on port 5176; the `Origin` check then stays quiet.
@@ -264,6 +264,81 @@ writer that invents its own scheme produces records nothing can read:
 `bookStatus.metadata.status` is required (`to-read`, `reading`, `read`, `dnf`).
 Shelf membership and reading status are separate records on purpose: a book can
 sit on several custom shelves while having exactly one reading status.
+
+## Production: tailnet-only dashboard at `/hv`
+
+On lescayes the dashboard and API are reachable at
+`https://lescayes.ts.olamaelcu.net/hv/` from tailnet clients only. The name
+does double duty: MagicDNS answers `100.64.0.1` inside the tailnet, while
+public DNS answers `108.61.75.187`. The same TLS vhost therefore serves both
+audiences and location rules decide which one reaches HappyView.
+
+| Setting | Value |
+| --- | --- |
+| `PUBLIC_URL` | `https://lescayes.ts.olamaelcu.net` — the origin only; no `/hv` |
+| `BASE_PATH` | `/hv` |
+| `HAPPYVIEW_URL` (edge) | `http://127.0.0.1:3101/hv` — loopback adapter (below) |
+| `HAPPYVIEW_URL` (deploy oneshot) | `http://127.0.0.1:3100/hv` |
+| listen address | `127.0.0.1:3100` (unchanged; still not a public listener) |
+
+`SESSION_SECRET` (64+ characters) and `TOKEN_ENCRYPTION_KEY` (base64 of 32
+bytes) must both be set before switching `PUBLIC_URL` away from a loopback
+name. The non-loopback OAuth client persists an encrypted key and the process
+refuses to boot with `client key is encrypted but TOKEN_ENCRYPTION_KEY is not
+set`. Losing the key makes the encrypted OAuth-client and attestation rows
+unreadable; rotate them (they regenerate) rather than guessing the key.
+
+`BASE_PATH` moves every route: `/hv/dashboard/`, `/hv/xrpc/*`, `/hv/admin/*`,
+`/hv/auth/*`, and the dashboard's `_next` assets. `/health` stays at the root.
+Internal callers use the prefixed base URL — `packages/web`'s `HAPPYVIEW_URL`
+and `hv-deploy`, whose health probe strips the path because health does not
+move.
+
+HappyView resolves dashboard/XRPC requests by `Host` to a registered domain,
+and once `PUBLIC_URL` is not a loopback name, `127.0.0.1` is no longer one. The
+edge therefore goes through a loopback listener
+(`/etc/nginx/conf.d/bibliograph-happyview-loopback.conf`, bound to
+`127.0.0.1:3101`) that rewrites `Host` to `lescayes.ts.olamaelcu.net` before
+proxying to `127.0.0.1:3100`. Source: `packaging/happyview/nginx/edge-loopback.conf`.
+The checked-in copy is a template: replace `__HAPPYVIEW_DOMAIN__` with the host
+HappyView has registered (`PUBLIC_URL`'s host).
+`hv-deploy` calls `/admin/*`, which is not behind the domain middleware, so it
+can keep using `127.0.0.1:3100` directly.
+
+The packaged dashboard is the upstream image's static tree: its HTML/JS contain
+the literal `/__HAPPYVIEW_BP__` sentinel and a `.base-path-pending` marker.
+The unit's `ExecStartPre=+…/hv-prepare-static` replaces the sentinel with
+`BASE_PATH` and removes the marker on first start; without that step the pages
+ask for `/__HAPPYVIEW_BP__/...` while the server serves `/hv/...`. The rewrite
+is one-shot, so change `BASE_PATH` by reinstalling the package (dpkg restores
+the marker), not by editing the conffile and restarting.
+
+Ingress is `/etc/nginx/snippets/happyview-hv.conf`, included from the
+`lescayes.ts.olamaelcu.net` TLS block in `/etc/nginx/conf.d/site-landing.conf`:
+
+- `= /hv` and `= /hv/` redirect to `/hv/dashboard/`; `/hv/` allows
+  `100.64.0.0/10` and `fd7a:115c:a1e0::/48` and denies everything else. The
+  address check is the client's real source address: nginx is the first hop,
+  and MagicDNS makes a tailnet browser connect to `100.64.0.1`, never to the
+  public address.
+- `= /hv/oauth-client-metadata.json` is public. The atproto authorization
+  server that handles dashboard login fetches it before and after the consent
+  screen and cannot reach a tailnet address. It is public client metadata
+  (redirect URIs, scopes, inline JWKS) with no secret; its `redirect_uris`
+  point at `/hv/auth/callback`, which stays tailnet-only.
+- `/health` is not exposed; the landing site owns this host's root.
+
+A tailnet-only hostname cannot be the dashboard origin: with a non-loopback
+`PUBLIC_URL`, HappyView's OAuth client is a metadata URL, and login fails with
+`invalid_client_metadata` when the authorization server cannot fetch it. This
+is why the origin stays the dual-homed `lescayes.ts` name and only the
+metadata document is public.
+
+The example is shipped at
+`/usr/share/bibliograph-happyview/nginx/hv-tailnet.conf` (source:
+`packaging/happyview/nginx/hv-tailnet.conf`). `site-landing.conf` is
+Ansible-managed, so re-add the `include` after any infra run that rewrites that
+file.
 
 ## Dashboard login
 

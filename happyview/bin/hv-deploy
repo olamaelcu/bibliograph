@@ -6,7 +6,8 @@ One implementation for both callers: `mise run hv-deploy` (compose) and the
 `bibliograph-happyview-deploy.service` oneshot the Debian package installs.
 
 Environment:
-  HAPPYVIEW_URL            base URL (default http://127.0.0.1:3000)
+  HAPPYVIEW_URL            base URL, including BASE_PATH when the instance is
+                           mounted under one (default http://127.0.0.1:3000)
   HAPPYVIEW_ADMIN_KEY      `hv_` admin key
   HAPPYVIEW_ADMIN_KEY_FILE read the key from this file instead (takes precedence)
   HV_PSQL                  command used for SQL, shell-split; e.g.
@@ -37,6 +38,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 import hvlib
 
@@ -128,16 +130,20 @@ def request(base: str, key: str, method: str, path: str, payload=None):
 
 
 def wait_for_health(base: str, seconds: int) -> None:
+    # HappyView always serves /health at the origin root, even with BASE_PATH
+    # set, so the probe must not carry the subpath the API calls use.
+    parts = urlsplit(base)
+    health_url = f"{parts.scheme}://{parts.netloc}/health"
     deadline = time.monotonic() + seconds
     while True:
         try:
-            with urllib.request.urlopen(f"{base}/health", timeout=3) as res:
+            with urllib.request.urlopen(health_url, timeout=3) as res:
                 if res.status == 200:
                     return
         except (urllib.error.URLError, OSError):
             pass
         if time.monotonic() >= deadline:
-            raise DeployError(f"{base}/health did not answer within {seconds}s")
+            raise DeployError(f"{health_url} did not answer within {seconds}s")
         time.sleep(1)
 
 
