@@ -162,6 +162,42 @@ export type AdminEntitySearchResponse = {
   items: AdminEntityMatch[];
 };
 
+/**
+ * A contributor row as the dedicated admin editor reads it. `atUri` is the
+ * canonical at-URI stored on the row (null until `entities.prepare` mints it),
+ * and `revision` is the optimistic concurrency token the editor echoes back.
+ */
+export type AdminContributorRecord = {
+  id: number;
+  atUri: string | null;
+  name: string;
+  nameInverted: string | null;
+  identifiers: Identifier[];
+  description: string | null;
+  imageUrl: string | null;
+  born: string | null;
+  died: string | null;
+  createdAt: string;
+  revision: string;
+};
+
+export type AdminPublisherRecord = {
+  id: number;
+  atUri: string | null;
+  name: string;
+  identifiers: Identifier[];
+  description: string | null;
+  imageUrl: string | null;
+  started: string | null;
+  ended: string | null;
+  createdAt: string;
+  revision: string;
+};
+
+export type ContributorEditResponse = { contributor: AdminContributorRecord };
+
+export type PublisherEditResponse = { publisher: AdminPublisherRecord };
+
 export type EditionEditResponse = { edition: AdminEdition };
 
 export type MergeField =

@@ -386,6 +386,72 @@ inline fallback.
   photo and external identifiers may be absent. There is deliberately no
   contributor detail route, import or write path.
 
+## Admin entity editors
+
+Two dedicated editors edit the shared contributor and publisher rows:
+`/admin/contributor/<id>/edit` and `/admin/publisher/<id>/edit`. `<id>` is the
+numeric `bigserial` row id or a percent-encoded canonical at-URI (the same
+`at://<did>/<collection>/<rkey>` stored in `at_uri`). Both pages live under
+`/admin`, so they share the admin gate: 404 when `ADMIN_TOKEN` is unset, 401
+without the admin cookie. The page load answers 404 for an unknown id or for
+the other record type's at-URI, and 503 when the catalog is unavailable.
+
+Editable fields are the record metadata, not identity:
+
+- contributor: display name, inverted name, identifiers, description, image
+  URL, born and died;
+- publisher: name, identifiers, description, image URL, started and ended.
+
+`id`, `at_uri`, `createdAt` and the record's collection are read-only. When
+`at_uri` is null the editor says the address has not been minted yet and offers
+no record URL; the `entities.prepare` task mints it later. The canonical at-URI
+is shown next to the record URL, the edge's anonymous XRPC read
+(`/xrpc/net.olamaelcu.livtet.biblio.getContributor?uri=…` or `getPublisher`).
+
+Validation runs in the browser and again on the server from
+`packages/web/src/lib/admin/entity-edit.ts`: the name is required and bounded,
+identifiers must be non-empty pairs and unique within the bag, the description
+and image URL are bounded, the image must be an absolute http(s) URL, and
+born/died/started/ended must be full, real `YYYY-MM-DD` calendar dates
+(`2024-02-29` but not `2023-02-29`) when present. Issues are returned per field
+path and the form keeps its unsaved state.
+
+Reads and writes go through `/admin/api/contributors/<id>` and
+`/admin/api/publishers/<id>`. `GET` returns `{ contributor }` or
+`{ publisher }`; `POST` accepts the editable fields plus `expectedRevision` and
+returns the reloaded row in the same envelope. Statuses are 400 validation
+(with `field`), 404 unknown id/at-URI, 409 stale revision or identity conflict,
+503 catalog unavailable, and 500 `UpdateFailed` when the one-row transaction
+rolls back. An identity conflict is the unique index
+`(lower(name), identifiers)`: renaming a row onto another row's normalized name
+and identifier set answers 409 `DuplicateEntity` and nothing is written.
+
+`expectedRevision` is a SHA-256 over the editable fields
+(`packages/web/src/lib/server/admin/entity-read.ts`). The page load and every
+save return it; a save whose token no longer matches answers 409
+`EntityChanged`. It deliberately excludes `id`, `at_uri`, `createdAt` and the
+outbox timestamp, so an unrelated publish attempt or a late URI mint is not a
+concurrent edit.
+
+`POST` is one transaction and a single-row `UPDATE` that names only the columns
+that differ; identifiers are replaced only when the pair set changed, and a
+stored identifier `url` is kept for pairs the editor retained. The entity row,
+its `at_uri` and `created_at` are never deleted or rewritten on any path.
+Publication is trigger-driven and the editors never write `pds_outbox`:
+`pds_enqueue_contributor_record`/`pds_enqueue_publisher_record` (0004) queue the
+record itself on any update, while `pds_enqueue_contributor_edits` /
+`pds_enqueue_publisher_edits` (0001, `AFTER UPDATE OF name, identifiers`) queue
+every edition that credits the row. A description-only edit therefore queues
+the entity record but no editions, because editions embed only the entity's
+name, identifiers and ref.
+
+The `/admin` page adds “Edit contributors” and “Edit publishers” tabs. Each has
+its own search state and calls the existing local typeahead
+`GET /admin/api/entity-search?type=<contributor|publisher>&q=…`; every row shows
+the name, identifiers, canonical AT URI (or that it is not minted), the row id
+and a link to its editor. The two panels share no state with each other, the
+edition editor or the merge workbench.
+
 ## Lexicon provenance
 
 `happyview/lexicons/community/lexicon/media/book/` is the source of truth for

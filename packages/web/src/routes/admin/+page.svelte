@@ -5,6 +5,8 @@
     PROVIDERS,
     identifierText,
     type AdminEdition,
+    type AdminEntityMatch,
+    type AdminEntitySearchResponse,
     type Candidate,
     type ContributorCandidate,
     type ContributorSearchResponse,
@@ -31,13 +33,22 @@
     goodreads: 'Goodreads'
   };
 
-  type AdminTab = 'provider' | 'publisher' | 'edit' | 'merge' | 'reports';
+  type AdminTab =
+    | 'provider'
+    | 'publisher'
+    | 'edit'
+    | 'contributors'
+    | 'publishers'
+    | 'merge'
+    | 'reports';
 
   function isAdminTab(value: string): value is AdminTab {
     return (
       value === 'provider' ||
       value === 'publisher' ||
       value === 'edit' ||
+      value === 'contributors' ||
+      value === 'publishers' ||
       value === 'merge' ||
       value === 'reports'
     );
@@ -686,6 +697,62 @@
     }
   }
 
+  // ── Local contributor and publisher editors ──────────────────────────────
+  //
+  // Two independent panels, each with its own search state, both fed by the
+  // local entity typeahead. A row links to its dedicated editor; nothing here
+  // shares state with an edition editor or with the merge workbench.
+  type EntityEditSearch = {
+    query: string;
+    items: AdminEntityMatch[];
+    searching: boolean;
+    error: string | null;
+    searched: boolean;
+    sequence: number;
+  };
+
+  function emptyEntityEditSearch(): EntityEditSearch {
+    return { query: '', items: [], searching: false, error: null, searched: false, sequence: 0 };
+  }
+
+  let contributorEditSearch = $state<EntityEditSearch>(emptyEntityEditSearch());
+  let publisherEditSearch = $state<EntityEditSearch>(emptyEntityEditSearch());
+
+  async function runEntityEditSearch(
+    state: EntityEditSearch,
+    type: 'contributor' | 'publisher'
+  ): Promise<void> {
+    const text = state.query.trim();
+    if (text === '') {
+      state.error = 'Enter a name or identifier.';
+      state.items = [];
+      state.searched = false;
+      return;
+    }
+    const sequence = ++state.sequence;
+    state.searching = true;
+    state.error = null;
+    state.items = [];
+    try {
+      const params = new URLSearchParams({ type, q: text, limit: '20' });
+      const response = await fetch(`/admin/api/entity-search?${params.toString()}`, {
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as AdminEntitySearchResponse;
+      if (sequence !== state.sequence) return;
+      state.items = Array.isArray(body.items) ? body.items : [];
+      state.searched = true;
+    } catch (error) {
+      if (sequence !== state.sequence) return;
+      state.error = error instanceof Error ? error.message : 'The local search failed.';
+      state.items = [];
+      state.searched = false;
+    } finally {
+      if (sequence === state.sequence) state.searching = false;
+    }
+  }
+
   // ── Reports ─────────────────────────────────────────────────────────────
   //
   // The registry is served by the edge; every report query is read-only and
@@ -843,11 +910,119 @@
   }
 </script>
 
+{#snippet entityEditPanel(
+  state: EntityEditSearch,
+  type: 'contributor' | 'publisher',
+  heading: string,
+  blurb: string
+)}
+  <div class="admin-content wa-stack wa-gap-l">
+    <div class="wa-stack wa-gap-2xs">
+      <h2>{heading}</h2>
+      <p class="muted">{blurb}</p>
+    </div>
+
+    <wa-card with-header appearance="outlined">
+      <h3 slot="header">Find a local {type} to edit</h3>
+      <div class="wa-stack wa-gap-m">
+        <div class="admin-form-grid">
+          <div class="field field-grow">
+            <span class="field-label">Name or identifier</span>
+            <wa-input
+              aria-label={`Find a local ${type} to edit`}
+              role="textbox"
+              tabindex="0"
+              value={state.query}
+              placeholder="Name, issuer:value or an identifier value"
+              oninput={(event: Event) => (state.query = valueOf(event))}
+              onkeydown={(event: KeyboardEvent) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void runEntityEditSearch(state, type);
+                }
+              }}
+            ></wa-input>
+          </div>
+          <div class="admin-form-action">
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+            <wa-button
+              variant="brand"
+              disabled={state.searching}
+              onclick={() => void runEntityEditSearch(state, type)}
+            >
+              {state.searching ? 'Searching…' : `Search ${type}s`}
+            </wa-button>
+          </div>
+        </div>
+
+        {#if state.error}
+          <wa-callout variant="danger">{state.error}</wa-callout>
+        {/if}
+
+        {#if state.searching}
+          <p class="muted admin-small">Searching local {type} rows…</p>
+        {:else if state.items.length > 0}
+          <div class="table-scroll">
+            <table class="params admin-preview-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Identifiers</th>
+                  <th>Canonical AT URI</th>
+                  <th>ID</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each state.items as item (item.id)}
+                  <tr>
+                    <td><strong>{item.name}</strong></td>
+                    <td>
+                      {#if item.identifiers.length > 0}
+                        <div class="wa-cluster wa-gap-2xs">
+                          {#each item.identifiers as identifier, index (index)}
+                            <wa-tag size="small" variant="neutral">
+                              {identifierText(identifier)}
+                            </wa-tag>
+                          {/each}
+                        </div>
+                      {:else}
+                        <span class="muted admin-small">None</span>
+                      {/if}
+                    </td>
+                    <td>
+                      {#if item.ref}
+                        <code class="admin-wrap admin-small">{item.ref}</code>
+                      {:else}
+                        <span class="muted admin-small">Not minted yet</span>
+                      {/if}
+                    </td>
+                    <td><code>{item.id}</code></td>
+                    <td>
+                      <a class="admin-small" href={`/admin/${type}/${item.id}/edit`}>
+                        Edit {type}
+                      </a>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {:else if state.searched}
+          <p class="muted">No local {type}s matched.</p>
+        {/if}
+      </div>
+    </wa-card>
+  </div>
+{/snippet}
+
 <main class="admin-main">
   <wa-tab-group class="admin-tabs" active={activeTab} onwa-tab-show={onTabShow}>
     <wa-tab slot="nav" panel="provider">Provider search</wa-tab>
     <wa-tab slot="nav" panel="publisher">Publisher import</wa-tab>
     <wa-tab slot="nav" panel="edit">Edit edition</wa-tab>
+    <wa-tab slot="nav" panel="contributors">Edit contributors</wa-tab>
+    <wa-tab slot="nav" panel="publishers">Edit publishers</wa-tab>
     <wa-tab slot="nav" panel="merge">Merge editions</wa-tab>
     <wa-tab slot="nav" panel="reports">Reports</wa-tab>
 
@@ -1495,11 +1670,33 @@
   </section>
     </wa-tab-panel>
 
+    <wa-tab-panel name="contributors" active={activeTab === 'contributors'}>
+  <section class="section" id="contributors">
+    {@render entityEditPanel(
+      contributorEditSearch,
+      'contributor',
+      '4 · Edit contributors',
+      'Search local contributor rows by name or identifier, then open the dedicated editor. Saving changes the shared row, queues its record and republishes any edition that credits its name or identifiers. Nothing is deleted.'
+    )}
+  </section>
+    </wa-tab-panel>
+
+    <wa-tab-panel name="publishers" active={activeTab === 'publishers'}>
+  <section class="section" id="publishers">
+    {@render entityEditPanel(
+      publisherEditSearch,
+      'publisher',
+      '5 · Edit publishers',
+      'Search local publisher rows by name or identifier, then open the dedicated editor. Saving changes the shared row, queues its record and republishes any edition that credits its name or identifiers. Nothing is deleted.'
+    )}
+  </section>
+    </wa-tab-panel>
+
     <wa-tab-panel name="merge" active={activeTab === 'merge'}>
   <section class="section" id="merge">
     <div class="admin-content wa-stack wa-gap-l">
       <div class="wa-stack wa-gap-2xs">
-        <h2>4 · Merge edition records</h2>
+        <h2>6 · Merge edition records</h2>
         <p class="muted">
           Find editions by title or identifier, select two or more, then choose the base record and
           which record supplies each field.

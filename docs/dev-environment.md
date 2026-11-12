@@ -134,8 +134,9 @@ stable. Plain `hv-fixtures` never deletes anything.
 
 ## Admin curation
 
-`/admin` is an operator-only area: provider search + ingest, and edition merge.
-It is not linked from the public navigation. Set the same `ADMIN_TOKEN` on the
+`/admin` is an operator-only area: provider search + ingest, edition merge, and
+the dedicated edition, contributor and publisher editors. It is not linked from
+the public navigation. Set the same `ADMIN_TOKEN` on the
 worker and the edge (`.env` or the packaged `worker.env`/`web.env`):
 
 ```bash
