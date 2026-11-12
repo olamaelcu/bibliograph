@@ -248,12 +248,41 @@ export function createCircuitBreaker({
     metrics?.setBreakerState(provider, state);
   }
 
+  /** Pure state check; never transitions state or consumes the half-open probe. */
+  function preflight() {
+    if (state === 'open') {
+      const time = now();
+      return time < openUntil
+        ? { allowed: false, retryAfterMs: openUntil - time }
+        : { allowed: true, retryAfterMs: 0 };
+    }
+    if (state === 'half-open') {
+      return { allowed: !probing, retryAfterMs: 0 };
+    }
+    return { allowed: true, retryAfterMs: 0 };
+  }
+
   return {
     get state() {
       return state;
     },
     get failures() {
       return failures;
+    },
+    /**
+     * Read-only admission check for metered providers, which must not spend a
+     * quota call on a request the breaker will reject. `acquire()` later makes
+     * the real transition (including the single half-open probe).
+     */
+    canAttempt() {
+      return preflight();
+    },
+    /** Throwing form of `canAttempt()`; still leaves the breaker state untouched. */
+    assertCanAttempt() {
+      const check = preflight();
+      if (check.allowed) return;
+      metrics?.recordRequest(provider, 'circuit_open');
+      throw new ProviderCircuitOpenError(provider, check.retryAfterMs);
     },
     /**
      * Admit one request. Returns `'normal'` in the closed state or `'probe'`

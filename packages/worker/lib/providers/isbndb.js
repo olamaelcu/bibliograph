@@ -108,7 +108,8 @@ export function createIsbndb({
   baseUrl,
   dailyLimit = DEFAULT_ISBNDB_DAILY_LIMIT,
   fetchImpl = fetch,
-  logger = console
+  logger = console,
+  breaker
 }) {
   if (!apiKey) return null;
   // The daily cap cannot be enforced without the shared counter, and an
@@ -122,7 +123,15 @@ export function createIsbndb({
   // midnight UTC, so repeating it on every miss would drown the log.
   let exhaustedDay;
 
+  // Metered providers must not spend a daily call on a request an open
+  // breaker would reject. This check is read-only; the resilient fetch below
+  // still owns the half-open probe transition.
+  function assertProviderAvailable() {
+    breaker?.assertCanAttempt?.();
+  }
+
   async function query(url) {
+    assertProviderAvailable();
     const cached = await cache.get(url);
     if (cached !== undefined) return cached;
 

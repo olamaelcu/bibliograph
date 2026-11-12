@@ -47,7 +47,8 @@ export function createProviders({
     baseUrl: env.ISBNDB_BASE_URL || 'https://api2.isbndb.com',
     dailyLimit: isbndbDailyLimit ?? parseDailyLimit(env.ISBNDB_DAILY_LIMIT, logger),
     logger,
-    fetchImpl: isbndbHttp.fetch
+    fetchImpl: isbndbHttp.fetch,
+    breaker: isbndbHttp.breaker
   });
   const goodreads = createGoodreads({
     baseUrl: env.GOODREADS_BASE_URL || 'https://www.goodreads.com',

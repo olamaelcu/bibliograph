@@ -306,6 +306,40 @@ test('half-open probe failure reopens the breaker', async () => {
   assert.throws(() => breaker.acquire(), ProviderCircuitOpenError);
 });
 
+test('breaker preflight is read-only and saves metered calls', () => {
+  let clock = 0;
+  const metrics = createProviderMetrics();
+  const breaker = createCircuitBreaker({
+    provider: 'isbndb',
+    metrics,
+    now: () => clock,
+    failureThreshold: 1,
+    cooldownMs: 1_000
+  });
+
+  breaker.fail(breaker.acquire());
+  clock = 400;
+  assert.deepEqual(breaker.canAttempt(), { allowed: false, retryAfterMs: 600 });
+  assert.throws(() => breaker.assertCanAttempt(), ProviderCircuitOpenError);
+  assert.equal(breaker.state, 'open', 'preflight never transitions the breaker');
+
+  clock = 1_000;
+  assert.deepEqual(breaker.canAttempt(), { allowed: true, retryAfterMs: 0 });
+  assert.equal(breaker.state, 'open', 'preflight does not consume the half-open probe');
+
+  const permit = breaker.acquire();
+  assert.equal(permit, 'probe');
+  assert.equal(breaker.state, 'half-open');
+  assert.deepEqual(
+    breaker.canAttempt(),
+    { allowed: false, retryAfterMs: 0 },
+    'a second half-open probe is blocked without consuming the first'
+  );
+
+  breaker.succeed(permit);
+  assert.deepEqual(breaker.canAttempt(), { allowed: true, retryAfterMs: 0 });
+});
+
 test('a retry does not reserve extra ISBNdb daily quota', async () => {
   const pool = {
     queries: [],
@@ -347,9 +381,13 @@ test('a retry does not reserve extra ISBNdb daily quota', async () => {
 
 test('provider fallback continues to Google when ISBNdb is open', async () => {
   const fetched = [];
+  let reserves = 0;
   const pool = {
     async query(sql) {
-      if (/INSERT INTO provider_daily_usage/.test(sql)) return { rows: [{ calls: 1 }] };
+      if (/INSERT INTO provider_daily_usage/.test(sql)) {
+        reserves += 1;
+        return { rows: [{ calls: reserves }] };
+      }
       return { rows: [] };
     }
   };
@@ -395,11 +433,14 @@ test('provider fallback continues to Google when ISBNdb is open', async () => {
   const first = await providers.resolve(identifier);
   assert.deepEqual(first.map((candidate) => candidate.title), ['Fallback Book']);
   assert.equal(providers.resilience.isbndb.state, 'open');
+  assert.equal(reserves, 1, 'the failed request reserved one ISBNdb call');
+  const reservesWhenOpen = reserves;
   const isbndbFetches = fetched.filter((url) => url.includes('/isbndb/')).length;
   assert.equal(isbndbFetches, MAX_ATTEMPTS);
 
   const second = await providers.resolve(identifier);
   assert.deepEqual(second.map((candidate) => candidate.title), ['Fallback Book']);
+  assert.equal(reserves, reservesWhenOpen, 'an open breaker reserves no ISBNdb quota');
   assert.equal(
     fetched.filter((url) => url.includes('/isbndb/')).length,
     isbndbFetches,
