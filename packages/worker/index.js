@@ -43,7 +43,10 @@ try {
   metricsServer = await startMetricsServer({
     pool,
     limit: isbndbDailyLimit,
-    providerMetrics: providers.metrics
+    providerMetrics: providers.metrics,
+    // Outbox gauges count the rows this publisher can claim; a database shared
+    // with another identity must not inflate this worker's backlog.
+    publisherDid
   });
 } catch (error) {
   console.error(`worker: metrics server disabled — ${error.message}`);
