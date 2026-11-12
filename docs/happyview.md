@@ -199,7 +199,7 @@ at upload, and a successful PDS write is indexed in the same request.
 
 | Group | NSIDs |
 | --- | --- |
-| Follow graph | `graph.follow`, `graph.unfollow` — rkey is the subject DID, so a repeat is a no-op |
+| Follow graph | `graph.follow`, `graph.unfollow` — the rkey is an opaque TID; `graph.follow` looks up the subject so a repeat is a no-op |
 | Shelves | `shelf.create`, `shelf.update`, `shelf.delete` — delete cascades `shelfItem` and `bookStatus` rows that name the shelf |
 | Membership | `shelf.addItem`, `shelf.removeItem`, `shelf.addBooks` — rkey `<shelf rkey>-<edition rkey>` |
 | Reading status | `status.set`, `status.clear` — rkey is the edition rkey, metadata merges |

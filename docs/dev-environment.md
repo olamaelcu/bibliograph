@@ -89,7 +89,7 @@ from Postgres. Per account:
 | `net.olamaelcu.livtet.biblio.bookStatus` | 6 (rkey = the edition rkey) |
 | `net.olamaelcu.livtet.biblio.shelfItem` | 3 on the custom shelf |
 | `community.lexicon.media.book.review` | 2 |
-| `net.olamaelcu.livtet.biblio.follow` | 2 (rkey = the followed DID) |
+| `net.olamaelcu.livtet.biblio.follow` | 2 (legacy fixture rows use the followed DID as rkey) |
 | `app.bsky.graph.follow` | 2 |
 | `app.bsky.feed.post` | 3 |
 | `app.bsky.feed.like` | 1 |

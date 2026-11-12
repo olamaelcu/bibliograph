@@ -133,7 +133,8 @@ and answers `400 InvalidRequest` when it is not the expected `{c,u}` object.
 | `{ "t": <created_at>, "u": <uri> }` | keyset over `(created_at, uri)`, descending | `listBooksOnShelf`, `listRecentShelving` |
 | `{ "u": <uri> }` | keyset over `uri`, ascending; for `getShelversOfBook` it is the smallest URI seen per DID | `listShelves`, `listShelvesWithBooks`, `getShelversOfBook` |
 | `{ "o": <offset> }` | offset, advanced by the emitted page size | `listEditionsByContributor`, `searchContributors`, `searchPublishers` |
-| raw DID | keyset over the follower DID / subject DID, ascending | `graph.listFollowers`, `graph.listFollowees` |
+| raw DID | keyset over the follower DID, ascending | `graph.listFollowers` |
+| raw rkey | keyset over the follow record's opaque TID rkey, ascending | `graph.listFollowees` |
 | `{ "c": <createdAt>, "u": <uri> }` | keyset over the record's own `createdAt` (text order) and `uri`, descending; `c` may be `null` for a row without `createdAt` | `com.atproto.feed.getFeedSkeleton` |
 
 A cursor is emitted only when the `limit + 1` probe row exists. An offset cursor advances by
@@ -281,10 +282,11 @@ decoded record object as `goal`, or `null`. `did` is required and may not be emp
 
 ### Follow graph
 
-Follow rows are `net.olamaelcu.livtet.biblio.follow` records. The lexicon types `subject` as a DID,
-but legacy rows may store the full `at://<did>` form; the queries match either spelling against the
-indexed full-subject expression. The rkey is the subject DID by contract, and `listFollowees` pages
-on that column instead of a derived expression.
+Follow rows are `net.olamaelcu.livtet.biblio.follow` records. The record key is an opaque TID;
+`graph.follow` enforces uniqueness by looking up `subject` before writing. The lexicon types
+`subject` as a DID, but legacy rows may store the full `at://<did>` form and may keep the subject DID
+as their rkey; the read queries match either spelling against the indexed full-subject expression.
+`listFollowees` pages on `rkey` but derives the followed DID from `subject`.
 
 #### `graph.isFollowing`
 
@@ -300,10 +302,12 @@ pages with a cursor and empty pages; a full page emits the last follower DID as 
 
 #### `graph.listFollowees`
 
-Rows whose record DID equals `did`, ordered by the record rkey (the subject DID) ascending, keyset on
-the same column. `total` is the full followee count and is emitted on every page. A full page emits
-the last subject DID as the cursor. `followedAt` falls back to the indexed `created_at` when the
-record body has no `createdAt`.
+Rows whose record DID equals `did`, ordered by the record's opaque TID rkey ascending, keyset on the
+same column. The emitted `did` is read from `record.subject` (legacy `at://did` is normalized to
+`did`); a row without a DID-shaped subject is omitted from the page. `total` is the full followee
+count and is emitted on every page. A full page emits the last TID rkey as the cursor. `followedAt`
+falls back to the indexed `created_at` when the record body has no `createdAt`. A cursor that is not
+a 13-character TID (for example a pre-TID DID cursor) restarts the page instead of skipping rows.
 
 ### Shelves
 
@@ -558,15 +562,17 @@ page; `limit` defaults to 25 (max 100) and `cursor` is the same offset cursor as
 
 #### `graph.follow`
 
-`subject` must be a DID (`did:<method>:<identifier>`), and a reader cannot follow themselves.
-The record is keyed by the subject DID, so this is an idempotent upsert: an existing follow returns
-`{ uri, created: false }` unchanged; a new one writes `{ subject, createdAt }` and returns
+`subject` must be a DID (`did:<method>:<identifier>`), and a reader cannot follow themselves. The
+procedure looks up an existing follow by subject (both `did:` and legacy `at://did` spellings, plus
+the old subject-DID URI) before writing: an existing follow returns `{ uri, created: false }`
+unchanged, and a new one is written at a fresh TID rkey with `{ subject, createdAt }` and returns
 `{ uri, created: true }`.
 
 #### `graph.unfollow`
 
-Deletes the follow at the subject-DID rkey. A follow that does not exist is `404 NotFound`, not a
-silent success.
+Finds the caller's follow records whose subject is that DID (both spellings, plus the legacy
+subject-DID rkey), deletes every match, and returns the first deleted URI. A follow that does not
+exist is `404 NotFound`, not a silent success.
 
 ### Reader
 
@@ -674,7 +680,7 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 | `net.olamaelcu.livtet.biblio.shelf` | `any` — TID for custom shelves, fixed `reading`/`read`/`to-read`/`dnf` for the reading-status shelves | `name` (≤128), `createdAt`, `updatedAt`; optional `description` | `shelf.create`, `shelf.update` |
 | `net.olamaelcu.livtet.biblio.shelfItem` | `any` — `<shelf rkey>-<edition rkey>` by contract | `shelf`, `book`, `createdAt`, `updatedAt`; optional `metadata` (`position` ≥ 1, `notes`, `emoji`) | `shelf.addItem`, `shelf.addBooks` |
 | `net.olamaelcu.livtet.biblio.bookStatus` | `any` — the edition rkey by contract | no record-level `required`; the view needs `metadata.status` (`to-read`/`reading`/`read`/`dnf`) plus a resolvable `book` and `shelf`; `book` is a strongRef; optional `startedAt`, `finishedAt`, `position`, `notes`, `emoji` | `status.set` |
-| `net.olamaelcu.livtet.biblio.follow` | `any` — the subject DID by contract | `subject` (DID), `createdAt` | `graph.follow` |
+| `net.olamaelcu.livtet.biblio.follow` | `tid` — a fresh TID minted by `graph.follow`; legacy rows may use the subject DID | `subject` (DID), `createdAt` | `graph.follow` |
 | `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
 | `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
 | `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`; contributors have `displayName` + ONIX `role`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
@@ -682,10 +688,11 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 
 The record keys are part of the contract: the queries resolve records by them. `bookStatus` derives
 from the edition URI, `shelfItem` from the shelf and edition rkeys, `readingGoal` and
-`actor.profile` from their literal keys, and the follow graph from the subject DID. A writer that
-invents its own scheme produces records the queries cannot see. `shelf.delete` and `status.clear`
-also rely on these derivations (and on `record.shelf`/`record.book`), so records written directly to
-a PDS with a different shape are not found by them.
+`actor.profile` from their literal keys, and the follow graph by its `subject` field (the follow
+rkey is opaque). A writer that invents its own scheme produces records the queries cannot see.
+`shelf.delete` and `status.clear` also rely on these derivations (and on
+`record.shelf`/`record.book`), so records written directly to a PDS with a different shape are not
+found by them.
 
 ## What the surface does not do
 

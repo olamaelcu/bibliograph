@@ -272,12 +272,14 @@ local function make_record_api(seed)
       self._uri = 'at://' .. (options.caller_did or 'did:plc:test') .. '/'
         .. (self._collection or 'unknown') .. '/' .. (self._rkey or 'r0')
     end
+    store[self._uri] = self
     return self
   end
 
   function methods:delete()
     if options.delete_error then error(options.delete_error) end
     options.deleted = (options.deleted or 0) + 1
+    store[self._uri] = nil
   end
 
   function methods:set_rkey(key) self._rkey = key end
@@ -312,6 +314,12 @@ local function seed_record(api, uri, collection, data)
   record._uri = uri
   api.store[uri] = record
   return record
+end
+
+local function count_store(store)
+  local count = 0
+  for _ in pairs(store) do count = count + 1 end
+  return count
 end
 
 local function load_helpers()
@@ -692,11 +700,11 @@ end)
 -- Tests: graph totals and follow predicates (P1).
 -- ---------------------------------------------------------------------------
 
-test('listFollowees always emits total and uses rkey, not split_part', function()
+test('listFollowees derives did from subject and pages on TID rkey', function()
   local follow_rows = {
-    { uri = 'u1', did = 'did:plc:d', record = '{"createdAt":"2026-01-01T00:00:00.000Z"}', created_at = '2026-02-01T00:00:00.000Z', subject_did = 'did:plc:a' },
-    { uri = 'u2', did = 'did:plc:d', record = '{}', created_at = '2026-02-02T00:00:00.000Z', subject_did = 'did:plc:b' },
-    { uri = 'u3', did = 'did:plc:d', record = '{}', created_at = '2026-02-03T00:00:00.000Z', subject_did = 'did:plc:c' },
+    { uri = 'u1', did = 'did:plc:d', record = '{"createdAt":"2026-01-01T00:00:00.000Z"}', created_at = '2026-02-01T00:00:00.000Z', rkey = '3n0000000000a', subject = 'did:plc:a' },
+    { uri = 'u2', did = 'did:plc:d', record = '{}', created_at = '2026-02-02T00:00:00.000Z', rkey = '3n0000000000b', subject = 'at://did:plc:b' },
+    { uri = 'u3', did = 'did:plc:d', record = '{}', created_at = '2026-02-03T00:00:00.000Z', rkey = '3n0000000000c', subject = 'did:plc:c' },
   }
   local responder = function(sql)
     if sql:find('count(*)', 1, true) then return { { n = 7 } } end
@@ -709,21 +717,30 @@ test('listFollowees always emits total and uses rkey, not split_part', function(
   })
 
   assert_equal(response.total, 7, 'total is present on a full page')
-  assert_equal(response.followees[1].followedAt, '2026-01-01T00:00:00.000Z')
+  assert_equal(response.followees[1].did, 'did:plc:a')
+  assert_equal(response.followees[2].did, 'did:plc:b', 'legacy at://did is normalized')
   assert_equal(response.followees[2].followedAt, '2026-02-02T00:00:00.000Z', 'falls back to selected created_at')
-  assert_equal(response.cursor, 'did:plc:b')
+  assert_equal(response.cursor, '3n0000000000b', 'cursor is the last TID rkey')
 
   assert_contains(calls[1].sql, 'created_at')
   assert_contains(calls[1].sql, 'rkey')
+  assert_contains(calls[1].sql, "->>'subject'")
+  assert_absent(calls[1].sql, 'subject_did')
   assert_absent(calls[1].sql, 'split_part')
-  assert_absent(calls[1].sql, 'regexp_replace')
 
   local cursor_response, cursor_calls = run_endpoint('query', 'graph.listFollowees', {
-    params = { did = 'did:plc:d', limit = '2', cursor = 'did:plc:a' },
+    params = { did = 'did:plc:d', limit = '2', cursor = '3n0000000000a' },
     responder = responder,
   })
   assert_equal(cursor_response.total, 7, 'total is present on later pages')
-  assert_equal(cursor_calls[1].args[3], 'did:plc:a')
+  assert_equal(cursor_calls[1].args[3], '3n0000000000a')
+
+  local legacy_cursor_calls
+  _, legacy_cursor_calls = run_endpoint('query', 'graph.listFollowees', {
+    params = { did = 'did:plc:d', limit = '2', cursor = 'did:plc:a' },
+    responder = responder,
+  })
+  assert_equal(legacy_cursor_calls[1].args[3], '', 'a pre-TID DID cursor restarts the page')
 
   local empty_response = run_endpoint('query', 'graph.listFollowees', {
     params = { did = 'did:plc:d' },
@@ -774,6 +791,170 @@ test('isFollowing matches both subject spellings without split_part', function()
   assert_contains(calls[1].sql, "'at://'")
   assert_absent(calls[1].sql, 'split_part')
   assert_absent(calls[1].sql, 'regexp_replace')
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: follow writes now use TID rkeys and look up by subject.
+-- ---------------------------------------------------------------------------
+
+test('graph.follow writes a fresh TID rkey and is idempotent by subject', function()
+  local api = make_record_api()
+  local responder = function(sql, args)
+    local out = {}
+    for _, record in pairs(api.store) do
+      if record._collection == 'net.olamaelcu.livtet.biblio.follow' then
+        local subject = record.subject
+        if subject == args[3] or subject == 'at://' .. args[3] then
+          out[#out + 1] = { uri = record._uri }
+        end
+      end
+    end
+    return out
+  end
+
+  local first = run_endpoint('procedure', 'graph.follow', {
+    input = { subject = 'did:plc:target' },
+    caller_did = 'did:plc:caller',
+    responder = responder,
+    RecordAPI = api,
+  })
+  assert_true(first.created)
+  local rkey = first.uri:match('([^/]+)$')
+  assert_equal(#rkey, 13, 'rkey is a 13-character TID')
+  assert_true(rkey ~= 'did:plc:target', 'rkey is not the subject DID')
+  assert_equal(api.options.saved, 1)
+  assert_equal(count_store(api.store), 1)
+  assert_equal(api.store[first.uri].subject, 'did:plc:target')
+
+  local second = run_endpoint('procedure', 'graph.follow', {
+    input = { subject = 'did:plc:target' },
+    caller_did = 'did:plc:caller',
+    responder = responder,
+    RecordAPI = api,
+  })
+  assert_equal(second.created, false)
+  assert_equal(second.uri, first.uri)
+  assert_equal(api.options.saved, 1, 'second call does not save')
+  assert_equal(count_store(api.store), 1, 'still exactly one follow')
+end)
+
+test('graph.follow keeps DID and self-follow validation', function()
+  local api = make_record_api()
+  local bad = run_endpoint('procedure', 'graph.follow', {
+    input = { subject = 'not-a-did' },
+    caller_did = 'did:plc:caller',
+    responder = function() error('no SQL expected') end,
+    RecordAPI = api,
+  })
+  assert_equal(bad.__bib_http.status, 400)
+
+  local self = run_endpoint('procedure', 'graph.follow', {
+    input = { subject = 'did:plc:caller' },
+    caller_did = 'did:plc:caller',
+    responder = function() error('no SQL expected') end,
+    RecordAPI = api,
+  })
+  assert_equal(self.__bib_http.status, 400)
+end)
+
+test('graph.follow matches a legacy at://did subject', function()
+  local api = make_record_api()
+  local legacy_uri = 'at://did:plc:caller/net.olamaelcu.livtet.biblio.follow/did:plc:target'
+  seed_record(api, legacy_uri, 'net.olamaelcu.livtet.biblio.follow', { subject = 'at://did:plc:target' })
+
+  local response = run_endpoint('procedure', 'graph.follow', {
+    input = { subject = 'did:plc:target' },
+    caller_did = 'did:plc:caller',
+    responder = function() return { { uri = legacy_uri } } end,
+    RecordAPI = api,
+  })
+  assert_equal(response.created, false)
+  assert_equal(response.uri, legacy_uri)
+  assert_nil(api.options.saved)
+end)
+
+test('graph.follow finds a legacy subject-DID rkey follow via its URI', function()
+  local api = make_record_api()
+  local legacy_uri = 'at://did:plc:caller/net.olamaelcu.livtet.biblio.follow/did:plc:target'
+  seed_record(api, legacy_uri, 'net.olamaelcu.livtet.biblio.follow', { subject = 'not-a-did' })
+
+  local response = run_endpoint('procedure', 'graph.follow', {
+    input = { subject = 'did:plc:target' },
+    caller_did = 'did:plc:caller',
+    responder = function() return {} end,
+    RecordAPI = api,
+  })
+  assert_equal(response.created, false)
+  assert_equal(response.uri, legacy_uri)
+  assert_nil(api.options.saved)
+end)
+
+test('graph.unfollow finds by subject and deletes the TID record', function()
+  local api = make_record_api()
+  local target = 'did:plc:target'
+  local tid_uri = 'at://did:plc:caller/net.olamaelcu.livtet.biblio.follow/3n0000000000a'
+  seed_record(api, tid_uri, 'net.olamaelcu.livtet.biblio.follow', { subject = target })
+
+  local response, calls = run_endpoint('procedure', 'graph.unfollow', {
+    input = { subject = target },
+    caller_did = 'did:plc:caller',
+    responder = function(sql)
+      assert_contains(sql, "->>'subject'")
+      assert_contains(sql, "'at://'")
+      return { { uri = tid_uri } }
+    end,
+    RecordAPI = api,
+  })
+
+  assert_equal(response.uri, tid_uri)
+  assert_equal(api.options.deleted, 1)
+  assert_nil(api.store[tid_uri])
+end)
+
+test('graph.unfollow deletes every matching row', function()
+  local api = make_record_api()
+  local target = 'did:plc:target'
+  local tid_uri = 'at://did:plc:caller/net.olamaelcu.livtet.biblio.follow/3n0000000000a'
+  local legacy_uri = 'at://did:plc:caller/net.olamaelcu.livtet.biblio.follow/did:plc:target'
+  seed_record(api, tid_uri, 'net.olamaelcu.livtet.biblio.follow', { subject = target })
+  seed_record(api, legacy_uri, 'net.olamaelcu.livtet.biblio.follow', { subject = 'at://' .. target })
+
+  local response = run_endpoint('procedure', 'graph.unfollow', {
+    input = { subject = target },
+    caller_did = 'did:plc:caller',
+    responder = function() return { { uri = tid_uri }, { uri = legacy_uri } } end,
+    RecordAPI = api,
+  })
+
+  assert_equal(response.uri, tid_uri)
+  assert_equal(api.options.deleted, 2, 'both the TID and legacy rows are deleted')
+  assert_nil(api.store[tid_uri])
+  assert_nil(api.store[legacy_uri])
+end)
+
+test('graph.unfollow finds a legacy subject-DID rkey record via its URI', function()
+  local api = make_record_api()
+  local legacy_uri = 'at://did:plc:caller/net.olamaelcu.livtet.biblio.follow/did:plc:target'
+  seed_record(api, legacy_uri, 'net.olamaelcu.livtet.biblio.follow', { subject = 'not-a-did' })
+
+  local response = run_endpoint('procedure', 'graph.unfollow', {
+    input = { subject = 'did:plc:target' },
+    caller_did = 'did:plc:caller',
+    responder = function() return {} end,
+    RecordAPI = api,
+  })
+  assert_equal(response.uri, legacy_uri)
+  assert_equal(api.options.deleted, 1)
+end)
+
+test('graph.unfollow answers 404 when nothing matches', function()
+  local response = run_endpoint('procedure', 'graph.unfollow', {
+    input = { subject = 'did:plc:target' },
+    caller_did = 'did:plc:caller',
+    responder = function() return {} end,
+    RecordAPI = make_record_api(),
+  })
+  assert_equal(response.__bib_http.status, 404)
 end)
 
 -- ---------------------------------------------------------------------------
