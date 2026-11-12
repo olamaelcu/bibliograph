@@ -1,3 +1,16 @@
+bibliograph-worker (0.2.2-1) unstable; urgency=medium
+
+  * 0.2.2 release: PDS session refresh and metrics.
+
+    - Refresh the publisher PDS session when a call is rejected with 400
+      ExpiredToken, then retry the write once, so queued pds_outbox rows keep
+      draining after an access token expires.
+    - Expose bibliograph_worker_up, the pds_outbox ready/parked/oldest-age
+      backlog gauges and per-scrape process gauges on the existing loopback
+      /metrics listener.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 14:00:00 +0000
+
 bibliograph-worker (0.2.1-1) unstable; urgency=medium
 
   * 0.2.1 release: lexicon.community PR #18 edition records.

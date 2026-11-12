@@ -1,3 +1,16 @@
+bibliograph-web (0.2.2-1) unstable; urgency=medium
+
+  * 0.2.2 release: Prometheus metrics on the edge.
+
+    - Serve GET /metrics on the web loopback listener (127.0.0.1:5176) from a
+      dependency-free registry: HTTP requests and latency by matched route id,
+      HappyView and PDS proxy calls, catalog query counts and latency, feed
+      requests, and per-scrape process gauges.
+    - Deny an exact-match /metrics in the packaged nginx vhost so the public
+      name cannot expose internal telemetry.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 14:00:00 +0000
+
 bibliograph-web (0.2.1-1) unstable; urgency=medium
 
   * 0.2.1 release: lexicon.community PR #18 book lexicons.
