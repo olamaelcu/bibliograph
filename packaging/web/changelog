@@ -1,3 +1,21 @@
+bibliograph-web (0.2.5-1) unstable; urgency=medium
+
+  * 0.2.5 release: metrics allowlist and dead-code cleanup.
+
+    - Prune the XRPC metrics allowlist to the current surface: drop
+      com.atproto.label.queryLabels, com.atproto.lexicon.resolveLexicon,
+      getEditions and getImageForBook, and add the entity NSIDs
+      (getContributor, getPublisher, listEditionsByContributor,
+      resolveContributors, resolvePublishers, searchContributors,
+      searchPublishers) so they no longer collapse to `other`.
+    - Remove the unused admin merge client and a stale Web Awesome type
+      re-export.
+    - Remove the dead Prometheus scrape jobs and rules, and retire stale
+      environment variables; docs and `.env.example` now describe the split
+      web/happyview/worker deployment on port 5176.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 19:25:00 +0000
+
 bibliograph-web (0.2.4-1) unstable; urgency=medium
 
   * 0.2.4 release: OpenLibrary in the admin curation UI.

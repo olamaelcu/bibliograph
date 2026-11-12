@@ -1,3 +1,22 @@
+bibliograph-worker (0.2.5-1) unstable; urgency=medium
+
+  * 0.2.5 release: cleanup of retired tooling and dead compatibility code.
+
+    - Drop the unreachable record-field fallbacks in the edition builders:
+      series values are objects only, and contributor displayName and
+      name_inverted no longer probe the retired books-wg spellings.
+    - Remove an unused admin body helper and the re-exported metrics
+      constants; behaviour of the admin API and the metrics listener is
+      unchanged.
+    - Delete the retired combined-package build tree (root `debian/`) and its
+      five mise tasks from the source; the split packages and deploy flow are
+      unchanged.
+    - Retire stale environment variables (pool overrides, labeler keys, cover
+      cache, legacy rate limits) and align `.env.example` and the docs with
+      the current deployment.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 19:20:00 +0000
+
 bibliograph-worker (0.2.4-1) unstable; urgency=medium
 
   * 0.2.4 release: OpenLibrary provider and admin contributor search.
