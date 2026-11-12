@@ -6,6 +6,7 @@ import { createOutboxPublisher } from './lib/publish.js';
 import { resolvePublisherAuthority, resolvePublisherConfig } from './lib/pds.js';
 import { ensureSupportSchema } from './lib/setup.js';
 import { startMetricsServer } from './lib/metrics.js';
+import { startAdminServer } from './lib/admin.js';
 import { parseDailyLimit } from './lib/providers/usage.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -25,6 +26,16 @@ await ensureSupportSchema(pool);
 
 const isbndbDailyLimit = parseDailyLimit(process.env.ISBNDB_DAILY_LIMIT);
 const providers = createProviders({ pool, isbndbDailyLimit });
+
+// The admin API is how an operator searches providers and ingests a result.
+// It is loopback-only by default and absent when ADMIN_TOKEN is unset; a bind
+// failure must not stop catalog hydration or publishing.
+let adminServer;
+try {
+  adminServer = await startAdminServer({ pool, providers, publisherDid, publisherHost });
+} catch (error) {
+  console.error(`worker: admin API disabled — ${error.message}`);
+}
 
 // Metrics are best-effort: a port conflict must not stop hydration/publishing.
 let metricsServer;
@@ -84,6 +95,7 @@ console.log(
     `isbndb=${providers.providers.isbndb ? 'enabled' : 'disabled'}, ` +
     `isbndb-daily-limit=${isbndbDailyLimit}, ` +
     `metrics=${metricsServer ? 'enabled' : 'disabled'}, ` +
+    `admin=${adminServer ? adminServer.url : 'disabled'}, ` +
     `pds-publish=${publisher ? 'enabled' : 'disabled'})`
 );
 
@@ -102,6 +114,7 @@ if (publisher) {
 try {
   await runner.promise;
 } finally {
+  if (adminServer) await adminServer.close();
   if (metricsServer) {
     await new Promise((resolve) => metricsServer.close(resolve));
   }
