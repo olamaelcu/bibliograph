@@ -312,7 +312,7 @@ test('candidateFromEdition accepts missing optional fields', () => {
   assert.equal(candidateFromEdition({ title: 'No identity' }), undefined);
 });
 
-test('provider chain tries OpenLibrary after Google and before Goodreads', async () => {
+test('provider chain tries Goodreads before OpenLibrary', async () => {
   const order = [];
   const base = 'https://provider.test';
   const fetchImpl = async (url) => {
@@ -345,7 +345,7 @@ test('provider chain tries OpenLibrary after Google and before Goodreads', async
   });
 
   const candidates = await providers.search({ title: 'left hand' });
-  assert.deepEqual(order, ['googlebooks', 'openlibrary']);
+  assert.deepEqual(order, ['googlebooks', 'goodreads', 'openlibrary']);
   assert.equal(candidates[0].title, 'The Left Hand of Darkness');
   assert.equal(providers.resilience.openlibrary.state, 'closed');
   assert.ok(
@@ -355,7 +355,7 @@ test('provider chain tries OpenLibrary after Google and before Goodreads', async
   );
 });
 
-test('the ISBN chain tries OpenLibrary after Google and before Goodreads', async () => {
+test('the ISBN chain tries Goodreads before OpenLibrary', async () => {
   const order = [];
   const base = 'https://provider.test';
   const fetchImpl = async (url) => {
@@ -391,11 +391,48 @@ test('the ISBN chain tries OpenLibrary after Google and before Goodreads', async
   });
 
   const candidates = await providers.resolve({ issuer: 'isbn13', value: ISBN13 });
-  assert.deepEqual(order, ['googlebooks', 'openlibrary']);
+  assert.deepEqual(order, ['googlebooks', 'goodreads', 'openlibrary']);
   assert.equal(candidates[0].title, 'The Left Hand of Darkness');
 });
 
-test('a Google candidate still stops the chain before OpenLibrary', async () => {
+test('a Goodreads candidate stops the chain before OpenLibrary', async () => {
+  const order = [];
+  const base = 'https://provider.test';
+  const fetchImpl = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/google/volumes') {
+      order.push('googlebooks');
+      return jsonResponse({ totalItems: 0, items: [] });
+    }
+    if (parsed.pathname === '/goodreads/search') {
+      order.push('goodreads');
+      return new Response(
+        `<table><tr itemscope>
+<td><a href="/book/show/1"><img class="bookCover" src="https://img.example/1.jpg" /></a></td>
+<td><a class="bookTitle" href="/book/show/1"><span itemprop="name">Goodreads First</span></a></td>
+</tr></table>`,
+        { status: 200, headers: { 'content-type': 'text/html' } }
+      );
+    }
+    if (parsed.pathname === '/openlibrary/search.json') order.push('openlibrary');
+    return jsonResponse({}, 404);
+  };
+
+  const providers = createProviders({
+    env: {
+      GOOGLE_BOOKS_BASE_URL: `${base}/google`,
+      OPENLIBRARY_BASE_URL: `${base}/openlibrary`,
+      GOODREADS_BASE_URL: `${base}/goodreads`
+    },
+    fetchImpl
+  });
+
+  const candidates = await providers.search({ title: 'goodreads wins' });
+  assert.deepEqual(order, ['googlebooks', 'goodreads']);
+  assert.deepEqual(candidates.map((candidate) => candidate.title), ['Goodreads First']);
+});
+
+test('a Google candidate still stops the chain before Goodreads and OpenLibrary', async () => {
   const called = [];
   const base = 'https://provider.test';
   const fetchImpl = async (url) => {

@@ -191,15 +191,14 @@ one anonymous call cannot turn its full identifier list into paid provider work.
 | `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to 50 candidates; falls back to the resolve chain when ISBNdb is unconfigured or returns nothing |
 | `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
 
-Provider precedence is ISBNdb → Google Books → OpenLibrary → Goodreads, for
+Provider precedence is ISBNdb → Google Books → Goodreads → OpenLibrary, for
 both ISBN lookups and text searches, stopping at the first provider that
-returns candidates (no fan-out merge across providers). Structured APIs come
-before Goodreads' HTML scraping; OpenLibrary's public API needs no key, so it
-sits after the two keyed providers and before the scrape. When `ISBNDB_API_KEY`
-is unset the chain starts at Google Books. `googlebooks`, `openlibrary` and
-`goodreads` identifiers still resolve directly against their own provider;
-OpenLibrary accepts edition (`OL…M`) and work (`OL…W`) keys and expands a work
-through its editions endpoint.
+returns candidates (no fan-out merge across providers). OpenLibrary's public
+API needs no key, so it is the final fallback after the two keyed providers
+and Goodreads. When `ISBNDB_API_KEY` is unset the chain starts at Google Books.
+`googlebooks`, `openlibrary` and `goodreads` identifiers still resolve directly
+against their own provider; OpenLibrary accepts edition (`OL…M`) and work
+(`OL…W`) keys and expands a work through its editions endpoint.
 `CANDIDATES_PER_TASK = 50` in `packages/worker/lib/tasks.js` bounds each task;
 Google Books asks for its maximum page (`maxResults=40`) and ISBNdb search asks
 for `pageSize=50` (the API's default is 20), so a single provider call can be
@@ -213,7 +212,7 @@ The primary key makes the reservation safe across worker processes and
 restarts, and an empty `RETURNING` means the quota is exhausted. In that case
 the provider makes no network call, logs one warning per process per UTC day,
 and returns an empty result so the normal fallback chain continues with Google
-Books, OpenLibrary then Goodreads. Cache hits do not reserve anything, and a failed HTTP
+Books, Goodreads then OpenLibrary. Cache hits do not reserve anything, and a failed HTTP
 attempt keeps its reservation because the call was attempted (billing
 semantics). `ISBNDB_DAILY_LIMIT` defaults to `5000` and must be a positive
 integer; `0`/negative is invalid and falls back to `5000` with a warning — it is

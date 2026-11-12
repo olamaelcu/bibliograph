@@ -105,14 +105,14 @@ export function createProviders({
     const isbn = normalizeIsbn13(identifier.value);
     if (!isbn) return [];
 
-    // ISBNdb owns the ISBN space; Google Books and the keyless structured
-    // OpenLibrary API come next, and Goodreads HTML scraping is the last
-    // resort. The breaker lets an open ISBNdb skip straight to the rest.
+    // ISBNdb owns the ISBN space; Google Books and Goodreads follow, and the
+    // keyless OpenLibrary API is the final fallback. The breaker lets an open
+    // ISBNdb skip straight to the rest.
     const steps = [];
     if (isbndb) steps.push(['isbndb', () => isbndb.byIsbn(isbn)]);
     steps.push(['googlebooks', () => google.byIsbn(isbn)]);
-    steps.push(['openlibrary', () => openlibrary.byIsbn(isbn)]);
     steps.push(['goodreads', () => goodreads.byIdentifier(isbn)]);
+    steps.push(['openlibrary', () => openlibrary.byIsbn(isbn)]);
     return mergeCandidates(await firstCandidates(`isbn:${isbn}`, steps));
   }
 
@@ -130,10 +130,8 @@ export function createProviders({
       steps.push(['isbndb', () => (isbn13 ? isbndb.byIsbn(isbn13) : isbndb.search(text))]);
     }
     steps.push(['googlebooks', () => google.search(input)]);
-    // A structured API before Goodreads' HTML scraping: OpenLibrary answers
-    // editions/works directly and needs no key or quota reservation.
-    if (text) steps.push(['openlibrary', () => openlibrary.search(input)]);
     if (text) steps.push(['goodreads', () => goodreads.search(text)]);
+    if (text) steps.push(['openlibrary', () => openlibrary.search(input)]);
     return mergeCandidates(await firstCandidates(text ?? 'search', steps));
   }
 

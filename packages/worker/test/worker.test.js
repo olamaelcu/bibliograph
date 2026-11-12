@@ -144,6 +144,7 @@ const CAP_BOOKS = Array.from({ length: 60 }, (_, index) => ({
 let googleRequests = 0;
 let goodreadsRequests = 0;
 let openlibraryRequests = 0;
+const providerOrder = [];
 const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
 
 // Every test set points OpenLibrary at the local stub. Without this a fallback
@@ -211,6 +212,7 @@ before(async () => {
 
     if (url.pathname === '/google/volumes') {
       googleRequests += 1;
+      providerOrder.push('googlebooks');
       const query = url.searchParams.get('q');
       if (query === 'isbn:9781111111111') send(plcBody);
       else if (query === 'google-fills') send(googleBody);
@@ -245,7 +247,13 @@ before(async () => {
     }
     if (url.pathname.startsWith('/goodreads/search')) {
       goodreadsRequests += 1;
-      send(goodreadsSearchHtml, 'text/html');
+      providerOrder.push('goodreads');
+      send(
+        url.searchParams.get('q') === 'openlibrary-fills'
+          ? '<table></table>'
+          : goodreadsSearchHtml,
+        'text/html'
+      );
       return;
     }
     if (url.pathname.startsWith('/goodreads/book/show/')) {
@@ -255,6 +263,7 @@ before(async () => {
     }
     if (url.pathname === '/openlibrary/search.json') {
       openlibraryRequests += 1;
+      providerOrder.push('openlibrary');
       const query = url.searchParams.get('q');
       if (query === 'openlibrary-fills') {
         send({
@@ -588,6 +597,7 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
     await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:web:test.example/%'");
 
     openlibraryRequests = 0;
+    goodreadsRequests = 0;
     await tasks['catalog.search']({ title: 'Left Hand' }, helpers);
 
     const edition = await pool.query(
@@ -597,7 +607,8 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
     assertTid(edition.rows[0].rkey);
     assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
     assert.equal(edition.rows[0].cover_url, 'https://img.example/18423.jpg');
-    assert.equal(openlibraryRequests, 1, 'OpenLibrary is tried between Google and Goodreads');
+    assert.equal(goodreadsRequests, 1, 'Goodreads answers before OpenLibrary');
+    assert.equal(openlibraryRequests, 0, 'OpenLibrary is not reached when Goodreads answers');
   } finally {
     await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query(
@@ -859,7 +870,7 @@ test('search ingests at most 50 candidates', async () => {
   }
 });
 
-test('search falls back to OpenLibrary after Google and before Goodreads', async () => {
+test('search tries OpenLibrary after Google and Goodreads', async () => {
   const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
   const providers = createProviders({
     pool,
@@ -877,6 +888,7 @@ test('search falls back to OpenLibrary after Google and before Goodreads', async
     googleRequests = 0;
     openlibraryRequests = 0;
     goodreadsRequests = 0;
+    providerOrder.length = 0;
 
     await tasks['catalog.search']({ title: 'openlibrary-fills' }, helpers);
 
@@ -884,9 +896,10 @@ test('search falls back to OpenLibrary after Google and before Goodreads', async
       "SELECT title FROM editions WHERE uri LIKE 'at://did:web:openlibrary.example/%'"
     );
     assert.deepEqual(edition.rows.map((row) => row.title), ['OpenLibrary Fallback Volume']);
+    assert.deepEqual(providerOrder, ['googlebooks', 'goodreads', 'openlibrary']);
     assert.equal(googleRequests, 1, 'Google is tried first');
-    assert.equal(openlibraryRequests, 1, 'OpenLibrary fills the gap');
-    assert.equal(goodreadsRequests, 0, 'Goodreads is not reached when OpenLibrary answers');
+    assert.equal(goodreadsRequests, 1, 'Goodreads is tried second');
+    assert.equal(openlibraryRequests, 1, 'OpenLibrary is the final fallback');
   } finally {
     await cleanupHydrationRows(pool, 'openlibrary.example');
     await pool.end();

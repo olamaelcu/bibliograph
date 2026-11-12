@@ -109,11 +109,11 @@ HappyView. The full request/response contract is in
 
 ## Providers
 
-Catalog hydration uses **ISBNdb → Google Books → OpenLibrary → Goodreads**,
+Catalog hydration uses **ISBNdb → Google Books → Goodreads → OpenLibrary**,
 stopping at the first provider that returns candidates, for both ISBN lookups
-and text searches. Structured APIs come before Goodreads' HTML scraping;
-OpenLibrary is keyless and public, so it is a cheap fallback after the two
-keyed providers. `googlebooks`, `openlibrary` and `goodreads` identifiers
+and text searches. OpenLibrary is keyless and public, so it is the final
+fallback after the two keyed providers and Goodreads. `googlebooks`,
+`openlibrary` and `goodreads` identifiers
 resolve directly against their own provider (`openlibrary` accepts edition
 `OL…M` and work `OL…W` keys); without `ISBNDB_API_KEY` the chain starts at
 Google Books. Each worker task ingests at most 50 candidates.
