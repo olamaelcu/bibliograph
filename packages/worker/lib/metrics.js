@@ -1,14 +1,16 @@
 /**
  * Dependency-free Prometheus endpoint for the catalog worker.
  *
- * The only metric family today is the ISBNdb daily quota. Values are read from
- * Postgres on every scrape, because the database is the authoritative counter
- * shared by all worker processes.
+ * ISBNdb quota gauges are read from Postgres on every scrape because the
+ * database is the authoritative counter shared by all worker processes.
+ * Provider retry/breaker counters live in memory and are passed in by the
+ * worker that owns them.
  */
 
 import http from 'node:http';
 
 import { DEFAULT_ISBNDB_DAILY_LIMIT, readDailyCalls } from './providers/usage.js';
+import { renderProviderMetrics } from './providers/resilience.js';
 
 const CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 const DEFAULT_HOST = '127.0.0.1';
@@ -16,8 +18,8 @@ const DEFAULT_PORT = 9464;
 
 export { DEFAULT_HOST as DEFAULT_METRICS_HOST, DEFAULT_PORT as DEFAULT_METRICS_PORT };
 
-/** Render the Prometheus text exposition for an ISBNdb quota snapshot. */
-export function renderMetrics({ calls, limit }) {
+/** Render the Prometheus text exposition for quota + provider telemetry. */
+export function renderMetrics({ calls, limit, providerMetrics }) {
   const used = Number.isFinite(calls) && calls > 0 ? Math.trunc(calls) : 0;
   const cap = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : 0;
   const remaining = Math.max(0, cap - used);
@@ -32,6 +34,7 @@ export function renderMetrics({ calls, limit }) {
     '# HELP bibliograph_isbndb_calls_remaining ISBNdb calls still available today (never negative).',
     '# TYPE bibliograph_isbndb_calls_remaining gauge',
     `bibliograph_isbndb_calls_remaining ${remaining}`,
+    renderProviderMetrics(providerMetrics),
     ''
   ].join('\n');
 }
@@ -51,7 +54,12 @@ export function parseMetricsPort(raw, logger = console) {
  * Build the HTTP server without listening, so tests can bind port 0 and the
  * caller owns startup/shutdown.
  */
-export function createMetricsServer({ pool, limit = DEFAULT_ISBNDB_DAILY_LIMIT, logger = console } = {}) {
+export function createMetricsServer({
+  pool,
+  limit = DEFAULT_ISBNDB_DAILY_LIMIT,
+  providerMetrics,
+  logger = console
+} = {}) {
   if (!pool) throw new Error('createMetricsServer requires a Postgres pool');
 
   return http.createServer(async (request, response) => {
@@ -76,7 +84,11 @@ export function createMetricsServer({ pool, limit = DEFAULT_ISBNDB_DAILY_LIMIT, 
         'content-type': CONTENT_TYPE,
         'cache-control': 'no-store'
       });
-      response.end(request.method === 'HEAD' ? undefined : renderMetrics({ calls, limit }));
+      response.end(
+        request.method === 'HEAD'
+          ? undefined
+          : renderMetrics({ calls, limit, providerMetrics })
+      );
     } catch (error) {
       // A metrics scrape must never take the worker down; report the failure to
       // the scraper instead of serving misleading counters.
@@ -91,10 +103,17 @@ export function createMetricsServer({ pool, limit = DEFAULT_ISBNDB_DAILY_LIMIT, 
  * Start the metrics server. Resolves to the listening server; the caller closes
  * it on shutdown.
  */
-export async function startMetricsServer({ pool, limit = DEFAULT_ISBNDB_DAILY_LIMIT, host, port, logger = console } = {}) {
+export async function startMetricsServer({
+  pool,
+  limit = DEFAULT_ISBNDB_DAILY_LIMIT,
+  providerMetrics,
+  host,
+  port,
+  logger = console
+} = {}) {
   const bindHost = (host ?? process.env.WORKER_METRICS_HOST ?? '').trim() || DEFAULT_HOST;
   const bindPort = parseMetricsPort(port ?? process.env.WORKER_METRICS_PORT, logger);
-  const server = createMetricsServer({ pool, limit, logger });
+  const server = createMetricsServer({ pool, limit, providerMetrics, logger });
 
   await new Promise((resolve, reject) => {
     const onError = (error) => {

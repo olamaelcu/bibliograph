@@ -3,6 +3,7 @@ import { createGoogleBooks } from './google-books.js';
 import { createIsbndb } from './isbndb.js';
 import { createGoodreads } from './goodreads.js';
 import { parseDailyLimit } from './usage.js';
+import { createProviderHttp, createProviderMetrics } from './resilience.js';
 
 const ISBN_ISSUERS = new Set(['isbn13', 'isbn10', 'isbn']);
 
@@ -11,13 +12,34 @@ export function createProviders({
   env = process.env,
   fetchImpl = fetch,
   logger = console,
-  isbndbDailyLimit
+  isbndbDailyLimit,
+  providerMetrics,
+  resilience = {}
 } = {}) {
+  const metrics = providerMetrics ?? createProviderMetrics();
+  const googleHttp = createProviderHttp({
+    ...resilience,
+    provider: 'googlebooks',
+    fetchImpl,
+    metrics
+  });
+  const isbndbHttp = createProviderHttp({
+    ...resilience,
+    provider: 'isbndb',
+    fetchImpl,
+    metrics
+  });
+  const goodreadsHttp = createProviderHttp({
+    ...resilience,
+    provider: 'goodreads',
+    fetchImpl,
+    metrics
+  });
   const google = createGoogleBooks({
     pool,
     apiKey: env.GOOGLE_BOOKS_API_KEY || undefined,
     baseUrl: env.GOOGLE_BOOKS_BASE_URL || 'https://www.googleapis.com/books/v1',
-    fetchImpl
+    fetchImpl: googleHttp.fetch
   });
   const isbndb = createIsbndb({
     pool,
@@ -25,32 +47,56 @@ export function createProviders({
     baseUrl: env.ISBNDB_BASE_URL || 'https://api2.isbndb.com',
     dailyLimit: isbndbDailyLimit ?? parseDailyLimit(env.ISBNDB_DAILY_LIMIT, logger),
     logger,
-    fetchImpl
+    fetchImpl: isbndbHttp.fetch
   });
   const goodreads = createGoodreads({
     baseUrl: env.GOODREADS_BASE_URL || 'https://www.goodreads.com',
     logger,
-    fetchImpl
+    fetchImpl: goodreadsHttp.fetch
   });
+
+  /**
+   * Walk providers in priority order until one returns candidates. A provider
+   * that throws (outage, open breaker) is logged and skipped so the rest of the
+   * chain still answers; if every step is empty and at least one threw, the
+   * first error is rethrown instead of reporting a misleading empty success.
+   */
+  async function firstCandidates(label, steps) {
+    const errors = [];
+    for (const [provider, run] of steps) {
+      try {
+        const candidates = await run();
+        if (candidates.length > 0) return candidates;
+      } catch (error) {
+        errors.push(error);
+        logger?.warn?.(`worker: ${provider} failed for ${label} — ${error.message}`);
+      }
+    }
+    if (errors.length > 0) throw errors[0];
+    return [];
+  }
 
   async function resolve(identifier) {
     const issuer = identifier.issuer.toLowerCase();
-    let candidates = [];
 
     if (issuer === 'googlebooks' || issuer === 'google-books') {
-      candidates = await google.byVolumeId(identifier.value);
-    } else if (issuer === 'goodreads') {
-      candidates = await goodreads.byId(identifier.value);
-    } else if (ISBN_ISSUERS.has(issuer)) {
-      const isbn = normalizeIsbn13(identifier.value);
-      if (!isbn) return [];
-      // ISBNdb owns the ISBN space; Google and Goodreads are fallbacks.
-      if (isbndb) candidates = await isbndb.byIsbn(isbn);
-      if (candidates.length === 0) candidates = await google.byIsbn(isbn);
-      if (candidates.length === 0) candidates = await goodreads.byIdentifier(isbn);
+      return mergeCandidates(await google.byVolumeId(identifier.value));
     }
+    if (issuer === 'goodreads') {
+      return mergeCandidates(await goodreads.byId(identifier.value));
+    }
+    if (!ISBN_ISSUERS.has(issuer)) return [];
 
-    return mergeCandidates(candidates);
+    const isbn = normalizeIsbn13(identifier.value);
+    if (!isbn) return [];
+
+    // ISBNdb owns the ISBN space; Google and Goodreads are fallbacks. The
+    // breaker lets an open ISBNdb skip straight to them.
+    const steps = [];
+    if (isbndb) steps.push(['isbndb', () => isbndb.byIsbn(isbn)]);
+    steps.push(['googlebooks', () => google.byIsbn(isbn)]);
+    steps.push(['goodreads', () => goodreads.byIdentifier(isbn)]);
+    return mergeCandidates(await firstCandidates(`isbn:${isbn}`, steps));
   }
 
   async function search(input) {
@@ -61,18 +107,25 @@ export function createProviders({
         .filter(Boolean)
         .join(' ') || (isbn ? normalizeIsbn13(isbn) : undefined);
 
+    const isbn13 = isbn ? normalizeIsbn13(isbn) : null;
+    const steps = [];
     if (isbndb && text) {
-      const isbn13 = isbn ? normalizeIsbn13(isbn) : null;
-      const fromIsbndb = isbn13 ? await isbndb.byIsbn(isbn13) : await isbndb.search(text);
-      if (fromIsbndb.length > 0) return mergeCandidates(fromIsbndb);
+      steps.push(['isbndb', () => (isbn13 ? isbndb.byIsbn(isbn13) : isbndb.search(text))]);
     }
-
-    const fromGoogle = await google.search(input);
-    if (fromGoogle.length > 0) return mergeCandidates(fromGoogle);
-
-    if (text) return mergeCandidates(await goodreads.search(text));
-    return [];
+    steps.push(['googlebooks', () => google.search(input)]);
+    if (text) steps.push(['goodreads', () => goodreads.search(text)]);
+    return mergeCandidates(await firstCandidates(text ?? 'search', steps));
   }
 
-  return { resolve, search, providers: { google, isbndb, goodreads } };
+  return {
+    resolve,
+    search,
+    providers: { google, isbndb, goodreads },
+    metrics,
+    resilience: {
+      googlebooks: googleHttp.breaker,
+      isbndb: isbndbHttp.breaker,
+      goodreads: goodreadsHttp.breaker
+    }
+  };
 }

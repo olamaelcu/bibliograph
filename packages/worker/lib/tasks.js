@@ -87,10 +87,18 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
 
       // A direct by-ISBN lookup beats the generic fan-out; an empty result falls
       // back to the resolve chain, which itself starts with ISBNdb (cache hit).
+      // A throw here means ISBNdb is down or its breaker is open; the resolve
+      // chain retries it fast and then uses Google/Goodreads.
       const isbndb = providers?.providers?.isbndb;
       let candidates = [];
       if (isbndb) {
-        candidates = await isbndb.byIsbn(isbn);
+        try {
+          candidates = await isbndb.byIsbn(isbn);
+        } catch (error) {
+          helpers.logger.warn(
+            `catalog.isbn: ISBNdb failed for ${isbn} — ${error.message}; using the resolve chain`
+          );
+        }
       } else {
         helpers.logger.warn(
           `catalog.isbn: ISBNdb is not configured (ISBNDB_API_KEY unset); ` +

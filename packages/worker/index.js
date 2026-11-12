@@ -40,7 +40,11 @@ try {
 // Metrics are best-effort: a port conflict must not stop hydration/publishing.
 let metricsServer;
 try {
-  metricsServer = await startMetricsServer({ pool, limit: isbndbDailyLimit });
+  metricsServer = await startMetricsServer({
+    pool,
+    limit: isbndbDailyLimit,
+    providerMetrics: providers.metrics
+  });
 } catch (error) {
   console.error(`worker: metrics server disabled — ${error.message}`);
 }
