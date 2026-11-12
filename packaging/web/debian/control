@@ -23,6 +23,8 @@ Description: Bibliograph web edge (SvelteKit appview front end)
  /etc/bibliograph/web.env — the HappyView client key and secret are required
  for the proxy to identify itself upstream.
  .
- The service binds 127.0.0.1:5176. Put a TLS-terminating reverse proxy in front
- (the package recommends nginx); the port and HappyView URL are conffile
- settings.
+ The service binds 127.0.0.1:5176. The package ships the TLS-terminating vhost
+ for biblio.livtet.olamaelcu.net as the conffile
+ /etc/nginx/sites-available/bibliograph-web; postinst enables it once the
+ certificate exists and nginx accepts the configuration, so installing the
+ package cannot take the host's other vhosts down.

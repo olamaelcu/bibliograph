@@ -46,6 +46,11 @@ install -d "$STAGE$LIVE"
 cp -a "$PAYLOAD/build" "$STAGE$LIVE/build"
 
 install -D -m 0644 packaging/web/web.env "$STAGE/etc/bibliograph/web.env"
+# The TLS vhost is a conffile in sites-available only; debian/postinst enables it
+# when a certificate exists and nginx accepts the result. It is not copied into
+# sites-enabled here, so an installed package never breaks the host's nginx.
+install -D -m 0644 packaging/web/nginx/bibliograph.conf \
+  "$STAGE/etc/nginx/sites-available/bibliograph-web"
 install -D -m 0644 packaging/web/bibliograph-web.service "$UNIT_DIR/bibliograph-web.service"
 install -D -m 0644 packaging/web/copyright \
   "$STAGE/usr/share/doc/bibliograph-web/copyright"
