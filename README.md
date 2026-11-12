@@ -29,7 +29,9 @@ at read time.
 
 ## Contexts and records
 
-Catalog records use the books-wg namespace:
+Catalog records use the shared book namespace, imported from
+[lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest)
+(the books-wg working set with ONIX contributor roles):
 
 - `community.lexicon.media.book.edition` — an edition, published by the
   publisher account. Contributors and one publisher are inlined on the wire but

@@ -6,8 +6,10 @@ It is drawn from the deployed lexicons in `happyview/lexicons` and the handler s
 `happyview/scripts/xrpc/{query,procedure}`. The same lexicons generate the public page in
 `packages/web`.
 
-The surface is the set of uploaded lexicons plus the books-wg working set vendored at
-`vendor/books-wg-lexicons`: **17 queries, 17 procedures and 8 record types**. Two procedures
+The surface is the set of uploaded lexicons plus the book lexicons imported from
+[lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest) into
+`happyview/lexicons/community/lexicon/media/book/`: **17 queries, 17 procedures and 8 record
+types**. Two procedures
 (`community.lexicon.media.book.resolveEditions` and `searchEditions`) are anonymous catalog reads
 served by the edge in `packages/web`; the other 15 are HappyView procedures that write to a caller's
 PDS. Everything except the review and edition record types lives under
@@ -165,6 +167,11 @@ link back to the record and resolves through `com.atproto.repo.getRecord` with
 `/book/<did>/<rkey>` from it (the display path may drop the collection, but the at-uri is the
 authoritative record reference). Stored identifiers follow it unchanged (`issuer`/`value`, no
 bookkeeping columns).
+
+Contributors in every `editionView` (and in a review's `subject`) use the PR #18 shape:
+`displayName` is required, `nameInverted` is optional, and `role` is an ONIX Codelist 17 code
+(default `A01`). Rows ingested under the old draft carried `name` and kebab-case roles; the edge
+and HappyView map them on output, so clients never need to know the storage form.
 
 `editionResults` is exactly the upstream envelope: `{ items, hasMore, total? }`, with no
 `pending`/`degraded` field, so a response cannot tell a client that catalog hydration is
@@ -589,8 +596,8 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 | `net.olamaelcu.livtet.biblio.follow` | `any` — the subject DID by contract | `subject` (DID), `createdAt` | `graph.follow` |
 | `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
 | `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
-| `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
-| `community.lexicon.media.book.edition` | `tid` — always a TID minted by `editions_next_tid()`; never provider-prefixed | `title`, `identifiers`, `contributors`, `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
+| `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`; contributors have `displayName` + ONIX `role`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
+| `community.lexicon.media.book.edition` | `tid` — always a TID minted by `editions_next_tid()`; never provider-prefixed | `title`, `identifiers`, `contributors` (`displayName` + ONIX `role`), `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
 
 The record keys are part of the contract: the queries resolve records by them. `bookStatus` derives
 from the edition URI, `shelfItem` from the shelf and edition rkeys, `readingGoal` and

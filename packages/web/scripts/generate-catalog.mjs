@@ -12,11 +12,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
-// HappyView's uploaded surface, plus the books-wg working set served by the edge
-// (resolveEditions / searchEditions and the edition record type).
+// HappyView's uploaded surface plus the book lexicons imported from
+// lexicon.community PR #18 (edition, resolveEditions, searchEditions and the
+// shared defs/review). The books-wg submodule stays for upstream provenance but
+// is no longer a catalog input: its pin predates the PR.
 const lexiconsDirs = [
-  join(here, '..', '..', '..', 'happyview', 'lexicons'),
-  join(here, '..', '..', '..', 'vendor', 'books-wg-lexicons', 'lexicons')
+  join(here, '..', '..', '..', 'happyview', 'lexicons')
 ];
 const outFile = join(here, '..', 'src', 'lib', 'xrpc-catalog.json');
 
@@ -63,8 +64,7 @@ const seen = new Set();
 for (const dir of lexiconsDirs) {
   for (const file of await findLexicons(dir)) {
     const lexicon = JSON.parse(await readFile(file, 'utf8'));
-    // The books-wg defs/review lexicons are the same files HappyView serves;
-    // keep one entry per NSID.
+    // Keep one entry per NSID; a directory may later repeat a shared lexicon.
     if (seen.has(lexicon.id)) continue;
     seen.add(lexicon.id);
 

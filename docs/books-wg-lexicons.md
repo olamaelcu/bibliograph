@@ -12,15 +12,50 @@ The submodule tracks the upstream, not the local clone used while reviewing it. 
 `git -C vendor/books-wg-lexicons fetch && git -C vendor/books-wg-lexicons checkout <sha>`, then
 commit the gitlink.
 
+## Source of truth: lexicon.community PR #18
+
+The working set is being adopted by [lexicon.community](https://tangled.org/lexicon.community/lexicons)
+in [PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest) (
+`nickthesick.com/lexicons:book-lexicon-proposal`, commit
+`1f246574e733dfb37ef30637b97d8bbc371820a2`, +776/−2). It is open, not merged, and its head is
+based on the current `lexicon.community` `main` (`47d55d9`); the books-wg repository has not
+moved. The PR is therefore a different authority from the submodule, and the submodule gitlink
+cannot point at it.
+
+Bibliograph imports the PR's five files verbatim into
+`happyview/lexicons/community/lexicon/media/book/`, which is now the source of truth for these
+NSIDs. `generate-catalog.mjs` no longer reads the books-wg submodule. The submodule stays pinned as
+the upstream working set (provenance and history); do not copy its `defs.json` or `edition.json`
+over the imports, because it predates the PR.
+
+When PR #18 merges, or the books-wg repository gains the same commit, update the pin as a separate
+change and delete the duplicate import; until then, keep the local copies in sync with the PR head.
+
 ## What it provides
 
 | File | Type | Status in this repo |
 | --- | --- | --- |
-| `lexicons/defs.json` (`community.lexicon.media.book.defs`) | defs | upstream copy; our `happyview/lexicons/community/lexicon/media/book/defs.json` is identical to it at this pin |
-| `lexicons/review.json` (`community.lexicon.media.book.review`) | record | identical to our deployed copy |
-| `lexicons/edition.json` (`community.lexicon.media.book.edition`) | record | **not present** in `happyview/lexicons`; the catalog publisher owns this record type |
-| `lexicons/resolveEditions.json` | procedure (read-only) | served by the edge; see below |
-| `lexicons/searchEditions.json` | procedure (read-only) | served by the edge; see below |
+| `defs.json` (`community.lexicon.media.book.defs`) | defs | imported from PR #18; vendor pin is older |
+| `review.json` (`community.lexicon.media.book.review`) | record | imported from PR #18; unchanged by the PR |
+| `edition.json` (`community.lexicon.media.book.edition`) | record | imported from PR #18; the catalog publisher owns the record type |
+| `resolveEditions.json` | procedure (read-only) | imported from PR #18; served by the edge |
+| `searchEditions.json` | procedure (read-only) | imported from PR #18; served by the edge |
+
+The PR's substantive changes are in `defs.json` and `edition.json`:
+
+- `defs#contributor` now requires `displayName` (was `name`) and adds optional `nameInverted`.
+- `defs#contributor.role` is an ONIX Codelist 17 code, default `A01` (By (author)); the old
+  kebab-case tokens are legacy input and are mapped on output. `knownValues` lists the 124 codes
+  from Issue 75 and remains open.
+- The inline `series` object became `defs#series`, referenced by `edition` and `editionView`.
+  `position` is a decimal string; `display` is optional.
+- Descriptions point new metadata at schema.org/Book and include comic books/graphic novels.
+
+Existing catalog rows keep the old `name`/kebab-role shape. No database migration is performed:
+`buildEditionRecord` and the `editionView` mappers emit `displayName` and an ONIX code, while
+ingest accepts `displayName` or `name` and normalizes known roles to codes for new rows.
+`nameInverted` is accepted by the record builder when a row carries it, but the catalog has no
+column for it, so it is not persisted; adding it needs a schema migration.
 
 Both new methods are `type: procedure` with a JSON body and `application/json` output, but they are
 **read-only**: `resolveEditions` has no declared errors, `searchEditions` declares
@@ -47,7 +82,7 @@ before the script runs (`401 XRPC procedures require DPoP authentication`), and 
   `pg` client (`DATABASE_URL`, cached on `globalThis` across dev reloads); `editions.ts` maps rows
   from `editions`, `edition_identifiers`, `edition_contributors` and `edition_publishers` to
   `community.lexicon.media.book.defs#editionView`, including the `series` object and contributor
-  `role`.
+  `displayName`/ONIX `role` (`contributor-roles.ts`).
 - **Configuration**: `DATABASE_URL` is declared in `packages/web/src/env.ts`; the deployment
   template is `packaging/web/web.env` (unset → the two methods answer `503 ServiceUnavailable`
   instead of taking the edge down).
@@ -55,9 +90,9 @@ before the script runs (`401 XRPC procedures require DPoP authentication`), and 
   `lib/publish.js`) consumes `catalog.resolve` / `catalog.search` / `pds-publish`. The Debian unit
   is `packaging/worker/bibliograph-worker.service`, running
   `/usr/bin/node /usr/lib/bibliograph-worker/index.js` with `/etc/bibliograph/worker.env`.
-- **Public catalogue**: `packages/web/scripts/generate-catalog.mjs` now reads both
-  `happyview/lexicons` and the vendored directory (de-duplicated by NSID), so the generated page
-  lists the two procedures and the `edition` record type.
+- **Public catalogue**: `packages/web/scripts/generate-catalog.mjs` reads `happyview/lexicons`
+  only (de-duplicated by NSID), so the generated page lists the two procedures and the `edition`
+  record type from the PR #18 imports. The books-wg submodule is no longer a catalog input.
 
 ## Edition identifiers point back at the record
 
@@ -157,11 +192,9 @@ Honest limits:
 ## Publication and schema registration
 
 - The catalog publisher must publish `community.lexicon.media.book.edition` records against the
-  vendored `edition.json`. Our tree lost that lexicon with `packages/bibliograph-service`, so the
-  submodule is now the only copy; reference it from the publication pipeline instead of re-adding a
-  hand-maintained duplicate.
+  imported `happyview/lexicons/community/lexicon/media/book/edition.json` (PR #18).
 - Publish the two procedure lexicons and the defs/review lexicons as `com.atproto.lexicon.schema`
-  records from the same vendored source, so `com.atproto.lexicon.resolveLexicon` answers for them.
+  records from the same imported source, so `com.atproto.lexicon.resolveLexicon` answers for them.
 - The publisher identity is the configured `did:plc` account (`ATP_SERVICE_DID`; the
   `did:web:<ATP_SERVICE_HOST>` form is a local/test fallback). Publication requires that account to
   be provisioned on the PDS; the catalog itself is not seeded, imported or migrated from a previous
@@ -176,6 +209,10 @@ Honest limits:
 - Contract tests should validate responses against the vendored schemas; `editionResults` requires
   `items` and `hasMore`, `total` is optional. CI must initialise the submodule and fail if the pin is
   missing.
+- `edition-record.test.js` covers the old-to-new role mapping (`author` → `A01`, `foreword` →
+  `A23`), ONIX pass-through, `displayName`/`nameInverted` and the `A01` default. The same mapping
+  is duplicated in `packages/web/src/lib/server/catalog/contributor-roles.ts` and
+  `happyview/lib/prelude.lua`; keep the three tables in sync.
 - Open items to raise upstream: an asynchronous-hydration signal for `editionResults`; array bounds
   use `minLength` instead of `minItems`; `editionView` carries no CID, while
   writes such as `shelf.addItem` need `{ uri, cid }` strongRefs, so a resolving client still has to
