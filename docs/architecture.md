@@ -170,13 +170,37 @@ not an "unlimited" switch.
 
 The worker starts a dependency-free Prometheus endpoint on
 `WORKER_METRICS_HOST:WORKER_METRICS_PORT` (default `127.0.0.1:9464`) serving
-`/metrics`. Each scrape reads the database and exposes
+`/metrics`. `bibliograph_worker_up` is `1` while the process answers. Each
+scrape reads the database and exposes the ISBNdb quota gauges
 `bibliograph_isbndb_calls_today`, `bibliograph_isbndb_daily_limit` and
-`bibliograph_isbndb_calls_remaining` (`max(0, limit - calls)`). A scrape that
-cannot query the database answers `500`; a port that cannot be bound is logged
-and leaves the worker running. The default loopback bind keeps the endpoint off
-the network; set `WORKER_METRICS_HOST=0.0.0.0` only for a container/host
-scraper and firewall the port accordingly (see `prometheus.yml`).
+`bibliograph_isbndb_calls_remaining` (`max(0, limit - calls)`), plus the outbox
+backlog for the configured publisher DID: `bibliograph_pds_outbox_ready`
+(claimable now: same collection, `attempts < 10`, due and unleased),
+`bibliograph_pds_outbox_parked` (`attempts >= 10`) and
+`bibliograph_pds_outbox_oldest_age_seconds` (age of the oldest claimable row,
+`0` when none). In-memory provider attempt/retry/request counters and breaker
+states are rendered by the same worker. A scrape that cannot query the
+database answers `500`; a port that cannot be bound is logged and leaves the
+worker running. The default loopback bind keeps the endpoint off the network;
+set `WORKER_METRICS_HOST=0.0.0.0` only for a container/host scraper and
+firewall the port accordingly (see `prometheus.yml`).
+
+The web edge serves its own dependency-free `/metrics` on the same loopback
+listener as the app (`127.0.0.1:5176`); it is not exposed by the public vhost,
+whose nginx config denies an exact-match `/metrics` `location`. The SvelteKit
+`handle` hook records `bibliograph_http_requests_total` and
+`bibliograph_http_request_duration_seconds` with the matched route id, verb and
+status; the XRPC surface records `bibliograph_happyview_requests_total`,
+`bibliograph_pds_proxy_requests_total`, `bibliograph_catalog_queries_total`,
+`bibliograph_catalog_query_duration_seconds` and
+`bibliograph_feed_requests_total`. Each scrape also collects process gauges
+(`bibliograph_process_resident_memory_bytes`,
+`bibliograph_process_cpu_seconds_total`, `bibliograph_process_uptime_seconds`,
+`bibliograph_nodejs_heap_used_bytes`). Labels are bounded: route ids come from
+the route manifest, XRPC methods outside a fixed allowlist collapse to `other`,
+and no metric carries a URL, identifier, query or other user input. Prometheus
+scrapes both loopback endpoints directly; no new environment variable is
+required.
 
 `pds-publish` claims at most 25 ready rows for its configured publisher DID per
 batch with `FOR UPDATE SKIP LOCKED` and a five-minute lease, so several worker

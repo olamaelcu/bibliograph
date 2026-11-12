@@ -30,3 +30,13 @@ scrape_configs:
       - targets: ["host.docker.internal:9464"]
         labels:
           service: bibliograph-worker
+
+  # The web edge serves /metrics on its loopback listener (5176). A dev/deploy
+  # host reaches it through the compose bridge; the public vhost denies the
+  # path, so the scrape must target the process directly.
+  - job_name: bibliograph-web
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:5176"]
+        labels:
+          service: bibliograph-web

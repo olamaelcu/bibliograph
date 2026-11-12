@@ -354,8 +354,13 @@ debconf/port arrangement and is not part of this flow.
 | `happyview.service` | `/usr/lib/bibliograph-happyview/happyview` | loopback `127.0.0.1:3000`; migrations load from its working directory |
 | `bibliograph-happyview-client.service` | `bin/hv-client` | oneshot, `Before=happyview.service`: seeds the edge's XRPC client |
 | `bibliograph-happyview-deploy.service` | `bin/hv-deploy --wait --seed` | oneshot, applies lexicons/scripts/indexes; mints the admin key on first run |
-| `bibliograph-worker.service` | `node /usr/lib/bibliograph-worker/index.js` | catalog hydration + `pds_outbox` drain; `/metrics` on loopback |
-| `bibliograph-web.service` | `node /usr/lib/bibliograph-web/build/index.js` | public edge on `127.0.0.1:5176`, proxied by the packaged nginx vhost |
+| `bibliograph-worker.service` | `node /usr/lib/bibliograph-worker/index.js` | catalog hydration + `pds_outbox` drain; `/metrics` on `127.0.0.1:9464` (loopback) |
+| `bibliograph-web.service` | `node /usr/lib/bibliograph-web/build/index.js` | public edge on `127.0.0.1:5176`, proxied by the packaged nginx vhost; `/metrics` on the same loopback listener, denied by the vhost |
+
+Both `/metrics` endpoints are loopback-only. Prometheus scrapes
+`127.0.0.1:5176` (web) and `127.0.0.1:9464` (worker) directly; the packaged
+nginx vhost answers a public `/metrics` with `403` and never proxies it. No
+extra package configuration is needed for either endpoint.
 
 ## Upgrade
 
