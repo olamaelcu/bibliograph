@@ -1,3 +1,16 @@
+bibliograph-web (0.2.1-1) unstable; urgency=medium
+
+  * 0.2.1 release: lexicon.community PR #18 book lexicons.
+
+    - Emit the PR #18 contributor shape from searchEditions and
+      resolveEditions: contributors[].displayName plus ONIX role codes
+      (A01 for by/co-author) instead of name/author.
+    - Ship the imported community.lexicon.media.book lexicons
+      (defs, edition, searchEditions, resolveEditions, review) as the source
+      of truth; the books-wg submodule stays pinned.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 12:00:00 +0000
+
 bibliograph-web (0.2.0-1) unstable; urgency=medium
 
   * 0.2.0 release: feed generator, admin curation and split packaging.

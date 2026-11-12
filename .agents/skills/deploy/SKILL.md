@@ -47,7 +47,7 @@ edge is `127.0.0.1:5176` (nginx proxies here), worker metrics
   → `version`, then appends `-${WEB_REVISION:-1}`. `WEB_VERSION` /
   `WEB_REVISION` override.
 - **happyview** — `packaging/happyview/build-deb.sh` uses
-  `${HAPPYVIEW_VERSION:-2.17.4}` + `${HAPPYVIEW_REVISION:-1}`. This tracks the
+  `${HAPPYVIEW_VERSION:-2.17.4}` + `${HAPPYVIEW_REVISION:-2}`. This tracks the
   pinned HappyView container image, **not** the Bibliograph release semver.
   Never "sync" it to the app version; bump it only when the extracted image
   changes.
@@ -58,11 +58,11 @@ edge is `127.0.0.1:5176` (nginx proxies here), worker metrics
 - The `debian/` debhelper tree and its `debian/changelog` belong to the retired
   combined package and are unused by this flow.
 
-So a `0.2.0` release means `packages/{worker,web}/package.json` → `0.2.0`,
-each split changelog gets a `0.2.0-1` entry, and the produced files are
-`dist/bibliograph-worker_0.2.0-1_all.deb` and
-`dist/bibliograph-web_0.2.0-1_all.deb`. HappyView stays at its image version
-(e.g. `2.17.4-1`).
+So a `0.2.1` release means `packages/{worker,web}/package.json` → `0.2.1`,
+each split changelog gets a `0.2.1-1` entry, and the produced files are
+`dist/bibliograph-worker_0.2.1-1_all.deb` and
+`dist/bibliograph-web_0.2.1-1_all.deb`. HappyView stays at its image version
+(e.g. `2.17.4-2`).
 
 ## Build
 
@@ -294,8 +294,8 @@ ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u bibliograph-web -n 30 --no-pag
 
 What each must show:
 
-- `dpkg-query` versions equal the built debs — `0.2.0-1` for worker/web and the
-  HappyView image version (e.g. `2.17.4-1`). A different version means the host
+- `dpkg-query` versions equal the built debs — `0.2.1-1` for worker/web and the
+  HappyView image version (e.g. `2.17.4-2`). A different version means the host
   installed a different file.
 - All five units `active`. The deploy oneshot is `oneshot` with
   `RemainAfterExit=yes`; `inactive (dead)` is not correct for it after a

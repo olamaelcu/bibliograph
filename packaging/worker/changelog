@@ -1,3 +1,15 @@
+bibliograph-worker (0.2.1-1) unstable; urgency=medium
+
+  * 0.2.1 release: lexicon.community PR #18 edition records.
+
+    - Build published edition records with contributors[].displayName and
+      ONIX role codes (normalized; default A01) from the imported PR #18
+      defs lexicon, replacing the legacy name/author fields.
+    - Republish existing editions through pds_outbox so PDS records match the
+      new contributor shape without changing URIs.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 12:00:00 +0000
+
 bibliograph-worker (0.2.0-1) unstable; urgency=medium
 
   * 0.2.0 release: catalog reliability and curation.
