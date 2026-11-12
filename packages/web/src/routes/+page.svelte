@@ -2,8 +2,27 @@
   import { page } from '$app/state';
   import { onMount } from 'svelte';
   import catalog from '$lib/xrpc-catalog.json';
+  import type { PageData } from './$types';
+
+  let { data }: { data: PageData } = $props();
+
+  type Stats = NonNullable<PageData['stats']>;
 
   let dark = $state(false);
+
+  // Server-rendered counts are the first paint; the browser then refreshes
+  // them from /api/stats while the tab is visible.
+  let liveStats = $state<Stats | null>(null);
+  const stats = $derived(liveStats ?? data.stats);
+  const numberFormat = new Intl.NumberFormat();
+
+  function isStats(value: unknown): value is Stats {
+    if (value === null || typeof value !== 'object') return false;
+    const candidate = value as Record<string, unknown>;
+    return (['editions', 'contributors', 'publishers', 'identifiers'] as const).every(
+      (key) => typeof candidate[key] === 'number'
+    );
+  }
 
   onMount(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -13,6 +32,51 @@
     };
     media.addEventListener('change', sync);
     return () => media.removeEventListener('change', sync);
+  });
+
+  onMount(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let inFlight = false;
+
+    async function refresh() {
+      if (document.visibilityState !== 'visible' || inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch('/api/stats', { cache: 'no-store' });
+        if (!response.ok) return;
+        const next: unknown = await response.json();
+        if (isStats(next)) liveStats = next;
+      } catch {
+        // Keep the last good counts; stats are decoration, not content.
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    function start() {
+      if (timer !== null) return;
+      void refresh();
+      timer = setInterval(() => void refresh(), 5_000);
+    }
+
+    function stop() {
+      if (timer === null) return;
+      clearInterval(timer);
+      timer = null;
+    }
+
+    // Poll only while visible: a hidden tab keeps its interval from running.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') start();
+      else stop();
+    };
+
+    start();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   });
 
   function toggleTheme() {
@@ -153,6 +217,13 @@
   <pre class="code"><code>{example}</code></pre>
 {/snippet}
 
+{#snippet statCard(label: string, value: number | undefined)}
+  <div class="stat-card">
+    <span class="stat-value">{value === undefined ? '—' : numberFormat.format(value)}</span>
+    <span class="stat-label">{label}</span>
+  </div>
+{/snippet}
+
 <wa-page mobile-breakpoint="900">
   <!--
     `wa-page` inserts a node with this slot itself when it upgrades, into the
@@ -168,6 +239,7 @@
       <span class="brand-sub">net.olamaelcu.livtet.biblio</span>
     </a>
     <nav class="nav">
+      <a href="#stats">Stats</a>
       <a href="#queries">Queries</a>
       <a href="#procedures">Procedures</a>
       <a href="#records">Records</a>
@@ -191,6 +263,7 @@
     <div class="wa-stack wa-gap-2xs">
       <span class="nav-heading">Overview</span>
       <a class="nav-link" href="#overview" data-drawer="close">Introduction</a>
+      <a class="nav-link" href="#stats" data-drawer="close">Stats</a>
       <a class="nav-link" href="#authentication" data-drawer="close">Authentication</a>
     </div>
 
@@ -240,6 +313,26 @@
         <p class="muted">
           Generated from the published lexicons, so this page tracks what the service accepts.
         </p>
+      </div>
+    </section>
+
+    <section class="section" id="stats">
+      <div class="content stats-content wa-stack wa-gap-m">
+        <h2>Stats</h2>
+        <p class="muted">
+          Live row counts from the catalog database. Updates every 5 seconds while this tab is
+          visible.
+        </p>
+        {#if stats === null}
+          <p class="muted">Catalog stats are unavailable right now.</p>
+        {/if}
+        <div class="stats-grid">
+          {@render statCard('Editions', stats?.editions)}
+          {@render statCard('Contributors', stats?.contributors)}
+          {@render statCard('Publishers', stats?.publishers)}
+          {@render statCard('Identifiers', stats?.identifiers)}
+        </div>
+        <p class="muted">Works are not modeled by this catalog.</p>
       </div>
     </section>
 

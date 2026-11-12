@@ -36,6 +36,41 @@ wa-page[view='mobile'] {
   max-width: 78ch;
 }
 
+/* Stats sit in cards, so they can use the extra width a docs column lacks. */
+.stats-content {
+  max-width: 1100px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--wa-space-m);
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wa-space-3xs);
+  padding: var(--wa-space-m);
+  border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
+  border-radius: var(--wa-border-radius-m);
+  background: var(--wa-color-surface-raised);
+}
+
+.stat-value {
+  font-size: var(--wa-font-size-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.stat-label {
+  font-size: var(--wa-font-size-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wa-color-text-quiet);
+}
+
 .lede {
   font-size: var(--wa-font-size-l);
   color: var(--wa-color-text-quiet);
