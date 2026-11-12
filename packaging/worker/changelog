@@ -1,3 +1,20 @@
+bibliograph-worker (0.2.4-1) unstable; urgency=medium
+
+  * 0.2.4 release: OpenLibrary provider and admin contributor search.
+
+    - Add an OpenLibrary provider (search, ISBN and OL key/edition lookups,
+      edition and author parsing) behind the shared retry/breaker/metrics
+      wrapper.
+    - Make OpenLibrary the final hydration fallback, so the order is
+      ISBNdb -> Google Books -> Goodreads -> OpenLibrary; an empty or failing
+      provider still falls through, and the first error is rethrown only when
+      every step is empty.
+    - Accept `openlibrary` in the worker admin /provider-search endpoint,
+      including ISBN and OL key queries, and add /contributor-search backed
+      by OpenLibrary author documents.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 17:20:00 +0000
+
 bibliograph-worker (0.2.3-1) unstable; urgency=medium
 
   * 0.2.3 release: contributor/publisher records and entity preparation.

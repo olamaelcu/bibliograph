@@ -1,3 +1,18 @@
+bibliograph-web (0.2.4-1) unstable; urgency=medium
+
+  * 0.2.4 release: OpenLibrary in the admin curation UI.
+
+    - Add OpenLibrary to the admin provider selector in fallback order
+      (Google Books, ISBNdb, Goodreads, OpenLibrary), and accept it in
+      /admin/api/provider-search for text, ISBN and OL key queries.
+    - Add the admin contributor search: /admin/api/contributor-search
+      proxies the worker's OpenLibrary author search and the curation page
+      renders the results.
+    - Stop dumping the raw Request object from the XRPC searchEditions
+      handler; the edge logs only real failures.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 17:25:00 +0000
+
 bibliograph-web (0.2.3-1) unstable; urgency=medium
 
   * 0.2.3 release: contributor and publisher entity queries on the edge.
