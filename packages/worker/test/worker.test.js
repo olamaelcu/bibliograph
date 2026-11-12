@@ -4,7 +4,11 @@ import http from 'node:http';
 import pg from 'pg';
 
 import { candidateFromVolume } from '../lib/providers/google-books.js';
-import { candidateFromIsbndb, cleanIsbndbSynopsis } from '../lib/providers/isbndb.js';
+import {
+  candidateFromIsbndb,
+  cleanIsbndbSynopsis,
+  normalizeIsbndbAuthor
+} from '../lib/providers/isbndb.js';
 import { candidatesFromBookPage, candidatesFromSearchPage } from '../lib/providers/goodreads.js';
 import { createProviders } from '../lib/providers/index.js';
 import { createTasks } from '../lib/tasks.js';
@@ -292,6 +296,33 @@ test('parses a Google Books volume into an edition candidate', () => {
   assert.equal(candidate.publishedDate, '1969');
   assert.equal(candidate.coverUrl, 'https://books.example/cover.jpg');
   assert.equal(candidate.description, 'A novel of the Ekumen.');
+});
+
+test('normalizes ISBNdb authors from "Last, First" to "First Middle Last"', () => {
+  assert.equal(normalizeIsbndbAuthor('Lewis, Rupert'), 'Rupert Lewis');
+  assert.equal(normalizeIsbndbAuthor('Rodney, Walter'), 'Walter Rodney');
+  assert.equal(normalizeIsbndbAuthor('Le Guin, Ursula K.'), 'Ursula K. Le Guin');
+  assert.equal(normalizeIsbndbAuthor('  Lewis ,  Rupert  '), 'Rupert Lewis');
+  assert.equal(normalizeIsbndbAuthor('Ursula K. Le Guin'), 'Ursula K. Le Guin');
+  assert.equal(normalizeIsbndbAuthor('American Library Association'), 'American Library Association');
+  assert.equal(normalizeIsbndbAuthor('Oram, Andy; Viega, John'), 'Oram, Andy; Viega, John');
+  assert.equal(normalizeIsbndbAuthor('King, Martin Luther, Jr.'), 'King, Martin Luther, Jr.');
+  assert.equal(normalizeIsbndbAuthor('Lewis,'), 'Lewis,');
+  assert.equal(normalizeIsbndbAuthor(undefined), undefined);
+
+  const candidate = candidateFromIsbndb({
+    title: 'Author Order',
+    isbn13: '9780306406157',
+    authors: ['Lewis, Rupert', 'Rupert Lewis', 'Rodney, Walter']
+  });
+  assert.deepEqual(
+    candidate.contributors.map((contributor) => contributor.name),
+    ['Rupert Lewis', 'Walter Rodney']
+  );
+  assert.deepEqual(
+    candidate.contributors.map((contributor) => contributor.role),
+    ['author', 'author']
+  );
 });
 
 test('parses ISBNdb, Goodreads search and Goodreads book pages', () => {
