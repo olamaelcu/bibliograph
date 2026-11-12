@@ -239,3 +239,11 @@ inline fallback.
   server transaction against the catalog; the base keeps its URI, identifiers
   are unioned, and the duplicate editions are deleted only after every chosen
   field and link is applied.
+- The admin UI also searches ISBNdb publisher names, previews one publisher's
+  books through `GET /publisher/{name}` (paged, filtered by `publishedFrom`,
+  `publishedTo` and `language`), and ingests either the selected candidates or
+  1–5 whole pages per request. A bulk import is bounded and synchronous: each
+  book commits in its own transaction, and the response reports how many were
+  created, already indexed or failed, plus the page to resume from.
+  Books without a checksum-valid ISBN-13 are excluded, because the ISBNdb
+  candidate parser requires one.

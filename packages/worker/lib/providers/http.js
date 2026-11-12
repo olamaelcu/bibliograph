@@ -30,19 +30,31 @@ export function createJsonCache(pool, table) {
   };
 }
 
-export async function fetchJson(fetchImpl, url, options = {}, timeoutMs = 15_000) {
+/**
+ * Fetch JSON while keeping the status visible to the caller.
+ *
+ * A 404 answers `{ status: 404, body: undefined }` instead of throwing because
+ * "no such book/publisher" is a normal provider answer; every other non-2xx
+ * status throws, with the status attached for callers that care.
+ */
+export async function fetchJsonResponse(fetchImpl, url, options = {}, timeoutMs = 15_000) {
   const response = await fetchImpl(url, {
     ...options,
     signal: AbortSignal.timeout(timeoutMs),
     redirect: 'follow'
   });
-  if (response.status === 404) return undefined;
+  if (response.status === 404) return { status: 404, body: undefined };
   if (!response.ok) {
     const error = new Error(`${url} answered ${response.status}`);
     error.status = response.status;
     throw error;
   }
-  return response.json();
+  return { status: response.status, body: await response.json() };
+}
+
+export async function fetchJson(fetchImpl, url, options = {}, timeoutMs = 15_000) {
+  const { status, body } = await fetchJsonResponse(fetchImpl, url, options, timeoutMs);
+  return status === 404 ? undefined : body;
 }
 
 export async function fetchText(fetchImpl, url, options = {}, timeoutMs = 15_000) {

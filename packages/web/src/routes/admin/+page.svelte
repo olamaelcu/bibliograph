@@ -11,7 +11,10 @@
     type MergeRequest,
     type MergeResponse,
     type Provider,
-    type ProviderSearchResponse
+    type ProviderSearchResponse,
+    type PublisherBooksResponse,
+    type PublisherImportResponse,
+    type PublisherSearchResponse
   } from '$lib/admin/types';
 
   const PROVIDER_LABELS: Record<Provider, string> = {
@@ -99,6 +102,200 @@
       ingestStatus = { ...ingestStatus };
       delete ingestStatus[key];
       searchError = error instanceof Error ? error.message : 'Ingestion failed.';
+    }
+  }
+
+  // ── ISBNdb publisher import ───────────────────────────────────────────────
+  let publisherQuery = $state('');
+  let publisherNames = $state<string[]>([]);
+  let publisherName = $state('');
+  let publisherFrom = $state('');
+  let publisherTo = $state('');
+  let publisherLanguage = $state('');
+  let publisherPageSize = $state('100');
+  let publisherMaxPages = $state('1');
+  let publisherBooks = $state<Candidate[]>([]);
+  let publisherSelected = $state<Record<string, boolean>>({});
+  let publisherTotal = $state(0);
+  let publisherPage = $state(1);
+  let publisherSearching = $state(false);
+  let publisherLoading = $state(false);
+  let publisherImporting = $state(false);
+  let publisherError = $state<string | null>(null);
+  let publisherNotice = $state<string | null>(null);
+  let publisherImportResult = $state<PublisherImportResponse | null>(null);
+  let publisherContinuePage = $state<number | null>(null);
+
+  const publisherPageCount = $derived(
+    Math.max(1, Math.ceil(publisherTotal / Number(publisherPageSize)))
+  );
+  const publisherSelectedKeys = $derived(
+    publisherBooks
+      .map((candidate) => candidateKey(candidate))
+      .filter((key) => publisherSelected[key] !== false)
+  );
+
+  function selectPublisher(name: string) {
+    publisherName = name;
+    publisherBooks = [];
+    publisherSelected = {};
+    publisherTotal = 0;
+    publisherPage = 1;
+    publisherImportResult = null;
+    publisherContinuePage = null;
+    publisherNotice = null;
+    publisherError = null;
+  }
+
+  async function runPublisherSearch() {
+    publisherError = null;
+    publisherNotice = null;
+    const text = publisherQuery.trim();
+    if (text === '') {
+      publisherError = 'Enter a publisher name.';
+      return;
+    }
+    publisherSearching = true;
+    try {
+      const response = await fetch('/admin/api/publisher-search', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: text, page: 1, pageSize: 50 })
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as PublisherSearchResponse;
+      publisherNames = Array.isArray(body.publishers) ? body.publishers : [];
+      if (publisherNames.length === 0) publisherError = 'ISBNdb returned no matching publishers.';
+    } catch (error) {
+      publisherError = error instanceof Error ? error.message : 'The publisher search failed.';
+      publisherNames = [];
+    } finally {
+      publisherSearching = false;
+    }
+  }
+
+  function publisherFilterBody(): Record<string, string> {
+    const filters: Record<string, string> = {};
+    const from = publisherFrom.trim();
+    const to = publisherTo.trim();
+    const language = publisherLanguage.trim();
+    if (from !== '') filters.publishedFrom = from;
+    if (to !== '') filters.publishedTo = to;
+    if (language !== '') filters.language = language;
+    return filters;
+  }
+
+  async function loadPublisherPage(page: number) {
+    if (publisherName === '') return;
+    publisherLoading = true;
+    publisherError = null;
+    publisherNotice = null;
+    try {
+      const response = await fetch('/admin/api/publisher-books', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: publisherName,
+          page,
+          pageSize: Number(publisherPageSize),
+          ...publisherFilterBody()
+        })
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as PublisherBooksResponse;
+      publisherBooks = Array.isArray(body.candidates) ? body.candidates : [];
+      publisherTotal = Number(body.total) || 0;
+      publisherPage = Number(body.page) || page;
+      publisherSelected = Object.fromEntries(
+        publisherBooks.map((candidate) => [candidateKey(candidate), true])
+      );
+      publisherImportResult = null;
+      publisherContinuePage = null;
+      if (publisherBooks.length === 0) {
+        publisherError = 'That publisher has no books for these filters.';
+      }
+    } catch (error) {
+      publisherError = error instanceof Error ? error.message : 'Loading the publisher failed.';
+      publisherBooks = [];
+    } finally {
+      publisherLoading = false;
+    }
+  }
+
+  async function importPublisherSelection() {
+    const chosen = publisherBooks.filter(
+      (candidate) => publisherSelected[candidateKey(candidate)] !== false
+    );
+    if (chosen.length === 0) {
+      publisherError = 'Select at least one book to import.';
+      return;
+    }
+    publisherImporting = true;
+    publisherError = null;
+    publisherNotice = null;
+    publisherImportResult = null;
+    publisherContinuePage = null;
+    let created = 0;
+    let existing = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+    try {
+      for (const candidate of chosen) {
+        const key = candidateKey(candidate);
+        ingestStatus = { ...ingestStatus, [key]: 'pending' };
+        try {
+          const response = await fetch('/admin/api/ingest', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ candidate })
+          });
+          if (!response.ok) throw new Error(await responseError(response));
+          const body = (await response.json()) as IngestResponse;
+          ingestStatus = { ...ingestStatus, [key]: 'done' };
+          if (body.created) created += 1;
+          else existing += 1;
+        } catch (error) {
+          ingestStatus = { ...ingestStatus };
+          delete ingestStatus[key];
+          failed += 1;
+          if (firstError === null) {
+            firstError = error instanceof Error ? error.message : 'Ingestion failed.';
+          }
+        }
+      }
+      const suffix = failed > 0 ? `, ${failed} failed.` : '.';
+      publisherNotice = `Imported ${created + existing} selected books: ${created} created, ${existing} already in the catalog${suffix}`;
+      if (firstError !== null) publisherError = firstError;
+    } finally {
+      publisherImporting = false;
+    }
+  }
+
+  async function runPublisherImport(page = publisherPage) {
+    if (publisherName === '') return;
+    publisherImporting = true;
+    publisherError = null;
+    publisherNotice = null;
+    try {
+      const response = await fetch('/admin/api/publisher-import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: publisherName,
+          page,
+          pageSize: Number(publisherPageSize),
+          maxPages: Number(publisherMaxPages),
+          ...publisherFilterBody()
+        })
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as PublisherImportResponse;
+      publisherImportResult = body;
+      publisherContinuePage = Number.isInteger(body.nextPage) ? body.nextPage : null;
+    } catch (error) {
+      publisherError = error instanceof Error ? error.message : 'The publisher import failed.';
+    } finally {
+      publisherImporting = false;
     }
   }
 
@@ -358,8 +555,8 @@
       <div class="wa-stack wa-gap-2xs">
         <h1>Catalog curation</h1>
         <p class="lede">
-          Search a catalog provider and ingest one result, then reconcile duplicate edition records
-          in the local catalog.
+          Search a catalog provider and ingest one result, bulk-import an ISBNdb publisher's books,
+          then reconcile duplicate edition records in the local catalog.
         </p>
       </div>
 
@@ -496,10 +693,300 @@
     </div>
   </section>
 
+  <section class="section" id="publisher">
+    <div class="admin-content wa-stack wa-gap-l">
+      <div class="wa-stack wa-gap-2xs">
+        <h2>2 · Publisher import (ISBNdb)</h2>
+        <p class="muted">
+          Search ISBNdb publisher names, preview a publisher's books with publication and language
+          filters, then ingest the books you select or whole pages in bulk. Only books carrying a
+          valid ISBN-13 can be imported.
+        </p>
+      </div>
+
+      <wa-card with-header appearance="outlined">
+        <h3 slot="header">Find an ISBNdb publisher</h3>
+        <div class="wa-stack wa-gap-m">
+          <div class="admin-form-grid">
+            <div class="field field-grow">
+              <span class="field-label">Publisher name</span>
+              <wa-input
+                aria-label="Publisher name"
+                role="textbox"
+                tabindex="0"
+                value={publisherQuery}
+                placeholder="Publisher name"
+                oninput={(event: Event) => (publisherQuery = valueOf(event))}
+                onkeydown={(event: KeyboardEvent) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void runPublisherSearch();
+                  }
+                }}
+              ></wa-input>
+            </div>
+            <div class="admin-form-action">
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <wa-button
+                variant="brand"
+                disabled={publisherSearching}
+                onclick={() => void runPublisherSearch()}
+              >
+                {publisherSearching ? 'Searching…' : 'Search publishers'}
+              </wa-button>
+            </div>
+          </div>
+
+          {#if publisherNames.length > 0}
+            <div class="field">
+              <span class="field-label">Publisher</span>
+              <wa-select
+                aria-label="Publisher"
+                value={publisherName}
+                onchange={(event: Event) => selectPublisher(valueOf(event))}
+              >
+                <wa-option value="">Choose a publisher…</wa-option>
+                {#each publisherNames as name (name)}
+                  <wa-option value={name}>{name}</wa-option>
+                {/each}
+              </wa-select>
+            </div>
+          {/if}
+
+          {#if publisherError && publisherName === ''}
+            <wa-callout variant="danger">{publisherError}</wa-callout>
+          {/if}
+        </div>
+      </wa-card>
+
+      {#if publisherName !== ''}
+        <wa-card with-header appearance="outlined">
+          <h3 slot="header">Books by {publisherName}</h3>
+          <div class="wa-stack wa-gap-m">
+            <div class="admin-form-grid">
+              <div class="field">
+                <span class="field-label">Published from</span>
+                <wa-input
+                  aria-label="Published from"
+                  role="textbox"
+                  tabindex="0"
+                  value={publisherFrom}
+                  placeholder="YYYY, YYYY-MM or YYYY-MM-DD"
+                  oninput={(event: Event) => (publisherFrom = valueOf(event))}
+                ></wa-input>
+              </div>
+              <div class="field">
+                <span class="field-label">Published to</span>
+                <wa-input
+                  aria-label="Published to"
+                  role="textbox"
+                  tabindex="0"
+                  value={publisherTo}
+                  placeholder="YYYY, YYYY-MM or YYYY-MM-DD"
+                  oninput={(event: Event) => (publisherTo = valueOf(event))}
+                ></wa-input>
+              </div>
+              <div class="field">
+                <span class="field-label">Language</span>
+                <wa-input
+                  aria-label="Language"
+                  role="textbox"
+                  tabindex="0"
+                  value={publisherLanguage}
+                  placeholder="eng"
+                  oninput={(event: Event) => (publisherLanguage = valueOf(event))}
+                ></wa-input>
+              </div>
+              <div class="field">
+                <span class="field-label">Page size</span>
+                <wa-select
+                  aria-label="Page size"
+                  value={publisherPageSize}
+                  onchange={(event: Event) => (publisherPageSize = valueOf(event))}
+                >
+                  <wa-option value="50">50</wa-option>
+                  <wa-option value="100">100</wa-option>
+                </wa-select>
+              </div>
+              <div class="admin-form-action">
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <wa-button disabled={publisherLoading} onclick={() => void loadPublisherPage(1)}>
+                  {publisherLoading ? 'Loading…' : 'Load books'}
+                </wa-button>
+              </div>
+            </div>
+
+            {#if publisherTotal > 0}
+              <div class="wa-cluster wa-gap-s wa-align-items-baseline">
+                <strong>{publisherTotal} books</strong>
+                <span class="muted">Page {publisherPage} of {publisherPageCount}</span>
+              </div>
+            {/if}
+
+            {#if publisherBooks.length > 0}
+              <div class="admin-results">
+                {#each publisherBooks as candidate, index (candidateKey(candidate) + index)}
+                  <wa-card appearance="outlined" class="admin-result">
+                    <div class="admin-result-row admin-result-select">
+                      <wa-checkbox
+                        aria-label={`Include ${candidate.title}`}
+                        checked={publisherSelected[candidateKey(candidate)] !== false}
+                        onchange={(event: Event) =>
+                          (publisherSelected = {
+                            ...publisherSelected,
+                            [candidateKey(candidate)]: checkedOf(event)
+                          })}
+                      ></wa-checkbox>
+                      <div class="wa-stack wa-gap-2xs admin-result-body">
+                        <div class="wa-cluster wa-gap-s wa-align-items-baseline">
+                          <strong>{candidate.title}</strong>
+                          {#if candidate.publishedDate}
+                            <span class="muted">{candidate.publishedDate}</span>
+                          {/if}
+                          {#if candidate.format}
+                            <span class="muted">{candidate.format}</span>
+                          {/if}
+                        </div>
+                        {#if candidate.contributors?.length}
+                          <span class="muted">
+                            {candidate.contributors.map((contributor) => contributor.name).join(', ')}
+                          </span>
+                        {/if}
+                        <div class="wa-cluster wa-gap-2xs">
+                          {#each candidate.identifiers as identifier (identifierText(identifier))}
+                            <wa-tag size="small" variant="neutral">
+                              {identifierText(identifier)}
+                            </wa-tag>
+                          {/each}
+                        </div>
+                        {#if candidate.publisher}
+                          <span class="muted admin-small">{candidate.publisher.name}</span>
+                        {/if}
+                      </div>
+                    </div>
+                  </wa-card>
+                {/each}
+              </div>
+            {/if}
+
+            <div class="wa-cluster wa-gap-s">
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <wa-button
+                disabled={publisherLoading || publisherPage <= 1}
+                onclick={() => void loadPublisherPage(publisherPage - 1)}
+              >
+                Previous
+              </wa-button>
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <wa-button
+                disabled={publisherLoading || publisherPage >= publisherPageCount}
+                onclick={() => void loadPublisherPage(publisherPage + 1)}
+              >
+                Next
+              </wa-button>
+            </div>
+
+            <div class="admin-form-grid">
+              <div class="admin-form-action">
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <wa-button
+                  variant="brand"
+                  disabled={publisherImporting || publisherSelectedKeys.length === 0}
+                  onclick={() => void importPublisherSelection()}
+                >
+                  Import selected ({publisherSelectedKeys.length})
+                </wa-button>
+              </div>
+              <div class="field">
+                <span class="field-label">Pages to import</span>
+                <wa-input
+                  aria-label="Pages to import"
+                  type="number"
+                  min="1"
+                  max="5"
+                  value={publisherMaxPages}
+                  oninput={(event: Event) => (publisherMaxPages = valueOf(event))}
+                ></wa-input>
+              </div>
+              <div class="admin-form-action">
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <wa-button
+                  disabled={publisherImporting}
+                  onclick={() => void runPublisherImport(publisherPage)}
+                >
+                  Import pages {publisherPage}–{Math.min(
+                    publisherPage + Number(publisherMaxPages) - 1,
+                    publisherPageCount
+                  )}
+                </wa-button>
+              </div>
+            </div>
+
+            {#if publisherContinuePage !== null}
+              <div class="wa-cluster wa-gap-s">
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <wa-button
+                  disabled={publisherImporting}
+                  onclick={() => void runPublisherImport(publisherContinuePage!)}
+                >
+                  Continue from page {publisherContinuePage}
+                </wa-button>
+              </div>
+            {/if}
+
+            {#if publisherNotice}
+              <wa-callout variant="success">{publisherNotice}</wa-callout>
+            {/if}
+            {#if publisherError && publisherName !== ''}
+              <wa-callout variant="danger">{publisherError}</wa-callout>
+            {/if}
+
+            {#if publisherImportResult}
+              <wa-callout
+                variant={publisherImportResult.stopped === 'quota_exhausted' ? 'warning' : 'success'}
+              >
+                <div class="wa-stack wa-gap-2xs">
+                  <strong>
+                    {publisherImportResult.stopped === 'quota_exhausted'
+                      ? 'ISBNdb quota exhausted — import stopped early.'
+                      : `Imported ${publisherImportResult.imported} books.`}
+                  </strong>
+                  <span class="muted">
+                    {publisherImportResult.created} created ·
+                    {publisherImportResult.existing} already in the catalog ·
+                    {publisherImportResult.failed} failed ·
+                    {publisherImportResult.pagesFetched} page(s) read.
+                  </span>
+                  {#if publisherImportResult.stopped === 'quota_exhausted'}
+                    <span class="muted">
+                      Retry after 00:00 UTC; already imported books are not duplicated.
+                    </span>
+                  {/if}
+                  {#if publisherImportResult.failures.length > 0}
+                    <ul class="admin-deleted">
+                      {#each publisherImportResult.failures as failure (failure.title)}
+                        <li><strong>{failure.title}</strong> — {failure.message}</li>
+                      {/each}
+                    </ul>
+                  {/if}
+                  {#if publisherContinuePage !== null}
+                    <span class="muted">
+                      More results remain; continue from page {publisherContinuePage}.
+                    </span>
+                  {/if}
+                </div>
+              </wa-callout>
+            {/if}
+          </div>
+        </wa-card>
+      {/if}
+    </div>
+  </section>
+
   <section class="section" id="merge">
     <div class="admin-content wa-stack wa-gap-l">
       <div class="wa-stack wa-gap-2xs">
-        <h2>2 · Merge edition records</h2>
+        <h2>3 · Merge edition records</h2>
         <p class="muted">
           Find editions by title or identifier, select two or more, then choose the base record and
           which record supplies each field.

@@ -1,5 +1,5 @@
 import { createGate, isbn13 as normalizeIsbn13, cleanString, stripHtml } from '../util.js';
-import { createJsonCache, fetchJson } from './http.js';
+import { createJsonCache, fetchJsonResponse } from './http.js';
 import {
   DEFAULT_ISBNDB_DAILY_LIMIT,
   parseDailyLimit,
@@ -7,6 +7,15 @@ import {
 } from './usage.js';
 
 const gate = createGate(1000);
+function stringListOfPublishers(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(cleanString).filter(Boolean);
+}
+
+function countOrZero(value) {
+  const count = Number(value);
+  return Number.isInteger(count) && count >= 0 ? count : 0;
+}
 
 // ISBNdb sometimes returns a publisher blurb as one quoted citation:
 //   "Body."--Back cover.
@@ -130,10 +139,13 @@ export function createIsbndb({
     breaker?.assertCanAttempt?.();
   }
 
-  async function query(url) {
+  // Keep quota refusal and "no such record" distinguishable: hydration treats
+  // both as a miss, but the admin publisher endpoints must report an exhausted
+  // quota instead of an empty publisher.
+  async function queryResult(url) {
     assertProviderAvailable();
     const cached = await cache.get(url);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) return { body: cached };
 
     // Reserve before the request: failed attempts still count (billing and
     // attempt semantics), and concurrent workers cannot exceed the limit.
@@ -147,12 +159,17 @@ export function createIsbndb({
             'skipping the network and falling back to Google Books/Goodreads'
         );
       }
-      return undefined;
+      return { quotaExhausted: true };
     }
 
-    const body = await gate(() => fetchJson(fetchImpl, url, { headers }));
-    if (body !== undefined) await cache.put(url, url, body);
-    return body;
+    const { status, body } = await gate(() => fetchJsonResponse(fetchImpl, url, { headers }));
+    if (status === 404) return { notFound: true };
+    await cache.put(url, url, body);
+    return { body };
+  }
+
+  async function query(url) {
+    return (await queryResult(url)).body;
   }
 
   return {
@@ -165,6 +182,41 @@ export function createIsbndb({
       // pageSize is documented for /books/{query}; the API caps it at 100.
       const body = await query(`${baseUrl}/books/${encodeURIComponent(text)}?pageSize=50`);
       return (body?.books ?? []).map(candidateFromIsbndb).filter(Boolean);
+    },
+
+    /** Publisher-name search. `null` means the daily quota refused the call. */
+    async searchPublishers(text, { page = 1, pageSize = 50 } = {}) {
+      const result = await queryResult(
+        `${baseUrl}/publishers/${encodeURIComponent(text)}?page=${page}&pageSize=${pageSize}`
+      );
+      if (result.quotaExhausted) return null;
+      const body = result.body;
+      return {
+        publishers: stringListOfPublishers(body?.publishers),
+        total: countOrZero(body?.total),
+        page: countOrZero(body?.page) || page,
+        pageSize: countOrZero(body?.page_size) || pageSize
+      };
+    },
+
+    /** A publisher's books, paged and filtered. `null` means quota refused. */
+    async booksByPublisher(
+      name,
+      { page = 1, pageSize = 100, publishedFrom, publishedTo, language } = {}
+    ) {
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (publishedFrom) params.set('publishedFrom', publishedFrom);
+      if (publishedTo) params.set('publishedTo', publishedTo);
+      if (language) params.set('language', language);
+      const result = await queryResult(`${baseUrl}/publisher/${encodeURIComponent(name)}?${params}`);
+      if (result.quotaExhausted) return null;
+      const body = result.body;
+      return {
+        candidates: (body?.books ?? []).map(candidateFromIsbndb).filter(Boolean),
+        total: countOrZero(body?.total),
+        page: countOrZero(body?.page) || page,
+        pageSize: countOrZero(body?.page_size) || pageSize
+      };
     }
   };
 }

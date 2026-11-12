@@ -12,8 +12,16 @@ HAPPYVIEW_DATABASE_URL = "postgres://happyview_app:happyview@localhost:5432/bibl
 description = "Open a psql shell against the local bibliograph database"
 run = ["psql ${DATABASE_URL}"]
 
+[tasks.worker-dev]
+dir = "packages/worker"
+run = ["pnpm run start"]
+
+[tasks.web-dev]
+dir = "packages/web"
+run = ["docker compose up -d", "pnpm run dev"]
+
 [tasks.dev]
-run = ["docker compose up -d", "pnpm web:dev"]
+run = ["mise run web-dev ::: worker-dev"]
 
 [shell_alias]
 sql = "mise sql"

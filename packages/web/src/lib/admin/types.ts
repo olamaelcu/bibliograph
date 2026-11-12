@@ -51,6 +51,40 @@ export type IngestResponse = {
   created: boolean;
 };
 
+export type PublisherSearchResponse = {
+  query: string;
+  publishers: string[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type PublisherBooksResponse = {
+  name: string;
+  candidates: Candidate[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+/** Why a bulk publisher import stopped early. */
+export type PublisherImportStop = 'end' | 'max_pages' | 'quota_exhausted';
+
+export type PublisherImportFailure = { title: string; message: string };
+
+export type PublisherImportResponse = {
+  name: string;
+  pagesFetched: number;
+  nextPage: number | null;
+  total: number;
+  imported: number;
+  created: number;
+  existing: number;
+  failed: number;
+  failures: PublisherImportFailure[];
+  stopped: PublisherImportStop;
+};
+
 export type AdminContributor = {
   id: number;
   name: string;

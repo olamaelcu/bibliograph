@@ -332,39 +332,6 @@
           {@render statCard('Publishers', stats?.publishers)}
           {@render statCard('Identifiers', stats?.identifiers)}
         </div>
-        <p class="muted">Works are not modeled by this catalog.</p>
-      </div>
-    </section>
-
-    <section class="section" id="authentication">
-      <div class="content wa-stack wa-gap-m">
-        <h2>Authentication</h2>
-
-        <wa-callout variant="brand">
-          <wa-icon slot="icon" library="lucide" name="user-round"></wa-icon>
-          <strong>Queries are public.</strong>
-          <p>No authentication is required; any caller can read.</p>
-        </wa-callout>
-
-        <wa-callout variant="warning">
-          <wa-icon slot="icon" library="lucide" name="shield-check"></wa-icon>
-          <strong>Write procedures need a DPoP session.</strong>
-          <p>
-            A procedure writes on behalf of the signed-in reader, so it requires a DPoP-bound
-            session. Without one, the service answers
-            <code>401 XRPC procedures require DPoP authentication</code>.
-          </p>
-        </wa-callout>
-
-        <wa-callout variant="neutral">
-          <wa-icon slot="icon" library="lucide" name="network"></wa-icon>
-          <strong>Transport.</strong>
-          <p>
-            Queries are <code>GET /xrpc/&lt;nsid&gt;</code> with parameters in the query string.
-            Procedures are <code>POST /xrpc/&lt;nsid&gt;</code> with a JSON body. Bodies and
-            responses are JSON; failures carry <code>{'{ error, message }'}</code>.
-          </p>
-        </wa-callout>
       </div>
     </section>
 

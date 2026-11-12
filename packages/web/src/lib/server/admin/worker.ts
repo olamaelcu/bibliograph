@@ -5,6 +5,14 @@ import { adminToken } from './auth';
 const DEFAULT_WORKER_ADMIN_URL = 'http://127.0.0.1:9465';
 const TIMEOUT_MS = 20_000;
 
+/** Worker admin routes the edge proxies; anything else is a programming error. */
+export type AdminWorkerPath =
+  | '/provider-search'
+  | '/ingest'
+  | '/publisher-search'
+  | '/publisher-books'
+  | '/publisher-import';
+
 export function workerAdminUrl(): string {
   const configured = env.WORKER_ADMIN_URL?.trim();
   return (configured || DEFAULT_WORKER_ADMIN_URL).replace(/\/+$/, '');
@@ -15,8 +23,9 @@ export function workerAdminUrl(): string {
  * here and never returned; the browser only ever talks to this origin.
  */
 export async function workerAdminPost(
-  path: '/provider-search' | '/ingest',
-  body: unknown
+  path: AdminWorkerPath,
+  body: unknown,
+  { timeoutMs = TIMEOUT_MS }: { timeoutMs?: number } = {}
 ): Promise<{ status: number; payload: unknown }> {
   const token = adminToken();
   if (!token) error(404, 'Not Found');
@@ -30,7 +39,7 @@ export async function workerAdminPost(
         authorization: `Bearer ${token}`
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
+      signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (cause) {
     console.error(`[admin] worker admin request to ${path} failed`, cause);

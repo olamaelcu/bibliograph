@@ -17,6 +17,16 @@ export const DEFAULT_ADMIN_HOST = '127.0.0.1';
 export const DEFAULT_ADMIN_PORT = 9465;
 const MAX_BODY_BYTES = 1024 * 1024;
 const PROVIDERS = new Set(['googlebooks', 'isbndb', 'goodreads']);
+// Publisher name length is shared by search and import so a name that previews
+// can always be imported; ISBNdb publisher names are short in practice.
+const PUBLISHER_NAME_MAX = 150;
+const PUBLISHER_SEARCH_PAGE_SIZE = 50;
+const PUBLISHER_PAGE_SIZE_MAX = 100;
+const PUBLISHER_IMPORT_PAGE_SIZE_DEFAULT = 100;
+const PUBLISHER_IMPORT_MAX_PAGES = 5;
+// ISBNdb accepts YYYY, YYYY-MM and YYYY-MM-DD; zero padding makes a plain
+// string comparison the correct range check.
+const DATE_FILTER = /^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?)?$/;
 
 const STRING_FIELDS = [
   'title',
@@ -200,14 +210,7 @@ export async function searchProvider(providers, provider, query) {
       : providers.providers.google.search({ q: text });
   }
   if (provider === 'isbndb') {
-    const isbndb = providers.providers.isbndb;
-    if (!isbndb) {
-      throw new AdminRequestError(
-        503,
-        'ISBNdb is not configured (ISBNDB_API_KEY is unset)',
-        'ProviderNotConfigured'
-      );
-    }
+    const isbndb = isbndbOr503(providers);
     return isbn ? isbndb.byIsbn(isbn) : isbndb.search(text);
   }
   return isbn
@@ -243,6 +246,91 @@ async function readJson(request) {
   }
 }
 
+function objectBody(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new AdminRequestError(400, 'request body must be an object');
+  }
+  return value;
+}
+
+function isbndbOr503(providers) {
+  const isbndb = providers.providers.isbndb;
+  if (!isbndb) {
+    throw new AdminRequestError(
+      503,
+      'ISBNdb is not configured (ISBNDB_API_KEY is unset)',
+      'ProviderNotConfigured'
+    );
+  }
+  return isbndb;
+}
+
+function isbndbQuotaError() {
+  return new AdminRequestError(
+    503,
+    'ISBNdb daily quota exhausted; it resets at 00:00 UTC',
+    'ProviderQuotaExhausted'
+  );
+}
+
+function publisherQueryInput(body) {
+  const query = stringValue(body.query);
+  if (!query) throw new AdminRequestError(400, 'query is required');
+  if (query.length > PUBLISHER_NAME_MAX) {
+    throw new AdminRequestError(400, `query must be at most ${PUBLISHER_NAME_MAX} characters`);
+  }
+  return query;
+}
+
+function publisherNameInput(body) {
+  const name = stringValue(body.name);
+  if (!name) throw new AdminRequestError(400, 'name is required');
+  if (name.length > PUBLISHER_NAME_MAX) {
+    throw new AdminRequestError(400, `name must be at most ${PUBLISHER_NAME_MAX} characters`);
+  }
+  return name;
+}
+
+function positivePage(value) {
+  if (value === undefined || value === null || value === '') return 1;
+  const page = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(page) || page < 1) {
+    throw new AdminRequestError(400, 'page must be a positive integer');
+  }
+  return page;
+}
+
+function boundedInteger(value, name, { fallback, min, max }) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new AdminRequestError(400, `${name} must be an integer between ${min} and ${max}`);
+  }
+  return parsed;
+}
+
+function optionalDate(value, name) {
+  const text = stringValue(value);
+  if (text === undefined) return undefined;
+  if (!DATE_FILTER.test(text)) {
+    throw new AdminRequestError(400, `${name} must be YYYY, YYYY-MM or YYYY-MM-DD`);
+  }
+  return text;
+}
+
+function publisherFilters(body) {
+  const publishedFrom = optionalDate(body.publishedFrom, 'publishedFrom');
+  const publishedTo = optionalDate(body.publishedTo, 'publishedTo');
+  if (publishedFrom && publishedTo && publishedFrom > publishedTo) {
+    throw new AdminRequestError(400, 'publishedFrom must not be later than publishedTo');
+  }
+  const language = stringValue(body.language);
+  if (language && language.length > 50) {
+    throw new AdminRequestError(400, 'language must be at most 50 characters');
+  }
+  return { publishedFrom, publishedTo, language };
+}
+
 /**
  * Create the HTTP handler. Exported separately from the listener so tests can
  * exercise routing without binding a port.
@@ -264,10 +352,7 @@ export function createAdminHandler({ providers, ingest, token, logger = console 
           sendJson(response, 405, { error: 'MethodNotAllowed' });
           return;
         }
-        const body = await readJson(request);
-        if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-          throw new AdminRequestError(400, 'request body must be an object');
-        }
+        const body = objectBody(await readJson(request));
         const candidates = await searchProvider(providers, body.provider, body.query);
         sendJson(response, 200, { provider: body.provider, candidates });
         return;
@@ -278,14 +363,131 @@ export function createAdminHandler({ providers, ingest, token, logger = console 
           sendJson(response, 405, { error: 'MethodNotAllowed' });
           return;
         }
-        const body = await readJson(request);
-        if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-          throw new AdminRequestError(400, 'request body must be an object');
-        }
+        const body = objectBody(await readJson(request));
         const candidate = normalizeCandidate(body.candidate);
         const result = await ingest(candidate);
         if (!result) throw new AdminRequestError(422, 'candidate could not be ingested');
         sendJson(response, 200, result);
+        return;
+      }
+
+      if (url.pathname === '/publisher-search') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const body = objectBody(await readJson(request));
+        const query = publisherQueryInput(body);
+        const page = positivePage(body.page);
+        const pageSize = boundedInteger(body.pageSize, 'pageSize', {
+          fallback: PUBLISHER_SEARCH_PAGE_SIZE,
+          min: 1,
+          max: PUBLISHER_PAGE_SIZE_MAX
+        });
+        const result = await isbndbOr503(providers).searchPublishers(query, { page, pageSize });
+        if (result === null) throw isbndbQuotaError();
+        sendJson(response, 200, { query, ...result });
+        return;
+      }
+
+      if (url.pathname === '/publisher-books') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const body = objectBody(await readJson(request));
+        const name = publisherNameInput(body);
+        const page = positivePage(body.page);
+        const pageSize = boundedInteger(body.pageSize, 'pageSize', {
+          fallback: PUBLISHER_IMPORT_PAGE_SIZE_DEFAULT,
+          min: 1,
+          max: PUBLISHER_PAGE_SIZE_MAX
+        });
+        const result = await isbndbOr503(providers).booksByPublisher(name, {
+          page,
+          pageSize,
+          ...publisherFilters(body)
+        });
+        if (result === null) throw isbndbQuotaError();
+        sendJson(response, 200, { name, ...result });
+        return;
+      }
+
+      if (url.pathname === '/publisher-import') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const body = objectBody(await readJson(request));
+        const name = publisherNameInput(body);
+        const firstPage = positivePage(body.page);
+        const pageSize = boundedInteger(body.pageSize, 'pageSize', {
+          fallback: PUBLISHER_IMPORT_PAGE_SIZE_DEFAULT,
+          min: 1,
+          max: PUBLISHER_PAGE_SIZE_MAX
+        });
+        const maxPages = boundedInteger(body.maxPages, 'maxPages', {
+          fallback: 1,
+          min: 1,
+          max: PUBLISHER_IMPORT_MAX_PAGES
+        });
+        const filters = publisherFilters(body);
+        const isbndb = isbndbOr503(providers);
+
+        // Each book is ingested in its own transaction, so one bad record never
+        // discards the rest of the batch; failures are reported per title.
+        let page = firstPage;
+        let pagesFetched = 0;
+        let imported = 0;
+        let created = 0;
+        let existing = 0;
+        let total = 0;
+        let stopped = 'end';
+        const failures = [];
+
+        for (let index = 0; index < maxPages; index += 1) {
+          const batch = await isbndb.booksByPublisher(name, { page, pageSize, ...filters });
+          if (batch === null) {
+            stopped = 'quota_exhausted';
+            break;
+          }
+          total = Math.max(total, batch.total);
+          if (batch.candidates.length === 0) {
+            stopped = 'end';
+            break;
+          }
+          for (const candidate of batch.candidates) {
+            try {
+              const result = await ingest(normalizeCandidate(candidate));
+              if (!result) {
+                failures.push({ title: candidate.title, message: 'no ingestable identifiers' });
+                continue;
+              }
+              imported += 1;
+              if (result.created) created += 1;
+              else existing += 1;
+            } catch (error) {
+              failures.push({ title: candidate.title, message: error.message });
+            }
+          }
+          pagesFetched += 1;
+          page += 1;
+          stopped = total > 0 && page * pageSize >= total ? 'end' : 'max_pages';
+          if (stopped === 'end') break;
+        }
+
+        sendJson(response, 200, {
+          name,
+          pagesFetched,
+          nextPage: stopped === 'max_pages' ? page : null,
+          total,
+          imported,
+          created,
+          existing,
+          failed: failures.length,
+          failures,
+          stopped
+        });
         return;
       }
 

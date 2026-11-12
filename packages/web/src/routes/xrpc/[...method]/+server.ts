@@ -1,22 +1,22 @@
-import { json } from '@sveltejs/kit';
-import type { RequestHandler } from './$types';
-import { forward } from '$lib/server/happyview';
-import { isPdsRead, proxyPdsRead } from '$lib/server/pds';
-import { CatalogUnavailableError } from '$lib/server/catalog/db';
-import { resolveEditions, searchEditions, type Identifier } from '$lib/server/catalog/editions';
+import { json } from "@sveltejs/kit";
+import type { RequestHandler } from "./$types";
+import { forward } from "$lib/server/happyview";
+import { isPdsRead, proxyPdsRead } from "$lib/server/pds";
+import { CatalogUnavailableError } from "$lib/server/catalog/db";
+import { resolveEditions, searchEditions, type Identifier } from "$lib/server/catalog/editions";
 import {
   enqueueResolveMiss,
   enqueueIsbnHydration,
-  enqueueSearchHydration
-} from '$lib/server/catalog/jobs';
-import { isbn13sFromIdentifiers } from '$lib/server/catalog/isbn';
+  enqueueSearchHydration,
+} from "$lib/server/catalog/jobs";
+import { isbn13sFromIdentifiers } from "$lib/server/catalog/isbn";
 import {
   describeFeedGenerator,
   getFeedSkeleton,
   isFeedMethod,
   DESCRIBE_FEED_GENERATOR,
-  GET_FEED_SKELETON
-} from '$lib/server/feeds';
+  GET_FEED_SKELETON,
+} from "$lib/server/feeds";
 
 // An NSID is at least three labels: authority, name, and at least one more.
 const NSID = /^[a-zA-Z]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]([a-zA-Z0-9-]{0,62})$/;
@@ -30,8 +30,8 @@ const MAX_IDENTIFIERS = 100;
 // TTL marks dedupe repeats across calls, they are not a global quota.
 const MAX_HYDRATION_JOBS_PER_REQUEST = 10;
 
-const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
-const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
+const RESOLVE_EDITIONS = "community.lexicon.media.book.resolveEditions";
+const SEARCH_EDITIONS = "community.lexicon.media.book.searchEditions";
 const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
 
 /**
@@ -41,8 +41,8 @@ const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
  * browser-facing API, so no other route gains CORS.
  */
 const CATALOG_CORS = {
-  'Access-Control-Allow-Origin': '*',
-  Vary: 'Origin'
+  "Access-Control-Allow-Origin": "*",
+  Vary: "Origin",
 } as const;
 
 function catalogPreflight(): Response {
@@ -50,10 +50,10 @@ function catalogPreflight(): Response {
     status: 204,
     headers: {
       ...CATALOG_CORS,
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'content-type',
-      'Access-Control-Max-Age': '86400'
-    }
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "content-type",
+      "Access-Control-Max-Age": "86400",
+    },
   });
 }
 
@@ -63,12 +63,12 @@ function withCatalogCors(response: Response): Response {
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
-    headers
+    headers,
   });
 }
 
 function methodNotAllowed(): Response {
-  return json({ error: 'MethodNotAllowed' }, { status: 405 });
+  return json({ error: "MethodNotAllowed" }, { status: 405 });
 }
 
 function fail(status: number, error: string, message: string): Response {
@@ -78,7 +78,7 @@ function fail(status: number, error: string, message: string): Response {
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const body: unknown = await request.json();
-    if (body === null || typeof body !== 'object' || Array.isArray(body)) return null;
+    if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
     return body as Record<string, unknown>;
   } catch {
     return null;
@@ -91,10 +91,10 @@ function parseIdentifiers(value: unknown): Identifier[] | null {
   const identifiers: Identifier[] = [];
   const seen = new Set<string>();
   for (const entry of value) {
-    if (entry === null || typeof entry !== 'object') return null;
+    if (entry === null || typeof entry !== "object") return null;
     const { issuer, value: rawValue } = entry as Record<string, unknown>;
-    if (typeof issuer !== 'string' || issuer === '') return null;
-    if (typeof rawValue !== 'string' || rawValue === '') return null;
+    if (typeof issuer !== "string" || issuer === "") return null;
+    if (typeof rawValue !== "string" || rawValue === "") return null;
     // Identifier comparison is exact by contract: no normalization.
     const key = `${issuer}\u0000${rawValue}`;
     if (seen.has(key)) continue;
@@ -106,41 +106,45 @@ function parseIdentifiers(value: unknown): Identifier[] | null {
 
 function boundedInteger(value: unknown, fallback: number, min: number, max: number): number | null {
   if (value === undefined || value === null) return fallback;
-  if (typeof value !== 'number' || !Number.isInteger(value)) return null;
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
   return Math.min(Math.max(value, min), max);
 }
 
 function optionalString(value: unknown): string | undefined | null {
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string') return null;
+  if (typeof value !== "string") return null;
   const trimmed = value.trim();
-  return trimmed === '' ? undefined : trimmed;
+  return trimmed === "" ? undefined : trimmed;
 }
 
 function catalogFailure(error: unknown): Response {
   if (error instanceof CatalogUnavailableError) {
-    return fail(503, 'ServiceUnavailable', 'catalog database is not configured');
+    return fail(503, "ServiceUnavailable", "catalog database is not configured");
   }
-  console.error('[xrpc] catalog query failed', error);
-  return fail(503, 'ServiceUnavailable', 'catalog unavailable');
+  console.error("[xrpc] catalog query failed", error);
+  return fail(503, "ServiceUnavailable", "catalog unavailable");
 }
 
 async function handleResolve(request: Request): Promise<Response> {
   const body = await readBody(request);
-  if (body === null) return fail(400, 'InvalidRequest', 'the request body must be a JSON object');
+  if (body === null) return fail(400, "InvalidRequest", "the request body must be a JSON object");
 
   const identifiers = parseIdentifiers(body.identifiers);
   if (identifiers === null || identifiers.length === 0) {
-    return fail(400, 'InvalidRequest', 'identifiers must be a non-empty array of issuer/value pairs');
+    return fail(
+      400,
+      "InvalidRequest",
+      "identifiers must be a non-empty array of issuer/value pairs",
+    );
   }
   if (identifiers.length > MAX_IDENTIFIERS) {
-    return fail(400, 'InvalidRequest', `at most ${MAX_IDENTIFIERS} identifiers per request`);
+    return fail(400, "InvalidRequest", `at most ${MAX_IDENTIFIERS} identifiers per request`);
   }
 
   const offset = boundedInteger(body.offset, 0, 0, Number.MAX_SAFE_INTEGER);
   const limit = boundedInteger(body.limit, 25, 1, 100);
-  if (offset === null) return fail(400, 'InvalidRequest', 'offset must be an integer');
-  if (limit === null) return fail(400, 'InvalidRequest', 'limit must be an integer');
+  if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
+  if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
 
   try {
     const results = await resolveEditions({ identifiers, offset, limit });
@@ -152,7 +156,7 @@ async function handleResolve(request: Request): Promise<Response> {
       }
     }
     const unmatched = identifiers.filter(
-      (identifier) => !matched.has(`${identifier.issuer}\u0000${identifier.value}`)
+      (identifier) => !matched.has(`${identifier.issuer}\u0000${identifier.value}`),
     );
     // Identifiers past the cap are still matched and answered; they are just
     // not queued on this call, and a later call that repeats the miss can
@@ -160,7 +164,7 @@ async function handleResolve(request: Request): Promise<Response> {
     await Promise.all(
       unmatched
         .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
-        .map((identifier) => enqueueResolveMiss(identifier))
+        .map((identifier) => enqueueResolveMiss(identifier)),
     );
 
     return json(results);
@@ -170,32 +174,33 @@ async function handleResolve(request: Request): Promise<Response> {
 }
 
 async function handleSearch(request: Request): Promise<Response> {
+  console.log(request);
   const body = await readBody(request);
-  if (body === null) return fail(400, 'InvalidRequest', 'the request body must be a JSON object');
+  if (body === null) return fail(400, "InvalidRequest", "the request body must be a JSON object");
 
   const q = optionalString(body.q);
   const title = optionalString(body.title);
   const author = optionalString(body.author);
   if (q === null || title === null || author === null) {
-    return fail(400, 'InvalidRequest', 'q, title and author must be strings');
+    return fail(400, "InvalidRequest", "q, title and author must be strings");
   }
 
   const identifiers = body.identifiers === undefined ? [] : parseIdentifiers(body.identifiers);
   if (identifiers === null) {
-    return fail(400, 'InvalidRequest', 'identifiers must be an array of issuer/value pairs');
+    return fail(400, "InvalidRequest", "identifiers must be an array of issuer/value pairs");
   }
   if (identifiers.length > MAX_IDENTIFIERS) {
-    return fail(400, 'InvalidRequest', `at most ${MAX_IDENTIFIERS} identifiers per request`);
+    return fail(400, "InvalidRequest", `at most ${MAX_IDENTIFIERS} identifiers per request`);
   }
 
   if (!q && !title && !author && identifiers.length === 0) {
-    return fail(400, 'InvalidQuery', 'supply q, title, author, or at least one identifier');
+    return fail(400, "InvalidQuery", "supply q, title, author, or at least one identifier");
   }
 
   const offset = boundedInteger(body.offset, 0, 0, Number.MAX_SAFE_INTEGER);
   const limit = boundedInteger(body.limit, 25, 1, 100);
-  if (offset === null) return fail(400, 'InvalidRequest', 'offset must be an integer');
-  if (limit === null) return fail(400, 'InvalidRequest', 'limit must be an integer');
+  if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
+  if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
 
   try {
     const results = await searchEditions({ q, title, author, identifiers, offset, limit });
@@ -205,7 +210,7 @@ async function handleSearch(request: Request): Promise<Response> {
     await Promise.all(
       isbn13sFromIdentifiers(identifiers)
         .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
-        .map((isbn13) => enqueueIsbnHydration(isbn13))
+        .map((isbn13) => enqueueIsbnHydration(isbn13)),
     );
     // Discovery only hydrates when the local catalog has nothing for the query.
     if (results.items.length === 0) {
@@ -228,7 +233,7 @@ async function handleSearch(request: Request): Promise<Response> {
  */
 export const GET: RequestHandler = ({ params, request }) => {
   if (!NSID.test(params.method)) {
-    return json({ error: 'InvalidRequest' }, { status: 400 });
+    return json({ error: "InvalidRequest" }, { status: 400 });
   }
   // The feed generator is served at the edge from the activity index; it is a
   // GET-only pair, and `public` is the only anonymous feed.
@@ -244,7 +249,7 @@ export const GET: RequestHandler = ({ params, request }) => {
 
 export const POST: RequestHandler = async ({ params, request }) => {
   if (!NSID.test(params.method)) {
-    return json({ error: 'InvalidRequest' }, { status: 400 });
+    return json({ error: "InvalidRequest" }, { status: 400 });
   }
   if (isFeedMethod(params.method)) return methodNotAllowed();
   if (params.method === RESOLVE_EDITIONS) return withCatalogCors(await handleResolve(request));

@@ -35,6 +35,16 @@ const ISBNDB_BOOK = {
   language: 'en',
   isbn13: ISBN
 };
+const PUBLISHER_BOOK_ISBN = isbn13For(4322);
+const PUBLISHER_BOOK = {
+  title: 'Publisher Probe Edition',
+  authors: [CONTRIBUTOR],
+  publisher: PUBLISHER,
+  date_published: '2023',
+  pages: 180,
+  language: 'en',
+  isbn13: PUBLISHER_BOOK_ISBN
+};
 
 let pool;
 let providerServer;
@@ -114,6 +124,47 @@ before(async () => {
       return;
     }
 
+    if (url.pathname.startsWith('/isbndb/publishers/')) {
+      isbndbRequests += 1;
+      requestedQueries.push({
+        provider: 'isbndb-publishers',
+        query: decodeURIComponent(url.pathname.split('/').at(-1)),
+        page: url.searchParams.get('page'),
+        pageSize: url.searchParams.get('pageSize')
+      });
+      send({
+        name: 'admin probe',
+        publishers: [PUBLISHER, 'Another Press'],
+        total: 2,
+        page: 1,
+        page_size: 50
+      });
+      return;
+    }
+
+    if (url.pathname.startsWith('/isbndb/publisher/')) {
+      isbndbRequests += 1;
+      requestedQueries.push({
+        provider: 'isbndb-publisher',
+        query: decodeURIComponent(url.pathname.split('/').at(-1)),
+        page: url.searchParams.get('page'),
+        pageSize: url.searchParams.get('pageSize'),
+        publishedFrom: url.searchParams.get('publishedFrom'),
+        publishedTo: url.searchParams.get('publishedTo'),
+        language: url.searchParams.get('language')
+      });
+      const page = Number(url.searchParams.get('page'));
+      const pageSize = Number(url.searchParams.get('pageSize'));
+      send({
+        name: PUBLISHER,
+        books: [PUBLISHER_BOOK],
+        total: page === 2 ? 120 : 1,
+        page,
+        page_size: pageSize
+      });
+      return;
+    }
+
     if (url.pathname === '/goodreads/search') {
       goodreadsRequests += 1;
       requestedQueries.push({ provider: 'goodreads', query: url.searchParams.get('q') });
@@ -150,7 +201,19 @@ before(async () => {
   // reserving calls from the shared daily quota that worker.test.js asserts on.
   const isbndbCache = [
     [`${providerBase}/isbndb/books/admin%20probe?pageSize=50`, { books: [ISBNDB_BOOK] }],
-    [`${providerBase}/isbndb/book/${ISBN}`, { book: ISBNDB_BOOK }]
+    [`${providerBase}/isbndb/book/${ISBN}`, { book: ISBNDB_BOOK }],
+    [
+      `${providerBase}/isbndb/publishers/admin%20probe?page=1&pageSize=50`,
+      { name: 'admin probe', publishers: [PUBLISHER, 'Another Press'], total: 2, page: 1, page_size: 50 }
+    ],
+    [
+      `${providerBase}/isbndb/publisher/${encodeURIComponent(PUBLISHER)}?page=2&pageSize=50&publishedFrom=2020&publishedTo=2024-12&language=eng`,
+      { name: PUBLISHER, books: [PUBLISHER_BOOK], total: 120, page: 2, page_size: 50 }
+    ],
+    [
+      `${providerBase}/isbndb/publisher/${encodeURIComponent(PUBLISHER)}?page=1&pageSize=100`,
+      { name: PUBLISHER, books: [PUBLISHER_BOOK], total: 1, page: 1, page_size: 100 }
+    ]
   ];
   for (const [url, body] of isbndbCache) {
     await pool.query(
@@ -349,4 +412,114 @@ test('unknown providers and empty queries are bad requests', async () => {
   assert.equal(unknown.status, 400);
   const empty = await post(admin, '/provider-search', { provider: 'googlebooks', query: '   ' });
   assert.equal(empty.status, 400);
+});
+
+test('publisher search returns ISBNdb publisher names', async () => {
+  isbndbRequests = 0;
+  requestedQueries.length = 0;
+
+  const response = await post(admin, '/publisher-search', { query: 'admin probe' });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.query, 'admin probe');
+  assert.deepEqual(body.publishers, [PUBLISHER, 'Another Press']);
+  assert.equal(body.total, 2);
+  assert.equal(body.page, 1);
+  assert.equal(body.pageSize, 50);
+  // A cache hit proves the request URL shape the live API would receive.
+  assert.equal(isbndbRequests, 0);
+});
+
+test('publisher books forwards filters and pagination', async () => {
+  isbndbRequests = 0;
+  requestedQueries.length = 0;
+
+  const response = await post(admin, '/publisher-books', {
+    name: PUBLISHER,
+    page: 2,
+    pageSize: 50,
+    publishedFrom: '2020',
+    publishedTo: '2024-12',
+    language: 'eng'
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.name, PUBLISHER);
+  assert.equal(body.candidates.length, 1);
+  assert.equal(body.candidates[0].title, 'Publisher Probe Edition');
+  assert.deepEqual(body.candidates[0].identifiers, [
+    { issuer: 'isbn13', value: PUBLISHER_BOOK_ISBN }
+  ]);
+  assert.equal(body.total, 120);
+  assert.equal(body.page, 2);
+  assert.equal(body.pageSize, 50);
+  assert.equal(isbndbRequests, 0);
+});
+
+test('publisher import ingests books and dedupes on a second run', async () => {
+  const first = await post(admin, '/publisher-import', {
+    name: PUBLISHER,
+    pageSize: 100,
+    maxPages: 1
+  });
+  assert.equal(first.status, 200);
+  const firstBody = await first.json();
+  assert.deepEqual(
+    {
+      imported: firstBody.imported,
+      created: firstBody.created,
+      existing: firstBody.existing,
+      failed: firstBody.failed,
+      stopped: firstBody.stopped,
+      nextPage: firstBody.nextPage,
+      pagesFetched: firstBody.pagesFetched
+    },
+    {
+      imported: 1,
+      created: 1,
+      existing: 0,
+      failed: 0,
+      stopped: 'end',
+      nextPage: null,
+      pagesFetched: 1
+    }
+  );
+
+  const second = await post(admin, '/publisher-import', {
+    name: PUBLISHER,
+    pageSize: 100,
+    maxPages: 1
+  });
+  assert.equal(second.status, 200);
+  const secondBody = await second.json();
+  assert.equal(secondBody.imported, 1);
+  assert.equal(secondBody.created, 0);
+  assert.equal(secondBody.existing, 1);
+  assert.equal(secondBody.stopped, 'end');
+
+  const stored = await pool.query(
+    `SELECT count(*)::int AS count FROM editions WHERE title = 'Publisher Probe Edition'`
+  );
+  assert.equal(stored.rows[0].count, 1);
+});
+
+test('publisher endpoints validate input', async () => {
+  const empty = await post(admin, '/publisher-search', { query: '   ' });
+  assert.equal(empty.status, 400);
+
+  const noName = await post(admin, '/publisher-books', {});
+  assert.equal(noName.status, 400);
+  assert.match((await noName.json()).message, /name/);
+
+  const tooBig = await post(admin, '/publisher-import', { name: PUBLISHER, pageSize: 101 });
+  assert.equal(tooBig.status, 400);
+  assert.match((await tooBig.json()).message, /pageSize/);
+
+  const reversed = await post(admin, '/publisher-books', {
+    name: PUBLISHER,
+    publishedFrom: '2024',
+    publishedTo: '2020'
+  });
+  assert.equal(reversed.status, 400);
+  assert.match((await reversed.json()).message, /publishedFrom/);
 });
