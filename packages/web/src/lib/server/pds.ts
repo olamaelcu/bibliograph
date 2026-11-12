@@ -2,18 +2,6 @@ import { env } from '$env/dynamic/private';
 
 import { metrics, recordPdsProxyRequest } from '$lib/server/metrics';
 
-/**
- * The only publisher-record reads served at the edge.
- *
- * Livtet's book, contributor and feed routes call `com.atproto.repo.getRecord`
- * and `listRecords` directly against this base URL. HappyView's built-in
- * `com.atproto.*` proxy is authority-bound and fails against the publisher
- * PDS, so these two GETs are answered here instead.
- */
-export function isPdsRead(method: string): boolean {
-  return method === 'com.atproto.repo.getRecord' || method === 'com.atproto.repo.listRecords';
-}
-
 /** Request headers worth relaying; everything else is hop-by-hop. */
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'] as const;
 

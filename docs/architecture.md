@@ -133,15 +133,23 @@ The public `/xrpc` gateway serves the two read-only books-wg procedures
 (`resolveEditions`, `searchEditions`) and the seven entity methods
 (`getContributor`, `getPublisher`, `listEditionsByContributor`,
 `resolveContributors`, `resolvePublishers`, `searchContributors`,
-`searchPublishers`) anonymously from the catalog tables, with CORS because
-Livet calls them from the browser; every `editionView` they return carries the
-edition's atproto URI as an `atproto` identifier. Entity
-reads include the last published CID on the two getters and never read a PDS.
+`searchPublishers`) anonymously from the catalog tables; every `editionView`
+they return carries the edition's atproto URI as an `atproto` identifier.
+Entity reads include the last published CID on the two getters and never read a
+PDS.
 GET
 `com.atproto.repo.getRecord` and `com.atproto.repo.listRecords` are proxied to
 `PDS_URL`, so clients read publisher records through the edge. Everything else
 is forwarded to HappyView, including the remaining `com.atproto.*` methods
 (HappyView's own com.atproto proxy is authority-bound).
+
+CORS covers the whole gateway, not just the edge-served reads: every valid
+NSID gets a `204` preflight on `OPTIONS` (`Authorization`, `DPoP`, `content-type`
+and `accept` allowed, `dpop-nonce` exposed) and every response — forwarded
+HappyView and PDS calls included — carries `Access-Control-Allow-Origin: *`,
+`Access-Control-Expose-Headers: dpop-nonce` and `Vary: Origin`. The headers are
+applied once around the route's dispatch, grant no credentials (no cookies, no
+`Access-Control-Allow-Credentials`), and never reflect the request origin.
 
 Because those two procedures are anonymous and each queued hydration job can
 spend up to 50 paid provider lookups, the edge caps enqueueing at 10 hydration

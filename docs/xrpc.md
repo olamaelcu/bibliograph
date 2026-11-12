@@ -27,8 +27,8 @@ exactly two read-only `com.atproto` methods, `repo.getRecord` and `repo.listReco
 Every call reaches HappyView through the SvelteKit edge (`packages/web/src/routes/xrpc/[...method]`),
 which:
 
-- accepts only `GET` and `POST`; `OPTIONS` is answered only as a CORS preflight for the nine
-  edge-served catalog methods and is `405 MethodNotAllowed` everywhere else;
+- accepts `GET` and `POST`; `OPTIONS` is answered as a `204` CORS preflight for every valid NSID,
+  including methods that are only forwarded, and other verbs are `405 MethodNotAllowed`;
 - rejects a path that is not a plausible NSID with `400 InvalidRequest`;
 - relays only `content-type`, `accept`, `authorization` and `dpop` upstream, and adds its own
   `X-Client-Key`/`X-Client-Secret` from the environment (the browser cannot choose them);
@@ -47,12 +47,19 @@ com.atproto.repo.getRecord` and `GET com.atproto.repo.listRecords` are proxied t
 timeout is `502 UpstreamUnavailable`; an unset `PDS_URL` is `503 ServiceUnavailable` with a message
 naming the missing setting. Every other `com.atproto.*` method still goes to HappyView.
 
-The nine catalog methods are the only browser-facing part of the surface: Livtet's search and
-contributor pages call them directly. `OPTIONS` on any of their NSIDs answers `204` with
-`Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: GET, POST, OPTIONS`,
-`Access-Control-Allow-Headers: content-type`, `Access-Control-Max-Age: 86400` and `Vary: Origin`;
-their responses (including errors) carry `Access-Control-Allow-Origin: *` and `Vary: Origin`.
-No credentials are allowed, and no other NSID gains CORS.
+**CORS.** CORS covers the entire gateway, not only the edge-served catalog methods: a browser
+preflights a forwarded HappyView procedure too, because the call sends `Authorization` and `DPoP`.
+`OPTIONS /xrpc/<nsid>` on any valid NSID answers `204` with `Access-Control-Allow-Origin: *`,
+`Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: content-type,
+authorization, dpop, accept`, `Access-Control-Max-Age: 86400`, `Access-Control-Expose-Headers:
+dpop-nonce` and `Vary: Origin`. Every response from the route — catalog, entity, feed generator,
+PDS proxy, HappyView proxy, and the `400`/`404`/`405`/`502`/`503` errors — carries
+`Access-Control-Allow-Origin: *`, `Access-Control-Expose-Headers: dpop-nonce` and `Vary: Origin`.
+The origin is never reflected: the value is always `*`. No credentials are allowed
+(`Access-Control-Allow-Credentials` is never sent and no cookie is needed); the surface
+authenticates with the `Authorization`/`DPoP` headers, which CORS permits without credentialed
+mode. A path that is not an NSID remains `400 InvalidRequest`, and that JSON error carries the
+headers as well.
 
 The two books-wg procedures never reach HappyView: the edge dispatches them on NSID and answers them
 from the catalog tables (`editions`, `edition_identifiers`, `edition_contributors`,
@@ -160,7 +167,7 @@ back to the default. The feed generator defaults to 20 and clamps to 1–100; a 
 | 403 | `Forbidden` | the named review or shelf belongs to another DID |
 | 404 | `NotFound` | a procedure targets a follow, review, shelf, `bookStatus` or `shelfItem` that does not exist |
 | 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing; `getContributor` / `getPublisher` / `listEditionsByContributor` when no catalog row has the URI |
-| 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST, and for `POST` on the two feed methods |
+| 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST/OPTIONS, for `POST` on the two feed methods, and for `GET` on the two books-wg procedures and the two entity resolvers |
 | 502 | `UpstreamFailure` | any procedure when the PDS rejects a save, delete or batch |
 | 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable, or when a PDS-proxied read fails or times out |
 | 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (the two books-wg procedures, the seven entity methods, `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |

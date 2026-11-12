@@ -2,11 +2,18 @@ import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
 import { metrics, recordCatalogQuery } from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
-import { isPdsRead, proxyPdsRead } from "$lib/server/pds";
+import { proxyPdsRead } from "$lib/server/pds";
 import { catalogPool } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import { resolveEditions, searchEditions, type Identifier } from "$lib/server/catalog/editions";
-import { catalogPreflight, withCatalogCors } from "$lib/server/catalog/cors";
+import { withXrpcCors } from "$lib/server/xrpc/cors";
+import {
+  dispatchGet,
+  dispatchMethodNotAllowed,
+  dispatchOptions,
+  dispatchPost,
+  type XrpcDependencies,
+} from "$lib/server/xrpc/dispatch";
 import {
   EntityQueryError,
   EntityUriError,
@@ -21,9 +28,6 @@ import {
   searchPublishers,
 } from "$lib/server/catalog/entities";
 import {
-  ENTITY_METHODS,
-  ENTITY_PROCEDURES,
-  ENTITY_QUERIES,
   GET_CONTRIBUTOR,
   GET_PUBLISHER,
   LIST_EDITIONS_BY_CONTRIBUTOR,
@@ -39,16 +43,7 @@ import {
   enqueueSearchHydration,
 } from "$lib/server/catalog/jobs";
 import { isbn13sFromIdentifiers } from "$lib/server/catalog/isbn";
-import {
-  describeFeedGenerator,
-  getFeedSkeleton,
-  isFeedMethod,
-  DESCRIBE_FEED_GENERATOR,
-  GET_FEED_SKELETON,
-} from "$lib/server/feeds";
-
-// An NSID is at least three labels: authority, name, and at least one more.
-const NSID = /^[a-zA-Z]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]([a-zA-Z0-9-]{0,62})$/;
+import { describeFeedGenerator, getFeedSkeleton } from "$lib/server/feeds";
 
 // Catalog discovery is anonymous, so bound the work a body can request.
 const MAX_IDENTIFIERS = 100;
@@ -58,14 +53,6 @@ const MAX_IDENTIFIERS = 100;
 // not be able to queue the whole identifier list. The cap is per request; the
 // TTL marks dedupe repeats across calls, they are not a global quota.
 const MAX_HYDRATION_JOBS_PER_REQUEST = 10;
-
-const RESOLVE_EDITIONS = "community.lexicon.media.book.resolveEditions";
-const SEARCH_EDITIONS = "community.lexicon.media.book.searchEditions";
-const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
-
-function methodNotAllowed(): Response {
-  return json({ error: "MethodNotAllowed" }, { status: 405 });
-}
 
 function fail(status: number, error: string, message: string): Response {
   return json({ error, message }, { status });
@@ -339,50 +326,34 @@ async function handleEntityResolve(request: Request, method: string): Promise<Re
  * Every other XRPC call is relayed to the AppView unchanged; the edge adds its
  * own client identity, and callers may present their own credentials.
  */
-export const GET: RequestHandler = async ({ params, request }) => {
-  if (!NSID.test(params.method)) {
-    return json({ error: "InvalidRequest" }, { status: 400 });
-  }
-  // The feed generator is served at the edge from the activity index; it is a
-  // GET-only pair, and `public` is the only anonymous feed.
-  if (params.method === DESCRIBE_FEED_GENERATOR) return describeFeedGenerator();
-  if (params.method === GET_FEED_SKELETON) return getFeedSkeleton(request);
-  if (ENTITY_QUERIES.has(params.method)) {
-    return withCatalogCors(await handleEntityGet(request, params.method));
-  }
-  // The books-wg and entity procedures are POST-only.
-  if (EDGE_PROCEDURES.has(params.method) || ENTITY_PROCEDURES.has(params.method)) {
-    return methodNotAllowed();
-  }
-  // Publisher-record reads go to the PDS; other com.atproto methods still go
-  // to HappyView below.
-  if (isPdsRead(params.method)) return proxyPdsRead(params.method, request);
-  return forward(params.method, request);
+const dependencies: XrpcDependencies = {
+  describeFeedGenerator,
+  getFeedSkeleton,
+  entityGet: handleEntityGet,
+  resolveEditions: handleResolve,
+  searchEditions: handleSearch,
+  entityResolve: handleEntityResolve,
+  proxyPdsRead,
+  forward,
 };
 
-export const POST: RequestHandler = async ({ params, request }) => {
-  if (!NSID.test(params.method)) {
-    return json({ error: "InvalidRequest" }, { status: 400 });
-  }
-  if (isFeedMethod(params.method)) return methodNotAllowed();
-  if (params.method === RESOLVE_EDITIONS) return withCatalogCors(await handleResolve(request));
-  if (params.method === SEARCH_EDITIONS) return withCatalogCors(await handleSearch(request));
-  if (ENTITY_PROCEDURES.has(params.method)) {
-    return withCatalogCors(await handleEntityResolve(request, params.method));
-  }
-  // Entity getters and searches are GET-only.
-  if (ENTITY_QUERIES.has(params.method)) return methodNotAllowed();
-  return forward(params.method, request);
-};
+const handleGet: RequestHandler = ({ params, request }) =>
+  dispatchGet(params.method, request, dependencies);
 
-export const PUT: RequestHandler = () => methodNotAllowed();
-export const PATCH: RequestHandler = () => methodNotAllowed();
-export const DELETE: RequestHandler = () => methodNotAllowed();
-export const OPTIONS: RequestHandler = ({ params }) => {
-  // Only the browser-called catalog methods answer a preflight; every other
-  // path keeps the surface's 405.
-  if (EDGE_PROCEDURES.has(params.method) || ENTITY_METHODS.has(params.method)) {
-    return catalogPreflight();
-  }
-  return methodNotAllowed();
-};
+const handlePost: RequestHandler = ({ params, request }) =>
+  dispatchPost(params.method, request, dependencies);
+
+const handleOptions: RequestHandler = ({ params }) => dispatchOptions(params.method);
+
+const handleOtherVerb: RequestHandler = ({ params }) =>
+  dispatchMethodNotAllowed(params.method);
+
+// CORS is applied once, to whatever the dispatch returned: every method,
+// including the 400/405 branches and the proxied responses, gets the same
+// headers, and no branch can return a response that bypasses them.
+export const GET: RequestHandler = withXrpcCors(handleGet);
+export const POST: RequestHandler = withXrpcCors(handlePost);
+export const OPTIONS: RequestHandler = withXrpcCors(handleOptions);
+export const PUT: RequestHandler = withXrpcCors(handleOtherVerb);
+export const PATCH: RequestHandler = withXrpcCors(handleOtherVerb);
+export const DELETE: RequestHandler = withXrpcCors(handleOtherVerb);

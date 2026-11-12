@@ -24,8 +24,6 @@ import {
  */
 
 export const FEED_COLLECTION = 'net.olamaelcu.livtet.biblio.feed.generator';
-export const DESCRIBE_FEED_GENERATOR = 'com.atproto.feed.describeFeedGenerator';
-export const GET_FEED_SKELETON = 'com.atproto.feed.getFeedSkeleton';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -33,10 +31,6 @@ const MAX_LIMIT = 100;
 const ERROR_AUTH_REQUIRED = 'AuthRequired';
 const ERROR_INVALID_REQUEST = 'InvalidRequest';
 const ERROR_UNAVAILABLE = 'ServiceUnavailable';
-
-export function isFeedMethod(method: string): boolean {
-  return method === DESCRIBE_FEED_GENERATOR || method === GET_FEED_SKELETON;
-}
 
 /** The configured generator DID, or `null` when `FEED_GENERATOR_DID` is unset. */
 export function feedGeneratorDid(): string | null {

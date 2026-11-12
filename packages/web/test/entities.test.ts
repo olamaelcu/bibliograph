@@ -24,7 +24,6 @@ import {
   ENTITY_PROCEDURES,
   ENTITY_QUERIES
 } from '../src/lib/server/catalog/entity-methods.ts';
-import { catalogPreflight, withCatalogCors } from '../src/lib/server/catalog/cors.ts';
 import { decodeOffsetCursor, encodeOffsetCursor, likePattern } from '../src/lib/server/catalog/sql.ts';
 
 const AUTHORITY = 'did:plc:entitytest';
@@ -260,20 +259,6 @@ test('the seven entity methods split into five GET queries and two POST procedur
   assert.ok(ENTITY_PROCEDURES.has('net.olamaelcu.livtet.biblio.resolveContributors'));
   assert.ok(ENTITY_PROCEDURES.has('net.olamaelcu.livtet.biblio.resolvePublishers'));
   assert.ok(!ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.resolvePublishers'));
-});
-
-test('the catalog preflight allows GET and POST and responses carry CORS', async () => {
-  const preflight = catalogPreflight();
-  assert.equal(preflight.status, 204);
-  assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
-  assert.equal(preflight.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
-  assert.equal(preflight.headers.get('access-control-allow-headers'), 'content-type');
-
-  const wrapped = withCatalogCors(new Response(JSON.stringify({ error: 'RecordNotFound' }), { status: 404 }));
-  assert.equal(wrapped.status, 404);
-  assert.equal(wrapped.headers.get('access-control-allow-origin'), '*');
-  assert.equal(wrapped.headers.get('vary'), 'Origin');
-  assert.equal(await wrapped.text(), JSON.stringify({ error: 'RecordNotFound' }));
 });
 
 test('likePattern wraps and escapes in one place', () => {

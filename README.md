@@ -90,7 +90,16 @@ methods are anonymous, edge-served catalog reads:
   `searchContributors` and `searchPublishers` — the contributor/publisher
   methods added with entity records. The getters and listings/searches are
   `GET`; the resolvers are `POST`. They read catalog tables (the two getters
-  also read `pds_cids`), never a PDS, and carry CORS for browser clients.
+  also read `pds_cids`) and never a PDS.
+
+CORS covers the whole XRPC gateway, not only those nine methods. Any valid
+NSID answers `OPTIONS` with a `204` preflight allowing `content-type`,
+`authorization`, `dpop` and `accept`, exposing `dpop-nonce`, and every response
+— catalog, feed generator, PDS proxy, forwarded HappyView call, or an error —
+carries `Access-Control-Allow-Origin: *`, `Access-Control-Expose-Headers:
+dpop-nonce` and `Vary: Origin`. The origin is never reflected and no
+credentials are allowed; an invalid NSID is still `400 InvalidRequest` (with
+the headers).
 
 The remaining methods are HappyView's **17 activity queries** and **15 activity
 procedures** (profiles, goals, shelves, shelf items, statuses, reviews, follow
