@@ -14,6 +14,7 @@ mise run hv-account           # mint the provisional account on the local PDS
 mise run hv-seed              # make it superuser, write the admin key + XRPC client
 mise run hv-ca                # trust Caddy's CA in Chrome and Firefox
 mise run hv-deploy            # upload the lexicons, query scripts and indexes
+mise run hv-fixtures          # seed-01 … seed-08 plus activity, then verify
 mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 ```
 
@@ -25,6 +26,104 @@ mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 | `postgres://bibliograph:bibliograph@127.0.0.1:5432/bibliograph` | the catalog + `happyview` schema |
 
 `mise run sql` opens psql against the same database.
+
+## Seeding test accounts and activity
+
+`hv-account` mints one account (`alice`, the dashboard superuser) and nothing
+else, so a fresh stack has no activity to render. `hv-fixtures` seeds a small
+lived-in network: eight accounts, their social records, and the Livtet records
+the activity queries read. It runs the whole loop — accounts, records,
+backfill, verify — and fails if the seeded data does not come back through
+`/xrpc`.
+
+```bash
+mise run hv-accounts          # create seed-01 … seed-08 on the PDS
+mise run hv-fixtures          # records → backfill → verify
+mise run hv-fixtures --reset  # delete the seed records, then seed again
+```
+
+Both commands are idempotent: a second run resolves the existing accounts and
+updates the same record keys in place. `mise run hv-fixtures` implies
+`hv-accounts`; run `hv-accounts` alone when you only want the identities.
+
+### Accounts
+
+| | |
+| --- | --- |
+| handles | `seed-01.pds.127-0-0-1.sslip.io` … `seed-08.pds.127-0-0-1.sslip.io` |
+| emails | `seed-01@example.invalid` … |
+| password | `Dev-account-password1` (`HV_SEED_PASSWORD` overrides it) |
+| count | 8 (`HV_SEED_ACCOUNTS` overrides it) |
+
+The suffix is the PDS's `hostname` (`docker/pds-config.toml`), not a free
+choice: `createAccount` derives the handle domain from it, and a reserved TLD
+such as `.localhost` is rejected outright. Every account's DID is a real
+`did:plc` registered with the local PLC, minted with
+`POST /xrpc/com.atproto.server.createAccount`; no `plc.directory` call is
+involved. Emails and handles are fixed so re-runs converge instead of piling
+up identities.
+
+Both commands print the handle/DID table and the password at the end; copy a
+handle from there. A client pointed at this PLC has no handle suggestions: the
+accounts exist only in the local directory, so Livtet's typeahead is disabled
+by design (`onPublicNetwork()` is false when `plcDirectoryBase()` is not
+`https://plc.directory`).
+
+Existence checks use `com.atproto.identity.resolveHandle` per fixed handle.
+The PDS also exposes `com.atproto.admin.searchAccounts`, but it answers `401
+AuthenticationRequired` here: this stack provisions no admin credential, so
+there is nothing to authenticate with.
+
+### Records
+
+`scripts/dev-seed.py` writes the records through the PDS (a
+`com.atproto.server.createSession` token per account, then batched
+`com.atproto.repo.applyWrites`), and reads the catalog editions it references
+from Postgres. Per account:
+
+| Collection | Records |
+| --- | --- |
+| `net.olamaelcu.livtet.actor.profile` | 1 (`self`) |
+| `app.bsky.actor.profile` | 1 (`self`) |
+| `net.olamaelcu.livtet.biblio.shelf` | 5 (the four fixed shelves + one custom) |
+| `net.olamaelcu.livtet.biblio.bookStatus` | 6 (rkey = the edition rkey) |
+| `net.olamaelcu.livtet.biblio.shelfItem` | 3 on the custom shelf |
+| `community.lexicon.media.book.review` | 2 |
+| `net.olamaelcu.livtet.biblio.follow` | 2 (rkey = the followed DID) |
+| `app.bsky.graph.follow` | 2 |
+| `app.bsky.feed.post` | 3 |
+| `app.bsky.feed.like` | 1 |
+| `net.olamaelcu.livtet.biblio.readingGoal` | 1 (`current`) |
+
+That is 26 records per account, 208 across the eight, plus a batched write for
+each like once its target post's CID is known. Timestamps are fixed offsets
+from a fixture epoch and rkeys are derived from the account index, so the same
+fixture list always produces the same records. The editions come from
+`public.appview_book_lua` joined to `public.pds_cids` — real catalog URIs with
+a published CID, read with `psql` from `DATABASE_URL` — because the read views
+drop activity whose edition is not in the catalog. On a database without the
+read model, run `mise run catalog-schema` first.
+
+### Backfill is mandatory
+
+Jetstream is deliberately closed (`ws://127.0.0.1:1`), so records written
+straight to the PDS are invisible to HappyView until a backfill indexes them.
+`hv-fixtures` calls `POST /admin/backfill` with `{"did": …}` for every seed
+account — one job per repo, because HappyView filters the walk to the
+collections it has lexicons for — then polls `happyview.happyview_records`
+until the expected counts land. Without that step every query answers empty.
+
+### Reset
+
+```bash
+mise run hv-fixtures --reset
+```
+
+`--reset` deletes every record the fixtures wrote from each seed repo
+(`applyWrites#delete`), deletes those DIDs' rows from
+`happyview.happyview_records` and `happyview.happyview_record_refs`, then seeds
+and backfills again. The accounts themselves are kept, so their DIDs stay
+stable. Plain `hv-fixtures` never deletes anything.
 
 ## Admin curation
 

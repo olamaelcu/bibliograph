@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Create the eight fixture accounts on the local PDS (idempotent)"
+# Provisions seed-01…seed-08 under the PDS's handle domain. Handles are
+# deterministic, emails are deterministic, and one password comes from
+# HV_SEED_PASSWORD (or HV_ACCOUNT_PASSWORD) with the dev default.
+#
+# Idempotent: each handle is resolved first, so a re-run reports the existing
+# DIDs and creates nothing. Account creation goes through the same Python code
+# `hv-account` uses, so the single-account and N-account paths cannot diverge.
+#
+# The DID each account gets is a real did:plc registered with the local PLC;
+# nothing here touches plc.directory or a public relay.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec python3 scripts/dev-seed.py accounts \
+  --count "${HV_SEED_ACCOUNTS:-8}" \
+  --password "${HV_SEED_PASSWORD:-${HV_ACCOUNT_PASSWORD:-Dev-account-password1}}" \
+  "$@"

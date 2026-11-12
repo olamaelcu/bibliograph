@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#MISE description="Seed the fixture network: accounts, social + Livtet records, backfill, verify"
+# One command for the whole loop: ensure the eight fixture accounts, write a
+# deterministic set of profiles, follows, posts, likes, shelves, reading
+# statuses, shelf items, reviews and reading goals to each repo, run
+# HappyView's backfill for every account, then query the deployed /xrpc
+# scripts and show what came back.
+#
+# The records are written to the PDS. HappyView's Jetstream is deliberately
+# closed (`ws://127.0.0.1:1`) and its only other intake is backfill, so the
+# `POST /admin/backfill` calls are what put the seed in the index. Without
+# them the queries answer empty.
+#
+# Edition references are real catalog URIs read from Postgres, so the views
+# join instead of dropping every seeded book.
+#
+# Idempotent: the same fixture list produces the same rkeys, and a re-run
+# updates the existing records in place. `--reset` deletes the seed accounts'
+# records and index rows first, so the following run starts clean.
+#
+# Configuration: PDS_URL, DATABASE_URL, HAPPYVIEW_URL,
+# HAPPYVIEW_ADMIN_KEY (all defaulted by mise/.env), HV_SEED_PASSWORD.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec python3 scripts/dev-seed.py fixtures \
+  --count "${HV_SEED_ACCOUNTS:-8}" \
+  --password "${HV_SEED_PASSWORD:-${HV_ACCOUNT_PASSWORD:-Dev-account-password1}}" \
+  "$@"

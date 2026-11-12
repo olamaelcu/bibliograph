@@ -7,6 +7,12 @@
 #
 # The password is only needed to sign in to the PDS directly (or to complete the
 # dashboard login in a browser); HappyView does not store it.
+#
+# This is the `--handle` form of `scripts/dev-seed.py accounts`, the same code
+# `mise run hv-accounts` uses for the fixture list, so the one-account and
+# N-account paths cannot drift. TLS verifies against `.cache/caddy-root.crt`
+# (written by `mise run hv-ca`) when it exists and falls back to an unverified
+# connection only for this local host.
 
 set -euo pipefail
 
@@ -16,27 +22,8 @@ cd "$ROOT"
 HANDLE="${1:-${HV_ACCOUNT_HANDLE:-alice.pds.127-0-0-1.sslip.io}}"
 PASSWORD="${HV_ACCOUNT_PASSWORD:-Dev-account-password1}"
 EMAIL="${HV_ACCOUNT_EMAIL:-alice@example.invalid}"
-PDS="https://pds.127-0-0-1.sslip.io"
 
-did_of() {
-  python3 -c 'import json,sys; print(json.load(sys.stdin).get("did",""))' 2>/dev/null || true
-}
-
-existing="$(curl -sk -m 10 "$PDS/xrpc/com.atproto.identity.resolveHandle?handle=$HANDLE" | did_of)"
-if [[ -n "$existing" ]]; then
-  echo "account already exists: $HANDLE -> $existing"
-  exit 0
-fi
-
-response="$(curl -sk -m 30 -X POST "$PDS/xrpc/com.atproto.server.createAccount" \
-  -H 'Content-Type: application/json' \
-  -d "{\"handle\":\"$HANDLE\",\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")"
-
-did="$(printf '%s' "$response" | did_of)"
-if [[ -z "$did" ]]; then
-  echo "ERROR: account creation failed: $response" >&2
-  exit 1
-fi
-
-echo "created $HANDLE -> $did"
-echo "password: $PASSWORD"
+exec python3 scripts/dev-seed.py accounts \
+  --handle "$HANDLE" \
+  --password "$PASSWORD" \
+  --email "$EMAIL"
