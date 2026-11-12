@@ -89,7 +89,7 @@ from Postgres. Per account:
 | `net.olamaelcu.livtet.biblio.bookStatus` | 6 (rkey = the edition rkey) |
 | `net.olamaelcu.livtet.biblio.shelfItem` | 3 on the custom shelf |
 | `community.lexicon.media.book.review` | 2 |
-| `net.olamaelcu.livtet.biblio.follow` | 2 (legacy fixture rows use the followed DID as rkey) |
+| `net.olamaelcu.livtet.biblio.follow` | 2 (TID rkeys) |
 | `app.bsky.graph.follow` | 2 |
 | `app.bsky.feed.post` | 3 |
 | `app.bsky.feed.like` | 1 |
@@ -103,6 +103,13 @@ fixture list always produces the same records. The editions come from
 a published CID, read with `psql` from `DATABASE_URL` — because the read views
 drop activity whose edition is not in the catalog. On a database without the
 read model, run `mise run catalog-schema` first.
+
+Follow records use TID rkeys. Before writing them, the seed reconciles the
+account's existing follows by subject, deleting a legacy subject-DID-rkey row
+or duplicate for the same target so a rerun converges on one record. Rows left
+over from an earlier seed are not rewritten in place: a fixture run deletes the
+legacy/duplicate row and writes the TID-keyed record. Until then they remain
+readable through `graph.listFollowees` and deletable through `graph.unfollow`.
 
 ### Backfill is mandatory
 

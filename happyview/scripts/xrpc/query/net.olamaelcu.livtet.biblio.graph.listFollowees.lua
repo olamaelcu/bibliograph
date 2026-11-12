@@ -16,6 +16,13 @@ local function subject_did(row, record)
   return nil
 end
 
+-- The page and the total use the same DID-shaped-subject predicate, so total
+-- cannot count rows the page would omit. Mirrors `is_did` in lib/core.lua.
+local SUBJECT_SQL = [[(
+       (record::jsonb)->>'subject' ~ '^did:[a-z0-9]+:[A-Za-z0-9._:%-]+$'
+    OR (record::jsonb)->>'subject' ~ '^at://did:[a-z0-9]+:[A-Za-z0-9._:%-]+(/.*)?$'
+  )]]
+
 function handle()
   local did, err = required_did(params.did, 'did')
   if err ~= nil then return fail(400, 'InvalidRequest', err) end
@@ -29,6 +36,7 @@ function handle()
     [[SELECT uri, did, record, created_at, rkey, (record::jsonb)->>'subject' AS subject
        FROM happyview_records
        WHERE collection = $1 AND did = $2
+         AND ]] .. SUBJECT_SQL .. [[
          AND ($3 = '' OR rkey > $3)
        ORDER BY rkey ASC
        LIMIT $4]],
@@ -49,7 +57,7 @@ function handle()
   end
 
   local counted = db.raw(
-    'SELECT count(*)::int AS n FROM happyview_records WHERE collection = $1 AND did = $2',
+    'SELECT count(*)::int AS n FROM happyview_records WHERE collection = $1 AND did = $2 AND ' .. SUBJECT_SQL,
     { FOLLOW_COLLECTION, did }
   )
 

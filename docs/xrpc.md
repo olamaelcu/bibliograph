@@ -305,9 +305,10 @@ pages with a cursor and empty pages; a full page emits the last follower DID as 
 Rows whose record DID equals `did`, ordered by the record's opaque TID rkey ascending, keyset on the
 same column. The emitted `did` is read from `record.subject` (legacy `at://did` is normalized to
 `did`); a row without a DID-shaped subject is omitted from the page. `total` is the full followee
-count and is emitted on every page. A full page emits the last TID rkey as the cursor. `followedAt`
-falls back to the indexed `created_at` when the record body has no `createdAt`. A cursor that is not
-a 13-character TID (for example a pre-TID DID cursor) restarts the page instead of skipping rows.
+count over the same DID-shaped subject rows and is emitted on every page. A full page emits the
+last TID rkey as the cursor. `followedAt` falls back to the indexed `created_at` when the record
+body has no `createdAt`. A cursor that is not a 13-character TID (for example a pre-TID DID cursor)
+restarts the page instead of skipping rows.
 
 ### Shelves
 

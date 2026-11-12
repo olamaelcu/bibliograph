@@ -283,6 +283,10 @@ def tid(value: int) -> str:
     )
 
 
+def is_tid(value: str) -> bool:
+    return len(value) == 13 and all(char in TID_ALPHABET for char in value)
+
+
 def stamp(minutes: int) -> str:
     return (FIXTURE_EPOCH + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -381,8 +385,8 @@ def strong_ref(edition: dict) -> dict:
     return {"uri": edition["uri"], "cid": edition["cid"]}
 
 
-def fetch_record_keys(did: str, collection: str, token: str) -> set[str]:
-    keys: set[str] = set()
+def fetch_records(did: str, collection: str, token: str) -> list[dict]:
+    records: list[dict] = []
     cursor = None
     while True:
         params = {"repo": did, "collection": collection, "limit": 100}
@@ -393,13 +397,64 @@ def fetch_record_keys(did: str, collection: str, token: str) -> set[str]:
             f"{PDS}/xrpc/com.atproto.repo.listRecords?{urlencode(params)}",
             token=token,
         )
-        for record in data.get("records", []):
-            uri = record.get("uri", "")
-            if "/" in uri:
-                keys.add(uri.rsplit("/", 1)[-1])
+        records.extend(data.get("records", []))
         cursor = data.get("cursor")
         if not cursor:
-            return keys
+            return records
+
+
+def fetch_record_keys(did: str, collection: str, token: str) -> set[str]:
+    keys: set[str] = set()
+    for record in fetch_records(did, collection, token):
+        uri = record.get("uri", "")
+        if "/" in uri:
+            keys.add(uri.rsplit("/", 1)[-1])
+    return keys
+
+
+def follow_subject(value: str) -> str:
+    subject = value[4:] if value.startswith("at://") else value
+    return subject.split("/", 1)[0]
+
+
+def reconcile_follows(did: str, token: str, records: list[dict]) -> None:
+    """Delete legacy or duplicate follow rows for this account's targets.
+
+    Fixture follows now use TID rkeys. A network seeded before that change has
+    DID-keyed rows for the same subjects; delete them (and any duplicate TID)
+    before upserting so a rerun converges on one record per target.
+    """
+    desired = {}
+    for record in records:
+        if record["collection"] != FOLLOW:
+            continue
+        subject = record["value"].get("subject")
+        if isinstance(subject, str):
+            desired[subject] = record["rkey"]
+    if not desired:
+        return
+
+    desired_rkeys = set(desired.values())
+    deletes = []
+    for existing in fetch_records(did, FOLLOW, token):
+        uri = existing.get("uri", "")
+        rkey = uri.rsplit("/", 1)[-1] if "/" in uri else ""
+        if not rkey or rkey in desired_rkeys:
+            continue
+        value = existing.get("value") or {}
+        subject = value.get("subject")
+        normalized = follow_subject(subject) if isinstance(subject, str) else None
+        if normalized in desired or rkey in desired:
+            deletes.append(
+                {
+                    "$type": "com.atproto.repo.applyWrites#delete",
+                    "collection": FOLLOW,
+                    "rkey": rkey,
+                }
+            )
+    if deletes:
+        apply_writes(did, token, deletes)
+        print(f"{did} {FOLLOW}: removed {len(deletes)} legacy/duplicate follows")
 
 
 def apply_writes(did: str, token: str, writes: list[dict]) -> dict[str, str]:
@@ -557,9 +612,12 @@ def fixture_records(
             targets.append(target)
     for slot, target in enumerate(targets):
         target_did = dids[target]
+        follow_rkey = tid(4000 + index * 10 + slot)
+        if not is_tid(follow_rkey) or follow_rkey == target_did:
+            raise SystemExit(f"ERROR: fixture follow rkey is not a TID: {follow_rkey}")
         add(
             FOLLOW,
-            target_did,
+            follow_rkey,
             {
                 "$type": FOLLOW,
                 "subject": target_did,
@@ -851,6 +909,7 @@ def command_fixtures(args: argparse.Namespace) -> int:
             for collection in SEEDED_COLLECTIONS
         }
         records = [r for r in records if r["collection"] != BSKY_LIKE]
+        reconcile_follows(did, token, records)
         record_cids.update(upsert_writes(did, token, records, existing))
         for record in records:
             totals[record["collection"]] = totals.get(record["collection"], 0) + 1
