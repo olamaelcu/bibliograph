@@ -1,12 +1,12 @@
 {
   "name": "web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "catalog": "node scripts/generate-catalog.mjs",
-    "dev": "node scripts/generate-catalog.mjs && vite dev",
-    "build": "node scripts/generate-catalog.mjs && vite build",
+    "dev": "pnpm run catalog && vite dev",
+    "build": "pnpm run catalog && vite build",
     "preview": "vite preview",
     "check": "node scripts/generate-catalog.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "test": "node --test test/*.test.ts"

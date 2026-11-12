@@ -1,25 +1,17 @@
 {
   "name": "bibliograph",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@11.13.1",
   "scripts": {
     "web:dev": "pnpm --filter web dev",
     "web:build": "pnpm --filter web build",
     "web:check": "pnpm --filter web check",
     "worker:dev": "pnpm --filter worker start",
-    "worker:test": "pnpm --filter worker test",
-    "pkg:payload": "mise run package-payload",
-    "pkg:deb": "mise run package-deb",
-    "pkg:worker-payload": "mise run package-worker-payload",
-    "pkg:worker-deb": "mise run package-worker-deb",
-    "pkg:verify-deb": "mise run package-verify-deb",
-    "pkg:deploy": "mise run deploy",
-    "pkg:tls": "mise run enable-tls",
-    "pkg:publish-lex": "mise run publish-lex"
+    "worker:test": "pnpm --filter worker test"
   },
   "engines": {
     "node": "26.3.0"
-  }
+  },
+  "packageManager": "pnpm@11.13.1"
 }

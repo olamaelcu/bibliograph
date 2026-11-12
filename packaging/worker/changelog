@@ -1,3 +1,18 @@
+bibliograph-worker (0.2.0-1) unstable; urgency=medium
+
+  * 0.2.0 release: catalog reliability and curation.
+
+    - Retry provider calls with per-provider circuit breakers, and expose the
+      breaker state and ISBNdb daily usage on the metrics listener.
+    - Enforce the daily ISBNdb quota before a request is made, and reject
+      ISBNdb calls while its breaker is open.
+    - Add the authenticated admin API (ADMIN_TOKEN) for provider search,
+      publisher search, publisher book preview and bounded bulk import.
+    - Keep ISBNdb citation and synopsis text intact while unwrapping.
+    - Ship the versioned catalog schema (0001-0003) inside the package.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 18:00:00 +0000
+
 bibliograph-worker (0.1.0-1) unstable; urgency=medium
 
   * Initial package. The graphile-worker from packages/worker, with its

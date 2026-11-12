@@ -1,3 +1,20 @@
+bibliograph-web (0.2.0-1) unstable; urgency=medium
+
+  * 0.2.0 release: feed generator, admin curation and split packaging.
+
+    - Serve com.atproto.feed.describeFeedGenerator and getFeedSkeleton at the
+      edge from HappyView's activity index; personalized feeds require
+      FEED_GENERATOR_DID and PLC_URL.
+    - Expand the private /admin UI with publisher search, book preview and
+      bounded bulk import proxied to the worker admin API.
+    - Show live catalog statistics and cap anonymous hydration enqueues.
+    - Read publisher records through PDS_URL and serve the books-wg catalog
+      procedures from the read-only catalog DATABASE_URL.
+    - Ship the TLS vhost as a conffile and enable it only when a certificate
+      and a valid nginx configuration make that safe.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 18:00:00 +0000
+
 bibliograph-web (0.1.0-1) unstable; urgency=medium
 
   * Initial package. The SvelteKit edge from packages/web, built with
