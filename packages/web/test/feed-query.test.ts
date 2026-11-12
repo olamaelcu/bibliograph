@@ -9,6 +9,7 @@ import {
   encodeCursor,
   feedDids,
   fetchFeedPage,
+  normalizeFollowSubject,
   reasonFor,
   type Queryable
 } from '../src/lib/server/feeds/query.ts';
@@ -137,8 +138,25 @@ test('following scopes the page to the viewer follow set', async () => {
   });
 
   assert.equal(page.feed.length, 1);
-  assert.match(pool.calls[0]!.sql, /subject' <> \$1/);
+  assert.match(pool.calls[0]!.sql, /did <> \$1/);
   assert.deepEqual(pool.calls[1]!.values?.[2], ['did:plc:one', 'did:plc:two']);
+});
+
+test('normalizes bare and at:// follow subjects without a migration', async () => {
+  assert.equal(normalizeFollowSubject('did:plc:one'), 'did:plc:one');
+  assert.equal(normalizeFollowSubject('at://did:plc:one'), 'did:plc:one');
+  assert.equal(normalizeFollowSubject('at://did:web:example.test'), 'did:web:example.test');
+  assert.equal(normalizeFollowSubject('https://example.test'), null);
+  assert.equal(normalizeFollowSubject('at://not-a-did'), null);
+  assert.equal(normalizeFollowSubject(42), null);
+
+  // Livtet's writer stores `at://did:...`; the SQL strips it and the row
+  // mapper repeats the normalization, so both writers land in one DID set.
+  const pool = queuedPool([[{ did: 'at://did:plc:one' }, { did: 'did:plc:two' }], []]);
+  const dids = await feedDids(pool, 'following', 'did:plc:viewer');
+  assert.deepEqual(dids, ['did:plc:one', 'did:plc:two']);
+  assert.match(pool.calls[0]!.sql, /WHEN subject LIKE 'at:\/\/%' THEN substr\(subject, 6\)/);
+  assert.match(pool.calls[0]!.sql, /did LIKE 'did:%'/);
 });
 
 test('extended adds the followees of followees with the 500-DID cap', async () => {
@@ -149,8 +167,10 @@ test('extended adds the followees of followees with the 500-DID cap', async () =
 
   await fetchFeedPage(pool, { kind: 'extended', viewerDid: 'did:plc:viewer', limit: 20 });
 
-  assert.match(pool.calls[0]!.sql, /WITH hop1 AS/);
+  assert.match(pool.calls[0]!.sql, /hop1 AS \(/);
   assert.match(pool.calls[0]!.sql, /LIMIT \$3/);
+  assert.match(pool.calls[0]!.sql, /r\.record::jsonb->>'subject' LIKE 'at:\/\/%'/);
+  assert.match(pool.calls[0]!.sql, /substr\(r\.record::jsonb->>'subject', 6\)/);
   assert.equal(pool.calls[0]!.values?.[2], 500);
   assert.deepEqual(pool.calls[1]!.values?.[2], ['did:plc:one', 'did:plc:two']);
 });

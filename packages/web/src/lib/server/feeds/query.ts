@@ -103,18 +103,38 @@ function asFeedRow(row: unknown): FeedRow | null {
 
 function didFromRow(row: unknown): string | null {
   if (row === null || typeof row !== 'object' || !('did' in row)) return null;
-  const did = row.did;
-  return typeof did === 'string' && did !== '' ? did : null;
+  return normalizeFollowSubject(row.did);
+}
+
+/**
+ * Follow records name their target either as a bare DID (HappyView graph
+ * scripts) or as an `at://` URI (Livtet's writer). Normalizing on read keeps
+ * existing rows valid without a migration.
+ */
+export function normalizeFollowSubject(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const subject = value.startsWith('at://') ? value.slice('at://'.length) : value;
+  return subject.startsWith('did:') ? subject : null;
 }
 
 async function followSubjects(pool: Queryable, viewerDid: string): Promise<string[]> {
   const result = await pool.query(
-    `SELECT DISTINCT record::jsonb->>'subject' AS did
-       FROM happyview.happyview_records
-      WHERE did = $1
-        AND collection = $2
-        AND record::jsonb->>'subject' LIKE 'did:%'
-        AND record::jsonb->>'subject' <> $1
+    `WITH follows AS (
+       SELECT DISTINCT record::jsonb->>'subject' AS subject
+         FROM happyview.happyview_records
+        WHERE did = $1
+          AND collection = $2
+     ), normalized AS (
+       SELECT DISTINCT CASE
+                WHEN subject LIKE 'at://%' THEN substr(subject, 6)
+                ELSE subject
+              END AS did
+         FROM follows
+     )
+     SELECT did
+       FROM normalized
+      WHERE did LIKE 'did:%'
+        AND did <> $1
       ORDER BY did
       LIMIT $3`,
     [viewerDid, FOLLOW_COLLECTION, MAX_FEED_DIDS]
@@ -124,23 +144,33 @@ async function followSubjects(pool: Queryable, viewerDid: string): Promise<strin
 
 async function extendedSubjects(pool: Queryable, viewerDid: string): Promise<string[]> {
   const result = await pool.query(
-    `WITH hop1 AS (
-       SELECT DISTINCT record::jsonb->>'subject' AS did
+    `WITH follows AS (
+       SELECT DISTINCT CASE
+                WHEN record::jsonb->>'subject' LIKE 'at://%'
+                  THEN substr(record::jsonb->>'subject', 6)
+                ELSE record::jsonb->>'subject'
+              END AS did
          FROM happyview.happyview_records
         WHERE did = $1
           AND collection = $2
-          AND record::jsonb->>'subject' LIKE 'did:%'
-          AND record::jsonb->>'subject' <> $1
+     ), hop1 AS (
+       SELECT DISTINCT did
+         FROM follows
+        WHERE did LIKE 'did:%'
+          AND did <> $1
      ), hop2 AS (
-       SELECT DISTINCT r.record::jsonb->>'subject' AS did
+       SELECT DISTINCT CASE
+                WHEN r.record::jsonb->>'subject' LIKE 'at://%'
+                  THEN substr(r.record::jsonb->>'subject', 6)
+                ELSE r.record::jsonb->>'subject'
+              END AS did
          FROM happyview.happyview_records r
          JOIN hop1 ON hop1.did = r.did
         WHERE r.collection = $2
-          AND r.record::jsonb->>'subject' LIKE 'did:%'
      )
      SELECT did
        FROM (SELECT did FROM hop1 UNION SELECT did FROM hop2) AS dids
-      WHERE did IS NOT NULL AND did <> $1
+      WHERE did LIKE 'did:%' AND did <> $1
       ORDER BY did
       LIMIT $3`,
     [viewerDid, FOLLOW_COLLECTION, MAX_FEED_DIDS]
