@@ -67,24 +67,6 @@ export function cleanIsbndbSynopsis(value) {
   return body === '' ? text : body;
 }
 
-// ISBNdb authors arrive as "Last, First Middle". Swap a single comma so
-// contributors use natural order. Names without exactly one comma (corporate
-// names, semicolon-separated lists, dates, suffixes) are left untouched.
-const INVERTED_AUTHOR = /^([^,;]+),\s*([^,;]+)$/u;
-
-export function normalizeIsbndbAuthor(value) {
-  const name = cleanString(value);
-  if (!name) return undefined;
-
-  const match = INVERTED_AUTHOR.exec(name);
-  if (!match) return name;
-
-  const last = match[1].trim();
-  const first = match[2].trim();
-  if (!last || !first) return name;
-  return `${first} ${last}`;
-}
-
 export function candidateFromIsbndb(book) {
   if (!book || !cleanString(book.title)) return undefined;
 
@@ -96,9 +78,10 @@ export function candidateFromIsbndb(book) {
   const candidate = {
     identifiers,
     title: cleanString(book.title),
-    contributors: [...new Set((book.authors ?? []).map(normalizeIsbndbAuthor).filter(Boolean))].map(
-      (name) => ({ name, role: 'author' })
-    )
+    contributors: [...new Set((book.authors ?? []).map(cleanString).filter(Boolean))].map((name) => ({
+      name,
+      role: 'author'
+    }))
   };
 
   const subtitle = cleanString(book.title_long)?.replace(`${candidate.title}:`, '').trim();
