@@ -4,22 +4,6 @@
 -- Load → mutate → save. The review lexicon has no updatedAt, so the record's
 -- createdAt is the only timestamp and it is left alone.
 
-local function valid_subject(value)
-  if type(value) ~= 'table' then
-    return nil, '`subject` must be an editionRef object'
-  end
-  if type(value.title) ~= 'string' or value.title == '' then
-    return nil, '`subject.title` must be a non-empty string'
-  end
-  if type(value.identifiers) ~= 'table' or #value.identifiers < 1 then
-    return nil, '`subject.identifiers` must be a non-empty array'
-  end
-  if type(value.contributors) ~= 'table' then
-    return nil, '`subject.contributors` must be an array (it may be empty)'
-  end
-  return value
-end
-
 function handle()
   if type(input) ~= 'table' then
     return fail(400, 'InvalidRequest', 'the request body must be a JSON object')
@@ -45,7 +29,7 @@ function handle()
   local updated = false
 
   if input.subject ~= nil then
-    local subject, err = valid_subject(input.subject)
+    local subject, err = edition_ref(input.subject)
     if err ~= nil then
       return fail(400, 'InvalidRequest', err)
     end
@@ -100,6 +84,7 @@ function handle()
     return fail(400, 'InvalidRequest', 'a review needs a rating or a non-empty textContent')
   end
 
-  record:save()
+  local failure = pds_save(record)
+  if failure ~= nil then return failure end
   return { uri = record._uri, updated = updated }
 end

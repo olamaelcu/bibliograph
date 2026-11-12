@@ -3,41 +3,11 @@
 --
 -- The bookStatus rkey is the edition rkey, so a status change replaces the
 -- previous record. On an existing record the metadata is merged, createdAt is
--- kept and updatedAt is bumped.
+-- kept and updatedAt is bumped. An optional `shelf` must exist and belong to
+-- the caller; the read views drop references to shelves they cannot resolve.
 
 local STATUSES = { ['to-read'] = true, reading = true, read = true, dnf = true }
 local PROGRESS = { 'startedAt', 'finishedAt', 'position', 'notes', 'emoji' }
-
-local function valid_progress(value)
-  if type(value) ~= 'table' then
-    return nil, '`metadata` must be an object'
-  end
-  local metadata = {}
-  for _, key in ipairs({ 'startedAt', 'finishedAt' }) do
-    if value[key] ~= nil then
-      if type(value[key]) ~= 'string' then
-        return nil, '`metadata.' .. key .. '` must be a datetime string'
-      end
-      metadata[key] = value[key]
-    end
-  end
-  if value.position ~= nil then
-    local position = integer_field(value.position)
-    if position == nil or position < 1 then
-      return nil, '`metadata.position` must be an integer >= 1'
-    end
-    metadata.position = position
-  end
-  for _, key in ipairs({ 'notes', 'emoji' }) do
-    if value[key] ~= nil then
-      if type(value[key]) ~= 'string' then
-        return nil, '`metadata.' .. key .. '` must be a string'
-      end
-      metadata[key] = value[key]
-    end
-  end
-  return metadata
-end
 
 function handle()
   if type(input) ~= 'table' then
@@ -57,23 +27,15 @@ function handle()
 
   local shelf_uri = nil
   if input.shelf ~= nil then
-    shelf_uri = string_field(input.shelf)
-    if shelf_uri == nil then
-      return fail(400, 'InvalidRequest', '`shelf` must be a shelf AT-URI')
-    end
-    local shelf_did, shelf_collection = at_uri_parts(shelf_uri)
-    if shelf_did == nil or shelf_collection ~= SHELF_COLLECTION then
-      return fail(400, 'InvalidRequest', '`shelf` must be an AT-URI in ' .. SHELF_COLLECTION)
-    end
-    if shelf_did ~= caller_did then
-      return fail(403, 'Forbidden', 'shelf ' .. shelf_uri .. ' belongs to another DID')
-    end
+    local shelf, failure = owned_shelf(input.shelf)
+    if failure ~= nil then return failure end
+    shelf_uri = shelf.uri
   end
 
   local provided = nil
   if input.metadata ~= nil then
     local err
-    provided, err = valid_progress(input.metadata)
+    provided, err = status_metadata(input.metadata)
     if err ~= nil then
       return fail(400, 'InvalidRequest', err)
     end
@@ -105,6 +67,7 @@ function handle()
     record:set_rkey(book_rkey)
   end
 
-  record:save()
+  local failure = pds_save(record)
+  if failure ~= nil then return failure end
   return { uri = record._uri, status = status }
 end

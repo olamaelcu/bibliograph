@@ -23,6 +23,7 @@ function handle()
     return fail(404, 'NotFound', 'no review record at ' .. uri)
   end
 
-  record:delete()
+  local failure = pds_delete(record)
+  if failure ~= nil then return failure end
   return { uri = uri }
 end

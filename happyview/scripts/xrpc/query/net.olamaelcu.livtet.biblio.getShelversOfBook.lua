@@ -1,13 +1,18 @@
 -- @include lib/prelude.lua
+-- net.olamaelcu.livtet.biblio.getShelversOfBook — distinct DIDs shelving a book.
+--
+-- Groups bookStatus rows by `did` for one `(shelvingRkey, bookUri)` pair and
+-- pages the groups by `min(uri)`; the cursor is that smallest URI.
+
 function handle()
-  local bookUri = params.bookUri
-  if bookUri == nil then return fail(400, 'InvalidRequest', 'bookUri is required') end
-  local shelvingRkey = params.shelvingRkey
-  if shelvingRkey == nil or shelvingRkey == '' then
+  local bookUri, err = required_at_uri(params.bookUri, 'bookUri')
+  if err ~= nil then return fail(400, 'InvalidRequest', err) end
+  local shelvingRkey = string_field(params.shelvingRkey)
+  if shelvingRkey == nil then
     shelvingRkey = string.match(bookUri, '([^/]+)$') or ''
   end
-  local limit = int(params.limit, 50, 1, 100)
-  local cursor = decode_cursor(params.cursor).u or ''
+  local limit = clamp_int(params.limit, 50, 1, 100)
+  local cursor = string_field(decode_cursor(params.cursor).u) or ''
 
   local rows = db.raw(
     [[SELECT did, min(uri) AS first_uri FROM happyview_records

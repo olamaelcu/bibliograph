@@ -1,10 +1,10 @@
 -- @include lib/prelude.lua
 -- net.olamaelcu.livtet.biblio.shelf.delete — cascading shelf delete.
 --
--- Every shelfItem and every bookStatus whose `shelf` is this URI goes first,
--- then the shelf itself. The records are found through the local index (the
--- record JSON is text, so the shelf URI is compared after decoding) and each
--- delete goes through the Record API, so the caller's PDS is updated too.
+-- Every shelfItem and bookStatus whose `record.shelf` is this URI is selected
+-- through the partial expression index on `(record::jsonb)->>'shelf'` (no Lua
+-- scan), loaded in one `Record.load_all` batch, then deleted through the
+-- Record API so the caller's PDS is updated too. The shelf itself goes last.
 
 local CASCADE = { SHELF_ITEM, BOOK_STATUS }
 
@@ -12,15 +12,12 @@ local function records_referencing(shelf_uri)
   local found = {}
   for _, collection_name in ipairs(CASCADE) do
     local rows = db.raw(
-      [[SELECT uri, record FROM happyview.happyview_records
-         WHERE did = $1 AND collection = $2]],
-      { caller_did, collection_name }
+      [[SELECT uri FROM happyview_records
+         WHERE did = $1 AND collection = $2 AND (record::jsonb)->>'shelf' = $3]],
+      { caller_did, collection_name, shelf_uri }
     )
     for _, row in ipairs(rows) do
-      local value = record_value(row.record)
-      if value.shelf == shelf_uri then
-        found[#found + 1] = row.uri
-      end
+      found[#found + 1] = row.uri
     end
   end
   return found
@@ -31,32 +28,26 @@ function handle()
     return fail(400, 'InvalidRequest', 'the request body must be a JSON object')
   end
 
-  local shelf_uri = string_field(input.shelf)
-  if shelf_uri == nil then
-    return fail(400, 'InvalidRequest', '`shelf` must be a shelf AT-URI')
-  end
-  local did, coll = at_uri_parts(shelf_uri)
-  if did == nil or coll ~= SHELF_COLLECTION then
-    return fail(400, 'InvalidRequest', '`shelf` must be an AT-URI in ' .. SHELF_COLLECTION)
-  end
-  if did ~= caller_did then
-    return fail(403, 'Forbidden', 'shelf ' .. shelf_uri .. ' belongs to another DID')
-  end
+  local shelf, failure = owned_shelf(input.shelf)
+  if failure ~= nil then return failure end
 
-  local shelf = Record.load(shelf_uri)
-  if shelf == nil then
-    return fail(404, 'NotFound', 'no shelf record at ' .. shelf_uri)
-  end
-
+  local uris = records_referencing(shelf.uri)
   local deleted = 0
-  for _, uri in ipairs(records_referencing(shelf_uri)) do
-    local dependent = Record.load(uri)
-    if dependent ~= nil then
-      dependent:delete()
-      deleted = deleted + 1
+  if #uris > 0 then
+    local records, err = pds_load_all(uris)
+    if records == nil then
+      return fail(502, 'UpstreamFailure', 'could not load shelf contents: ' .. tostring(err))
+    end
+    for _, record in ipairs(records) do
+      if record ~= nil then
+        failure = pds_delete(record)
+        if failure ~= nil then return failure end
+        deleted = deleted + 1
+      end
     end
   end
 
-  shelf:delete()
+  failure = pds_delete(shelf.record)
+  if failure ~= nil then return failure end
   return { deleted = deleted + 1 }
 end

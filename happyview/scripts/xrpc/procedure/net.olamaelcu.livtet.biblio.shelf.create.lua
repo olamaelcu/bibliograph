@@ -6,9 +6,9 @@ function handle()
     return fail(400, 'InvalidRequest', 'the request body must be a JSON object')
   end
 
-  local name = string_field(input.name)
-  if name == nil then
-    return fail(400, 'InvalidRequest', '`name` must be a non-empty string')
+  local name, err = required_string(input.name, 'name')
+  if err ~= nil then
+    return fail(400, 'InvalidRequest', err)
   end
   if #name > 128 then
     return fail(400, 'InvalidRequest', '`name` must be at most 128 characters')
@@ -28,6 +28,7 @@ function handle()
 
   local record = Record(SHELF_COLLECTION, data)
   record:set_rkey(TID())
-  record:save()
+  local failure = pds_save(record)
+  if failure ~= nil then return failure end
   return { uri = record._uri }
 end

@@ -1,9 +1,24 @@
 -- @include lib/prelude.lua
+-- net.olamaelcu.livtet.biblio.listShelvesWithBooks — shelves plus their books.
+--
+-- One shelf page, then one bookStatus query per shelf capped at
+-- `booksPerShelf`. All view builders share one per-request cache, so a book or
+-- shelf repeated across the page is looked up once. `did` is optional; an empty
+-- string is treated as absent, a non-empty value must be a DID.
+
 function handle()
-  local limit = int(params.limit, 50, 1, 100)
-  local booksPerShelf = int(params.booksPerShelf, 25, 1, 100)
-  local cursor = decode_cursor(params.cursor).u or ''
-  local did = params.did
+  local limit = clamp_int(params.limit, 50, 1, 100)
+  local booksPerShelf = clamp_int(params.booksPerShelf, 25, 1, 100)
+  local cursor = string_field(decode_cursor(params.cursor).u) or ''
+
+  local did = string_field(params.did)
+  if did ~= nil then
+    local err
+    did, err = required_did(did, 'did')
+    if err ~= nil then return fail(400, 'InvalidRequest', err) end
+  else
+    did = ''
+  end
 
   local rows = db.raw(
     [[SELECT uri, did, record FROM happyview_records
@@ -12,9 +27,10 @@ function handle()
          AND ($3 = '' OR uri > $3)
        ORDER BY uri ASC
        LIMIT $4]],
-    { SHELF_COLLECTION, did or '', cursor, limit + 1 }
+    { SHELF_COLLECTION, did, cursor, limit + 1 }
   )
 
+  local cache = view_cache()
   local shelves = {}
   for i = 1, math.min(#rows, limit) do
     local shelf_row = rows[i]
@@ -27,7 +43,7 @@ function handle()
     )
     local books = {}
     for _, entry in ipairs(entries) do
-      local view = book_shelf_view(entry)
+      local view = book_shelf_view(entry, cache)
       if view ~= nil then books[#books + 1] = view end
     end
     table.sort(books, function(a, b)

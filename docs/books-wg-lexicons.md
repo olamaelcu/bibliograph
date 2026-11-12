@@ -225,7 +225,7 @@ Honest limits:
 - `edition-record.test.js` covers the old-to-new role mapping (`author` → `A01`, `foreword` →
   `A23`), ONIX pass-through, `displayName`/`nameInverted` and the `A01` default. The same mapping
   is duplicated in `packages/web/src/lib/server/catalog/contributor-roles.ts` and
-  `happyview/lib/prelude.lua`; keep the three tables in sync.
+  `happyview/lib/views.lua`; keep the three tables in sync.
 - Open items to raise upstream: an asynchronous-hydration signal for `editionResults`; array bounds
   use `minLength` instead of `minItems`; `editionView` carries no CID, while
   writes such as `shelf.addItem` need `{ uri, cid }` strongRefs, so a resolving client still has to

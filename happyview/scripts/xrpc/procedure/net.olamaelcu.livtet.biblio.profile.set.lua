@@ -53,6 +53,7 @@ function handle()
     record:set_rkey('self')
   end
 
-  record:save()
+  local failure = pds_save(record)
+  if failure ~= nil then return failure end
   return { uri = record._uri }
 end

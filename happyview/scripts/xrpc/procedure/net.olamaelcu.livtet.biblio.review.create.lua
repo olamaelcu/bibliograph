@@ -5,22 +5,6 @@
 -- catalog edition to exist. At least one of rating or textContent must be
 -- present, as the review lexicon requires.
 
-local function valid_subject(value)
-  if type(value) ~= 'table' then
-    return nil, '`subject` must be an editionRef object'
-  end
-  if type(value.title) ~= 'string' or value.title == '' then
-    return nil, '`subject.title` must be a non-empty string'
-  end
-  if type(value.identifiers) ~= 'table' or #value.identifiers < 1 then
-    return nil, '`subject.identifiers` must be a non-empty array'
-  end
-  if type(value.contributors) ~= 'table' then
-    return nil, '`subject.contributors` must be an array (it may be empty)'
-  end
-  return value
-end
-
 local function valid_rating(value)
   local rating = integer_field(value)
   if rating == nil or rating < 1 or rating > 20 then
@@ -34,7 +18,7 @@ function handle()
     return fail(400, 'InvalidRequest', 'the request body must be a JSON object')
   end
 
-  local subject, err = valid_subject(input.subject)
+  local subject, err = edition_ref(input.subject)
   if err ~= nil then
     return fail(400, 'InvalidRequest', err)
   end
@@ -87,6 +71,7 @@ function handle()
 
   local record = Record(REVIEW_COLLECTION, data)
   record:set_rkey(TID())
-  record:save()
+  local failure = pds_save(record)
+  if failure ~= nil then return failure end
   return { uri = record._uri }
 end

@@ -1,9 +1,14 @@
 -- @include lib/prelude.lua
+-- net.olamaelcu.livtet.biblio.listShelves — one DID's shelf records.
+--
+-- Ordered by URI ascending, keyset `uri > cursor`. Fixed reading-status
+-- shelves appear only when a record exists; nothing is derived.
+
 function handle()
-  local did = params.did
-  if did == nil then return fail(400, 'InvalidRequest', 'did is required') end
-  local limit = int(params.limit, 50, 1, 100)
-  local cursor = decode_cursor(params.cursor).u or ''
+  local did, err = required_did(params.did, 'did')
+  if err ~= nil then return fail(400, 'InvalidRequest', err) end
+  local limit = clamp_int(params.limit, 50, 1, 100)
+  local cursor = string_field(decode_cursor(params.cursor).u) or ''
 
   local rows = db.raw(
     [[SELECT uri, did, record FROM happyview_records

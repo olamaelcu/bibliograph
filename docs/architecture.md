@@ -37,7 +37,7 @@ Codelist 17 code or a legacy kebab-case token (`author`, `foreword`, …). No
 migration rewrites them. Every lexicon boundary maps to the current shape:
 `buildEditionRecord` emits `displayName` and a code, the edge's
 `editionView` (`contributor-roles.ts`) does the same, and HappyView's
-`prelude.lua` applies the identical table. Unknown role tokens pass through
+`lib/views.lua` applies the identical table. Unknown role tokens pass through
 because the lexicon's `knownValues` list is open.
 
 New editions always get a TID rkey from `editions_next_tid()` (a 13-character

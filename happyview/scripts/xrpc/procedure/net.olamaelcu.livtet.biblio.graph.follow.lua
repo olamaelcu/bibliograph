@@ -28,6 +28,7 @@ function handle()
 
   local record = Record(FOLLOW_COLLECTION, { subject = subject, createdAt = now() })
   record:set_rkey(subject)
-  record:save()
+  local failure = pds_save(record)
+  if failure ~= nil then return failure end
   return { uri = record._uri, created = true }
 end

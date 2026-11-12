@@ -1,9 +1,14 @@
 -- @include lib/prelude.lua
+-- net.olamaelcu.livtet.biblio.listReviewsByActor — one DID's reviews.
+--
+-- Newest first, offset cursor. The cursor advances by `limit` (the number of
+-- rows the page emits), not by `limit + 1` (the probe row it scanned).
+
 function handle()
-  local did = params.did
-  if did == nil then return fail(400, 'InvalidRequest', 'did is required') end
-  local limit = int(params.limit, 25, 1, 100)
-  local offset = tonumber(decode_cursor(params.cursor).o) or 0
+  local did, err = required_did(params.did, 'did')
+  if err ~= nil then return fail(400, 'InvalidRequest', err) end
+  local limit = clamp_int(params.limit, 25, 1, 100)
+  local offset = decode_offset(decode_cursor(params.cursor).o)
 
   local rows = db.raw(
     [[SELECT uri, did, record, created_at FROM happyview_records
@@ -18,6 +23,6 @@ function handle()
     out[#out + 1] = review_view(rows[i])
   end
   local response = { reviews = toarray(out) }
-  if #rows > limit then response.cursor = encode_cursor({ o = offset + #rows }) end
+  if #rows > limit then response.cursor = offset_cursor(offset, limit) end
   return response
 end

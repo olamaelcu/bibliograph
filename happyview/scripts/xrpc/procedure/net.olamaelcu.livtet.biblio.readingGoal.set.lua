@@ -46,6 +46,7 @@ function handle()
     record:set_rkey('current')
   end
 
-  record:save()
+  local failure = pds_save(record)
+  if failure ~= nil then return failure end
   return { uri = record._uri, period = period, year = year, booksGoal = books_goal }
 end

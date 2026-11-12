@@ -119,7 +119,7 @@ What is created:
 because HappyView's `db.raw`/Any driver cannot decode `jsonb` or
 `timestamptz`: `series`, `contributors`, `publisher`, `publishers`,
 `identifiers` and `created_at` arrive as JSON/timestamp **text**. The Lua
-scripts (`happyview/lib/prelude.lua`, `edition_view`) read
+scripts (`happyview/lib/views.lua`, `edition_view`) read
 `appview_book_lua`; the web catalog queries read the tables directly. Keep
 both: they are different contracts over the same rows.
 

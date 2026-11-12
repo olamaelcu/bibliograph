@@ -118,20 +118,23 @@ and answers `400 InvalidRequest` when it is not the expected `{c,u}` object.
 
 | Encoding | Meaning | Methods |
 | --- | --- | --- |
-| `{ "o": <offset> }` | offset, advanced by the number of **scanned** rows (`limit + 1` when another page exists) | `getReviewsByBook`, `listReviewsByActor`, `listShelfItems`, `listShelfItemsByBook`, `getShelvingOfBook` |
+| `{ "o": <offset> }` | offset, advanced by the number of **emitted** rows (`limit`); the `limit + 1` probe row only decides whether another page exists | `getReviewsByBook`, `listReviewsByActor`, `listShelfItems`, `listShelfItemsByBook`, `getShelvingOfBook` |
 | `{ "t": <created_at>, "u": <uri> }` | keyset over `(created_at, uri)`, descending | `listBooksOnShelf`, `listRecentShelving` |
 | `{ "u": <uri> }` | keyset over `uri`, ascending; for `getShelversOfBook` it is the smallest URI seen per DID | `listShelves`, `listShelvesWithBooks`, `getShelversOfBook` |
 | raw DID | keyset over the follower DID / subject DID, ascending | `graph.listFollowers`, `graph.listFollowees` |
 | `{ "c": <createdAt>, "u": <uri> }` | keyset over the record's own `createdAt` (text order) and `uri`, descending; `c` may be `null` for a row without `createdAt` | `com.atproto.feed.getFeedSkeleton` |
 
-A cursor is emitted only when the `limit + 1` probe row exists. Because list mapping can drop
-unbuildable rows, an offset cursor can return fewer than `limit` views while still pointing past
-all scanned rows; the keyset cursors share the same property (they advance from the last scanned
-row, not the last emitted view).
+A cursor is emitted only when the `limit + 1` probe row exists. An offset cursor advances by
+`limit`, the page size actually emitted: the next call starts at the probe row instead of skipping
+it. Because list mapping can drop unbuildable rows, a page can return fewer than `limit` views while
+the next call still continues from the same scanned page boundary; keyset cursors likewise advance
+from the last scanned row, not the last emitted view. A decoded offset that is negative, NaN or
+non-numeric restarts at 0, and a float is floored and capped by `MAX_OFFSET` before it reaches SQL.
 
-**Limits.** Every `limit` is clamped to the lexicon's range by the handler (`int(value, default,
-min, max)`), so an out-of-range number is adjusted, not rejected. The feed generator defaults to
-20 and clamps to 1–100; a non-integer `limit` is `400 InvalidRequest`.
+**Limits.** Every `limit` is clamped to the lexicon's range by the handler (`clamp_int(value,
+default, min, max)`), so an out-of-range number is adjusted, not rejected. A non-finite value falls
+back to the default. The feed generator defaults to 20 and clamps to 1–100; a non-integer `limit` is
+`400 InvalidRequest`.
 
 **Errors.** The envelope is `{ "error": string, "message": string }`.
 
@@ -145,7 +148,7 @@ min, max)`), so an out-of-range number is adjusted, not rejected. The feed gener
 | 404 | `NotFound` | a procedure targets a follow, review, shelf, `bookStatus` or `shelfItem` that does not exist |
 | 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing |
 | 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST, and for `POST` on the two feed methods |
-| 502 | `UpstreamFailure` | `shelf.addBooks` when the PDS rejects the batch |
+| 502 | `UpstreamFailure` | any procedure when the PDS rejects a save, delete or batch |
 | 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable, or when a PDS-proxied read fails or times out |
 | 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (`resolveEditions` / `searchEditions` / `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
 
@@ -202,8 +205,8 @@ signal. Queued work is not a promise that anything will be found.
 | `getReviewsByBook` | `book`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
 | `listReviewsByActor` | `did`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
 | `graph.isFollowing` | `follower`, `followed` | `{ following }` |
-| `graph.listFollowers` | `did`, `limit` 100 (≤1000), `cursor` | `{ followers, total?, cursor? }` |
-| `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total?, cursor? }` |
+| `graph.listFollowers` | `did`, `limit` 100 (≤1000), `cursor` | `{ followers, total, cursor? }` |
+| `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total, cursor? }` |
 
 ### Procedures
 
@@ -237,37 +240,42 @@ the same request.
 
 #### `getActorProfile`
 
-Reads the index at `at://<did>/net.olamaelcu.livtet.actor.profile/self` and returns the stored record
-as `profile`. A missing record is `200 { profile: null }`; no PDS read happens, so a profile the
-index has not seen is reported missing. The lexicon's optional `handle` is not served today: the
-handler emits only `profile`.
+Reads the index at `at://<did>/net.olamaelcu.livtet.actor.profile/self` and returns the decoded record
+object as `profile`. A missing (or unparseable) record is `200 { profile: null }`; no PDS read
+happens, so a profile the index has not seen is reported missing. `did` is required and may not be
+an empty string. The lexicon's optional `handle` is not served today: the handler emits only
+`profile`.
 
 #### `getReadingGoal`
 
 Reads the index at `at://<did>/net.olamaelcu.livtet.biblio.readingGoal/current` and returns the
-stored record as `goal`, or `null`.
+decoded record object as `goal`, or `null`. `did` is required and may not be empty.
 
 ### Follow graph
 
-Follow rows are `net.olamaelcu.livtet.biblio.follow` records; the subject DID is the first path
-segment of `record.subject`, and the rkey is the subject DID too.
+Follow rows are `net.olamaelcu.livtet.biblio.follow` records. The lexicon types `subject` as a DID,
+but legacy rows may store the full `at://<did>` form; the queries match either spelling against the
+indexed full-subject expression. The rkey is the subject DID by contract, and `listFollowees` pages
+on that column instead of a derived expression.
 
 #### `graph.isFollowing`
 
-One probe of the follower's follow collection filtered by the subject DID returns `{ following }`.
-The graph is public data; `follower` and `followed` name whose edge to read, not the caller.
+One probe of the follower's follow collection filtered by either subject spelling returns
+`{ following }`. Both DIDs are required and may not be empty. The graph is public data; `follower`
+and `followed` name whose edge to read, not the caller.
 
 #### `graph.listFollowers`
 
-Rows whose `subject` DID equals `did`, ordered by the follower DID (`record.did`) ascending, keyset
-`did > cursor`. `total` is counted only when no cursor is given; a full page emits the last
-follower DID as the cursor.
+Rows whose `subject` is `did` or `at://did`, ordered by the follower DID (`record.did`) ascending,
+keyset `did > cursor`. `total` is the full follower count and is emitted on every page, including
+pages with a cursor and empty pages; a full page emits the last follower DID as the cursor.
 
 #### `graph.listFollowees`
 
-Rows whose record DID equals `did`, ordered by the subject DID ascending, keyset on the same value.
-`total` is counted on the first page only, and the first page is the only one that emits it. A full
-page emits the last subject DID as the cursor.
+Rows whose record DID equals `did`, ordered by the record rkey (the subject DID) ascending, keyset on
+the same column. `total` is the full followee count and is emitted on every page. A full page emits
+the last subject DID as the cursor. `followedAt` falls back to the indexed `created_at` when the
+record body has no `createdAt`.
 
 ### Shelves
 
@@ -344,9 +352,10 @@ Reviews are `community.lexicon.media.book.review` records; `reviewView` returns 
 
 #### `getReviewsByBook`
 
-Pages reviews that either name the book in `subjectRecord` or share an identifier with the edition
-(`edition_identifiers` of `book`), ordered `created_at` descending, `uri` descending, offset cursor.
-Returns `{ reviews, cursor? }`. The lexicon declares `NotFound`; the handler returns an empty page.
+Pages reviews that either name the book in `subjectRecord` or share an identifier with the edition's
+`identifiers` bag in `appview_book_lua`, ordered `created_at` descending, `uri` descending, offset
+cursor. Returns `{ reviews, cursor? }`. The activity plane reads no other catalog table. The lexicon
+declares `NotFound`; the handler returns an empty page.
 
 #### `listReviewsByActor`
 
@@ -520,16 +529,17 @@ supplied. Missing shelf: `404 NotFound`.
 #### `shelf.delete`
 
 Cascading delete of an owned shelf: every `shelfItem` and every `bookStatus` whose `record.shelf`
-equals the shelf URI is deleted first, then the shelf itself. Child records are found by scanning the
-caller's rows in both collections and comparing the decoded `shelf` field. Returns
-`{ deleted }`, counting the cascade plus the shelf record.
+equals the shelf URI is selected through the partial expression index on `(record::jsonb)->>'shelf'`,
+loaded in one `Record.load_all` batch, and deleted first; then the shelf itself. A missing shelf is
+`404 NotFound`. Returns `{ deleted }`, counting the cascade plus the shelf record.
 
 ### Membership
 
 #### `shelf.addItem`
 
-Upsert of one membership edge. `book` must be a strongRef with a CID; `metadata.position` must be an
-integer ≥ 1, `metadata.notes` and `metadata.emoji` strings. The rkey is derived as
+Upsert of one membership edge. `shelf` must be an owned, existing shelf (`404` when it does not
+exist, `403` when it belongs to another DID). `book` must be a strongRef with a CID;
+`metadata.position` must be an integer ≥ 1, `metadata.notes` and `metadata.emoji` strings. The rkey is derived as
 `<shelf rkey>-<edition rkey>` (rejected if longer than 512 characters), so the pair always maps to
 one record. On an existing record the metadata is merged key-by-key (omitted keys keep their value)
 and `updatedAt` is bumped; on create the metadata object is stored as given. Returns `{ uri }`.
@@ -541,7 +551,8 @@ Deletes the derived `<shelf rkey>-<edition rkey>` record. `book` may be a strong
 
 #### `shelf.addBooks`
 
-Batch upsert of up to 100 strongRefs. Each entry is validated independently; invalid entries
+Batch upsert of up to 100 strongRefs into an owned, existing shelf (`404`/`403` as in
+`shelf.addItem`). Each entry is validated independently; invalid entries
 (missing CID, malformed URI, duplicate derived rkey inside the request, rkey over 512 characters)
 are counted in `failed` instead of failing the call. Valid entries are written in parallel with
 `Record.save_all`; an existing record has its `shelf`, `book` and `updatedAt` refreshed (its
@@ -553,7 +564,8 @@ are counted in `failed` instead of failing the call. Valid entries are written i
 #### `status.set`
 
 Upsert of `bookStatus` at the edition rkey. Requires a strongRef `book` (CID included) and a
-`status` ∈ `to-read|reading|read|dnf`; `shelf` is optional but must be one of the caller's shelves.
+`status` ∈ `to-read|reading|read|dnf`; `shelf` is optional, but when present it must exist and belong
+to the caller (`404`/`403`), so the read views never receive a dangling shelf reference.
 `metadata` may carry `startedAt`/`finishedAt` (strings), `position` (integer ≥ 1), `notes` and
 `emoji` (strings). On an existing record the metadata is merged, `status` is overwritten,
 `createdAt` survives and `updatedAt` is bumped. Returns `{ uri, status }`.

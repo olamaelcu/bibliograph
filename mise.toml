@@ -23,5 +23,9 @@ run = ["docker compose up -d", "pnpm run dev"]
 [tasks.dev]
 run = ["mise run web-dev ::: worker-dev"]
 
+[tasks.hv-test]
+description = "Syntax-check and unit-test the HappyView Lua scripts"
+run = ["happyview/test/run.sh"]
+
 [shell_alias]
 sql = "mise sql"
