@@ -5,8 +5,8 @@ lexicons:
 
 - upstream: https://tangled.org/books-wg.tngl.sh/lexicons
 - pinned commit: `3bcee8e344681fc5251abf43537d2c13ba85ff94` (`main`, 2026-11-11)
-- declared in `.gitmodules`; CI, `mise` tasks and the Debian build must run
-  `git submodule update --init --recursive` before anything reads it.
+- declared in `.gitmodules`. After the PR #18 import, no build step reads it; initialize the
+  submodule only when inspecting the upstream working set.
 
 The submodule tracks the upstream, not the local clone used while reviewing it. Updating is
 `git -C vendor/books-wg-lexicons fetch && git -C vendor/books-wg-lexicons checkout <sha>`, then
@@ -206,9 +206,9 @@ Honest limits:
   exactly one `atproto` identifier equal to the record URI, pagination/`hasMore`/`total`, exact and
   identifier-bag matching, `InvalidQuery`, `InvalidRequest`, `405` on `GET`, and the derived
   `/book/<did>/<rkey>` path.
-- Contract tests should validate responses against the vendored schemas; `editionResults` requires
-  `items` and `hasMore`, `total` is optional. CI must initialise the submodule and fail if the pin is
-  missing.
+- Contract tests should validate responses against the imported schemas; `editionResults` requires
+  `items` and `hasMore`, `total` is optional. If they later read the submodule, CI must initialise
+  it and fail if the pin is missing.
 - `edition-record.test.js` covers the old-to-new role mapping (`author` → `A01`, `foreword` →
   `A23`), ONIX pass-through, `displayName`/`nameInverted` and the `A01` default. The same mapping
   is duplicated in `packages/web/src/lib/server/catalog/contributor-roles.ts` and
