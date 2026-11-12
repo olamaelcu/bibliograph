@@ -344,8 +344,8 @@ dpkg-reconfigure bibliograph-web   # runs postinst, enables the vhost
 nginx -t && systemctl reload nginx
 ```
 
-The `mise run enable-tls` task belonged to the retired combined package's
-debconf/port arrangement and is not part of this flow.
+The retired combined package also shipped an `enable-tls` task; it was removed
+with that package and is not part of this flow.
 
 ## Units
 
@@ -374,18 +374,24 @@ database a newer one has migrated. Rollback is a version pin to an older package
 set (`apt-get install -y bibliograph-web=<version> …`); automated rollback and
 staging/canary workflows are not provided.
 
-## Retired combined package
+## Removed combined package
 
-The old single `bibliograph` package and its deploy path are retired and are not
-used by the current flow:
+The old single `bibliograph` package and its deploy path were removed from this
+tree and are not used by the current flow:
 
-| Retired | Current replacement |
+| Removed | Current replacement |
 | --- | --- |
-| `debian/`, `package-payload`, `package-deb` → `dist/bibliograph_*.deb`, `bibliograph.service` | `packaging/{happyview,worker,web}`, `package-{hv,worker,web}-{payload,deb}` |
+| `debian/`, `package-payload`, `package-deb`, `package-verify-deb`, `deploy-deb`, `enable-tls` → `dist/bibliograph_*.deb`, `bibliograph.service` | `packaging/{happyview,worker,web}`, `package-{hv,worker,web}-{payload,deb}` |
 | `mise run deploy-deb` (combined deb + PostgreSQL provisioning) | `mise run deploy` |
 | drizzle migrator / `bibliograph-migrate.service` | none; catalog schema is applied once from `/usr/lib/bibliograph-worker/sql/` |
 | `bibliograph.env`, `port.conf`, debconf `bibliograph/port` | `happyview.env`, `worker.env`, `web.env`; web port is `PORT` in `web.env` (default 5176) |
 | combined nginx site `bibliograph-platform` | `bibliograph-web` package's vhost conffile |
+
+The retired combined package published under the public production publisher
+identity `ATP_SERVICE_DID=did:plc:e2x3ihw2ntxt7pcgzmtu3abi` (the account whose
+repo carries the catalog records). The split packages ship no value for it: set
+`ATP_SERVICE_DID` explicitly in `/etc/bibliograph/worker.env`, and keep
+`PDS_ACCOUNT_DID` equal to it.
 
 `deploy.sh` itself used to install `dist/bibliograph_*.deb` and restart
 `bibliograph`/`bibliograph-worker`; it now selects only the three split packages

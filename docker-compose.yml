@@ -1,25 +1,26 @@
 # Local development stack: Postgres, a local PLC directory, a local PDS, Caddy
-# (TLS for both), and a pinned HappyView.
+# (TLS for the PDS), a pinned HappyView, and Prometheus.
 #
 # The network is closed: HappyView's Jetstream and relay point at a dead port, so
 # no public-network records enter the index. Only the local PDS's own repo is
 # indexed, via the procedures HappyView proxies and via backfill from RELAY_URL.
 #
-# Everything is reachable over HTTPS with Caddy's internal CA:
+# Endpoints:
 #
-#   https://localhost        HappyView (dashboard at /, admin API at /admin/*)
-#   https://pds.localhost    the PDS        (`alice.pds.localhost` also routes)
+#   http://127.0.0.1:3000           HappyView (dashboard at /, admin API at /admin/*)
+#   https://pds.127-0-0-1.sslip.io the PDS (`alice.pds.127-0-0-1.sslip.io` also routes)
 #
-# `*.localhost` resolves to 127.0.0.1 on Linux, so no DNS or /etc/hosts entry is
-# needed. The browser has to trust Caddy's root CA once: `mise run hv-ca` writes
-# it to .cache/caddy-root.crt and prints the import command.
+# `*.127-0-0-1.sslip.io` resolves to 127.0.0.1 through public DNS, so no DNS or
+# /etc/hosts entry is needed; `docker/Caddyfile` terminates TLS for the PDS with
+# its internal CA. The browser has to trust Caddy's root CA once: `mise run
+# hv-ca` writes it to .cache/caddy-root.crt and prints the import command.
 #
 # HappyView's PUBLIC_URL is a loopback name on purpose. `is_loopback_url` covers
-# `localhost`, so HappyView registers itself as the spec's localhost OAuth client
-# (client_id `http://localhost`). The PDS then synthesises its metadata instead
-# of fetching it, which keeps the TLS trust problem one-directional: HappyView
-# trusts Caddy (see docker/happyview-local-entrypoint.sh), the PDS never has to
-# trust HappyView.
+# loopback addresses, so HappyView registers itself as the spec's localhost OAuth
+# client (client_id `http://localhost`). The PDS then synthesises its metadata
+# instead of fetching it, which keeps the TLS trust problem one-directional:
+# HappyView trusts Caddy (see docker/happyview-local-entrypoint.sh), the PDS
+# never has to trust HappyView.
 name: bibliograph
 
 services:
@@ -188,7 +189,6 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./prometheus/rules:/etc/prometheus/rules:ro
       - promdata:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"

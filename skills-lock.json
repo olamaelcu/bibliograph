@@ -32,12 +32,12 @@
       "computedHash": "b8a0477cd4d7bf8fa54d27f8e64d82388402f0d502591db50a357df5b9995c75"
     },
     "webawesome": {
-      "source": "./packages/bibliograph-service/node_modules/@awesome.me/webawesome/dist/skills/webawesome",
+      "source": "./packages/web/node_modules/@awesome.me/webawesome/dist/skills/webawesome",
       "sourceType": "local",
       "computedHash": "032d4071623aeab7710aea523d3a71a62fde0452b9fc3fd5748ed78194d6e91f"
     },
     "webawesome-design": {
-      "source": "./packages/bibliograph-service/node_modules/@awesome.me/webawesome/dist/skills/webawesome-design",
+      "source": "./packages/web/node_modules/@awesome.me/webawesome/dist/skills/webawesome-design",
       "sourceType": "local",
       "computedHash": "e01dbf4deaa2e091acc116d0bcb5f5852324174cba0ffc8f45fac3b24415d206"
     }

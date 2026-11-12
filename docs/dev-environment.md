@@ -160,8 +160,9 @@ untouched.
 
 ## Database schemas
 
-HappyView creates unqualified tables, including a `labels` table that collides
-with the AppView's labeler table. It therefore runs in its own schema:
+HappyView creates unqualified tables, including a `labels` table. It therefore
+runs in its own schema so those tables stay out of the catalog's `public`
+schema:
 
 - App: `DATABASE_URL=…/bibliograph` (public only).
 - HappyView: `HAPPYVIEW_DATABASE_URL=postgres://happyview_app:happyview@…/bibliograph`.

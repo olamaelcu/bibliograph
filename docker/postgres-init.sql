@@ -1,6 +1,6 @@
 -- Local compose stack: HappyView needs its own schema and login role because
--- sqlx migrations are unqualified and its `labels` table collides with the
--- AppView's. The role's default search_path is what keeps them apart.
+-- its sqlx migrations are unqualified. The role's default search_path keeps
+-- its tables (including `labels`) out of the catalog's `public` schema.
 CREATE SCHEMA IF NOT EXISTS happyview;
 
 DO $$

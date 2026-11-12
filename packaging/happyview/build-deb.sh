@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 # Build the bibliograph-happyview .deb from the staged payload.
 #
-# Deliberately not part of the debhelper tree in debian/: that tree builds the
-# `bibliograph` application package from a Node payload staged by
-# `package-payload`, which needs the SvelteKit server sources. HappyView has no
-# Node payload — its tree is a binary, migrations and static files extracted
-# from the pinned image — so it is assembled with dpkg-deb and can be built and
-# installed on its own. The package layout still matches the app package's
-# conventions: /usr/lib/bibliograph, /etc/bibliograph, the shared `bibliograph`
-# sysuser.
+# HappyView has no Node payload — its tree is a binary, migrations and static
+# files extracted from the pinned image — so it is assembled with dpkg-deb and
+# can be built and installed on its own. The package layout matches the other
+# Bibliograph packages' conventions: /usr/lib/bibliograph, /etc/bibliograph,
+# the shared `bibliograph` sysuser.
 
 set -euo pipefail
 

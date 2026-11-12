@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Build the bibliograph-web .deb from the staged adapter-node output.
 #
-# Same reasoning as the HappyView package: the debhelper tree in debian/ builds
-# the original application package from a Node payload for sources that no
-# longer exist, and this edge must be installable on its own. Assembled with
-# dpkg-deb, keeping the repo's layout conventions (/usr/lib/bibliograph,
+# This edge is assembled with dpkg-deb and must be installable on its own,
+# keeping the repo's layout conventions (/usr/lib/bibliograph,
 # /etc/bibliograph, the shared `bibliograph` sysuser).
 #
 # Architecture is `all`: the payload is JavaScript, and the runtime dependency
@@ -46,7 +44,7 @@ install -d "$STAGE$LIVE"
 cp -a "$PAYLOAD/build" "$STAGE$LIVE/build"
 
 install -D -m 0644 packaging/web/web.env "$STAGE/etc/bibliograph/web.env"
-# The TLS vhost is a conffile in sites-available only; debian/postinst enables it
+# The TLS vhost is a conffile in sites-available only; packaging/web/debian/postinst enables it
 # when a certificate exists and nginx accepts the result. It is not copied into
 # sites-enabled here, so an installed package never breaks the host's nginx.
 install -D -m 0644 packaging/web/nginx/bibliograph.conf \

@@ -87,11 +87,6 @@ function stringValue(value) {
   return undefined;
 }
 
-function stringList(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map(stringValue).filter(Boolean);
-}
-
 function identifierList(value) {
   if (!Array.isArray(value)) return [];
   const seen = new Set();

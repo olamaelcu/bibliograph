@@ -25,14 +25,7 @@ function positiveInteger(value) {
 }
 
 function seriesValue(value) {
-  let series = value;
-  if (typeof series === 'string') {
-    try {
-      series = JSON.parse(series);
-    } catch {
-      return undefined;
-    }
-  }
+  const series = value;
   if (series === null || typeof series !== 'object') return undefined;
   const name = nonEmptyString(series.name);
   if (!name) return undefined;
@@ -44,11 +37,9 @@ function seriesValue(value) {
 }
 
 function contributorValue(row) {
-  // New rows use the lexicon's `displayName`; rows ingested under the old
-  // books-wg draft stored the same value in `name`.
-  const displayName = nonEmptyString(row.displayName) ?? nonEmptyString(row.name);
+  const displayName = nonEmptyString(row.name);
   if (!displayName) return undefined;
-  const nameInverted = nonEmptyString(row.nameInverted) ?? nonEmptyString(row.name_inverted);
+  const nameInverted = nonEmptyString(row.name_inverted);
   const identifiers = identifierArray(row.identifiers);
   return {
     displayName,

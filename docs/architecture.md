@@ -10,8 +10,9 @@ Bibliograph is an AppView with a deliberately narrow seam:
   query from that index.
 
 One Postgres database holds both planes, in two schemas: `public` for the
-catalog, `happyview` for HappyView's tables (its `labels` table motivates the
-separate schema). Activity scripts join `appview_book_lua`, a text projection
+catalog, `happyview` for HappyView's tables (a separate schema keeps
+HappyView's unqualified tables, including `labels`, out of `public`).
+Activity scripts join `appview_book_lua`, a text projection
 of `appview_book` over the catalog tables, because HappyView's `db.raw` cannot
 decode jsonb or timestamptz columns. No other catalog coupling exists at read
 time. Catalog editions are published to the publisher PDS by an outbox
@@ -365,9 +366,11 @@ inline fallback.
 ## Lexicon provenance
 
 `happyview/lexicons/community/lexicon/media/book/` is the source of truth for
-the shared book NSIDs. It imports five files verbatim from
+the shared book NSIDs. It imports five files from
 [lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest)
-(`1f246574e733dfb37ef30637b97d8bbc371820a2`), which is open, not merged.
+(`1f246574e733dfb37ef30637b97d8bbc371820a2`), which is open, not merged; four
+are verbatim and `defs.json` adds the local `publisher.ref` extension described
+below.
 `vendor/books-wg-lexicons` is a separate upstream working-set submodule pinned
 at `3bcee8e344681fc5251abf43537d2c13ba85ff94` for provenance only; no build
 reads it, and its `defs.json`/`edition.json` predate the PR, so they must not
@@ -388,6 +391,5 @@ remains to be proposed upstream.
   remove `vendor/books-wg-lexicons` when upstream lands; propose
   `defs#publisher.ref` upstream. See [Lexicon provenance](#lexicon-provenance).
 - **Batch edition lookup.** `net.olamaelcu.livtet.biblio.getEditions`
-  (1–100 AT-URIs → `defs#bookView`) was planned but has no lexicon or handler;
-  only `packages/web/src/lib/server/metrics.ts` names it. Implement it or
-  remove the stale allowlist entry.
+  (1–100 AT-URIs → `defs#bookView`) was planned but has no lexicon or handler.
+  Implement it if it is still wanted.

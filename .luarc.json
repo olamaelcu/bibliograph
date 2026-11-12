@@ -33,7 +33,6 @@
     "book_shelf_view",
     "shelf_item_view",
     "review_view",
-    "paged",
     "at_uri_parts",
     "is_did",
     "string_field",

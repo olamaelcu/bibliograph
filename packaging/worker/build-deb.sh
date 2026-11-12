@@ -7,8 +7,7 @@
 # nodejs with no package manager or build toolchain. Architecture is `all`:
 # every shipped file is JavaScript or JSON.
 #
-# The older debhelper tree in debian/ builds the original combined package from
-# sources that no longer exist; this worker package is standalone.
+# This worker package is standalone.
 
 set -euo pipefail
 

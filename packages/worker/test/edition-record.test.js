@@ -130,14 +130,14 @@ test('refuses a record with no title or created_at', () => {
   );
 });
 
-test('accepts ONIX codes, displayName and nameInverted from newer rows', () => {
+test('accepts ONIX codes and nameInverted from catalog rows', () => {
   const record = buildEditionRecord({
     edition,
     identifiers,
     contributors: [
       {
-        displayName: 'Ursula K. Le Guin',
-        nameInverted: 'Le Guin, Ursula K.',
+        name: 'Ursula K. Le Guin',
+        name_inverted: 'Le Guin, Ursula K.',
         role: 'B06'
       }
     ]

@@ -17,8 +17,6 @@ const CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 9464;
 
-export { DEFAULT_HOST as DEFAULT_METRICS_HOST, DEFAULT_PORT as DEFAULT_METRICS_PORT };
-
 /**
  * Coerce a Postgres numeric (returned as a string for bigint/numeric) to a
  * non-negative JS number. Missing or malformed values become 0 so a scrape

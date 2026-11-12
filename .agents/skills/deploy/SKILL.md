@@ -64,8 +64,8 @@ worker metrics `127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
 - Each split package has a static changelog under `packaging/<name>/changelog`,
   gzipped into the deb as documentation. The build scripts do **not** read it,
   so it must be updated by hand to agree with `package.json`.
-- The `debian/` debhelper tree and its `debian/changelog` belong to the retired
-  combined package and are unused by this flow.
+- The root `debian/` debhelper tree and its `debian/changelog` were removed
+  with the retired combined package.
 
 So a `0.2.1` release means `packages/{worker,web}/package.json` → `0.2.1`,
 each split changelog gets a `0.2.1-1` entry, and the produced files are

@@ -130,7 +130,11 @@ test('proxy counters collapse unknown NSIDs to other and mark thrown calls', () 
     text,
     /^bibliograph_pds_proxy_requests_total\{method="com\.atproto\.repo\.listRecords",outcome="error",status="404"\} 1$/m
   );
-  assert.equal(normalizeXrpcMethod('net.olamaelcu.livtet.biblio.getEditions'), 'net.olamaelcu.livtet.biblio.getEditions');
+  assert.equal(
+    normalizeXrpcMethod('net.olamaelcu.livtet.biblio.getContributor'),
+    'net.olamaelcu.livtet.biblio.getContributor'
+  );
+  assert.equal(normalizeXrpcMethod('net.olamaelcu.livtet.biblio.getEditions'), 'other');
   assert.equal(normalizeXrpcMethod('com.example.other'), 'other');
 });
 

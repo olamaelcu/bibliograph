@@ -14,21 +14,6 @@ import {
 
 const COLLECTION = 'community.lexicon.media.book.edition';
 
-const COLUMNS: Record<MergeField, string> = {
-  title: 'title',
-  subtitle: 'subtitle',
-  language: 'language',
-  publishedDate: 'published_date',
-  format: 'format',
-  pages: 'pages',
-  durationSeconds: 'duration_seconds',
-  chapters: 'chapters',
-  series: 'series',
-  bookEdition: 'book_edition',
-  description: 'description',
-  coverUrl: 'cover_url'
-};
-
 export class MergeError extends Error {
   readonly status: number;
 

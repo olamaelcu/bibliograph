@@ -259,8 +259,6 @@ export function normalizeStatus(status: number): string {
 const XRPC_METHODS: Record<string, true> = {
   'com.atproto.feed.describeFeedGenerator': true,
   'com.atproto.feed.getFeedSkeleton': true,
-  'com.atproto.label.queryLabels': true,
-  'com.atproto.lexicon.resolveLexicon': true,
   'com.atproto.repo.applyWrites': true,
   'com.atproto.repo.describeRepo': true,
   'com.atproto.repo.getRecord': true,
@@ -275,12 +273,17 @@ const XRPC_METHODS: Record<string, true> = {
   'com.atproto.sync.listRepos': true,
   'community.lexicon.media.book.resolveEditions': true,
   'community.lexicon.media.book.searchEditions': true,
-  'net.olamaelcu.livtet.biblio.getEditions': true,
-  'net.olamaelcu.livtet.biblio.getImageForBook': true,
+  'net.olamaelcu.livtet.biblio.getContributor': true,
+  'net.olamaelcu.livtet.biblio.getPublisher': true,
   'net.olamaelcu.livtet.biblio.graph.isFollowing': true,
   'net.olamaelcu.livtet.biblio.graph.listFollowees': true,
+  'net.olamaelcu.livtet.biblio.listEditionsByContributor': true,
   'net.olamaelcu.livtet.biblio.listBooksOnShelf': true,
-  'net.olamaelcu.livtet.biblio.listShelves': true
+  'net.olamaelcu.livtet.biblio.listShelves': true,
+  'net.olamaelcu.livtet.biblio.resolveContributors': true,
+  'net.olamaelcu.livtet.biblio.resolvePublishers': true,
+  'net.olamaelcu.livtet.biblio.searchContributors': true,
+  'net.olamaelcu.livtet.biblio.searchPublishers': true
 };
 
 export function normalizeXrpcMethod(method: string): string {
