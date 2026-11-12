@@ -1,6 +1,6 @@
 /** Types shared by the admin server routes and the browser-side curation UI. */
 
-export const PROVIDERS = ['googlebooks', 'isbndb', 'openlibrary', 'goodreads'] as const;
+export const PROVIDERS = ['googlebooks', 'isbndb', 'goodreads', 'openlibrary'] as const;
 export type Provider = (typeof PROVIDERS)[number];
 
 export type Identifier = { issuer: string; value: string };
