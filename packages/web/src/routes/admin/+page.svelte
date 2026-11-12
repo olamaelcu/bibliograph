@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     MERGE_FIELDS,
     PROVIDERS,
@@ -25,6 +26,32 @@
     openlibrary: 'OpenLibrary',
     goodreads: 'Goodreads'
   };
+
+  type AdminTab = 'provider' | 'publisher' | 'edit' | 'merge';
+
+  function isAdminTab(value: string): value is AdminTab {
+    return value === 'provider' || value === 'publisher' || value === 'edit' || value === 'merge';
+  }
+
+  let activeTab = $state<AdminTab>('provider');
+
+  // The Web Awesome tab group owns click/keyboard activation; mirror it into
+  // state so actions elsewhere can switch panels.
+  function onTabShow(event: Event) {
+    const name = (event as CustomEvent<{ name?: unknown }>).detail?.name;
+    if (typeof name === 'string' && isAdminTab(name)) activeTab = name;
+  }
+
+  onMount(() => {
+    const applyHash = () => {
+      const name = window.location.hash.replace(/^#/, '');
+      if (name === '') activeTab = 'provider';
+      else if (isAdminTab(name)) activeTab = name;
+    };
+    applyHash();
+    window.addEventListener('hashchange', applyHash);
+    return () => window.removeEventListener('hashchange', applyHash);
+  });
 
   // ── Provider search and ingest ────────────────────────────────────────────
   let provider = $state<Provider>('googlebooks');
@@ -333,6 +360,69 @@
     }
   }
 
+  // ── Edition editor search ────────────────────────────────────────────────
+  let editQuery = $state('');
+  let editResults = $state<AdminEdition[]>([]);
+  let editSearching = $state(false);
+  let editError = $state<string | null>(null);
+  let editSearched = $state(false);
+  let editSequence = 0;
+
+  // A query that is an at-URI or a single rkey-shaped token can be opened
+  // directly, even when the catalog search returns no list.
+  const editDirectRef = $derived.by(() => {
+    const value = editQuery.trim();
+    if (value === '') return null;
+    if (value.startsWith('at://')) return value;
+    if (/%3A/i.test(value)) {
+      try {
+        const decoded = decodeURIComponent(value);
+        if (decoded.startsWith('at://')) return decoded;
+      } catch {
+        // Fall through to the rkey-shaped check.
+      }
+    }
+    return /^[A-Za-z0-9._~:-]{1,512}$/.test(value) ? value : null;
+  });
+
+  // Prefer the rkey from an at-URI: the editor route accepts either, and a
+  // bare rkey avoids encoded slashes in the browser path.
+  const editDirectHref = $derived.by(() => {
+    const ref = editDirectRef;
+    if (ref === null) return null;
+    const rkey = ref.startsWith('at://') ? ref.slice(ref.lastIndexOf('/') + 1) : ref;
+    if (rkey === '') return null;
+    return `/admin/edition/${encodeURIComponent(rkey)}/edit`;
+  });
+
+  async function runEditSearch() {
+    editError = null;
+    editSearched = true;
+    const q = editQuery.trim();
+    if (q === '') {
+      editResults = [];
+      editError = 'Enter a title, identifier, rkey or at-URI.';
+      return;
+    }
+    const sequence = ++editSequence;
+    editSearching = true;
+    try {
+      const response = await fetch(`/admin/api/editions?q=${encodeURIComponent(q)}&limit=20`, {
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as { items?: AdminEdition[] };
+      if (sequence !== editSequence) return;
+      editResults = Array.isArray(body.items) ? body.items : [];
+    } catch (error) {
+      if (sequence !== editSequence) return;
+      editError = error instanceof Error ? error.message : 'The local search failed.';
+      editResults = [];
+    } finally {
+      if (sequence === editSequence) editSearching = false;
+    }
+  }
+
   // ── Edition merge ─────────────────────────────────────────────────────────
   let mergeQuery = $state('');
   let mergeResults = $state<AdminEdition[]>([]);
@@ -523,8 +613,8 @@
   async function findInMerge(value: string) {
     mergeQuery = value;
     if (editionTimer) clearTimeout(editionTimer);
+    activeTab = 'merge';
     await runEditionSearch();
-    document.getElementById('merge')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   async function runMerge() {
@@ -584,6 +674,13 @@
 </script>
 
 <main class="admin-main">
+  <wa-tab-group class="admin-tabs" active={activeTab} onwa-tab-show={onTabShow}>
+    <wa-tab slot="nav" panel="provider">Provider search</wa-tab>
+    <wa-tab slot="nav" panel="publisher">Publisher import</wa-tab>
+    <wa-tab slot="nav" panel="edit">Edit edition</wa-tab>
+    <wa-tab slot="nav" panel="merge">Merge editions</wa-tab>
+
+    <wa-tab-panel name="provider" active={activeTab === 'provider'}>
   <section class="section" id="provider">
     <div class="admin-content wa-stack wa-gap-l">
       <div class="wa-stack wa-gap-2xs">
@@ -819,7 +916,9 @@
       </wa-card>
     </div>
   </section>
+    </wa-tab-panel>
 
+    <wa-tab-panel name="publisher" active={activeTab === 'publisher'}>
   <section class="section" id="publisher">
     <div class="admin-content wa-stack wa-gap-l">
       <div class="wa-stack wa-gap-2xs">
@@ -1109,11 +1208,127 @@
       {/if}
     </div>
   </section>
+    </wa-tab-panel>
 
+    <wa-tab-panel name="edit" active={activeTab === 'edit'}>
+  <section class="section" id="edit">
+    <div class="admin-content wa-stack wa-gap-l">
+      <div class="wa-stack wa-gap-2xs">
+        <h2>3 · Edit an edition</h2>
+        <p class="muted">
+          Search the local catalog by title, identifier, rkey or at-URI, then open the full record
+          editor. Editing is separate from merge selection.
+        </p>
+      </div>
+
+      <wa-card with-header appearance="outlined">
+        <h3 slot="header">Find a local edition to edit</h3>
+        <div class="wa-stack wa-gap-m">
+          <div class="admin-form-grid">
+            <div class="field field-grow">
+              <span class="field-label">Title, identifier, rkey or at-URI</span>
+              <wa-input
+                aria-label="Find an edition to edit"
+                role="textbox"
+                tabindex="0"
+                value={editQuery}
+                placeholder="Title, ISBN, issuer:value, rkey or at://…"
+                oninput={(event: Event) => (editQuery = valueOf(event))}
+                onkeydown={(event: KeyboardEvent) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void runEditSearch();
+                  }
+                }}
+              ></wa-input>
+            </div>
+            <div class="admin-form-action">
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <wa-button
+                variant="brand"
+                disabled={editSearching}
+                onclick={() => void runEditSearch()}
+              >
+                {editSearching ? 'Searching…' : 'Search editions'}
+              </wa-button>
+            </div>
+          </div>
+
+          {#if editDirectRef && editDirectHref}
+            <wa-callout variant="neutral">
+              <div class="wa-stack wa-gap-2xs">
+                <strong>Open directly</strong>
+                <span class="muted admin-small">
+                  This value looks like an rkey or at-URI; open the editor without waiting for a
+                  search result.
+                </span>
+                <a
+                  class="admin-small admin-wrap"
+                  href={editDirectHref}
+                >
+                  Open {editDirectRef}
+                </a>
+              </div>
+            </wa-callout>
+          {/if}
+
+          {#if editError}
+            <wa-callout variant="danger">{editError}</wa-callout>
+          {/if}
+
+          {#if editSearching}
+            <p class="muted admin-small">Searching the catalog…</p>
+          {/if}
+
+          {#if editResults.length > 0}
+            <div class="admin-results">
+              {#each editResults as record (record.uri)}
+                <wa-card appearance="outlined" class="admin-result">
+                  <div class="wa-stack wa-gap-2xs admin-result-body">
+                    <div class="wa-cluster wa-gap-s wa-align-items-baseline">
+                      <strong>{record.title}</strong>
+                      {#if record.publishedDate}
+                        <span class="muted">{record.publishedDate}</span>
+                      {/if}
+                    </div>
+                    <span class="muted">
+                      {record.contributors.map((contributor) => contributor.name).join(', ') ||
+                        'No contributors'}
+                    </span>
+                    <div class="wa-cluster wa-gap-2xs">
+                      {#each record.identifiers as identifier (identifierText(identifier))}
+                        <wa-tag size="small" variant="neutral">
+                          {identifierText(identifier)}
+                        </wa-tag>
+                      {/each}
+                    </div>
+                    <span class="muted admin-small admin-wrap">
+                      <code>{record.rkey}</code> · {record.uri}
+                    </span>
+                    <a
+                      class="admin-small"
+                      href={`/admin/edition/${encodeURIComponent(record.rkey)}/edit`}
+                    >
+                      Edit edition
+                    </a>
+                  </div>
+                </wa-card>
+              {/each}
+            </div>
+          {:else if editSearched && !editSearching && !editError && !editDirectRef}
+            <p class="muted">No local editions matched.</p>
+          {/if}
+        </div>
+      </wa-card>
+    </div>
+  </section>
+    </wa-tab-panel>
+
+    <wa-tab-panel name="merge" active={activeTab === 'merge'}>
   <section class="section" id="merge">
     <div class="admin-content wa-stack wa-gap-l">
       <div class="wa-stack wa-gap-2xs">
-        <h2>3 · Merge edition records</h2>
+        <h2>4 · Merge edition records</h2>
         <p class="muted">
           Find editions by title or identifier, select two or more, then choose the base record and
           which record supplies each field.
@@ -1381,4 +1596,16 @@
       {/if}
     </div>
   </section>
+    </wa-tab-panel>
+  </wa-tab-group>
 </main>
+
+<style>
+  .admin-tabs::part(nav) {
+    padding-inline: var(--wa-space-xl);
+  }
+
+  .admin-tabs wa-tab-panel {
+    --padding: 0;
+  }
+</style>
