@@ -204,4 +204,9 @@ inline fallback.
 - Personalized feed skeletons authenticate with an atproto service JWT
   (`lxm = com.atproto.feed.getFeedSkeleton`).
 - The admin UI is gated on `ADMIN_TOKEN`; there is no end-user login and no
-  AppView write procedure.
+  AppView write procedure. Its provider search and ingest calls go to the
+  worker's loopback admin API (`WORKER_ADMIN_HOST`:`WORKER_ADMIN_PORT`,
+  default `127.0.0.1:9465`) with the same token. Edition merges run in a web
+  server transaction against the catalog; the base keeps its URI, identifiers
+  are unioned, and the duplicate editions are deleted only after every chosen
+  field and link is applied.

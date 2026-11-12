@@ -26,6 +26,32 @@ mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 
 `mise run sql` opens psql against the same database.
 
+## Admin curation
+
+`/admin` is an operator-only area: provider search + ingest, and edition merge.
+It is not linked from the public navigation. Set the same `ADMIN_TOKEN` on the
+worker and the edge (`.env` or the packaged `worker.env`/`web.env`):
+
+```bash
+export ADMIN_TOKEN=dev-admin-token
+export WORKER_ADMIN_URL=http://127.0.0.1:9465
+```
+
+The worker starts a loopback admin API on `WORKER_ADMIN_HOST`:`WORKER_ADMIN_PORT`
+(default `127.0.0.1:9465`). Without `ADMIN_TOKEN` it logs that the admin API is
+disabled, and the edge answers every `/admin` path with 404. Sign in at
+`http://127.0.0.1:5176/admin/login`; the token becomes an HttpOnly,
+SameSite=Strict cookie and is never rendered into the page.
+
+Provider search uses exactly the selected provider (Google Books, ISBNdb or
+Goodreads) and sends ISBN-shaped queries to that provider's ISBN lookup. Ingest
+revalidates the candidate server-side in the worker before minting an edition.
+The merge workbench unions identifiers, copies the chosen scalar fields from the
+chosen records, applies the contributor/publisher source or union, deletes the
+duplicate editions (their outbox rows become `delete`) and keeps the base URI.
+Reader activity records that referenced deleted URIs are intentionally left
+untouched.
+
 ## Database schemas
 
 HappyView creates unqualified tables, including a `labels` table that collides
