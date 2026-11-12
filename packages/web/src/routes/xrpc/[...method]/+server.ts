@@ -10,6 +10,13 @@ import {
   enqueueSearchHydration
 } from '$lib/server/catalog/jobs';
 import { isbn13sFromIdentifiers } from '$lib/server/catalog/isbn';
+import {
+  describeFeedGenerator,
+  getFeedSkeleton,
+  isFeedMethod,
+  DESCRIBE_FEED_GENERATOR,
+  GET_FEED_SKELETON
+} from '$lib/server/feeds';
 
 // An NSID is at least three labels: authority, name, and at least one more.
 const NSID = /^[a-zA-Z]([a-zA-Z0-9-]{0,62}\.)+[a-zA-Z]([a-zA-Z0-9-]{0,62})$/;
@@ -223,6 +230,10 @@ export const GET: RequestHandler = ({ params, request }) => {
   if (!NSID.test(params.method)) {
     return json({ error: 'InvalidRequest' }, { status: 400 });
   }
+  // The feed generator is served at the edge from the activity index; it is a
+  // GET-only pair, and `public` is the only anonymous feed.
+  if (params.method === DESCRIBE_FEED_GENERATOR) return describeFeedGenerator();
+  if (params.method === GET_FEED_SKELETON) return getFeedSkeleton(request);
   // Both books-wg methods are procedures.
   if (EDGE_PROCEDURES.has(params.method)) return methodNotAllowed();
   // Publisher-record reads go to the PDS; other com.atproto methods still go
@@ -235,6 +246,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
   if (!NSID.test(params.method)) {
     return json({ error: 'InvalidRequest' }, { status: 400 });
   }
+  if (isFeedMethod(params.method)) return methodNotAllowed();
   if (params.method === RESOLVE_EDITIONS) return withCatalogCors(await handleResolve(request));
   if (params.method === SEARCH_EDITIONS) return withCatalogCors(await handleSearch(request));
   return forward(params.method, request);

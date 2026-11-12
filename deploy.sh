@@ -24,6 +24,9 @@
 #   * Catalog schema: every /usr/lib/bibliograph-worker/sql/*.sql file is
 #     applied with psql against DATABASE_URL from /etc/bibliograph/worker.env.
 #     The files are additive and safe to re-run.
+#   * Feed read path: 0003-feed-read.sql is re-applied after HappyView has
+#     migrated (its tables do not exist during the first catalog pass), so a
+#     fresh host gets the feed indexes and grants without a second full pass.
 #
 # Usage:
 #   ./deploy.sh                          -> veve@lescayes.ts.olamaelcu.net
@@ -456,6 +459,29 @@ restart_unit happyview.service
 # PartOf=happyview restarts this oneshot with HappyView; restart it explicitly
 # so the deploy finishes only after the lexicons/scripts/indexes succeeded.
 restart_unit bibliograph-happyview-deploy.service
+
+# 0003 reads `happyview.happyview_records`, which HappyView creates from its
+# own migrations. The catalog pass above runs before HappyView starts, so on a
+# fresh host it skipped its indexes and grants. Re-apply only that file now
+# that HappyView has migrated and `hv-deploy --wait` has confirmed readiness;
+# re-running the whole catalog schema would be unnecessary. Fatal on error:
+# without the indexes/grants the edge feed generator answers 503.
+if [ "$SKIP_DB" = 0 ]; then
+  worker_url="$(combined_env_value DATABASE_URL /etc/bibliograph/worker.env)"
+  [ -n "$worker_url" ] \
+    || fail "DATABASE_URL is empty in /etc/bibliograph/worker.env; cannot apply the feed read path"
+  sql_dir=/usr/lib/bibliograph-worker/sql
+  feed_sql="$sql_dir/0003-feed-read.sql"
+  [ -f "$feed_sql" ] \
+    || fail "the installed bibliograph-worker has no $feed_sql; rebuild it with 'mise run package-worker-deb'"
+  say "Feed read path: re-applying $(basename "$feed_sql") after HappyView migrated"
+  psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -f "$feed_sql" \
+    || fail "feed read schema failed at 0003-feed-read.sql; the edge feed generator answers 503 without it. Fix the grant/index error and re-run (idempotent)."
+  note "Feed read path applied (indexes and grants only; idempotent)"
+else
+  note "--skip-db: feed read schema re-apply skipped"
+fi
+
 restart_unit bibliograph-worker.service
 restart_unit bibliograph-web.service
 

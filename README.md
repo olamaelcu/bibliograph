@@ -77,13 +77,17 @@ The admin import UI lives at `/admin/import/isbn` and is gated on `ADMIN_TOKEN`.
 `com.atproto.feed.describeFeedGenerator` advertises four feeds:
 
 - `public` — newest reviews and shelving across the index;
-- `following` — activity by accounts the viewer follows;
-- `extended` — two-hop follow graph;
-- `dynamic` — same graph, service-JWT required.
+- `following` — records by accounts the viewer follows, excluding the viewer;
+- `extended` — the follow graph two hops deep, capped at 500 DIDs;
+- `dynamic` — the viewer plus the accounts they follow (the per-viewer ladder).
 
-Personalized feeds authenticate with an atproto service JWT
-(`lxm = com.atproto.feed.getFeedSkeleton`). There is no browser session and no
-end-user OAuth.
+`public` needs no token. The other three authenticate with an atproto service
+JWT (`lxm = com.atproto.feed.getFeedSkeleton`) whose signature is verified
+against the issuer DID document's `#atproto` Multikey, with `aud` exactly
+`<FEED_GENERATOR_DID>#atproto_feed`. The generator DID is `FEED_GENERATOR_DID`
+(default `did:web:biblio.livtet.olamaelcu.net`); `did:plc` signers resolve
+through `PLC_URL` (default `https://plc.directory`). There is no browser session
+and no end-user OAuth, and no `recommendations` feed.
 
 ## Development
 

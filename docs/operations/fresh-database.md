@@ -70,6 +70,31 @@ Re-running them on a live catalog is safe; they never wipe data. They do not
 alter a table that already exists — a new column belongs in a new numbered SQL
 file.
 
+### Feed read path
+
+`0003-feed-read.sql` is the one file that targets HappyView's schema: it adds
+the feed-order and follow-subject indexes on `happyview.happyview_records`, plus
+`USAGE`/`SELECT` for the edge role. That table is created by HappyView's own
+migrations, so on a fresh host the first catalog pass runs before it exists and
+0003 logs its conditional skip.
+
+`mise run deploy` re-applies only that file after `happyview.service` and
+`bibliograph-happyview-deploy.service` have restarted (the latter's
+`--wait 120` is the migration/readiness barrier). Re-running it is safe: it
+creates missing indexes and repeats the grants, and never touches a row.
+
+The grant goes to the applying role (`DATABASE_URL` in `worker.env`) and, when
+that role exists, to `bibliograph-web`. Create `bibliograph-web` before the
+deploy if `web.env` uses it as its read-only role; without `USAGE` on `happyview`
+and `SELECT` on `happyview.happyview_records` the edge answers
+`com.atproto.feed.describeFeedGenerator` / `getFeedSkeleton` with
+`503 ServiceUnavailable` while the rest of the edge keeps working.
+
+There is no feed backfill table or worker task either: feeds read the HappyView
+index, so a fresh deployment's feeds are empty until Jetstream, a HappyView
+procedure write, or HappyView's existing `/admin/backfill` indexes activity for
+a DID (see [`../xrpc.md`](../xrpc.md#feed-generator-edge)).
+
 What is created:
 
 - `editions`, `edition_identifiers`, `contributors`, `edition_contributors`,

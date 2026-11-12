@@ -93,6 +93,30 @@ cap is unchanged and every identifier is still matched; only the first 10
 misses are queued per call. The cap is per request, not a global quota, so it
 bounds the provider cost of a single body but does not rate-limit the caller.
 
+## Feed generator
+
+`com.atproto.feed.describeFeedGenerator` and `com.atproto.feed.getFeedSkeleton` are served by the
+edge (`packages/web/src/lib/server/feeds/`), not HappyView: a skeleton is one SQL query over
+`happyview.happyview_records` for `community.lexicon.media.book.review` and
+`net.olamaelcu.livtet.biblio.bookStatus`, ordered newest first by the record's own `createdAt` and
+then `uri`. There is no worker task and no Lua script for feeds.
+
+The generator DID is `FEED_GENERATOR_DID` (default `did:web:biblio.livtet.olamaelcu.net`) and its
+feed URIs are `at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/<kind>` for
+`public`, `following`, `extended` and `dynamic`; `recommendations` is dropped. `public` is
+anonymous. The other three require an atproto service JWT whose compact signature verifies against
+the issuer DID document's `#atproto` Multikey (ES256K/ES256), with `aud` exactly
+`<FEED_GENERATOR_DID>#atproto_feed` and `lxm` exactly `com.atproto.feed.getFeedSkeleton`; `did:plc`
+issuers resolve through `PLC_URL`, `did:web` through its standard document URL, and both are cached
+briefly. A missing or invalid token is `401`, never a silent public page. `following` pages records
+by DIDs the viewer follows (excluding the viewer), `extended` adds their followees (capped at 500
+DIDs), and `dynamic` is the viewer plus their follow set.
+
+`packages/worker/sql/0003-feed-read.sql` adds the
+`(collection, (record::jsonb->>'createdAt') DESC, uri DESC)` and follow-subject indexes and grants
+the web role `USAGE`/`SELECT`; it is conditional on HappyView having created the table, so a fresh
+catalog-only database skips it.
+
 ## Catalog worker
 
 `packages/worker` is the only long-running catalog process. Graphile Worker owns
@@ -202,7 +226,9 @@ inline fallback.
 - `X-Client-Key` identifies the calling application and is the rate-limit
   bucket. It is not user authentication.
 - Personalized feed skeletons authenticate with an atproto service JWT
-  (`lxm = com.atproto.feed.getFeedSkeleton`).
+  (`lxm = com.atproto.feed.getFeedSkeleton`). The edge verifies the signature against the issuer's
+  `#atproto` Multikey and enforces `aud`, `lxm`, `iss` and `exp`/`iat`; it never trusts a
+  caller-supplied viewer DID header.
 - The admin UI is gated on `ADMIN_TOKEN`; there is no end-user login and no
   AppView write procedure. Its provider search and ingest calls go to the
   worker's loopback admin API (`WORKER_ADMIN_HOST`:`WORKER_ADMIN_PORT`,

@@ -54,6 +54,14 @@ from the catalog tables (`editions`, `edition_identifiers`, `edition_contributor
 They never write catalog rows; when the local catalog cannot answer, they may queue a hydration job
 and mark it in `catalog_enqueue_marks`.
 
+The feed generator is also served at the edge, from `happyview.happyview_records`, never from
+HappyView. `GET com.atproto.feed.describeFeedGenerator` is anonymous and advertises exactly four
+feeds; `GET com.atproto.feed.getFeedSkeleton` serves their skeletons. Both are `GET`-only — `POST`
+on either NSID is `405 MethodNotAllowed` like every other non-GET verb. The generator DID is
+`FEED_GENERATOR_DID` (default `did:web:biblio.livtet.olamaelcu.net`) and the feed URIs are
+`at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/<kind>` for `public`,
+`following`, `extended` and `dynamic`. There is no `recommendations` feed.
+
 **Auth.** Queries are anonymous. HappyView procedures require a DPoP-bound session:
 `Authorization: DPoP <token>` plus a fresh `DPoP` proof. The edge holds no session and cannot mint
 one; it relays both headers untouched, and the token needs `transition:generic` because the write is
@@ -65,6 +73,15 @@ proxied to the caller's PDS. Without a session those 15 procedures answer `401` 
 The two catalog procedures are the exception: they are read-only and anonymous, and they never
 require or read a session. They also need `DATABASE_URL`; when it is unset or the catalog is
 unreachable they answer `503 ServiceUnavailable` instead of proxying anywhere.
+
+Feed skeletons have their own contract: `public` is anonymous, while `following`, `extended` and
+`dynamic` require an atproto service JWT in `Authorization: Bearer <jwt>`. The edge verifies the
+compact JWT against the issuer DID document's `#atproto` Multikey (ES256K or ES256), requires
+`iss` to be a DID, `aud` exactly `<FEED_GENERATOR_DID>#atproto_feed`, `lxm` exactly
+`com.atproto.feed.getFeedSkeleton`, and sane `iat`/`exp`. `did:plc` issuers resolve through
+`PLC_URL` (default `https://plc.directory`), `did:web` through its standard document URL, and both
+are cached briefly. A missing or invalid token is `401 AuthRequired`; the request never falls back
+to the public feed. No `x-viewer-did` header is trusted.
 
 Anonymous queries are still attributed to the edge's XRPC client key, which is the rate-limiting
 and attribution identity.
@@ -91,7 +108,8 @@ missing is inferred from the fixed shelf rkey (`reading`, `read`, `to-read`, `dn
 record's shelf is one of them.
 
 **Cursors.** Cursors are base64url-encoded JSON objects. A malformed cursor decodes to `{}` and
-starts at the beginning rather than erroring.
+starts at the beginning rather than erroring — except the feed generator's cursor, which is strict
+and answers `400 InvalidRequest` when it is not the expected `{c,u}` object.
 
 | Encoding | Meaning | Methods |
 | --- | --- | --- |
@@ -99,6 +117,7 @@ starts at the beginning rather than erroring.
 | `{ "t": <created_at>, "u": <uri> }` | keyset over `(created_at, uri)`, descending | `listBooksOnShelf`, `listRecentShelving` |
 | `{ "u": <uri> }` | keyset over `uri`, ascending; for `getShelversOfBook` it is the smallest URI seen per DID | `listShelves`, `listShelvesWithBooks`, `getShelversOfBook` |
 | raw DID | keyset over the follower DID / subject DID, ascending | `graph.listFollowers`, `graph.listFollowees` |
+| `{ "c": <createdAt>, "u": <uri> }` | keyset over the record's own `createdAt` (text order) and `uri`, descending; `c` may be `null` for a row without `createdAt` | `com.atproto.feed.getFeedSkeleton` |
 
 A cursor is emitted only when the `limit + 1` probe row exists. Because list mapping can drop
 unbuildable rows, an offset cursor can return fewer than `limit` views while still pointing past
@@ -106,7 +125,8 @@ all scanned rows; the keyset cursors share the same property (they advance from 
 row, not the last emitted view).
 
 **Limits.** Every `limit` is clamped to the lexicon's range by the handler (`int(value, default,
-min, max)`), so an out-of-range number is adjusted, not rejected.
+min, max)`), so an out-of-range number is adjusted, not rejected. The feed generator defaults to
+20 and clamps to 1–100; a non-integer `limit` is `400 InvalidRequest`.
 
 **Errors.** The envelope is `{ "error": string, "message": string }`.
 
@@ -115,16 +135,17 @@ min, max)`), so an out-of-range number is adjusted, not rejected.
 | 400 | `InvalidRequest` | a required parameter is missing, or a value violates its contract: non-DID `subject`, self-follow, non-AT-URI shelf/review URI, wrong collection, bad enum (`status`, `period`), out-of-range integer, empty update, invalid `editionRef`, non-strongRef `book` |
 | 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author` or identifier |
 | 401 | `XRPC procedures require DPoP authentication` | the 15 HappyView procedures, until a DPoP session is presented |
+| 401 | `AuthRequired` | a personalized feed (`following`/`extended`/`dynamic`) without a valid service JWT |
 | 403 | `Forbidden` | the named review or shelf belongs to another DID |
 | 404 | `NotFound` | a procedure targets a follow, review, shelf, `bookStatus` or `shelfItem` that does not exist |
 | 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing |
-| 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST |
+| 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST, and for `POST` on the two feed methods |
 | 502 | `UpstreamFailure` | `shelf.addBooks` when the PDS rejects the batch |
 | 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable, or when a PDS-proxied read fails or times out |
-| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (`resolveEditions` / `searchEditions` only), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
+| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (`resolveEditions` / `searchEditions` / `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
 
-Queries and the two catalog procedures never answer `401`. Missing optional records are not errors:
-`getActorProfile` and `getReadingGoal` answer `200` with `null`.
+Queries, the two catalog procedures and the `public` feed never answer `401`. Missing optional
+records are not errors: `getActorProfile` and `getReadingGoal` answer `200` with `null`.
 
 **Views.** Responses embed the lexicon's view types from `net.olamaelcu.livtet.biblio.defs`:
 `shelfView` (`uri`, `name`, optional `description`/timestamps), `bookView` (`uri`, `edition`),
@@ -320,6 +341,65 @@ Returns `{ reviews, cursor? }`. The lexicon declares `NotFound`; the handler ret
 #### `listReviewsByActor`
 
 Pages one DID's reviews, same ordering and cursor. Returns `{ reviews, cursor? }`.
+
+### Feed generator (edge)
+
+Both `com.atproto.feed.*` methods are answered by the edge from `happyview.happyview_records`,
+over exactly `community.lexicon.media.book.review` and `net.olamaelcu.livtet.biblio.bookStatus`.
+They never call HappyView, the PDS or a worker task, and they read no catalog table.
+
+#### `com.atproto.feed.describeFeedGenerator`
+
+Anonymous. Returns `{ did, feeds: [{ uri }] }` for exactly `public`, `following`, `extended` and
+`dynamic`, all under `at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/`.
+
+#### `com.atproto.feed.getFeedSkeleton`
+
+Params: `feed` (required, one of the four URIs), `limit` (20, clamped 1–100) and `cursor` (the
+feed's own opaque `{c,u}`). Skeleton items are `{ post, reason? }`: `post` is the record URI (`cid`
+is omitted) and `reason` is the book URI when the record names one — a review's `subjectRecord`,
+else the first `subject.identifiers[]` entry with `issuer: "atproto"`; a `bookStatus`'s
+`book.uri`. `reason` is omitted when it cannot be resolved.
+
+Ordering is newest first by the record's own `record::jsonb->>'createdAt'` as text, then `uri`
+descending; `limit + 1` rows decide whether a cursor is returned. A missing, malformed or foreign
+`feed`, and a malformed cursor, are `400 InvalidRequest`. An unavailable `DATABASE_URL` or a failed
+query is `503 ServiceUnavailable`.
+
+| Feed | Auth | Records |
+| --- | --- | --- |
+| `public` | none | every indexed review and `bookStatus` |
+| `following` | service JWT | records by DIDs the viewer follows, excluding the viewer |
+| `extended` | service JWT | followed DIDs plus their followees, capped at 500 DIDs, excluding the viewer |
+| `dynamic` | service JWT | the viewer plus followed DIDs (the per-viewer ladder) |
+
+The viewer is the JWT's `iss`; the `follow` collection's `subject` field is the follow graph. A
+viewer who follows nobody gets an empty personalized page, not the public feed. `following` always
+excludes the viewer's own records; `dynamic` is the feed that includes them.
+
+**Feed backfill.** There is no feed-specific table, cursor store or worker task: a feed is a view
+over whatever HappyView has indexed. A fresh deployment starts empty and fills through Jetstream,
+the HappyView procedures (which index the record they just wrote) and HappyView's normal
+backfill/reconcile. If `happyview_records` is missing a reader's review, `bookStatus` or `follow`,
+run HappyView's existing `/admin/backfill` for that DID and collection; the next feed call sees it:
+
+```bash
+for collection in \
+  community.lexicon.media.book.review \
+  net.olamaelcu.livtet.biblio.bookStatus \
+  net.olamaelcu.livtet.biblio.follow
+do
+  curl -sS -X POST "$HAPPYVIEW_URL/admin/backfill" \
+    -H "Authorization: Bearer $HAPPYVIEW_ADMIN_KEY" \
+    -H 'content-type: application/json' \
+    -d "{\"did\":\"$DID\",\"collection\":\"$collection\"}"
+done
+```
+
+`HAPPYVIEW_URL` is the upstream base (`http://127.0.0.1:3000` by default) and
+`HAPPYVIEW_ADMIN_KEY` is the `hv_…` key from `mise run hv-seed`. This is HappyView's existing
+backfill, not a feed job: feeds never queue worker work and keep no cursor state beyond the opaque
+page cursor.
 
 ## Procedure behavior
 
@@ -520,11 +600,11 @@ a PDS with a different shape are not found by them.
 
 - No PDS reads on the query path, no Constellation, no tiered cursors (`tap:`/`con:`/`pds:`), no
   Bookhive branches: the index is the only activity source.
-- No `com.atproto.*` writes or other methods are handled here; only the two read-only PDS proxies
-  (`repo.getRecord`, `repo.listRecords`) run at the edge, and every other `com.atproto.*` call is
-  forwarded to HappyView. No `community.lexicon.book.*` handlers are exposed; the activity queries
-  read the catalog through `appview_book_lua` only, and edition discovery is the two edge
-  procedures.
+- No `com.atproto.*` writes are handled here. The edge serves only the two read-only PDS proxies
+  (`repo.getRecord`, `repo.listRecords`), the two `com.atproto.feed.*` methods, and the two books-wg
+  catalog procedures; every other `com.atproto.*` call is forwarded to HappyView. No
+  `community.lexicon.book.*` handlers are exposed; the activity queries read the catalog through
+  `appview_book_lua` only, and edition discovery is the two edge procedures.
 - No request-path writes other than the 15 procedures; the worker writes catalog rows and
   publishes editions out of band. A client that writes records to its own PDS directly is indexed
   only when a backfill or reconcile runs, not per request.
@@ -542,5 +622,5 @@ a PDS with a different shape are not found by them.
   upstream defines it), so a client cannot be told via the response that work is outstanding; it
   can only re-call. Without the hydration queue installed the edge skips enqueueing.
 - No cache headers are set by the edge, and no cache-control is relayed from HappyView.
-- No works/contributors/publishers records, no feed generator, and no label or lexicon endpoints on
-  this surface.
+- No works/contributors/publishers records, and no label or lexicon endpoints on this surface. The
+  feed generator has exactly the four feeds above; there is no `recommendations` feed.

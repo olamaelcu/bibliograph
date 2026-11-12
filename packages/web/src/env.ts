@@ -37,5 +37,15 @@ export const variables = defineEnvVars({
     schema: (value) => value ?? 'http://127.0.0.1:9465',
     description:
       'Loopback base URL of the worker admin API used by /admin for provider search and ingest.'
+  },
+  FEED_GENERATOR_DID: {
+    schema: (value) => value ?? 'did:web:biblio.livtet.olamaelcu.net',
+    description:
+      'DID the edge feed generator advertises and accepts as the aud authority; also the authority of every feed URI.'
+  },
+  PLC_URL: {
+    schema: (value) => value ?? 'https://plc.directory',
+    description:
+      'PLC directory used to resolve did:plc service-token issuers for personalized feeds.'
   }
 });

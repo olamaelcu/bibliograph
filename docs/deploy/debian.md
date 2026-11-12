@@ -212,6 +212,13 @@ creates missing tables/sequences/indexes/functions/views and never drops or
 truncates data. Running it on an existing database is safe. It does not alter an
 existing table — a new column belongs in a new numbered file.
 
+`0003-feed-read.sql` is re-applied after `happyview.service` (and its deploy
+oneshot) has migrated, because the first catalog pass runs before
+`happyview.happyview_records` exists. That re-apply is idempotent and adds only
+the feed indexes and grants. If `web.env` uses the `bibliograph-web` role, create
+it before deploying so 0003 can grant it `USAGE` on `happyview` and `SELECT` on
+`happyview.happyview_records`; otherwise those methods answer `503`.
+
 `web.env` needs its own read-only `DATABASE_URL` for the anonymous catalog
 procedures; without it those methods answer `503 ServiceUnavailable` while the
 rest of the edge still works. The HappyView role receives `SELECT` on the

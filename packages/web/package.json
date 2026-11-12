@@ -8,9 +8,11 @@
     "dev": "node scripts/generate-catalog.mjs && vite dev",
     "build": "node scripts/generate-catalog.mjs && vite build",
     "preview": "vite preview",
-    "check": "node scripts/generate-catalog.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "check": "node scripts/generate-catalog.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "node --test test/*.test.ts"
   },
   "devDependencies": {
+    "@atproto/crypto": "^0.5.7",
     "@awesome.me/webawesome": "^3.14.0",
     "@sveltejs/adapter-node": "^6.0.1",
     "@sveltejs/kit": "^3.1.1",
