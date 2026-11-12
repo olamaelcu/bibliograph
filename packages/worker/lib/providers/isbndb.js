@@ -8,6 +8,25 @@ import {
 
 const gate = createGate(1000);
 
+// ISBNdb sometimes returns a publisher blurb as one quoted citation:
+//   "Body."--Back cover.
+//   “Body.”—Kirkus Reviews
+// The quote marks and the trailing attribution are payload formatting, not
+// part of the synopsis. Only a value that is wholly one quoted citation is
+// unwrapped; unquoted descriptions and interior quotes are left untouched.
+const QUOTED_CITATION = /^["“](.+)["”](?:\s*(?:--|—|–)\s*[^"“”]+)?$/u;
+
+export function cleanIsbndbSynopsis(value) {
+  const text = stripHtml(value);
+  if (!text) return undefined;
+
+  const match = QUOTED_CITATION.exec(text);
+  if (!match) return text;
+
+  const body = match[1].trim();
+  return body === '' ? text : body;
+}
+
 export function candidateFromIsbndb(book) {
   if (!book || !cleanString(book.title)) return undefined;
 
@@ -33,7 +52,7 @@ export function candidateFromIsbndb(book) {
   if (publishedDate) candidate.publishedDate = publishedDate;
   const pages = Number(book.pages);
   if (Number.isInteger(pages) && pages > 0) candidate.pages = pages;
-  const description = stripHtml(book.synopsis);
+  const description = cleanIsbndbSynopsis(book.synopsis);
   if (description) candidate.description = description;
   const cover = cleanString(book.image);
   if (cover) candidate.coverUrl = cover.replace(/^http:/, 'https:');

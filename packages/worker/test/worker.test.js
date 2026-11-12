@@ -4,7 +4,7 @@ import http from 'node:http';
 import pg from 'pg';
 
 import { candidateFromVolume } from '../lib/providers/google-books.js';
-import { candidateFromIsbndb } from '../lib/providers/isbndb.js';
+import { candidateFromIsbndb, cleanIsbndbSynopsis } from '../lib/providers/isbndb.js';
 import { candidatesFromBookPage, candidatesFromSearchPage } from '../lib/providers/goodreads.js';
 import { createProviders } from '../lib/providers/index.js';
 import { createTasks } from '../lib/tasks.js';
@@ -230,6 +230,45 @@ after(async () => {
 test('normalizes ISBN-10 and strips HTML', () => {
   assert.equal(isbn10To13('0-441-47812-3'), '9780441478125');
   assert.equal(stripHtml('<p>Hello&nbsp;<b>world</b></p>'), 'Hello world');
+});
+
+test('unwraps ISBNdb synopsis citations without touching other descriptions', () => {
+  assert.equal(
+    cleanIsbndbSynopsis('"Walter Rodney was assassinated."--Back cover.'),
+    'Walter Rodney was assassinated.'
+  );
+  assert.equal(
+    cleanIsbndbSynopsis('"In his short life he set a movement in motion."--Provided by publisher.'),
+    'In his short life he set a movement in motion.'
+  );
+  assert.equal(
+    cleanIsbndbSynopsis('“The best book of the year.”—Kirkus Reviews'),
+    'The best book of the year.'
+  );
+  assert.equal(cleanIsbndbSynopsis('"A novel."'), 'A novel.');
+  assert.equal(cleanIsbndbSynopsis('<p>&quot;A novel.&quot;--Back cover.</p>'), 'A novel.');
+
+  assert.equal(
+    cleanIsbndbSynopsis('"A "strange" novel."--Back cover.'),
+    'A "strange" novel.'
+  );
+
+  const unquoted = 'A novel described as "strange".';
+  assert.equal(cleanIsbndbSynopsis(unquoted), unquoted);
+  const unquotedAttribution = 'A novel. --Back cover.';
+  assert.equal(cleanIsbndbSynopsis(unquotedAttribution), unquotedAttribution);
+  const apostrophes = 'The dog\'s "best" friend.';
+  assert.equal(cleanIsbndbSynopsis(apostrophes), apostrophes);
+  const notWholeValue = '"A novel." and more.';
+  assert.equal(cleanIsbndbSynopsis(notWholeValue), notWholeValue);
+  assert.equal(cleanIsbndbSynopsis(undefined), undefined);
+
+  const candidate = candidateFromIsbndb({
+    title: 'Quoted Synopsis',
+    isbn13: '9780306406157',
+    synopsis: '"The actual body."--Kirkus Reviews'
+  });
+  assert.equal(candidate.description, 'The actual body.');
 });
 
 test('parses a Google Books volume into an edition candidate', () => {
