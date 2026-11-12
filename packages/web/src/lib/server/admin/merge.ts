@@ -1,5 +1,5 @@
 import { catalogPool } from '../catalog/db';
-import { normalizeContributorRole } from '../catalog/contributor-roles';
+import { normalizeContributorRole } from '../../contributor-roles';
 import { loadAdminEditions } from './editions';
 import type { PoolClient } from 'pg';
 import {

@@ -126,6 +126,8 @@ export type AdminSeries = {
 export type AdminEdition = {
   uri: string;
   rkey: string;
+  /** Opaque content revision; the editor sends it back to detect concurrent edits. */
+  revision: string;
   title: string;
   subtitle: string | null;
   language: string | null;
@@ -145,6 +147,22 @@ export type AdminEdition = {
   contributors: AdminContributor[];
   publishers: AdminPublisher[];
 };
+
+/** One local contributor or publisher returned by the editor's picker. */
+export type AdminEntityMatch = {
+  id: number;
+  name: string;
+  identifiers: Identifier[];
+  ref: string | null;
+};
+
+export type AdminEntitySearchResponse = {
+  type: 'contributor' | 'publisher';
+  query: string;
+  items: AdminEntityMatch[];
+};
+
+export type EditionEditResponse = { edition: AdminEdition };
 
 export type MergeField =
   | 'title'

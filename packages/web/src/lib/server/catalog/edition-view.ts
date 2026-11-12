@@ -8,7 +8,7 @@
  */
 
 import type { Pool } from 'pg';
-import { normalizeContributorRole } from './contributor-roles.ts';
+import { normalizeContributorRole } from '../../contributor-roles.ts';
 
 export type EditionQueryable = Pick<Pool, 'query'>;
 

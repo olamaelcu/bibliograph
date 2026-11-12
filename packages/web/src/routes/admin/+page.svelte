@@ -652,6 +652,14 @@
                   <wa-button size="small" onclick={() => void findInMerge(lastIngest!.title)}>
                     Find in merge
                   </wa-button>
+                  <a
+                    class="admin-small"
+                    href={`/admin/edition/${encodeURIComponent(
+                      lastIngest!.uri.slice(lastIngest!.uri.lastIndexOf('/') + 1)
+                    )}/edit`}
+                  >
+                    Edit edition
+                  </a>
                 </div>
               </div>
             </wa-callout>
@@ -1180,6 +1188,12 @@
                         {record.uri}<br />
                         indexed {isoDate(record.indexedAt)} · updated {isoDate(record.updatedAt)}
                       </span>
+                      <a
+                        class="admin-small"
+                        href={`/admin/edition/${encodeURIComponent(record.rkey)}/edit`}
+                      >
+                        Edit edition
+                      </a>
                     </div>
                   </div>
                 </wa-card>

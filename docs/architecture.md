@@ -347,6 +347,21 @@ inline fallback.
   server transaction against the catalog; the base keeps its URI, identifiers
   are unioned, and the duplicate editions are deleted only after every chosen
   field and link is applied.
+- The admin edition editor lives at `/admin/edition/<rkey>/edit`; the same
+  route accepts a URL-encoded edition at-URI. Its page load returns the full
+  admin record (scalars, identifiers, contributor credits and publisher links)
+  or 404, and reads through the shared catalog loader. Saving posts the whole
+  record to `/admin/api/editions/<id>`; one transaction replaces the scalars,
+  identifiers, contributor credits and publisher links, preserving the edition
+  URI, rkey and `createdAt` as well as any contributor/publisher entity rows
+  that remain selected. A new contributor or publisher is deduped by
+  `lower(name)` plus its identifier bag, exactly like ingest, and gets an
+  `at_uri` under the edition's own repo authority. Removing a credit deletes
+  only the join row; shared entities are never deleted. The editor never
+  writes `pds_outbox`: the catalog triggers queue the edition and any new or
+  newly addressed entity records. A save that carries a stale `revision`
+  (returned by the page load) answers 409, and the form keeps its unsaved state
+  on every validation or conflict error.
 - The admin UI also searches ISBNdb publisher names, previews one publisher's
   books through `GET /publisher/{name}` (paged, filtered by `publishedFrom`,
   `publishedTo` and `language`), and ingests either the selected candidates or
