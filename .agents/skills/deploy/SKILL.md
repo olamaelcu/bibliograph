@@ -32,11 +32,20 @@ applied immediately after it installs, before any unit from the new set starts.
 
 Ports: the packaged HappyView default is `127.0.0.1:3000`, but on
 `lescayes.ts.olamaelcu.net` that address belongs to the unrelated
-`livtet.service`, so HappyView runs on `127.0.0.1:3100` there. `PORT` and
-`PUBLIC_URL` in `happyview.env`, plus `HAPPYVIEW_URL` in `happyview.env` (the
-deploy oneshot) and `web.env`, must all name the same loopback port. The web
-edge is `127.0.0.1:5176` (nginx proxies here), worker metrics
-`127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
+`livtet.service`, so HappyView itself listens on `127.0.0.1:3100` there
+(`PORT=3100`). Its internal callers do not share that address:
+
+- the deploy oneshot (`hv-deploy`) uses `HAPPYVIEW_URL=http://127.0.0.1:3100/hv`
+  from `happyview.local` (`BASE_PATH=/hv`), talking to HappyView directly;
+- the web edge uses `HAPPYVIEW_URL=http://127.0.0.1:3101/hv` from `web.env`.
+  `3101` is a loopback-only nginx adapter that rewrites `Host` to the
+  registered tailnet name and proxies to `3100/hv`; HappyView answers
+  `421 Unknown host` to a bare `127.0.0.1` Host once `PUBLIC_URL` is the
+  tailnet origin.
+
+So `PORT=3100` is HappyView's own listener, not the edge's upstream: never
+point `web.env` at it. The web edge is `127.0.0.1:5176` (nginx proxies here),
+worker metrics `127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
 
 ## Version sources (do not guess)
 
@@ -226,9 +235,11 @@ the packaged defaults. All are `0640 root:bibliograph`-style rooted files.
 - `PUBLIC_URL`, `HOST`, `PORT`, `STATIC_DIR` — shipped loopback defaults; the
   app is the public origin.
 - `HAPPYVIEW_URL` — the deploy oneshot's `hv-deploy` defaults to
-  `http://127.0.0.1:3000`. Set it to the actual loopback address whenever
-  `PORT` is not 3000 (on lescayes: `http://127.0.0.1:3100`), or the lexicon/
-  script upload talks to whatever else owns 3000.
+  `http://127.0.0.1:3000`. Set it whenever `PORT` is not 3000 (on lescayes:
+  `http://127.0.0.1:3100/hv`, set in `happyview.local` beside
+  `BASE_PATH=/hv`), including the prefix when one is set, or the lexicon and
+  script upload either talks to whatever else owns 3000 or misses the
+  prefixed routes.
 - Optional: `JETSTREAM_URL`, `RELAY_URL`, `PLC_URL` (commented),
   `HAPPYVIEW_ADMIN_KEY_FILE`, `HV_ADMIN_DID`.
 
@@ -251,9 +262,12 @@ wins (Ansible-managed hosts use it).
 ### `/etc/bibliograph/web.env`
 
 - `HOST=127.0.0.1`, `PORT=5176` (must match the nginx upstream),
-  `HAPPYVIEW_URL` — **required** and must match HappyView's actual loopback
-  port: the packaged default is `http://127.0.0.1:3000`; on lescayes it is
-  `http://127.0.0.1:3100` because 3000 belongs to livtet.
+  `HAPPYVIEW_URL` — **required**: the base URL the edge proxies XRPC to. The
+  packaged default is `http://127.0.0.1:3000`. On lescayes it is
+  `http://127.0.0.1:3101/hv` — the loopback Host-rewrite adapter, not
+  HappyView's own `127.0.0.1:3100` (`PORT=3100` in `happyview.env`), because
+  HappyView rejects a loopback `Host` once `PUBLIC_URL` is the tailnet origin.
+  Include the `/hv` prefix when `BASE_PATH=/hv`.
 - `FEED_GENERATOR_DID` — **required** for the feed methods; no code default,
   empty answers `503`.
 - `PLC_URL` — **required for `following`/`extended`/`dynamic`**; `public` does
@@ -383,9 +397,11 @@ nginx access/error logs are `/var/log/nginx/bibliograph.access.log` and
   Confirm with the correct `--resolve host:443:127.0.0.1` request before
   treating it as a TLS failure.
 - **HappyView exits with `AddrInUse` on 127.0.0.1:3000** — another service owns
-  that port (livtet on lescayes). Move `PORT`/`PUBLIC_URL` in `happyview.env`
-  and `HAPPYVIEW_URL` in both `happyview.env` and `web.env` together to a free
-  loopback port; do not stop the unrelated service.
+  that port (livtet on lescayes). Move `PORT` in `happyview.env` (and
+  `BASE_PATH`/`PUBLIC_URL`/`HAPPYVIEW_URL` with it) to a free loopback port;
+  do not stop the unrelated service. Then point `web.env`'s `HAPPYVIEW_URL` at
+  whatever front the edge uses (the `3101/hv` adapter on lescayes targets the
+  new port), which is not necessarily HappyView's own port.
 - **Feeds answer `503`** — set `FEED_GENERATOR_DID`; for
   `following`/`extended`/`dynamic` also `PLC_URL`. Ensure the web role has
   `USAGE` on `happyview` and `SELECT` on `happyview.happyview_records`
