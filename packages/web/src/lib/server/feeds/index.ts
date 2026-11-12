@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 
 import { CatalogUnavailableError, catalogPool } from '$lib/server/catalog/db';
+import { metrics, recordFeedRequest } from '$lib/server/metrics';
 import { createDidResolver } from './did';
 import { FeedAuthError, verifyFeedServiceJwt, type DidResolver } from './auth';
 import {
@@ -92,11 +93,15 @@ function didResolver(url: string): DidResolver {
 
 export function describeFeedGenerator(): Response {
   const did = feedGeneratorDid();
-  if (did === null) return missingConfig('FEED_GENERATOR_DID');
-  return json({
-    did,
-    feeds: FEED_KINDS.map((kind) => ({ uri: feedUri(did, kind) }))
-  });
+  const response =
+    did === null
+      ? missingConfig('FEED_GENERATOR_DID')
+      : json({
+          did,
+          feeds: FEED_KINDS.map((kind) => ({ uri: feedUri(did, kind) }))
+        });
+  recordFeedRequest(metrics, 'describe', response.status);
+  return response;
 }
 
 /**
@@ -105,27 +110,40 @@ export function describeFeedGenerator(): Response {
  * the public page.
  */
 export async function getFeedSkeleton(request: Request): Promise<Response> {
+  // `invalid` covers every early rejection; once the feed parameter parses,
+  // the metric carries the actual feed kind. Both are bounded label values.
+  let metricsKind = 'invalid';
+  const respond = (response: Response): Response => {
+    recordFeedRequest(metrics, metricsKind, response.status);
+    return response;
+  };
+
   const url = new URL(request.url);
   const did = feedGeneratorDid();
-  if (did === null) return missingConfig('FEED_GENERATOR_DID');
+  if (did === null) return respond(missingConfig('FEED_GENERATOR_DID'));
 
   const rawFeed = url.searchParams.get('feed');
   if (rawFeed === null || rawFeed === '') {
-    return fail(400, ERROR_INVALID_REQUEST, 'the feed parameter is required');
+    return respond(fail(400, ERROR_INVALID_REQUEST, 'the feed parameter is required'));
   }
   const kind = parseFeedUri(rawFeed, did);
   if (kind === null) {
-    return fail(400, ERROR_INVALID_REQUEST, 'the feed parameter is not a feed of this generator');
+    return respond(
+      fail(400, ERROR_INVALID_REQUEST, 'the feed parameter is not a feed of this generator')
+    );
   }
+  metricsKind = kind;
   const limit = parseLimit(url.searchParams.get('limit'));
   if (limit === null) {
-    return fail(400, ERROR_INVALID_REQUEST, 'limit must be an integer between 1 and 100');
+    return respond(
+      fail(400, ERROR_INVALID_REQUEST, 'limit must be an integer between 1 and 100')
+    );
   }
 
   const rawCursor = url.searchParams.get('cursor');
   const cursor = rawCursor === null || rawCursor === '' ? null : decodeCursor(rawCursor);
   if (rawCursor !== null && cursor === null) {
-    return fail(400, ERROR_INVALID_REQUEST, 'the cursor is malformed');
+    return respond(fail(400, ERROR_INVALID_REQUEST, 'the cursor is malformed'));
   }
 
   let viewerDid: string | null = null;
@@ -133,10 +151,12 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
     // `public` is anonymous and needs no DID resolution; the personalized kinds
     // need the PLC directory before they verify a token or touch the database.
     const plc = plcUrl();
-    if (plc === null) return missingConfig('PLC_URL');
+    if (plc === null) return respond(missingConfig('PLC_URL'));
     const token = bearerToken(request.headers.get('authorization'));
     if (token === null) {
-      return fail(401, ERROR_AUTH_REQUIRED, 'this feed requires an atproto service token');
+      return respond(
+        fail(401, ERROR_AUTH_REQUIRED, 'this feed requires an atproto service token')
+      );
     }
     try {
       viewerDid = await verifyFeedServiceJwt(token, {
@@ -145,7 +165,7 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
       });
     } catch (error) {
       if (error instanceof FeedAuthError) {
-        return fail(401, ERROR_AUTH_REQUIRED, error.message);
+        return respond(fail(401, ERROR_AUTH_REQUIRED, error.message));
       }
       throw error;
     }
@@ -161,11 +181,11 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
     });
   } catch (error) {
     if (error instanceof CatalogUnavailableError) {
-      return fail(503, ERROR_UNAVAILABLE, 'feed database is not configured');
+      return respond(fail(503, ERROR_UNAVAILABLE, 'feed database is not configured'));
     }
     console.error('[feeds] skeleton query failed', error);
-    return fail(503, ERROR_UNAVAILABLE, 'feed database is unavailable');
+    return respond(fail(503, ERROR_UNAVAILABLE, 'feed database is unavailable'));
   }
 
-  return json(page);
+  return respond(json(page));
 }

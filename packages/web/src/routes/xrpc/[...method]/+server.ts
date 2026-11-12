@@ -1,5 +1,6 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
+import { metrics, recordCatalogQuery } from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
 import { isPdsRead, proxyPdsRead } from "$lib/server/pds";
 import { CatalogUnavailableError } from "$lib/server/catalog/db";
@@ -146,8 +147,15 @@ async function handleResolve(request: Request): Promise<Response> {
   if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
   if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
 
+  const started = performance.now();
   try {
     const results = await resolveEditions({ identifiers, offset, limit });
+    recordCatalogQuery(
+      metrics,
+      "resolveEditions",
+      "ok",
+      (performance.now() - started) / 1000,
+    );
 
     const matched = new Set<string>();
     for (const item of results.items) {
@@ -169,6 +177,12 @@ async function handleResolve(request: Request): Promise<Response> {
 
     return json(results);
   } catch (error) {
+    recordCatalogQuery(
+      metrics,
+      "resolveEditions",
+      error instanceof CatalogUnavailableError ? "unavailable" : "error",
+      (performance.now() - started) / 1000,
+    );
     return catalogFailure(error);
   }
 }
@@ -202,8 +216,15 @@ async function handleSearch(request: Request): Promise<Response> {
   if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
   if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
 
+  const started = performance.now();
   try {
     const results = await searchEditions({ q, title, author, identifiers, offset, limit });
+    recordCatalogQuery(
+      metrics,
+      "searchEditions",
+      "ok",
+      (performance.now() - started) / 1000,
+    );
     // An ISBN is worth a direct ISBNdb lookup even when the local catalog
     // answered: the job enriches/ingests the edition from the provider.
     // Only the first MAX_HYDRATION_JOBS_PER_REQUEST distinct ISBNs queue.
@@ -218,6 +239,12 @@ async function handleSearch(request: Request): Promise<Response> {
     }
     return json(results);
   } catch (error) {
+    recordCatalogQuery(
+      metrics,
+      "searchEditions",
+      error instanceof CatalogUnavailableError ? "unavailable" : "error",
+      (performance.now() - started) / 1000,
+    );
     return catalogFailure(error);
   }
 }

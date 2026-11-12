@@ -1,5 +1,7 @@
 import { env } from '$env/dynamic/private';
 
+import { metrics, recordPdsProxyRequest } from '$lib/server/metrics';
+
 /**
  * The only publisher-record reads served at the edge.
  *
@@ -36,7 +38,7 @@ function failure(status: number, error: string, message?: string): Response {
  * Every other `com.atproto.*` method stays on the HappyView `forward()` path;
  * this proxy deliberately handles exactly the two reads above.
  */
-export async function proxyPdsRead(method: string, request: Request): Promise<Response> {
+async function proxyPdsReadRequest(method: string, request: Request): Promise<Response> {
   const base = env.PDS_URL?.replace(/\/+$/, '');
   if (!base) {
     return failure(
@@ -72,4 +74,16 @@ export async function proxyPdsRead(method: string, request: Request): Promise<Re
     status: upstream.status,
     headers: response
   });
+}
+
+/** Count one publisher-record read and relay it, with the status the caller saw. */
+export async function proxyPdsRead(method: string, request: Request): Promise<Response> {
+  try {
+    const response = await proxyPdsReadRequest(method, request);
+    recordPdsProxyRequest(metrics, { method, status: response.status });
+    return response;
+  } catch (error) {
+    recordPdsProxyRequest(metrics, { method, status: 0, outcome: 'exception' });
+    throw error;
+  }
 }

@@ -1,5 +1,7 @@
 import { env } from "$env/dynamic/private";
 
+import { metrics, recordHappyViewRequest } from "$lib/server/metrics";
+
 /** Upstream request headers worth relaying; everything else is hop-by-hop. */
 const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "authorization", "dpop"] as const;
 
@@ -89,7 +91,7 @@ function clientHeaders(): Record<string, string> {
  * `unwrapScriptFailure`): it is a failure the caller asked for, and only this
  * layer can turn it into the status it names.
  */
-export async function forward(method: string, request: Request): Promise<Response> {
+async function forwardRequest(method: string, request: Request): Promise<Response> {
   const url = new URL(request.url);
   const headers = new Headers();
 
@@ -143,4 +145,21 @@ export async function forward(method: string, request: Request): Promise<Respons
     status: upstream.status,
     headers: response,
   });
+}
+
+/**
+ * Count one XRPC call and relay it. The counter is recorded only after the
+ * proxy produced a response, so the status label is the status the caller
+ * actually saw; a thrown error (a bug, not an upstream failure) is still
+ * counted as an exception before propagating.
+ */
+export async function forward(method: string, request: Request): Promise<Response> {
+  try {
+    const response = await forwardRequest(method, request);
+    recordHappyViewRequest(metrics, { method, status: response.status });
+    return response;
+  } catch (error) {
+    recordHappyViewRequest(metrics, { method, status: 0, outcome: "exception" });
+    throw error;
+  }
 }
