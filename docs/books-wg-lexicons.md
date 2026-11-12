@@ -193,8 +193,21 @@ Honest limits:
 
 - The catalog publisher must publish `community.lexicon.media.book.edition` records against the
   imported `happyview/lexicons/community/lexicon/media/book/edition.json` (PR #18).
-- Publish the two procedure lexicons and the defs/review lexicons as `com.atproto.lexicon.schema`
-  records from the same imported source, so `com.atproto.lexicon.resolveLexicon` answers for them.
+- Publish every local schema with `mise run publish-lex` (or
+  `node scripts/publish-lexicons.mjs`). It writes each `happyview/lexicons/**/*.json` as a
+  `com.atproto.lexicon.schema` record (rkey = NSID, record = document plus `$type`) to the
+  configured `PDS_URL` repo, is idempotent, and verifies each write with `getRecord`. List the
+  published records with `com.atproto.repo.listRecords` (collection
+  `com.atproto.lexicon.schema`) on the publisher PDS.
+- A repo write is not a namespace claim. Consumers resolve an NSID by reading
+  `_lexicon.<authority>` TXT (authority = all segments except the final name, reversed) and then
+  that DID's record. Only `_lexicon.biblio.livtet.olamaelcu.net` names the publisher DID today, so
+  `net.olamaelcu.livtet.biblio.<name>` resolves under its authority. Nested names
+  (`net.olamaelcu.livtet.biblio.graph.follow`, `.shelf.create`, `.review.create`, …) need their own
+  `_lexicon.<sub-authority>` TXT, and the `community.lexicon.media.book.*` authority
+  (`book.media.lexicon.community`) is not ours; their records exist but are not authoritative.
+  `com.atproto.lexicon.resolveLexicon` is not implemented by the PDS (400 `InvalidRequest` with a
+  session, 401 `AuthMissing` without one); the biblio edge requires DPoP/space credentials.
 - The publisher identity is the configured `did:plc` account (`ATP_SERVICE_DID`; the
   `did:web:<ATP_SERVICE_HOST>` form is a local/test fallback). Publication requires that account to
   be provisioned on the PDS; the catalog itself is not seeded, imported or migrated from a previous

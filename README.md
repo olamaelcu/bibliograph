@@ -55,8 +55,10 @@ remembers the last published CID so create/update is chosen without a read.
 
 `/xrpc/com.atproto.{repo,sync,identity}.*` and
 `/xrpc/com.atproto.server.describeServer` are proxied to that PDS. Lexicons are
-published as `com.atproto.lexicon.schema` records with
-`pnpm --filter bibliograph-service pds:publish-lexicons`.
+published as `com.atproto.lexicon.schema` records with `mise run publish-lex`
+(or `node scripts/publish-lexicons.mjs` against `PDS_URL`). The task is
+idempotent: it writes each `happyview/lexicons/**/*.json` with rkey = NSID,
+skips unchanged records, and re-reads every write to compare the value/CID.
 
 ## Providers
 
