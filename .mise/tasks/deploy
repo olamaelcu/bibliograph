@@ -1,15 +1,25 @@
 #!/usr/bin/env bash
-#MISE description="Build happyview, worker and web, then deploy them in dependency order"
-#MISE depends=["package-hv-deb", "package-worker-deb", "package-web-deb"]
+#MISE description="Build web, happyview and worker sequentially, then deploy them in dependency order"
 # Thin wrapper. Build selection, upload, install order, database prerequisites
 # and verification live in ./deploy.sh, so there is exactly one implementation.
 #
-# The three deb tasks above run before this script and must all succeed: nothing
-# is uploaded or installed after a partial build. Install order on the host is
-# dependency-first — bibliograph-happyview, then bibliograph-worker (whose
-# /usr/lib/bibliograph-worker/sql/ is applied next), then bibliograph-web
-# (Depends: bibliograph-happyview) last, so the edge is never exposed before its
-# upstream and the worker.
+# The three debs are built here, sequentially, and all must succeed before
+# deploy.sh uploads anything: nothing is installed after a partial build.
+#
+# The order is web -> happyview -> worker, not the host install order.
+# package-worker-payload runs `pnpm deploy --prod`, which prunes the workspace's
+# dev dependency links (notably packages/web/node_modules/.bin/vite). Building
+# web after that races the worker payload and fails, so web is built and
+# packaged first; the worker payload is staged last. A repeat run restores the
+# pruned links with `pnpm install --frozen-lockfile` before building web.
+#
+# Do not turn these into #MISE depends: mise may run dependencies concurrently,
+# which reintroduces the same race and leaves vite missing under the web build.
+#
+# Install order on the host is dependency-first — bibliograph-happyview, then
+# bibliograph-worker (whose /usr/lib/bibliograph-worker/sql/ is applied next),
+# then bibliograph-web (Depends: bibliograph-happyview) last, so the edge is
+# never exposed before its upstream and the worker.
 #
 # A host with the retired combined `bibliograph` package is detected in
 # preflight. Without --replace-legacy the deploy aborts before uploading;
@@ -23,7 +33,7 @@
 #   mise run deploy                          -> veve@lescayes.ts.olamaelcu.net
 #   mise run deploy -- alice@server          another host
 #   DEPLOY_HOST=alice@server mise run deploy
-#   mise run deploy -- --dry-run             select/print the plan; no ssh
+#   mise run deploy -- --dry-run             build sequentially, then print the plan; no ssh
 #   mise run deploy -- --print-remote        print the remote script
 #   mise run deploy -- --replace-legacy      stop/purge the retired combined
 #                                            package and cut over explicitly
@@ -33,5 +43,19 @@
 set -euo pipefail
 
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+# Sequential, and web first: the worker payload's `pnpm deploy --prod` removes
+# the workspace dev links the web build needs.
+if [ ! -x "$ROOT/packages/web/node_modules/.bin/vite" ]; then
+  printf '==> Restoring workspace dev links pruned by a previous worker payload\n'
+  pnpm install --frozen-lockfile
+fi
+printf '==> Building bibliograph-web (before the worker payload prunes dev links)\n'
+mise run package-web-deb
+printf '==> Building bibliograph-happyview\n'
+mise run package-hv-deb
+printf '==> Building bibliograph-worker (payload staging prunes workspace dev links)\n'
+mise run package-worker-deb
 
 exec bash "$ROOT/deploy.sh" "$@"

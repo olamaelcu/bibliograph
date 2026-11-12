@@ -533,7 +533,9 @@ printf 'HTTP http://127.0.0.1:%s/ %s\n' "$port" "$code"
 # exists, so this is fatal only in --replace-legacy mode.
 web_site_enabled=/etc/nginx/sites-enabled/bibliograph-web
 if [ -e "$web_site_enabled" ] || [ -L "$web_site_enabled" ]; then
-  vhost_name="$(awk '/^[[:space:]]*server_name[[:space:]]/ {print $2; exit}' \
+  # nginx writes `server_name host;`, so $2 includes the trailing semicolon;
+  # strip it before building the --resolve host:port and https:// URL.
+  vhost_name="$(awk '/^[[:space:]]*server_name[[:space:]]/ {gsub(/;$/,"",$2); print $2; exit}' \
     /etc/nginx/sites-available/bibliograph-web 2>/dev/null || true)"
   if [ -z "$vhost_name" ] || [ "$vhost_name" = _ ]; then
     if [ "$REPLACE_LEGACY" = 1 ]; then
@@ -615,10 +617,10 @@ print_plan() {
   cat <<EOF
 Target: $HOST
 
-Build (mise dependencies, all must succeed before this script runs):
-  1. mise run package-hv-deb      -> $HV_NAME ($HV_VERSION, $HV_ARCH)
-  2. mise run package-worker-deb  -> $WORKER_NAME ($WORKER_VERSION, $WORKER_ARCH)
-  3. mise run package-web-deb     -> $WEB_NAME ($WEB_VERSION, $WEB_ARCH)
+Build (.mise/tasks/deploy, sequential; all must succeed before this script runs):
+  1. mise run package-web-deb     -> $WEB_NAME ($WEB_VERSION, $WEB_ARCH)   [first]
+  2. mise run package-hv-deb      -> $HV_NAME ($HV_VERSION, $HV_ARCH)
+  3. mise run package-worker-deb  -> $WORKER_NAME ($WORKER_VERSION, $WORKER_ARCH)   [last: prunes web dev links]
 
 Install (dependency-first, apt-get --reinstall, stop on failure):
   1. bibliograph-happyview  upstream activity plane + db-init.sql

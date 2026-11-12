@@ -11,7 +11,7 @@ One command drives the whole release:
 mise run deploy                          # build all three, install on veve@lescayes.ts.olamaelcu.net
 mise run deploy -- alice@server          # another host
 DEPLOY_HOST=alice@server mise run deploy
-mise run deploy -- --dry-run             # select debs, print the plan; no ssh
+mise run deploy -- --dry-run             # build sequentially, then print the plan; no ssh
 ```
 
 This is a fresh-start deployment: no data migration, no import, no seed. The
@@ -30,8 +30,13 @@ staging/canary flow; rollback is a version pin (see [Rollback](#rollback)).
 never exposed before its upstream exists. The worker's catalog schema is
 applied immediately after it installs, before any unit from the new set starts.
 
-Ports: HappyView `127.0.0.1:3000`, web edge `127.0.0.1:5176` (nginx proxies
-here), worker metrics `127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
+Ports: the packaged HappyView default is `127.0.0.1:3000`, but on
+`lescayes.ts.olamaelcu.net` that address belongs to the unrelated
+`livtet.service`, so HappyView runs on `127.0.0.1:3100` there. `PORT` and
+`PUBLIC_URL` in `happyview.env`, plus `HAPPYVIEW_URL` in `happyview.env` (the
+deploy oneshot) and `web.env`, must all name the same loopback port. The web
+edge is `127.0.0.1:5176` (nginx proxies here), worker metrics
+`127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
 
 ## Version sources (do not guess)
 
@@ -61,13 +66,20 @@ each split changelog gets a `0.2.0-1` entry, and the produced files are
 
 ## Build
 
-`.mise/tasks/deploy` declares the three build tasks as dependencies; mise may
-run them concurrently, and all must succeed before anything is uploaded:
+`.mise/tasks/deploy` builds the three packages sequentially, in the safe order
+**web → happyview → worker**, and all must succeed before anything is
+uploaded. Do not make these `#MISE depends`: mise may run dependencies
+concurrently, and `package-worker-payload` runs `pnpm deploy --prod`, which
+prunes the workspace dev links the web build needs
+(`packages/web/node_modules/.bin/vite`). Build and package web first; stage
+the worker payload last. On a repeat run the pruned links are gone, so the
+wrapper restores them with `pnpm install --frozen-lockfile` before building
+web.
 
 ```bash
+mise run package-web-deb     # package-web-payload (pnpm build) -> dpkg-deb; first
 mise run package-hv-deb      # package-hv-payload (docker pull pinned image) -> dpkg-deb
-mise run package-worker-deb  # package-worker-payload (pnpm deploy --prod) -> dpkg-deb
-mise run package-web-deb     # package-web-payload (pnpm build) -> dpkg-deb
+mise run package-worker-deb  # package-worker-payload (pnpm deploy --prod) -> dpkg-deb; last
 ```
 
 `deploy.sh` selects the newest `dist/bibliograph-{happyview,worker,web}_*.deb`
@@ -76,8 +88,9 @@ by version sort. `DIST_DIR` changes the directory; `HV_PKG`, `WORKER_PKG`,
 
 ## What `mise run deploy` does
 
-`deploy.sh` is the single implementation; the mise task only adds the three
-build dependencies and `exec`s it.
+`deploy.sh` is the single implementation; the mise task builds the three debs
+sequentially (web, happyview, worker) and then `exec`s it with the arguments
+unchanged.
 
 ### 1. Local preflight
 
@@ -88,7 +101,7 @@ build dependencies and `exec`s it.
   Node.js **≥ 22**, architecture compatibility (`worker`/`web` are `all`,
   HappyView is the host arch), nginx/psql presence, free memory/disk warnings,
   and the legacy detection below.
-- `--dry-run` stops here and prints the plan.
+- The builds have already run by now; `--dry-run` stops here and prints the plan.
 
 ### 2. Legacy detection (preflight, before any upload)
 
@@ -178,8 +191,11 @@ systemctl restart bibliograph-web.service
   differs from `web.env`'s `PORT` (would 502), reloads nginx. Reports whether
   the site is enabled or only staged (no certificate).
 - Polls `http://127.0.0.1:<PORT>/` for up to 30 s and prints `HTTP`.
-- If the new vhost is enabled, checks `https://<server_name>/` through
-  `127.0.0.1:443`; this is fatal only under `--replace-legacy`.
+- If the new vhost is enabled, strips the trailing semicolon from
+  `server_name` (nginx writes `server_name host;`; without stripping it the
+  URL becomes `https://host;/` and curl reports `000`), then checks
+  `https://<server_name>/` through `127.0.0.1:443` with `--resolve`; this is
+  fatal only under `--replace-legacy`.
 - `POST /xrpc/community.lexicon.media.book.searchEditions` probe (best effort).
 - Prints `PKG_VERSION`, `HTTP`, `XRPC`, one `SERVICE_STATE` line per unit, and
   `DEPLOY_OK`. Non-zero on a version mismatch, a non-`200` loopback, or any
@@ -192,8 +208,8 @@ systemctl restart bibliograph-web.service
 | `--replace-legacy` | Explicitly stop/purge the retired combined package and remove its vhost, then cut over. Destructive to that package's conffile edits; PostgreSQL data untouched. Without it, a detected legacy install aborts before upload. |
 | `--skip-db` | Skip the HappyView role/schema gate, the catalog schema, and the 0003 re-apply. Use only when another tool owns the database. |
 | `--skip-nginx` | Skip `nginx -t`/reload. Replacement checks under `--replace-legacy` still apply. |
-| `--dry-run` | Select/validate packages and print the plan; no ssh. |
-| `--print-remote` | Print the remote install/verify script (review or `bash -n`). |
+| `--dry-run` | Builds run first; then select/validate packages and print the plan; no ssh. |
+| `--print-remote` | Builds run first; then print the remote install/verify script (review or `bash -n`). |
 | `-h`, `--help` | Usage. |
 
 ## Configuration / required env
@@ -209,6 +225,10 @@ the packaged defaults. All are `0640 root:bibliograph`-style rooted files.
 - `TOKEN_ENCRYPTION_KEY` — base64, exactly 32 bytes; DPoP/OAuth at rest.
 - `PUBLIC_URL`, `HOST`, `PORT`, `STATIC_DIR` — shipped loopback defaults; the
   app is the public origin.
+- `HAPPYVIEW_URL` — the deploy oneshot's `hv-deploy` defaults to
+  `http://127.0.0.1:3000`. Set it to the actual loopback address whenever
+  `PORT` is not 3000 (on lescayes: `http://127.0.0.1:3100`), or the lexicon/
+  script upload talks to whatever else owns 3000.
 - Optional: `JETSTREAM_URL`, `RELAY_URL`, `PLC_URL` (commented),
   `HAPPYVIEW_ADMIN_KEY_FILE`, `HV_ADMIN_DID`.
 
@@ -231,7 +251,9 @@ wins (Ansible-managed hosts use it).
 ### `/etc/bibliograph/web.env`
 
 - `HOST=127.0.0.1`, `PORT=5176` (must match the nginx upstream),
-  `HAPPYVIEW_URL` — **required** (`http://127.0.0.1:3000`).
+  `HAPPYVIEW_URL` — **required** and must match HappyView's actual loopback
+  port: the packaged default is `http://127.0.0.1:3000`; on lescayes it is
+  `http://127.0.0.1:3100` because 3000 belongs to livtet.
 - `FEED_GENERATOR_DID` — **required** for the feed methods; no code default,
   empty answers `503`.
 - `PLC_URL` — **required for `following`/`extended`/`dynamic`**; `public` does
@@ -356,6 +378,14 @@ nginx access/error logs are `/var/log/nginx/bibliograph.access.log` and
   nginx, then `dpkg-reconfigure bibliograph-web` to retry enablement.
 - **Public 502 while loopback is 200** — the vhost upstream port and
   `web.env`'s `PORT` disagree (default `5176`). The deploy warns about this.
+- **`HTTPS https://host;/ 000`** — the vhost verifier failed to strip the
+  trailing semicolon from `server_name`; current `deploy.sh` does strip it.
+  Confirm with the correct `--resolve host:443:127.0.0.1` request before
+  treating it as a TLS failure.
+- **HappyView exits with `AddrInUse` on 127.0.0.1:3000** — another service owns
+  that port (livtet on lescayes). Move `PORT`/`PUBLIC_URL` in `happyview.env`
+  and `HAPPYVIEW_URL` in both `happyview.env` and `web.env` together to a free
+  loopback port; do not stop the unrelated service.
 - **Feeds answer `503`** — set `FEED_GENERATOR_DID`; for
   `following`/`extended`/`dynamic` also `PLC_URL`. Ensure the web role has
   `USAGE` on `happyview` and `SELECT` on `happyview.happyview_records`
@@ -380,7 +410,8 @@ nginx access/error logs are `/var/log/nginx/bibliograph.access.log` and
 - `deploy.sh` — full implementation: package selection, preflight, legacy
   detection/cutover, upload + checksum, install/DB stages, ordered restarts,
   nginx and verification.
-- `.mise/tasks/deploy` — thin wrapper with the three build dependencies.
+- `.mise/tasks/deploy` — thin wrapper that builds web, happyview and worker
+  sequentially, then `exec`s `deploy.sh`.
 - `.mise/tasks/package-{hv,worker,web}-{payload,deb}` — build/stage steps.
 - `packaging/{happyview,worker,web}/build-deb.sh` — version reading,
   `dpkg-deb` assembly, payload/unit/conffile install.
