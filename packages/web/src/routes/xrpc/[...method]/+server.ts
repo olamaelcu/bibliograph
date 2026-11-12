@@ -137,12 +137,7 @@ async function handleResolve(request: Request): Promise<Response> {
   const started = performance.now();
   try {
     const results = await resolveEditions({ identifiers, offset, limit });
-    recordCatalogQuery(
-      metrics,
-      "resolveEditions",
-      "ok",
-      (performance.now() - started) / 1000,
-    );
+    recordCatalogQuery(metrics, "resolveEditions", "ok", (performance.now() - started) / 1000);
 
     const matched = new Set<string>();
     for (const item of results.items) {
@@ -175,7 +170,6 @@ async function handleResolve(request: Request): Promise<Response> {
 }
 
 async function handleSearch(request: Request): Promise<Response> {
-  console.log(request);
   const body = await readBody(request);
   if (body === null) return fail(400, "InvalidRequest", "the request body must be a JSON object");
 
@@ -206,12 +200,7 @@ async function handleSearch(request: Request): Promise<Response> {
   const started = performance.now();
   try {
     const results = await searchEditions({ q, title, author, identifiers, offset, limit });
-    recordCatalogQuery(
-      metrics,
-      "searchEditions",
-      "ok",
-      (performance.now() - started) / 1000,
-    );
+    recordCatalogQuery(metrics, "searchEditions", "ok", (performance.now() - started) / 1000);
     // An ISBN is worth a direct ISBNdb lookup even when the local catalog
     // answered: the job enriches/ingests the edition from the provider.
     // Only the first MAX_HYDRATION_JOBS_PER_REQUEST distinct ISBNs queue.
