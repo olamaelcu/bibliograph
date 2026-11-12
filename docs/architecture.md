@@ -408,6 +408,60 @@ need `_lexicon.<authority>` TXT to name the publisher DID.
 served by this edge. `defs#publisher.ref` is a local extension to PR #18 and
 remains to be proposed upstream.
 
+## Admin reports
+
+`GET /admin/api/reports` returns the report registry (id, title, description,
+filters and column definitions). `GET /admin/api/reports/<id>` runs one report.
+Both live under `/admin`, so they share the admin gate: 404 when `ADMIN_TOKEN`
+is unset, 401 without the admin cookie. An unknown report id answers 404, an
+invalid or unsupported filter 400, and an unreachable catalog 503. Every query
+is a fixed, read-only SELECT defined in
+`packages/web/src/lib/server/admin/reports.ts`; there is no parameter that
+accepts SQL, and the only interpolated fragment is an operator chosen from a
+closed union. No report writes, locks or queues anything.
+
+Common parameters are `limit` (1–100, default 25) and `offset` (0–1e9, default
+0). The response is `{ report, params, rows, total, limit, offset }`: `total` is
+the full match count, `params` echoes the applied filters, and rows are ordered
+by a stable key that ends in a unique column (so offset paging is repeatable).
+Timestamps are ISO 8601 strings. Every edition row carries `uri` — the canonical
+`at://<pds>/<recordType>/<rkey>` stored in `editions.uri` — plus `rkey` and
+`title`; report-specific columns are appended.
+
+Reports:
+
+- `editions-missing-cover`: `cover_url IS NULL OR btrim(cover_url) = ''`.
+- `edition-identifier-count`: counts an edition's `edition_identifiers` rows
+  that match `issuer` (exact, optional) and `value` (case-insensitive substring
+  match with LIKE metacharacters escaped, optional), then keeps editions whose
+  count satisfies `comparison` (`eq`, `gte` or `lte`, default `eq`) against `m`
+  (default 0). The matching count is returned as `matching_identifiers`;
+  `m=0` lists editions with no matching identifier. The value is a bound
+  parameter, never a regex or SQL expression.
+- `contributors-missing-identifiers` and `publishers-missing-identifiers`:
+  entity rows whose `identifiers` JSONB is SQL NULL, JSON null or an empty
+  array. Rows without an `at_uri` are included; `identifier_status` says
+  `none`.
+- `editions-missing-description`, `editions-missing-language`,
+  `editions-missing-pages` (`pages IS NULL OR pages <= 0`) and
+  `editions-missing-published-date`: completeness gaps on the edition row.
+- `editions-without-contributors` and `editions-without-publishers`: editions
+  with no `edition_contributors` / `edition_publishers` row.
+- `editions-without-cid`: a left join finds editions with no `pds_cids` row,
+  i.e. no known published record version.
+- `duplicate-identifier-pairs`: identifier `(issuer, value)` pairs attached to
+  two or more editions, with each edition's at-URI, rkey and title. It only
+  reports; no identifier or edition is changed.
+- `outbox-pending-editions`: edition records currently queued in
+  `pds_outbox` (entity records are excluded), with op, attempts, next attempt
+  and last error.
+- `outbox-stale-editions`: outbox rows parked after ten failed attempts or
+  whose next attempt is more than an hour overdue, with a `stale_reason` of
+  `parked` or `overdue`.
+
+The Reports tab in `/admin` consumes the registry and renders the same columns,
+filters, total and paging controls, with loading, empty, error and 503 states.
+
 ## Residual roadmap
 
 - **Books-wg import sync.** Keep the PR #18 imports current and re-pin or

@@ -214,3 +214,66 @@ export type MergeResponse = {
 export function identifierText(identifier: Identifier): string {
   return `${identifier.issuer}:${identifier.value}`;
 }
+
+// ── Reports ─────────────────────────────────────────────────────────────────
+//
+// Shared by the admin reporting API and the Reports tab. The registry is
+// authored server-side in `$lib/server/admin/reports.ts`; these types only
+// describe the JSON the browser receives. Every row is JSON-safe (dates are
+// ISO strings) and an edition row's `uri` is its canonical stored at-URI.
+
+export type ReportColumnFormat =
+  | 'at-uri'
+  | 'edition-list'
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'status';
+
+export type ReportColumn = {
+  key: string;
+  label: string;
+  format: ReportColumnFormat;
+};
+
+export type ReportParamOption = { value: string; label: string };
+
+export type ReportParamSpec = {
+  key: string;
+  label: string;
+  kind: 'text' | 'select';
+  defaultValue: string;
+  placeholder?: string;
+  options?: ReportParamOption[];
+};
+
+export type ReportKind =
+  | 'editions'
+  | 'contributors'
+  | 'publishers'
+  | 'identifier-pairs'
+  | 'outbox';
+
+export type ReportSummary = {
+  id: string;
+  title: string;
+  description: string;
+  kind: ReportKind;
+  columns: ReportColumn[];
+  params: ReportParamSpec[];
+};
+
+export type ReportRow = Record<string, unknown>;
+
+export type ReportRegistryResponse = { reports: ReportSummary[] };
+
+export type ReportResponse = {
+  report: ReportSummary;
+  /** The filters the server applied, echoed as submitted. */
+  params: Record<string, string | number>;
+  rows: ReportRow[];
+  /** Full match count for the report, not just this page. */
+  total: number;
+  limit: number;
+  offset: number;
+};

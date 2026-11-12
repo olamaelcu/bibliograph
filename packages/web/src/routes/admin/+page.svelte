@@ -17,7 +17,11 @@
     type ProviderSearchResponse,
     type PublisherBooksResponse,
     type PublisherImportResponse,
-    type PublisherSearchResponse
+    type PublisherSearchResponse,
+    type ReportRegistryResponse,
+    type ReportResponse,
+    type ReportRow,
+    type ReportSummary
   } from '$lib/admin/types';
 
   const PROVIDER_LABELS: Record<Provider, string> = {
@@ -27,10 +31,16 @@
     goodreads: 'Goodreads'
   };
 
-  type AdminTab = 'provider' | 'publisher' | 'edit' | 'merge';
+  type AdminTab = 'provider' | 'publisher' | 'edit' | 'merge' | 'reports';
 
   function isAdminTab(value: string): value is AdminTab {
-    return value === 'provider' || value === 'publisher' || value === 'edit' || value === 'merge';
+    return (
+      value === 'provider' ||
+      value === 'publisher' ||
+      value === 'edit' ||
+      value === 'merge' ||
+      value === 'reports'
+    );
   }
 
   let activeTab = $state<AdminTab>('provider');
@@ -39,7 +49,10 @@
   // state so actions elsewhere can switch panels.
   function onTabShow(event: Event) {
     const name = (event as CustomEvent<{ name?: unknown }>).detail?.name;
-    if (typeof name === 'string' && isAdminTab(name)) activeTab = name;
+    if (typeof name === 'string' && isAdminTab(name)) {
+      activeTab = name;
+      if (name === 'reports') void loadReports();
+    }
   }
 
   onMount(() => {
@@ -50,6 +63,7 @@
     };
     applyHash();
     window.addEventListener('hashchange', applyHash);
+    if (activeTab === 'reports') void loadReports();
     return () => window.removeEventListener('hashchange', applyHash);
   });
 
@@ -671,6 +685,162 @@
       merging = false;
     }
   }
+
+  // ── Reports ─────────────────────────────────────────────────────────────
+  //
+  // The registry is served by the edge; every report query is read-only and
+  // paginated server-side. Rows arrive JSON-safe, and edition rows carry their
+  // canonical stored at-URI.
+  let reports = $state<ReportSummary[]>([]);
+  let reportsLoading = $state(false);
+  let reportsLoaded = $state(false);
+  let reportsError = $state<string | null>(null);
+  let selectedReportId = $state('');
+  let reportParamValues = $state<Record<string, string>>({});
+  let reportRows = $state<ReportRow[]>([]);
+  let reportTotal = $state(0);
+  let reportLimit = $state(25);
+  let reportOffset = $state(0);
+  let reportLoading = $state(false);
+  let reportError = $state<string | null>(null);
+  let reportRan = $state(false);
+  let reportSequence = 0;
+
+  const selectedReport = $derived(
+    reports.find((report) => report.id === selectedReportId) ?? null
+  );
+  const reportPage = $derived(Math.floor(reportOffset / reportLimit) + 1);
+  const reportPageCount = $derived(Math.max(1, Math.ceil(reportTotal / reportLimit)));
+  const reportRangeStart = $derived(reportRows.length === 0 ? 0 : reportOffset + 1);
+  const reportRangeEnd = $derived(Math.min(reportOffset + reportRows.length, reportTotal));
+
+  function selectReport(id: string) {
+    selectedReportId = id;
+    const report = reports.find((entry) => entry.id === id) ?? null;
+    const defaults: Record<string, string> = {};
+    for (const param of report?.params ?? []) defaults[param.key] = param.defaultValue;
+    reportParamValues = defaults;
+    reportRows = [];
+    reportTotal = 0;
+    reportOffset = 0;
+    reportError = null;
+    reportRan = false;
+  }
+
+  function setReportParam(key: string, value: string) {
+    reportParamValues = { ...reportParamValues, [key]: value };
+  }
+
+  async function loadReports() {
+    if (reportsLoading || reportsLoaded) return;
+    reportsLoading = true;
+    reportsError = null;
+    try {
+      const response = await fetch('/admin/api/reports', { cache: 'no-store' });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as ReportRegistryResponse;
+      reports = Array.isArray(body.reports) ? body.reports : [];
+      reportsLoaded = true;
+      const first = reports[0];
+      if (selectedReportId === '' && first) {
+        selectReport(first.id);
+        await runReport(0);
+      }
+    } catch (error) {
+      reportsError = error instanceof Error ? error.message : 'The report list failed to load.';
+      reports = [];
+    } finally {
+      reportsLoading = false;
+    }
+  }
+
+  async function onSelectReport(event: Event) {
+    selectReport(valueOf(event));
+    await runReport(0);
+  }
+
+  function setReportLimit(value: string) {
+    const parsed = Number(value);
+    reportLimit = Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : 25;
+    void runReport(0);
+  }
+
+  async function runReport(offset: number) {
+    const report = selectedReport;
+    if (!report) return;
+    const sequence = ++reportSequence;
+    reportLoading = true;
+    reportError = null;
+    try {
+      const params = new URLSearchParams({ limit: String(reportLimit), offset: String(offset) });
+      for (const spec of report.params) {
+        const value = reportParamValues[spec.key] ?? spec.defaultValue;
+        if (value !== '') params.set(spec.key, value);
+      }
+      const response = await fetch(
+        `/admin/api/reports/${encodeURIComponent(report.id)}?${params.toString()}`,
+        { cache: 'no-store' }
+      );
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = (await response.json()) as ReportResponse;
+      if (sequence !== reportSequence) return;
+      reportRows = Array.isArray(body.rows) ? body.rows : [];
+      reportTotal = typeof body.total === 'number' ? body.total : 0;
+      reportOffset = typeof body.offset === 'number' ? body.offset : offset;
+      reportRan = true;
+    } catch (error) {
+      if (sequence !== reportSequence) return;
+      reportError = error instanceof Error ? error.message : 'The report query failed.';
+      reportRows = [];
+      reportTotal = 0;
+      reportRan = true;
+    } finally {
+      if (sequence === reportSequence) reportLoading = false;
+    }
+  }
+
+  function reportText(row: ReportRow, key: string): string {
+    const value = row[key];
+    if (value === null || value === undefined) return '—';
+    if (typeof value === 'string') return value === '' ? '—' : value;
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join(', ');
+    }
+    return JSON.stringify(value);
+  }
+
+  function reportDate(value: unknown): string {
+    if (typeof value !== 'string' || value === '') return '—';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : isoDate(value);
+  }
+
+  type ReportEditionLink = { uri: string; rkey: string; title: string };
+
+  function reportEditions(row: ReportRow, key: string): ReportEditionLink[] {
+    const value = row[key];
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry): entry is ReportEditionLink => {
+      if (entry === null || typeof entry !== 'object') return false;
+      const candidate = entry as Record<string, unknown>;
+      return (
+        typeof candidate.uri === 'string' &&
+        typeof candidate.rkey === 'string' &&
+        typeof candidate.title === 'string'
+      );
+    });
+  }
+
+  function reportRowKey(row: ReportRow, index: number): string {
+    for (const key of ['uri', 'at_uri', 'issuer', 'id']) {
+      const value = row[key];
+      if (typeof value === 'string' || typeof value === 'number') return `${key}:${value}:${index}`;
+    }
+    return `row:${index}`;
+  }
 </script>
 
 <main class="admin-main">
@@ -679,6 +849,7 @@
     <wa-tab slot="nav" panel="publisher">Publisher import</wa-tab>
     <wa-tab slot="nav" panel="edit">Edit edition</wa-tab>
     <wa-tab slot="nav" panel="merge">Merge editions</wa-tab>
+    <wa-tab slot="nav" panel="reports">Reports</wa-tab>
 
     <wa-tab-panel name="provider" active={activeTab === 'provider'}>
   <section class="section" id="provider">
@@ -1593,6 +1764,213 @@
             </span>
           </div>
         </wa-callout>
+      {/if}
+    </div>
+  </section>
+    </wa-tab-panel>
+
+    <wa-tab-panel name="reports" active={activeTab === 'reports'}>
+  <section class="section" id="reports">
+    <div class="admin-content wa-stack wa-gap-l">
+      <div class="wa-stack wa-gap-2xs">
+        <h1>Catalog reports</h1>
+        <p class="lede">
+          Read-only completeness and consistency reports over the local catalog. Every edition row
+          shows the canonical at-URI stored on the edition; the count covers the whole report,
+          not just the current page.
+        </p>
+      </div>
+
+      <wa-card with-header appearance="outlined">
+        <h2 slot="header">Report and filters</h2>
+        <div class="wa-stack wa-gap-m">
+          {#if reportsLoading}
+            <p class="muted">Loading reports…</p>
+          {:else if reportsError}
+            <wa-callout variant="danger">{reportsError}</wa-callout>
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+            <wa-button
+              size="small"
+              onclick={() => {
+                reportsLoaded = false;
+                void loadReports();
+              }}
+            >
+              Retry
+            </wa-button>
+          {:else if reports.length > 0}
+            <div class="admin-form-grid">
+              <div class="field field-grow">
+                <span class="field-label">Report</span>
+                <wa-select aria-label="Report" value={selectedReportId} onchange={onSelectReport}>
+                  {#each reports as report (report.id)}
+                    <wa-option value={report.id}>{report.title}</wa-option>
+                  {/each}
+                </wa-select>
+              </div>
+              <div class="field">
+                <span class="field-label">Rows per page</span>
+                <wa-select
+                  aria-label="Rows per page"
+                  value={String(reportLimit)}
+                  onchange={(event: Event) => setReportLimit(valueOf(event))}
+                >
+                  <wa-option value="25">25</wa-option>
+                  <wa-option value="50">50</wa-option>
+                  <wa-option value="100">100</wa-option>
+                </wa-select>
+              </div>
+              <div class="admin-form-action">
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <wa-button
+                  variant="brand"
+                  disabled={reportLoading}
+                  onclick={() => void runReport(reportOffset)}
+                >
+                  {reportLoading ? 'Running…' : 'Refresh'}
+                </wa-button>
+              </div>
+            </div>
+
+            {#if selectedReport}
+              <p class="muted admin-small">{selectedReport.description}</p>
+
+              {#if selectedReport.params.length > 0}
+                <div class="admin-form-grid">
+                  {#each selectedReport.params as param (param.key)}
+                    <div class="field">
+                      <span class="field-label">{param.label}</span>
+                      {#if param.kind === 'select'}
+                        <wa-select
+                          aria-label={param.label}
+                          value={reportParamValues[param.key] ?? param.defaultValue}
+                          onchange={(event: Event) => setReportParam(param.key, valueOf(event))}
+                        >
+                          {#each param.options ?? [] as option (option.value)}
+                            <wa-option value={option.value}>{option.label}</wa-option>
+                          {/each}
+                        </wa-select>
+                      {:else}
+                        <wa-input
+                          aria-label={param.label}
+                          role="textbox"
+                          tabindex="0"
+                          value={reportParamValues[param.key] ?? param.defaultValue}
+                          placeholder={param.placeholder ?? ''}
+                          oninput={(event: Event) => setReportParam(param.key, valueOf(event))}
+                          onkeydown={(event: KeyboardEvent) => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              void runReport(0);
+                            }
+                          }}
+                        ></wa-input>
+                      {/if}
+                    </div>
+                  {/each}
+                  <div class="admin-form-action">
+                    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                    <wa-button disabled={reportLoading} onclick={() => void runReport(0)}>
+                      Apply filters
+                    </wa-button>
+                  </div>
+                </div>
+              {/if}
+            {/if}
+          {/if}
+        </div>
+      </wa-card>
+
+      {#if reportError}
+        <wa-callout variant="danger">{reportError}</wa-callout>
+      {:else if selectedReport}
+        <wa-card with-header appearance="outlined">
+          <h2 slot="header">{selectedReport.title}</h2>
+          <div class="wa-stack wa-gap-m">
+            {#if reportLoading && !reportRan}
+              <p class="muted">Running the report…</p>
+            {:else if reportRan && reportRows.length === 0}
+              <wa-callout variant="neutral">No rows match this report.</wa-callout>
+            {:else if reportRows.length > 0}
+              <div class="wa-cluster wa-gap-s wa-align-items-baseline">
+                <span class="muted admin-small">
+                  Showing {reportRangeStart}–{reportRangeEnd} of {reportTotal} row{reportTotal === 1
+                    ? ''
+                    : 's'}
+                </span>
+                {#if reportLoading}
+                  <span class="muted admin-small">Refreshing…</span>
+                {/if}
+              </div>
+
+              <div class="table-scroll">
+                <table class="params admin-preview-table">
+                  <thead>
+                    <tr>
+                      {#each selectedReport.columns as column (column.key)}
+                        <th>{column.label}</th>
+                      {/each}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each reportRows as row, index (reportRowKey(row, index))}
+                      <tr>
+                        {#each selectedReport.columns as column (column.key)}
+                          <td>
+                            {#if column.format === 'at-uri'}
+                              <code class="admin-wrap admin-small">{reportText(row, column.key)}</code>
+                            {:else if column.format === 'edition-list'}
+                              <ul class="admin-deleted">
+                                {#each reportEditions(row, column.key) as edition (edition.uri)}
+                                  <li>
+                                    <code class="admin-wrap admin-small">{edition.uri}</code>
+                                    <span class="muted admin-small">
+                                      {edition.title} · {edition.rkey}
+                                    </span>
+                                  </li>
+                                {/each}
+                              </ul>
+                            {:else if column.format === 'date'}
+                              <span class="admin-small">{reportDate(row[column.key])}</span>
+                            {:else if column.format === 'status'}
+                              <wa-tag size="small" variant="neutral">
+                                {reportText(row, column.key)}
+                              </wa-tag>
+                            {:else}
+                              <span class={column.format === 'number' ? '' : 'admin-small'}>
+                                {reportText(row, column.key)}
+                              </span>
+                            {/if}
+                          </td>
+                        {/each}
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="wa-cluster wa-gap-s">
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <wa-button
+                  size="small"
+                  disabled={reportLoading || reportOffset === 0}
+                  onclick={() => void runReport(Math.max(0, reportOffset - reportLimit))}
+                >
+                  Previous
+                </wa-button>
+                <span class="muted admin-small">Page {reportPage} of {reportPageCount}</span>
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <wa-button
+                  size="small"
+                  disabled={reportLoading || reportOffset + reportRows.length >= reportTotal}
+                  onclick={() => void runReport(reportOffset + reportLimit)}
+                >
+                  Next
+                </wa-button>
+              </div>
+            {/if}
+          </div>
+        </wa-card>
       {/if}
     </div>
   </section>
