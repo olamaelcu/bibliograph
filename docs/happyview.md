@@ -99,6 +99,9 @@ building the stack.
   instead of fetching it — TLS trust only has to work one way. The scheme must
   be `http`: with an `https` loopback URL HappyView panics at boot with
   `ClientMetadata(LocalhostClient(NotHttpScheme))`.
+  This is the local compose stack; the lescayes deployment switches to the
+  tailnet origin with `BASE_PATH=/hv` — see
+  [Production: tailnet-only dashboard at `/hv`](#production-tailnet-only-dashboard-at-hv).
 - **The PDS hostname is `pds.127-0-0-1.sslip.io`, not `pds.localhost`.** Handle
   domains cannot be under a reserved TLD; `createAccount` answers *"This
   server's handle domain has a reserved TLD"* for `.localhost` and `.test`.
@@ -288,6 +291,18 @@ refuses to boot with `client key is encrypted but TOKEN_ENCRYPTION_KEY is not
 set`. Losing the key makes the encrypted OAuth-client and attestation rows
 unreadable; rotate them (they regenerate) rather than guessing the key.
 
+Those values live in `/etc/bibliograph/happyview.local`, which the infra
+`bibliograph_database` role writes from
+`ansible/group_vars/all/secrets.sops.yml` (`bibliograph_session_secret`,
+`bibliograph_token_encryption_key`) and its own defaults
+(`bibliograph_public_url`, `bibliograph_base_path`,
+`bibliograph_happyview_url`). The file loads after the packaged conffile, so it
+wins. `/etc/bibliograph/happyview.env` and `/etc/bibliograph/web.env` are dpkg
+conffiles, not Ansible-managed: preserve them with
+`--force-confdef --force-confold` and stage them by hand on a new host. Never
+regenerate the two secret values to "fix" a boot error — encrypted OAuth-client
+and attestation rows become unreadable.
+
 `BASE_PATH` moves every route: `/hv/dashboard/`, `/hv/xrpc/*`, `/hv/admin/*`,
 `/hv/auth/*`, and the dashboard's `_next` assets. `/health` stays at the root.
 Internal callers use the prefixed base URL — `packages/web`'s `HAPPYVIEW_URL`
@@ -302,8 +317,10 @@ edge therefore goes through a loopback listener
 proxying to `127.0.0.1:3100`. Source: `packaging/happyview/nginx/edge-loopback.conf`.
 The checked-in copy is a template: replace `__HAPPYVIEW_DOMAIN__` with the host
 HappyView has registered (`PUBLIC_URL`'s host).
-`hv-deploy` calls `/admin/*`, which is not behind the domain middleware, so it
-can keep using `127.0.0.1:3100` directly.
+`hv-deploy` does not need the adapter: it talks to HappyView directly at
+`HAPPYVIEW_URL=http://127.0.0.1:3100/hv` and calls `/hv/admin/*`, which is not
+behind the domain middleware. Only the edge's `/hv/xrpc` traffic needs the
+Host-rewriting adapter.
 
 The packaged dashboard is the upstream image's static tree: its HTML/JS contain
 the literal `/__HAPPYVIEW_BP__` sentinel and a `.base-path-pending` marker.
@@ -336,11 +353,54 @@ metadata document is public.
 
 The example is shipped at
 `/usr/share/bibliograph-happyview/nginx/hv-tailnet.conf` (source:
-`packaging/happyview/nginx/hv-tailnet.conf`). `site-landing.conf` is
-Ansible-managed, so re-add the `include` after any infra run that rewrites that
-file.
+`packaging/happyview/nginx/hv-tailnet.conf`) and is installed by hand to
+`/etc/nginx/snippets/happyview-hv.conf`; the package never includes it. The
+`lescayes.ts.olamaelcu.net` block of `site-landing.conf` comes from
+`infra/ansible/roles/landing/templates/landing.conf.j2`, whose `landing_domain`
+branch includes the snippet, so a normal infra run keeps the include. The
+snippet itself is not deployed by that role.
+
+### Access without the tailnet
+
+If MagicDNS or tailnet routing is unavailable, forward the loopback adapter and
+talk to it directly:
+
+```bash
+ssh -N -L 3101:127.0.0.1:3101 veve@lescayes.ts.olamaelcu.net
+curl -H 'Host: lescayes.ts.olamaelcu.net' http://127.0.0.1:3101/hv/dashboard/
+```
+
+The adapter rewrites `Host` to the registered tailnet name, so this reaches the
+dashboard without relying on the browser to resolve `100.64.0.1`. An interactive
+OAuth login still needs the browser to reach
+`https://lescayes.ts.olamaelcu.net` (the authorization server fetches the public
+metadata and the browser returns to `/hv/auth/callback`); use the tailnet name
+for login and the tunnel for diagnostics or admin-key API calls.
+
+### Static reset and rollback
+
+`hv-prepare-static` is one-shot: to re-apply `BASE_PATH`, or to return to root
+mode, reinstall the package and restart rather than editing `static/` in place.
+
+```bash
+sudo apt-get install -y --reinstall \
+  -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+  /tmp/bibliograph-happyview_2.17.4-2_amd64.deb
+sudo systemctl restart happyview.service
+```
+
+dpkg restores `.base-path-pending` and the `/__HAPPYVIEW_BP__` sentinel;
+`ExecStartPre` then rewrites the tree to the current `BASE_PATH` and removes the
+marker. Removing `BASE_PATH` from `happyview.local` before the reinstall restores
+the root (`/dashboard/`) dashboard. `--reinstall` leaves the conffiles and
+`happyview.local` alone; revert those from the infra role templates or a
+`/root/hv-rollback-*` backup.
 
 ## Dashboard login
+
+On lescayes, sign in at `https://lescayes.ts.olamaelcu.net/hv/dashboard/` from a
+tailnet client; the metadata document is the only public `/hv` path. The local
+compose stack below uses `http://127.0.0.1:3000`.
 
 Open `http://127.0.0.1:3000`, redirects to `/dashboard/`, and sign in with the
 provisional handle. The redirect chain goes to

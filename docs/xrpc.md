@@ -455,7 +455,9 @@ do
 done
 ```
 
-`HAPPYVIEW_URL` is the upstream base (`http://127.0.0.1:3000` by default) and
+`HAPPYVIEW_URL` is the upstream base (`http://127.0.0.1:3000` by default; on
+lescayes it includes the prefix: `http://127.0.0.1:3101/hv` for the edge and
+`http://127.0.0.1:3100/hv` for the deploy oneshot) and
 `HAPPYVIEW_ADMIN_KEY` is the `hv_…` key from `mise run hv-seed`. This is HappyView's existing
 backfill, not a feed job: feeds never queue worker work and keep no cursor state beyond the opaque
 page cursor.
