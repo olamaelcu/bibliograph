@@ -49,7 +49,13 @@ function validConfig(pdsUrl) {
 }
 
 function startStub() {
-  const state = { requests: [], applyWrites: [], applyWriteNext: undefined };
+  const state = {
+    requests: [],
+    applyWrites: [],
+    applyWriteNext: undefined,
+    refreshNext: undefined,
+    refreshJwt: 'test-refresh-jwt'
+  };
 
   const server = http.createServer(async (request, response) => {
     const chunks = [];
@@ -80,9 +86,14 @@ function startStub() {
       return send(200, { did: PUBLISHER_DID, handle: HOST });
     }
     if (request.method === 'POST' && request.url === '/xrpc/com.atproto.server.refreshSession') {
+      if (state.refreshNext) {
+        const next = state.refreshNext;
+        state.refreshNext = undefined;
+        return send(next.status, next.body);
+      }
       return send(200, {
         accessJwt: 'refreshed-access-jwt',
-        refreshJwt: 'test-refresh-jwt',
+        refreshJwt: state.refreshJwt,
         did: PUBLISHER_DID
       });
     }
@@ -258,6 +269,8 @@ afterEach(async () => {
   stub.state.requests.length = 0;
   stub.state.applyWrites.length = 0;
   stub.state.applyWriteNext = undefined;
+  stub.state.refreshNext = undefined;
+  stub.state.refreshJwt = 'test-refresh-jwt';
 });
 
 function helpers() {
@@ -531,6 +544,118 @@ test('an expired access token is refreshed once and the write retried', async ()
   assert.equal(writes.length, 2);
   assert.equal(writes[1].headers.authorization, 'Bearer refreshed-access-jwt');
   assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+});
+
+test('a 400 ExpiredToken is refreshed once and the write retried', async () => {
+  const fixture = await makeEdition();
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  stub.state.applyWriteNext = {
+    status: 400,
+    body: { error: 'ExpiredToken', message: 'Token has expired' }
+  };
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  const refresh = stub.state.requests.find(
+    (request) => request.url === '/xrpc/com.atproto.server.refreshSession'
+  );
+  assert.ok(refresh, 'a 400 ExpiredToken must trigger refreshSession');
+  assert.equal(refresh.headers.authorization, 'Bearer test-refresh-jwt');
+
+  const writes = applyWriteRequests();
+  assert.equal(writes.length, 2, 'the write is retried exactly once');
+  assert.equal(writes[1].headers.authorization, 'Bearer refreshed-access-jwt');
+  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+  assert.equal((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount, 0);
+});
+
+test('a rotated refresh token replaces the in-memory session token', async () => {
+  const fixture = await makeEdition();
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  stub.state.refreshJwt = 'rotated-refresh-jwt';
+  stub.state.applyWriteNext = {
+    status: 400,
+    body: { error: 'ExpiredToken', message: 'Token has expired' }
+  };
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  await pool.query("UPDATE editions SET title = 'Rotated Session Edition' WHERE uri = $1", [
+    fixture.uri
+  ]);
+  stub.state.applyWriteNext = {
+    status: 400,
+    body: { error: 'ExpiredToken', message: 'Token has expired' }
+  };
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  const refreshes = stub.state.requests.filter(
+    (request) => request.url === '/xrpc/com.atproto.server.refreshSession'
+  );
+  assert.equal(refreshes.length, 2);
+  assert.equal(refreshes[1].headers.authorization, 'Bearer rotated-refresh-jwt');
+  assert.equal((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount, 0);
+});
+
+test('a rejected refresh falls back to an app-password createSession', async () => {
+  const fixture = await makeEdition();
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  stub.state.applyWriteNext = {
+    status: 400,
+    body: { error: 'ExpiredToken', message: 'Token has expired' }
+  };
+  stub.state.refreshNext = {
+    status: 400,
+    body: { error: 'ExpiredToken', message: 'Token has expired' }
+  };
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  const creates = stub.state.requests.filter(
+    (request) => request.url === '/xrpc/com.atproto.server.createSession'
+  );
+  assert.equal(creates.length, 2, 'the initial sign-in plus the password fallback');
+  assert.equal(creates[1].body.password, 'test-password');
+
+  const writes = applyWriteRequests();
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].headers.authorization, 'Bearer test-access-jwt');
+  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+});
+
+test('an unrelated 400 does not refresh the session', async () => {
+  const fixture = await makeEdition();
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  stub.state.applyWriteNext = {
+    status: 400,
+    body: { error: 'InvalidRequest', message: 'invalid write' }
+  };
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  assert.equal(
+    stub.state.requests.some(
+      (request) => request.url === '/xrpc/com.atproto.server.refreshSession'
+    ),
+    false,
+    'only an expired token may refresh'
+  );
+  assert.equal(applyWriteRequests().length, 1);
+
+  const failed = await pool.query(
+    'SELECT attempts, last_error FROM pds_outbox WHERE uri = $1',
+    [fixture.uri]
+  );
+  assert.equal(failed.rowCount, 1);
+  assert.equal(failed.rows[0].attempts, 1);
+  assert.match(failed.rows[0].last_error, /InvalidRequest|invalid write/);
 });
 
 test('a trigger update during publishing is not swallowed', async () => {

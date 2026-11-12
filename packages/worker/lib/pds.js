@@ -239,12 +239,24 @@ export function createPdsPublisher({ config, fetchImpl = fetch, timeoutMs = DEFA
     return sessionPromise;
   }
 
+  /**
+   * The PDS reports an expired access token either as 401 or as 400 with the
+   * error code `ExpiredToken`. Both mean "refresh and retry"; every other
+   * status/code is a real request failure that must not disturb the session.
+   */
+  function isExpiredToken(error) {
+    if (!(error instanceof PdsError)) return false;
+    return error.status === 401 || (error.status === 400 && error.code === 'ExpiredToken');
+  }
+
   async function rpc(method, { body } = {}) {
     let accessJwt = await token();
     try {
       return await request(method, { body, token: accessJwt });
     } catch (error) {
-      if (!(error instanceof PdsError) || error.status !== 401) throw error;
+      if (!isExpiredToken(error)) throw error;
+      // Refresh once and retry once. A freshly minted token the PDS still
+      // rejects is a credential problem, not a race worth another attempt.
       accessJwt = await token(true);
       return request(method, { body, token: accessJwt });
     }
