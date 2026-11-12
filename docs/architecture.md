@@ -301,8 +301,9 @@ package-worker-deb` builds `bibliograph-worker`, which installs the payload at
 
 Indexed collections: `net.olamaelcu.livtet.biblio.{bookStatus,shelf,shelfItem,follow,readingGoal}`,
 `net.olamaelcu.livtet.actor.profile` and `community.lexicon.media.book.review`.
-Query scripts lived in the deleted package's `happyview/scripts/`; uploads now
-go through HappyView's admin API (see `docs/happyview.md`).
+Query and procedure scripts live in `happyview/scripts/xrpc/`; `mise run hv-deploy`
+runs `happyview/bin/hv-deploy` to upload the lexicons and scripts through
+HappyView's admin API and apply the activity indexes (see `docs/happyview.md`).
 
 No request path reads a user's PDS or a backlink service. A record missing from
 the index is reported missing and repaired by backfill/reconcile, not by an
