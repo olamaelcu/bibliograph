@@ -1,3 +1,23 @@
+bibliograph-worker (0.2.3-1) unstable; urgency=medium
+
+  * 0.2.3 release: contributor/publisher records and entity preparation.
+
+    - Build and publish net.olamaelcu.livtet.biblio.contributor and
+      .publisher records (strict YYYY-MM-DD dates, defs#identifier
+      identifiers, optional image and blob), and dispatch pds_outbox rows
+      by collection instead of assuming editions.
+    - Mint contributor/publisher at-URIs at ingest and link edition snapshots
+      to them through defs#contributor.ref / defs#publisher.ref.
+    - Ship the additive, idempotent 0004-entity-records.sql schema: at_uri
+      and metadata columns, partial unique URI indexes, identifier GIN
+      indexes and snapshot triggers. It queues nothing on its own.
+    - Add the idempotent entities.prepare task and `--prepare-entities` CLI
+      to mint URIs, enqueue entity records and republish linked editions.
+    - Scope the outbox backlog metrics to the published collection
+      allowlist.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 17:00:00 +0000
+
 bibliograph-worker (0.2.2-1) unstable; urgency=medium
 
   * 0.2.2 release: PDS session refresh and metrics.

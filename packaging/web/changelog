@@ -1,3 +1,20 @@
+bibliograph-web (0.2.3-1) unstable; urgency=medium
+
+  * 0.2.3 release: contributor and publisher entity queries on the edge.
+
+    - Serve the anonymous catalog entity methods: getContributor,
+      getPublisher, resolveContributors, resolvePublishers,
+      searchContributors, searchPublishers and listEditionsByContributor.
+    - Answer malformed entity URIs and unknown identifiers with the
+      documented 400/404 envelope, and share the catalog error mapping with
+      the existing edition methods.
+    - Extend the private catalog CORS to the entity queries and procedures.
+    - Share the edition read model between edition and entity lookups, so
+      listEditionsByContributor returns defs#bookView items across every
+      contributor role without duplicates.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 17:05:00 +0000
+
 bibliograph-web (0.2.2-1) unstable; urgency=medium
 
   * 0.2.2 release: Prometheus metrics on the edge.
