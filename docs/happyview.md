@@ -396,6 +396,55 @@ the root (`/dashboard/`) dashboard. `--reinstall` leaves the conffiles and
 `happyview.local` alone; revert those from the infra role templates or a
 `/root/hv-rollback-*` backup.
 
+### Relays and network sync
+
+In production the PDS announces itself to two relays:
+
+```
+PDS_CRAWLERS=https://atproto.africa,https://bsky.network
+```
+
+That value is managed in `infra` (`rsky_pds_crawlers` in
+`ansible/group_vars/all/default.yml`, rendered into `/etc/rsky-pds/pds.local` by
+`ansible/roles/rsky_pds/templates/pds.local.j2`). rsky POSTs
+`com.atproto.sync.requestCrawl` to each host after a sequencer event, at most
+once per 20 minutes; the list has no spaces and each entry needs its `https://`
+scheme because it is interpolated into `<host>/xrpc/com.atproto.sync.requestCrawl`.
+
+`atproto.africa` is an **additional** relay, not a replacement. HappyView still
+consumes `bsky.network`:
+
+| Setting | Value | Why it stays |
+|---|---|---|
+| `JETSTREAM_URL` | `wss://jetstream1.us-east.bsky.network` | atproto.africa runs no Jetstream service |
+| `RELAY_URL` | `https://bsky.network` | backfill walks the relay's `listRepos`; atproto.africa has no `listRepos`/`getRepo` |
+
+So do not point either value at `atproto.africa`. Keep both relays in
+`PDS_CRAWLERS`: dropping `bsky.network` would stop re-announcement to the relay
+that serves the Jetstream feed HappyView indexes.
+
+Announce manually after a PDS restart (it also reads `PDS_CRAWLERS` from the
+symlinked `/etc/rsky-pds/pds.local`):
+
+```bash
+sudo pdsadmin request-crawl https://atproto.africa,https://bsky.network
+```
+
+Verify each relay sees the host (`status` must be `active` and `seq` must match
+`/var/lib/rsky-pds/sequencer.sqlite`'s `max(seq)`):
+
+```bash
+curl -sS 'https://atproto.africa/xrpc/com.atproto.sync.getHostStatus?hostname=pds.olamaelcu.net'
+curl -sS 'https://bsky.network/xrpc/com.atproto.sync.getHostStatus?hostname=pds.olamaelcu.net'
+```
+
+A relay subscription is visible as a `101` on
+`GET /xrpc/com.atproto.sync.subscribeRepos` in
+`/var/log/nginx/rsky-pds_access.log` (nginx writes the line when the stream
+closes; an open stream shows only as an established connection from the relay's
+IP). Crawl failures are swallowed at debug level, so check the relay side rather
+than `journalctl -u rsky-pds`.
+
 ## Dashboard login
 
 On lescayes, sign in at `https://lescayes.ts.olamaelcu.net/hv/dashboard/` from a
