@@ -5,6 +5,7 @@ import { parseEditionEdit } from '../src/lib/admin/edition-edit.ts';
 
 const valid = () => ({
   title: 'Dune',
+  language: 'en',
   identifiers: [{ issuer: 'isbn13', value: '9780441013593' }],
   contributors: [{ name: 'Frank Herbert', role: 'author' }]
 });
@@ -36,6 +37,33 @@ test('bounds string lengths', () => {
   assert.ok(paths({ ...valid(), title: 'x'.repeat(501) }).includes('title'));
   assert.ok(paths({ ...valid(), description: 'x'.repeat(20_001) }).includes('description'));
   assert.ok(paths({ ...valid(), language: 'x'.repeat(36) }).includes('language'));
+});
+
+test('canonicalises valid BCP 47 language tags', () => {
+  for (const [input, expected] of [
+    ['en', 'en'],
+    ['en-US', 'en-US'],
+    ['EN-us', 'en-US'],
+    ['zh-Hant-TW', 'zh-Hant-TW'],
+    ['zh-hant-tw', 'zh-Hant-TW'],
+    ['en-US-u-ca-gregory', 'en-US-u-ca-gregory']
+  ]) {
+    const parsed = parseEditionEdit({ ...valid(), language: input });
+    assert.deepEqual(parsed.errors, [], input);
+    assert.equal(parsed.value?.language, expected, input);
+  }
+});
+
+test('rejects invalid or empty BCP 47 language tags', () => {
+  for (const value of ['English', 'english', 'en_US', '', '   ', 'en-', '123']) {
+    const errors = parseEditionEdit({ ...valid(), language: value }).errors;
+    assert.ok(
+      errors.some((issue) => issue.path === 'language'),
+      `expected a language error for ${JSON.stringify(value)}`
+    );
+  }
+  const missing = parseEditionEdit({ ...valid(), language: undefined }).errors;
+  assert.ok(missing.some((issue) => issue.path === 'language'));
 });
 
 test('rejects negative, fractional and oversized integers', () => {
@@ -85,6 +113,23 @@ test('normalises legacy roles and rejects unknown role tokens', () => {
     contributors: [{ name: 'A', role: 'chief-vibes' }]
   });
   assert.ok(bad.includes('contributors.0.role'));
+  for (const role of ['A55', 'A98', 'AAA', 'author2']) {
+    assert.ok(
+      paths({ ...valid(), contributors: [{ name: 'A', role }] }).includes('contributors.0.role'),
+      `expected ${role} to be rejected`
+    );
+  }
+  for (const [role, expected] of [
+    ['author', 'A01'],
+    ['translator', 'B06'],
+    ['narrator', 'E03'],
+    ['A01', 'A01'],
+    ['Z99', 'Z99']
+  ]) {
+    const parsed = parseEditionEdit({ ...valid(), contributors: [{ name: 'A', role }] });
+    assert.deepEqual(parsed.errors, [], role);
+    assert.equal(parsed.value?.contributors[0]?.role, expected, role);
+  }
   const blank = parseEditionEdit({
     ...valid(),
     contributors: [{ name: 'A', role: '' }]

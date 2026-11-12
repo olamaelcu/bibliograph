@@ -566,9 +566,12 @@
             <wa-input
               aria-label="Language"
               value={language}
-              placeholder="en"
+              placeholder="en, en-US, zh-Hant-TW"
               oninput={(event: Event) => (language = valueOf(event))}
             ></wa-input>
+            <span class="muted admin-small">
+              BCP 47 tag, for example en, en-US or zh-Hant-TW.
+            </span>
             {#if fieldError('language')}
               <span class="field-error">{fieldError('language')}</span>
             {/if}
@@ -737,9 +740,10 @@
       <h2 slot="header">Contributors</h2>
       <div class="wa-stack wa-gap-m">
         <p class="muted admin-small">
-          Order is the record order. Role is normalised to ONIX Codelist 17 (legacy names such as
-          “editor” map to B01). An existing row keeps its catalog entity; editing its name or
-          identifiers here is not allowed.
+          Order is the record order. Role must normalise to a known ONIX Codelist 17 code, for
+          example A01 author, B06 translator or E03 narrator; legacy names such as “editor” map to
+          B01. An existing row keeps its catalog entity; editing its name or identifiers here is not
+          allowed.
         </p>
 
         {#if contributors.length === 0}

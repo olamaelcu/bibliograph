@@ -76,8 +76,8 @@ async function seedEdition(
   const rkey = label();
   const uri = `at://${AUTHORITY}/${EDITION_COLLECTION}/${rkey}`;
   await (pool as pg.Pool).query(
-    `INSERT INTO editions (uri, rkey, title, created_at, indexed_at)
-     VALUES ($1, $2, $3, '2020-01-02T03:04:05.000Z', '2020-01-02T03:04:05.000Z')`,
+    `INSERT INTO editions (uri, rkey, title, language, created_at, indexed_at)
+     VALUES ($1, $2, $3, 'en', '2020-01-02T03:04:05.000Z', '2020-01-02T03:04:05.000Z')`,
     [uri, rkey, title]
   );
   await (pool as pg.Pool).query(
@@ -396,6 +396,48 @@ test('rejects invalid bodies before opening a transaction', async (t) => {
   );
 });
 
+test('server rejects invalid language and roles, and stores canonical language', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await seedEdition('Strict validation');
+  const original = await loaded(seeded.rkey);
+
+  await assert.rejects(
+    updateAdminEdition(db, seeded.rkey, bodyFrom(original, { language: 'English' })),
+    (error: unknown) =>
+      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
+  );
+  await assert.rejects(
+    updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+      contributors: [{ id: seeded.contributorId, role: 'A55', ref: null }]
+    })),
+    (error: unknown) =>
+      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
+  );
+
+  const unchanged = await db.query<{ title: string; language: string }>(
+    'SELECT title, language FROM editions WHERE uri = $1',
+    [seeded.uri]
+  );
+  assert.equal(unchanged.rows[0]?.title, 'Strict validation');
+  assert.equal(unchanged.rows[0]?.language, 'en');
+  const credit = await db.query<{ role: string }>(
+    'SELECT role FROM edition_contributors WHERE edition_uri = $1',
+    [seeded.uri]
+  );
+  assert.equal(credit.rows[0]?.role, 'A01');
+
+  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+    language: 'EN-us'
+  }));
+  assert.equal(saved.language, 'en-US');
+  const stored = await db.query<{ language: string }>(
+    'SELECT language FROM editions WHERE uri = $1',
+    [seeded.uri]
+  );
+  assert.equal(stored.rows[0]?.language, 'en-US');
+});
+
 test('returns 404 for an unknown edition', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
@@ -403,6 +445,7 @@ test('returns 404 for an unknown edition', async (t) => {
   await assert.rejects(
     updateAdminEdition(db, `missing${RUN}`, {
       title: 'x',
+      language: 'en',
       identifiers: [{ issuer: 'isbn13', value: '1' }],
       contributors: [{ name: 'A' }]
     }),

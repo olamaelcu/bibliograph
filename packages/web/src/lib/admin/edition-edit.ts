@@ -4,7 +4,7 @@
  * node's test runner can load this module without SvelteKit aliases.
  */
 
-import { normalizeContributorRole } from '../contributor-roles.ts';
+import { isKnownContributorRole, normalizeContributorRole } from '../contributor-roles.ts';
 
 export type EditionEditIdentifier = { issuer: string; value: string };
 
@@ -70,8 +70,14 @@ export const EDITION_EDIT_LIMITS = {
 
 /** YYYY, YYYY-MM or YYYY-MM-DD, as the lexicon's publishedDate permits. */
 const PUBLISHED_DATE = /^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?)?$/;
-const ONIX_ROLE = /^[A-Z]\d{2}$/;
 const AT_URI = /^at:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+$/;
+// Intl accepts any syntactically valid primary language subtag, including the
+// word "English" (canonicalised to "english"). The editor requires a real
+// language tag, so the common 2–3 letter primary subtag plus optional script,
+// region, variants and extensions is enforced before canonicalisation.
+const BCP47_TAG =
+  /^[a-z]{2,3}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|\d{3}))?(?:-(?:[a-z0-9]{5,8}|\d[a-z0-9]{3}))*(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*(?:-x(?:-[a-z0-9]{1,8})+)?$/i;
+const BCP47_ERROR = 'must be a valid BCP 47 language tag such as en, en-US or zh-Hant-TW';
 
 function publishedDateProblem(value: string): string | null {
   if (!PUBLISHED_DATE.test(value)) return 'use YYYY, YYYY-MM or YYYY-MM-DD';
@@ -206,10 +212,8 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
 
   function role(value: unknown, path: string): string {
     const normalized = normalizeContributorRole(typeof value === 'string' ? value : '');
-    if (!ONIX_ROLE.test(normalized)) {
-      issue(path, 'must be an ONIX Codelist 17 code such as A01');
-      return normalized;
-    }
+    if (!isKnownContributorRole(normalized))
+      issue(path, 'must be a known ONIX Codelist 17 code (for example A01, B06 or E03)');
     return normalized;
   }
 
@@ -230,7 +234,21 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
   const fields = body as Record<string, unknown>;
   const title = text(fields.title, 'title', EDITION_EDIT_LIMITS.title, true);
   const subtitle = text(fields.subtitle, 'subtitle', EDITION_EDIT_LIMITS.subtitle);
-  const language = text(fields.language, 'language', EDITION_EDIT_LIMITS.language);
+  const rawLanguage = text(fields.language, 'language', EDITION_EDIT_LIMITS.language);
+  let language: string | null = null;
+  if (rawLanguage === null) {
+    if (!errors.some((error) => error.path === 'language')) issue('language', BCP47_ERROR);
+  } else if (!BCP47_TAG.test(rawLanguage)) {
+    issue('language', BCP47_ERROR);
+  } else {
+    try {
+      const canonical = Intl.getCanonicalLocales(rawLanguage)[0];
+      if (canonical === undefined) issue('language', BCP47_ERROR);
+      else language = canonical;
+    } catch {
+      issue('language', BCP47_ERROR);
+    }
+  }
   const publishedDate = text(fields.publishedDate, 'publishedDate', 10);
   if (publishedDate !== null) {
     const problem = publishedDateProblem(publishedDate);
