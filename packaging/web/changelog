@@ -1,3 +1,27 @@
+bibliograph-web (0.2.6-1) unstable; urgency=medium
+
+  * 0.2.6 release: admin edition editor, tabbed curation, input validation
+    and universal XRPC CORS.
+
+    - Add the edition editor: /admin/edition/<rkey>/edit and
+      POST /admin/api/editions/<rkey> apply scalars, identifiers, contributor
+      credits and publisher links to one edition in a single transaction.
+      New entities reuse the ingest identity and mint their at-URI, and the
+      catalog triggers queue the edition and entity records for publication.
+    - Tab the admin page into provider search, publisher import, edition
+      editing and merge, and add a local edition search for the editor that
+      accepts a title, identifier, rkey or at-URI.
+    - Validate editor input: language is optional and must be a well-formed
+      BCP 47 tag canonicalized through Intl, and contributor roles must be
+      known ONIX Codelist 17 codes; bad input is rejected per field.
+    - Serve CORS on the whole XRPC surface: every valid NSID answers OPTIONS
+      with 204 (GET/POST/OPTIONS; content-type, authorization, dpop, accept)
+      and every response, including forwarded/proxied and error branches,
+      carries Access-Control-Allow-Origin *, Vary: Origin and exposes
+      dpop-nonce. Dispatch moves to an env-free module.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 20:15:00 +0000
+
 bibliograph-web (0.2.5-1) unstable; urgency=medium
 
   * 0.2.5 release: metrics allowlist and dead-code cleanup.

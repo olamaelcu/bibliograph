@@ -1,3 +1,15 @@
+bibliograph-worker (0.2.6-1) unstable; urgency=medium
+
+  * 0.2.6 release: lockstep version bump, no worker payload changes.
+
+    - The admin edition editor writes the catalog through the web pool; the
+      existing catalog triggers queue the edition and entity records for
+      pds-publish, so the worker and its publication path are unchanged.
+    - The catalog schema is unchanged (0001-0004 are still the current
+      files); this release applies no migration.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 20:10:00 +0000
+
 bibliograph-worker (0.2.5-1) unstable; urgency=medium
 
   * 0.2.5 release: cleanup of retired tooling and dead compatibility code.
