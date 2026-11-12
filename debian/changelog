@@ -1,3 +1,164 @@
+bibliograph (0.5.28) unstable; urgency=high
+
+  * Fix: production Postgres ran out of connection slots (SQLSTATE 53300),
+    answering 500 to XRPC calls — searchEditions among them — from 05:19 UTC.
+    Every pool was left at the pg default of 10, so the web process (read pool
+    + enqueue pool), the worker (search + tap task pools) and the tap consumer
+    together could ask for more than the host's `max_connections = 50` allows
+    once traffic expanded all of them at once. Pools are now bounded and
+    env-tunable, leaving ~20 slots of headroom: web `PG_POOL_MAX` (5), enqueue
+    `ENQUEUE_POOL_MAX` (3), worker `GRAPHILE_WORKER_POOL_SEARCH` (4) /
+    `GRAPHILE_WORKER_POOL_TAP` (6). No behaviour changes otherwise.
+  * New: backfill audit log. `backfill_events` (migration 0035) records one row
+    per terminal-interesting backfill execution — job, resource type/uri/rkey,
+    outcome, reason, attempts, duration, origin (scan | on-read | admin | tap |
+    manual), and the error on failure — for all seven backfill tasks. Rows are
+    written by one wrapper (`jobs/backfill-audit.ts`) that swallows its own
+    failures, so audit can never fail a job; the scan's already/absent no-ops
+    are not recorded. `/admin/backfills` renders them administrators-only,
+    keyset-paginated and filterable, each row linking to the edition,
+    contributor or work it touched (merged-away editions resolve through
+    `edition_aliases`). History starts at this deploy: graphile deletes
+    completed jobs, so earlier runs are unrecoverable, and inline scripts
+    (`backfill-formats.ts`) run outside the worker and are not audited.
+  * `backfill_events` is append-only and deliberately has no foreign key to
+    `editions` — a librarian merge deletes edition rows, and the audit trail
+    must outlive them. No automated prune yet; interesting-only recording keeps
+    steady state near 30k rows/day.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 00:28:00 -0500
+
+bibliograph (0.5.27) unstable; urgency=high
+
+  * Fix: clients replaying a pre-0.5.26 uncompressed search cursor were still
+    rejected, so 0.5.26's cursor fix did not reach them. 0.5.26 only shrank
+    the cursors it emitted (deflated, ~150-220 chars); a client resending an
+    older cursor (284 chars from Livtet 0.15.1, observed in production logs
+    ~304 times/day) hit the lexicon's 256-character cap at parameter
+    validation and got 400 before the handler's inflate fallback could run,
+    so it backed off permanently. `withLenientCursor()` now rewraps the
+    generated schema at the `searchWorks`, `searchContributors` and
+    `searchPublishers` registrations to accept `cursor` up to 1024
+    characters; the vendored lexicons and the published schema are
+    unchanged, the 0.5.26 inflate fallback decodes the legacy plain-text
+    payload, and emission stays deflated. Clients stuck on legacy cursors
+    recover on their next request with no restart or client change.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 00:03:18 -0500
+
+bibliograph (0.5.26) unstable; urgency=high
+
+  * Fix: search cursors could exceed the lexicon's 256-character cap. The
+    base64url payload carries an AT-URI, so contributors with long Goodreads
+    slugs produced cursors over the limit; the atcute validator rejected them
+    with 400, the catalog stopped paging, and Livtet read that as a
+    bad-request and backed off permanently. `encodeCursor`/`decodeCursor` in
+    `lib/server/search/postgres-source.ts` now deflate the JSON payload
+    (~149 bytes typical) and fall back to plain base64 on inflate failure, so
+    cursors already handed out keep working. A regression test covers the
+    long-slug case and asserts the 256-character cap.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 23:44:49 -0500
+
+bibliograph (0.5.25) unstable; urgency=high
+
+  * Fix: the "For You" recommendations feed returned empty for every viewer
+    since 0.5.23. `@atcute/client`'s `client.get` answers with a
+    `{ ok, status, headers, data }` envelope, and `readViewerLibrary` read that
+    envelope as the XRPC body; the shape guard rejected every page and the
+    function returned null for every viewer, so every recommendation path
+    returned `[]`. Unwrapped in both the library reader and the linklonk
+    signal reader, matching the shelf/profile call sites.
+  * "For You" now also ranks by a LinkLonk-style collaborative-filtering walk
+    over the local Bookhive mirror (~144k records, 99% mapped to catalog
+    editions), merged behind the viewer's subject-overlap candidates. Biblio
+    shelving `read`/`reading` counts as an up and `dnf` as a down, and review
+    ratings fold in the same way (>= 6 up, <= 5 down; a review without a
+    rating counts as up). Down votes outrank ups on conflict. The graph is
+    TTL-cached for 10 minutes and the viewer's own editions are never
+    candidates.
+  * Discover and Extended Network feeds no longer surface the signed-in
+    viewer's own records: `paginateFromDb` drops them from the public feed and
+    the extended feed removes the viewer from its 1-hop author set, so a
+    self-follow cannot leak either. `following` keeps its raw set and
+    anonymous callers see the unfiltered Discover feed.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 23:35:51 -0500
+
+bibliograph (0.5.24) unstable; urgency=medium
+
+  * Viewer-facing feeds served over XRPC now drop authors the viewer blocks —
+    and authors who block the viewer — using marco.jazco.dev's public
+    follow/block graph (`Relationships`, one call per page over at most 100
+    candidates). Applies to the `following`, `extended` and `dynamic` feeds
+    and to the network fallback page, for authenticated viewers only;
+    anonymous callers are unchanged. `lib/server/marco.ts` treats an account
+    as blocked only when its `block` entry carries `outUri`/`inUri`, since
+    marco names every follow and block even where no record exists.
+  * "For You" recommendations gain a third candidate source: editions the
+    viewer's network mutuals shelved or reviewed, ranked by distinct mutual
+    count against the local shelving/review mirror. The mutual list is
+    marco's `Intersect` of follow OUT∩IN (5-minute cache, 256-DID cap) and
+    merges in after active reads and past reads, so a reader with an empty
+    shelf now gets an answer instead of nothing.
+  * `MARCO_URL` selects the instance (default `https://marco.jazco.dev`; an
+    explicitly empty value disables marco entirely) and `MARCO_TIMEOUT_MS`
+    sets the per-call timeout (default 800 ms). Caveat: the public instance
+    sees (viewer DID, candidate DID) pairs. Every marco failure logs and
+    degrades to no annotation — unfiltered feeds, unsupplemented
+    recommendations — and never errors a request.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 22:38:49 -0500
+
+bibliograph (0.5.23) unstable; urgency=medium
+
+  * Any XRPC read that serves books or contributors now heals what it returns.
+    `lib/server/jobs/on-read.ts` adds `maybeEnqueueEditionBackfills` and
+    `maybeEnqueueContributorBackfills`: one indexed `ANY()` query per batch
+    selects only rows missing a field that has never been checked, and each
+    missing description, cover, portrait or bio is enqueued fire-and-forget
+    through the existing `jobKey`'d helpers, so a hot row cannot stack
+    duplicates. Neither helper throws — a backfill that cannot be queued never
+    fails the read that triggered it — and in steady state (nothing missing) a
+    pass costs one query and enqueues nothing. Wired into `hydrateBooksByUri`,
+    `searchEditions`, `resolveEditions`, `searchWorks` (contributors only),
+    `searchContributors`, `getImageForBook` / `getImageForContributor` (which
+    also gain the `cover_checked_at` gate) and `getEditionsByContributor`.
+  * Contributor pages gain an administrators-only "Queue portrait + bio
+    backfill" button, whose `runBackfill` action re-checks `isAdministrator`
+    regardless of UI visibility and enqueues both contributor jobs. Enqueue-
+    only: the action returns immediately and `bibliograph-worker.service`
+    scrapes.
+  * `backfill-contributor-bio` is now a real graphile task in
+    `searchTaskList`. `backfillBioForContributor` previously had no
+    registration point, so the module was dead code; it is reachable through
+    the new `enqueueContributorBioBackfill` (`jobKey` `backfill-bio:<uri>`,
+    maxAttempts 5) as well as the on-read helper and the contributor button.
+    No migration: job names are not schema.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 22:15:23 -0500
+
+bibliograph (0.5.22) unstable; urgency=medium
+
+  * Edition detail page gains an administrators-only "Queue description +
+    metadata backfill" button. It enqueues, for that one edition, the existing
+    `backfill-edition-description` job and a new `backfill-edition-format`
+    graphile task that wraps `backfillEditionMetadata` — the per-row logic
+    extracted from `scripts/backfill-formats.ts` into
+    `lib/server/jobs/format-backfill.ts`. Fills format, pages, ISBN/ASIN
+    identifiers, publishedYear and language from Goodreads, writing only
+    fields the row is missing; rows already complete short-circuit before any
+    upstream call, and Goodreads anti-bot responses are swallowed into a
+    `blocked` status so the worker never retries them. The scan script keeps
+    its SQL filters, cursor loop, failure threshold and `--dry` mode, now
+    delegating each row to the module. Enqueue-only: the form action returns
+    immediately and the search worker (`bibliograph-worker.service`) drains
+    the jobs; a re-click does not stack duplicates while one is pending
+    (`jobKey` per URI). Server action re-checks `isAdministrator` regardless
+    of UI visibility.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 10 Nov 2026 21:38:28 -0500
+
 bibliograph (0.5.21) unstable; urgency=medium
 
   * `net.olamaelcu.livtet.biblio.searchActors` exposes the reader directory the

@@ -1,0 +1,39 @@
+[Unit]
+Description=HappyView activity plane (Bibliograph)
+Documentation=https://github.com/olamaelcu/bibliograph
+# The edge's XRPC client must exist before the client registry is loaded.
+After=network-online.target bibliograph-happyview-client.service
+Wants=network-online.target bibliograph-happyview-client.service
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+# HappyView loads ./migrations relative to its working directory, so this must
+# stay the install root.
+WorkingDirectory=/usr/lib/bibliograph-happyview
+EnvironmentFile=/etc/bibliograph/happyview.env
+# Ansible-managed overrides; loaded after the conffile, so it wins.
+EnvironmentFile=-/etc/bibliograph/happyview.local
+# The packaged dashboard is the upstream image's static tree and still carries
+# the /__HAPPYVIEW_BP__ sentinel. Rewrite it to BASE_PATH before the server
+# starts. "+" runs this step as root with the filesystem namespace options
+# lifted, so /usr stays read-only for the service itself.
+ExecStartPre=+/usr/lib/bibliograph-happyview/bin/hv-prepare-static
+ExecStart=/usr/lib/bibliograph-happyview/happyview
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65536
+
+# The install tree is read-only; HappyView's state is Postgres. The sysuser's
+# home is the only writable path, and only because the shared sysuser declares
+# it.
+StateDirectory=bibliograph
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bibliograph
+
+[Install]
+WantedBy=multi-user.target

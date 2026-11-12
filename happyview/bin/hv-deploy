@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""Upload Bibliograph's lexicons and scripts to HappyView, apply indexes, and
+optionally bootstrap the admin credentials a fresh install needs.
+
+One implementation for both callers: `mise run hv-deploy` (compose) and the
+`bibliograph-happyview-deploy.service` oneshot the Debian package installs.
+
+Environment:
+  HAPPYVIEW_URL            base URL, including BASE_PATH when the instance is
+                           mounted under one (default http://127.0.0.1:3000)
+  HAPPYVIEW_ADMIN_KEY      `hv_` admin key
+  HAPPYVIEW_ADMIN_KEY_FILE read the key from this file instead (takes precedence)
+  HV_PSQL                  command used for SQL, shell-split; e.g.
+                           "docker compose exec -T postgres psql -U bibliograph -d bibliograph"
+  HV_DATABASE_URL          used when HV_PSQL is unset: runs plain `psql <dsn>`
+  HV_ADMIN_DID             DID recorded for the seeded user (default did:web:<hostname>)
+
+Options:
+  --wait SECONDS     wait for /health before talking to the API (default 0)
+  --seed             create the admin user/key first (needs SQL access)
+  --root DIR         HappyView tree with lexicons/, scripts/, sql/ (default: ../)
+  --no-indexes       skip applying sql/indexes.sql
+  --admin-key-out FILE where --seed writes a generated key (default: none)
+
+Exit status is non-zero if HappyView rejects an upload or SQL fails, so a
+systemd oneshot surfaces the failure instead of half-deploying silently.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import socket
+import sys
+import time
+import urllib.error
+import urllib.request
+from urllib.parse import urlsplit
+
+import hvlib
+
+# Both tools share one SQL path; the error type is the same one they raise.
+DeployError = hvlib.ToolError
+run_sql = hvlib.run_sql
+
+RECORD_LEXICONS = [
+    "net.olamaelcu.livtet.biblio.bookStatus",
+    "net.olamaelcu.livtet.biblio.shelf",
+    "net.olamaelcu.livtet.biblio.shelfItem",
+    "net.olamaelcu.livtet.biblio.follow",
+    "net.olamaelcu.livtet.biblio.readingGoal",
+    "net.olamaelcu.livtet.actor.profile",
+    "community.lexicon.media.book.review",
+]
+
+QUERY_LEXICONS = [
+    ("net.olamaelcu.livtet.biblio.graph.isFollowing", "net.olamaelcu.livtet.biblio.follow"),
+    ("net.olamaelcu.livtet.biblio.graph.listFollowers", "net.olamaelcu.livtet.biblio.follow"),
+    ("net.olamaelcu.livtet.biblio.graph.listFollowees", "net.olamaelcu.livtet.biblio.follow"),
+    ("net.olamaelcu.livtet.biblio.getReadingGoal", "net.olamaelcu.livtet.biblio.readingGoal"),
+    ("net.olamaelcu.livtet.biblio.getActorProfile", "net.olamaelcu.livtet.actor.profile"),
+    ("net.olamaelcu.livtet.biblio.getShelf", "net.olamaelcu.livtet.biblio.shelf"),
+    ("net.olamaelcu.livtet.biblio.listShelves", "net.olamaelcu.livtet.biblio.shelf"),
+    ("net.olamaelcu.livtet.biblio.listShelvesWithBooks", "net.olamaelcu.livtet.biblio.shelf"),
+    ("net.olamaelcu.livtet.biblio.getShelvingOfBook", "net.olamaelcu.livtet.biblio.bookStatus"),
+    ("net.olamaelcu.livtet.biblio.getShelversOfBook", "net.olamaelcu.livtet.biblio.bookStatus"),
+    ("net.olamaelcu.livtet.biblio.listBooksOnShelf", "net.olamaelcu.livtet.biblio.bookStatus"),
+    ("net.olamaelcu.livtet.biblio.listRecentShelving", "net.olamaelcu.livtet.biblio.bookStatus"),
+    ("net.olamaelcu.livtet.biblio.getBookOnShelf", "net.olamaelcu.livtet.biblio.bookStatus"),
+    ("net.olamaelcu.livtet.biblio.listShelfItems", "net.olamaelcu.livtet.biblio.shelfItem"),
+    ("net.olamaelcu.livtet.biblio.listShelfItemsByBook", "net.olamaelcu.livtet.biblio.shelfItem"),
+    ("net.olamaelcu.livtet.biblio.getReviewsByBook", "community.lexicon.media.book.review"),
+    ("net.olamaelcu.livtet.biblio.listReviewsByActor", "community.lexicon.media.book.review"),
+]
+
+PROCEDURE_LEXICONS = [
+    ("net.olamaelcu.livtet.biblio.graph.follow", "net.olamaelcu.livtet.biblio.follow"),
+    ("net.olamaelcu.livtet.biblio.graph.unfollow", "net.olamaelcu.livtet.biblio.follow"),
+    ("net.olamaelcu.livtet.biblio.shelf.create", "net.olamaelcu.livtet.biblio.shelf"),
+    ("net.olamaelcu.livtet.biblio.shelf.update", "net.olamaelcu.livtet.biblio.shelf"),
+    ("net.olamaelcu.livtet.biblio.shelf.delete", "net.olamaelcu.livtet.biblio.shelf"),
+    ("net.olamaelcu.livtet.biblio.shelf.addItem", "net.olamaelcu.livtet.biblio.shelfItem"),
+    ("net.olamaelcu.livtet.biblio.shelf.removeItem", "net.olamaelcu.livtet.biblio.shelfItem"),
+    ("net.olamaelcu.livtet.biblio.shelf.addBooks", "net.olamaelcu.livtet.biblio.shelfItem"),
+    ("net.olamaelcu.livtet.biblio.status.set", "net.olamaelcu.livtet.biblio.bookStatus"),
+    ("net.olamaelcu.livtet.biblio.status.clear", "net.olamaelcu.livtet.biblio.bookStatus"),
+    ("net.olamaelcu.livtet.biblio.readingGoal.set", "net.olamaelcu.livtet.biblio.readingGoal"),
+    ("net.olamaelcu.livtet.biblio.profile.set", "net.olamaelcu.livtet.actor.profile"),
+    ("net.olamaelcu.livtet.biblio.review.create", "community.lexicon.media.book.review"),
+    ("net.olamaelcu.livtet.biblio.review.update", "community.lexicon.media.book.review"),
+    ("net.olamaelcu.livtet.biblio.review.delete", "community.lexicon.media.book.review"),
+]
+
+# Pure `defs` lexicons: no defs.main, so no dispatch and no target_collection.
+DEFS_LEXICONS = [
+    "net.olamaelcu.livtet.biblio.defs",
+    "community.lexicon.media.book.defs",
+]
+
+TIMESTAMP_SQL = "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')"
+
+
+def configured_admin_key(args: argparse.Namespace) -> str | None:
+    """The operator's key, or None when none was configured."""
+    if args.admin_key_file and os.path.exists(args.admin_key_file):
+        return open(args.admin_key_file, encoding="utf-8").read().strip()
+    return os.environ.get("HAPPYVIEW_ADMIN_KEY") or None
+
+
+def request(base: str, key: str, method: str, path: str, payload=None):
+    data = None if payload is None else json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"{base}{path}",
+        data=data,
+        method=method,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            body = res.read().decode() or "{}"
+            return res.status, json.loads(body) if body.strip() else None
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode(errors="replace")
+        raise DeployError(f"{method} {path} failed: HTTP {err.code} {detail}") from None
+    except urllib.error.URLError as err:
+        raise DeployError(f"{method} {path} failed: {err.reason}") from None
+
+
+def wait_for_health(base: str, seconds: int) -> None:
+    # HappyView always serves /health at the origin root, even with BASE_PATH
+    # set, so the probe must not carry the subpath the API calls use.
+    parts = urlsplit(base)
+    health_url = f"{parts.scheme}://{parts.netloc}/health"
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            with urllib.request.urlopen(health_url, timeout=3) as res:
+                if res.status == 200:
+                    return
+        except (urllib.error.URLError, OSError):
+            pass
+        if time.monotonic() >= deadline:
+            raise DeployError(f"{health_url} did not answer within {seconds}s")
+        time.sleep(1)
+
+
+def read_lexicon(root: str, nsid: str):
+    path = os.path.join(root, "lexicons", *nsid.split(".")) + ".json"
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def expand(root: str, body: str, seen=None) -> str:
+    """Mirror deploy.ts: expand `-- @include <path>` relative to the root."""
+    seen = set() if seen is None else seen
+    out = []
+    for line in body.split("\n"):
+        match = re.match(r"^--\s*@include\s+(.+)$", line.strip())
+        if not match:
+            out.append(line)
+            continue
+        include = os.path.join(root, match.group(1).strip())
+        if include in seen:
+            continue
+        seen.add(include)
+        try:
+            with open(include, encoding="utf-8") as handle:
+                out.append(expand(root, handle.read(), seen))
+        except OSError as err:
+            raise DeployError(f"cannot read included script {include}: {err}") from None
+    return "\n".join(out)
+
+
+def seed(root: str, did: str, key: str, key_file: str | None) -> None:
+    digest = hashlib.sha256(key.encode()).hexdigest()
+    with open(os.path.join(root, "sql", "admin-bootstrap.sql"), encoding="utf-8") as handle:
+        sql = handle.read()
+    run_sql(
+        sql,
+        {
+            "user_id": "u_install_admin",
+            "key_id": "k_install_admin",
+            "did": did,
+            "key_hash": digest,
+            "key_prefix": key[:11],
+        },
+    )
+    if key_file:
+        fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(key + "\n")
+    print(f"seeded admin user for {did}")
+
+
+def upload(root: str, base: str, key: str) -> tuple[int, int]:
+    lexicons = 0
+    scripts = 0
+
+    def post_lexicon(nsid: str, target: str | None, label: str) -> None:
+        nonlocal lexicons
+        payload = {"lexicon_json": read_lexicon(root, nsid), "backfill": False}
+        if target:
+            payload["target_collection"] = target
+        status, reply = request(base, key, "POST", "/admin/lexicons", payload)
+        print(f"{label} {nsid}: HTTP {status} revision {reply['revision']}")
+        lexicons += 1
+
+    for nsid in RECORD_LEXICONS:
+        post_lexicon(nsid, nsid, "lexicon")
+    for nsid, target in QUERY_LEXICONS:
+        post_lexicon(nsid, target, "lexicon")
+    for nsid, target in PROCEDURE_LEXICONS:
+        post_lexicon(nsid, target, "procedure lexicon")
+    for nsid in DEFS_LEXICONS:
+        post_lexicon(nsid, None, "defs lexicon")
+
+    for kind in ("query", "procedure"):
+        directory = os.path.join(root, "scripts", "xrpc", kind)
+        for filename in sorted(os.listdir(directory)):
+            if not filename.endswith(".lua"):
+                continue
+            nsid = filename[: -len(".lua")]
+            with open(os.path.join(directory, filename), encoding="utf-8") as handle:
+                body = expand(root, handle.read())
+            status, _ = request(
+                base,
+                key,
+                "POST",
+                "/admin/scripts",
+                {
+                    "id": f"xrpc.{kind}:{nsid}",
+                    "script_type": "lua",
+                    "body": body,
+                    "description": f"Bibliograph {kind} {nsid} (from scripts/xrpc/{kind}/{filename})",
+                },
+            )
+            print(f"script xrpc.{kind}:{nsid}: HTTP {status}")
+            scripts += 1
+    return lexicons, scripts
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--wait", type=int, default=0)
+    parser.add_argument("--seed", action="store_true")
+    parser.add_argument("--root", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    parser.add_argument("--no-indexes", action="store_true")
+    parser.add_argument("--admin-key-file", default=os.environ.get("HAPPYVIEW_ADMIN_KEY_FILE"))
+    parser.add_argument("--admin-key-out")
+    parser.add_argument("--did", default=os.environ.get("HV_ADMIN_DID"))
+    args = parser.parse_args()
+
+    root = os.path.abspath(args.root)
+    base = os.environ.get("HAPPYVIEW_URL", "http://127.0.0.1:3000").rstrip("/")
+
+    try:
+        if args.wait:
+            wait_for_health(base, args.wait)
+
+        key = configured_admin_key(args)
+        if args.seed:
+            # Mint one only when the operator supplied none; never replace theirs.
+            if key is None:
+                key = "hv_" + os.urandom(16).hex()
+                print("generated an admin key")
+            did = args.did or f"did:web:{socket.gethostname()}"
+            seed(root, did, key, args.admin_key_out)
+        elif key is None:
+            key = "hv_dev_admin"
+
+        lexicons, scripts = upload(root, base, key)
+
+        if not args.no_indexes:
+            with open(os.path.join(root, "sql", "indexes.sql"), encoding="utf-8") as handle:
+                run_sql(handle.read())
+            print("indexes applied")
+
+        registered_lexicons = len(request(base, key, "GET", "/admin/lexicons")[1] or [])
+        registered_scripts = len(request(base, key, "GET", "/admin/scripts")[1] or [])
+        print(
+            f"uploaded {lexicons} lexicons and {scripts} scripts; "
+            f"registered: {registered_lexicons} lexicons, {registered_scripts} scripts"
+        )
+    except DeployError as err:
+        print(f"hv-deploy: {err}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

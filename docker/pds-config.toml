@@ -1,0 +1,27 @@
+# tranquil-pds, local development. Ported from the HappyView e2e stack
+# (scripts/e2e-config.toml) with this repo's database and blob paths.
+#
+# `hostname` sets the handle suffix: accounts are
+# `alice.pds.127-0-0-1.sslip.io`. It cannot be a `.localhost` name — the handle
+# spec reserves that TLD, so the PDS refuses to mint any account under it. Every
+# `*.127-0-0-1.sslip.io` name resolves to 127.0.0.1 through public DNS, which is
+# why the e2e stack names hosts the same way.
+
+[server]
+hostname = "pds.127-0-0-1.sslip.io"
+allow_http_proxy = true
+invite_code_required = false
+disable_rate_limiting = true
+disable_account_verification_gate = true
+
+[database]
+url = "postgres://bibliograph:bibliograph@postgres:5432/pds"
+
+[storage]
+path = "/var/lib/tranquil-pds/blobs"
+
+[plc]
+directory_url = "http://plc:2582"
+
+[secrets]
+allow_insecure = true

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Create the plc and pds databases on an existing pgdata volume"
+# docker/postgres-init.sql only runs when the Postgres data directory is
+# created, so a volume from before the local atproto network existed lacks these
+# two databases. This applies the same two statements by hand. Idempotent.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+psql_() {
+  docker compose exec -T postgres psql -U bibliograph -d bibliograph "$@"
+}
+
+for db in plc pds; do
+  if psql_ -tAc "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1; then
+    echo "$db: exists"
+  else
+    psql_ -q -c "CREATE DATABASE $db" >/dev/null
+    echo "$db: created"
+  fi
+done

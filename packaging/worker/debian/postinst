@@ -1,0 +1,37 @@
+#!/bin/sh
+# Hand-assembled package, so the unit is enabled and started with
+# deb-systemd-helper/-invoke (what debhelper's generated snippets call).
+set -e
+
+# Shared with the bibliograph and bibliograph-web packages.
+if ! getent group bibliograph >/dev/null; then
+    addgroup --system bibliograph
+fi
+if ! getent passwd bibliograph >/dev/null; then
+    adduser --system --ingroup bibliograph --home /var/lib/bibliograph \
+        --no-create-home --disabled-login --gecos "Bibliograph appview" bibliograph
+fi
+
+install -d -m 0750 -o root -g bibliograph /etc/bibliograph
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+    deb-systemd-helper enable bibliograph-worker.service >/dev/null 2>&1 || true
+    deb-systemd-invoke restart bibliograph-worker.service >/dev/null 2>&1 || true
+fi
+
+# A worker without a database cannot start at all; publisher credentials are
+# optional and the worker reports their absence itself.
+if ! grep -Eq '^DATABASE_URL=..+' /etc/bibliograph/worker.env; then
+    echo "bibliograph-worker: DATABASE_URL is not set in" >&2
+    echo "bibliograph-worker: /etc/bibliograph/worker.env; the service will" >&2
+    echo "bibliograph-worker: exit until it is." >&2
+fi
+
+if ! grep -Eq '^(PDS_ACCOUNT_PASSWORD|PDS_ACCESS_TOKEN)=..+' /etc/bibliograph/worker.env; then
+    echo "bibliograph-worker: no PDS publisher credentials in worker.env;" >&2
+    echo "bibliograph-worker: catalog hydration runs, but pds-publish is" >&2
+    echo "bibliograph-worker: disabled until they are provided." >&2
+fi
+
+exit 0

@@ -17,13 +17,13 @@ Depends: ${misc:Depends},
 Recommends: postgresql (>= 15)
 Description: ATProto book catalogue appview and labeler
  A SvelteKit appview for the community.lexicon.book lexicons, backed by
- PostgreSQL. It indexes records from the ATProto firehose via TAP, serves
+ PostgreSQL. It indexes activity records through HappyView, publishes catalog editions, serves
  XRPC queries, hosts the web catalogue, and issues its own labels so other
  appviews can consume its curation decisions by DID.
  .
  This package installs the prebuilt server payload at /usr/lib/bibliograph and
  runs it under systemd as the unprivileged "bibliograph" user: a web unit, a
- worker unit consuming TAP, and a oneshot migrator both require. Configuration
+ worker unit draining the PDS outbox, and a oneshot migrator all require. Configuration
  lives in /etc/bibliograph/bibliograph.env.
  .
  The Node.js runtime is deliberately not bundled. Install it from the

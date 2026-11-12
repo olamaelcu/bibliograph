@@ -1,0 +1,51 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.status.clear",
+  "description": "Clear the reading status of one edition by deleting the bookStatus at the edition rkey.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Delete a bookStatus. Answers NotFound when the edition has no status.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["book"],
+          "properties": {
+            "book": {
+              "type": "object",
+              "description": "A strongRef or a bare {uri} naming the edition.",
+              "required": ["uri"],
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "format": "at-uri",
+                  "description": "AT-URI of the catalog edition record."
+                },
+                "cid": {
+                  "type": "string",
+                  "format": "cid",
+                  "description": "Optional CID of the edition record."
+                }
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the deleted bookStatus record."
+            }
+          }
+        }
+      }
+    }
+  }
+}

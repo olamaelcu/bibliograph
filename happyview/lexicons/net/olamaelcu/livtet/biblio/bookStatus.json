@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookStatus",
+  "description": "The reading status of one edition for one reader: an edition, the (optional) shelf it was filed under, and its progress metadata. One record per edition, so a status change replaces the previous one rather than adding a shelf membership. The rkey is the edition record's rkey (the last segment of the catalog edition URI).",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "properties": {
+          "shelf": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the parent shelf record (e.g. at://did/biblio.shelf/reading)."
+          },
+          "book": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The book on the shelf (catalog record URI)."
+          },
+          "metadata": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfMetadata",
+            "description": "Status and optional position/notes/emoji for this book's relationship to the shelf."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

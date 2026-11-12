@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#MISE description="Stage the HappyView payload (host binary, migrations, dashboard) from the pinned image"
+#
+# HappyView ships as a container, so the host binary is extracted from the
+# image the compose stack pins rather than compiled here. The digest is the
+# same one in docker-compose.yml: a moving tag would make two installs of the
+# same package version differ.
+#
+# Output (gitignored): packaging/payload/happyview/
+#   happyview              the server binary (glibc, links libssl3)
+#   migrations/postgres/   SQL HappyView loads relative to its working directory
+#   static/                the built dashboard
+#
+# Lexicons, Lua scripts and indexes.sql are *not* staged: debian packaging
+# installs them straight from happyview/ in the source tree, so the package
+# always carries what this commit has.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+IMAGE="${HAPPYVIEW_IMAGE:-ghcr.io/gamesgamesgamesgamesgames/happyview@sha256:a981c30cb2bdad83413aa3126fb0eab6782427d0565f35e8b7349c098de2c841}"
+OUT="packaging/payload/happyview"
+
+say() { printf '==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+command -v docker >/dev/null || die "docker is required to extract the image"
+
+say "Pulling $IMAGE"
+docker pull -q "$IMAGE" >/dev/null
+
+rm -rf "$OUT"
+mkdir -p "$OUT"
+
+container="$(docker create "$IMAGE")"
+trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+
+say "Extracting the binary, migrations and dashboard"
+docker cp "$container:/usr/local/bin/happyview" "$OUT/happyview" >/dev/null
+docker cp "$container:/app/migrations" "$OUT/migrations" >/dev/null
+docker cp "$container:/srv/static" "$OUT/static" >/dev/null
+
+[[ -x "$OUT/happyview" ]] || die "the image did not yield an executable happyview"
+compgen -G "$OUT/migrations/postgres/*.sql" >/dev/null \
+  || die "no migrations/postgres/*.sql in the image"
+[[ -f "$OUT/static/index.html" ]] || die "no static/index.html in the image"
+
+say "Payload staged at ./$OUT"
+du -sh "$OUT" "$OUT"/* | sed 's/^/    /'

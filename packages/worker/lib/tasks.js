@@ -1,0 +1,143 @@
+import { createOutboxPublisher, DEFAULT_BATCH } from './publish.js';
+import { publisherConfigError, resolvePublisherConfig } from './pds.js';
+import { createIngest } from './ingest.js';
+import { isbn13 as normalizeIsbn13 } from './util.js';
+import { prepareEntityRecords } from './prepare-entities.js';
+
+/** Upper bound on editions one catalog task ingests; providers may return fewer. */
+export const CANDIDATES_PER_TASK = 50;
+
+function validIdentifier(identifier) {
+  return (
+    identifier !== null &&
+    typeof identifier === 'object' &&
+    typeof identifier.issuer === 'string' &&
+    identifier.issuer !== '' &&
+    typeof identifier.value === 'string' &&
+    identifier.value !== ''
+  );
+}
+
+export function createTasks({ pool, providers, publisherDid, publisherHost, publisher }) {
+  const ingest = createIngest({ pool, publisherDid, publisherHost });
+
+  // Without configured credentials the task still exists and fails with the
+  // exact missing settings; it must never quietly drop outbox rows.
+  const outbox =
+    publisher ??
+    (() => {
+      const config = resolvePublisherConfig();
+      if (!config.configured) return undefined;
+      return createOutboxPublisher({ pool, config });
+    })();
+
+  async function ingestCandidates(candidates, limit) {
+    let ingested = 0;
+    for (const candidate of candidates.slice(0, limit)) {
+      if (await ingest(candidate)) ingested += 1;
+    }
+    return ingested;
+  }
+
+  return {
+    'catalog.resolve': async (payload, helpers) => {
+      const identifier = payload?.identifier;
+      if (!validIdentifier(identifier)) {
+        helpers.logger.warn('catalog.resolve: invalid identifier payload');
+        return;
+      }
+
+      const candidates = await providers.resolve(identifier);
+      const ingested = await ingestCandidates(candidates, CANDIDATES_PER_TASK);
+      helpers.logger.info(
+        `catalog.resolve ${identifier.issuer}:${identifier.value}: ` +
+          `${candidates.length} candidate(s), ${ingested} ingested`
+      );
+    },
+
+    'catalog.search': async (payload, helpers) => {
+      const identifiers = Array.isArray(payload?.identifiers)
+        ? payload.identifiers.filter(validIdentifier)
+        : [];
+      const hasText = ['q', 'title', 'author'].some(
+        (key) => typeof payload?.[key] === 'string' && payload[key].trim() !== ''
+      );
+      if (!hasText && identifiers.length === 0) {
+        helpers.logger.warn('catalog.search: empty payload');
+        return;
+      }
+
+      const candidates = await providers.search({
+        q: typeof payload.q === 'string' ? payload.q : undefined,
+        title: typeof payload.title === 'string' ? payload.title : undefined,
+        author: typeof payload.author === 'string' ? payload.author : undefined,
+        identifiers
+      });
+      const ingested = await ingestCandidates(candidates, CANDIDATES_PER_TASK);
+      helpers.logger.info(
+        `catalog.search: ${candidates.length} candidate(s), ${ingested} ingested`
+      );
+    },
+
+    'catalog.isbn': async (payload, helpers) => {
+      const isbn = typeof payload?.isbn === 'string' ? normalizeIsbn13(payload.isbn) : null;
+      if (!isbn) {
+        helpers.logger.warn('catalog.isbn: invalid isbn payload');
+        return;
+      }
+
+      // A direct by-ISBN lookup beats the generic fan-out; an empty result falls
+      // back to the resolve chain, which itself starts with ISBNdb (cache hit).
+      // A throw here means ISBNdb is down or its breaker is open; the resolve
+      // chain retries it fast and then uses Google/Goodreads.
+      const isbndb = providers?.providers?.isbndb;
+      let candidates = [];
+      if (isbndb) {
+        try {
+          candidates = await isbndb.byIsbn(isbn);
+        } catch (error) {
+          helpers.logger.warn(
+            `catalog.isbn: ISBNdb failed for ${isbn} — ${error.message}; using the resolve chain`
+          );
+        }
+      } else {
+        helpers.logger.warn(
+          `catalog.isbn: ISBNdb is not configured (ISBNDB_API_KEY unset); ` +
+            `falling back to the resolve chain for ${isbn}`
+        );
+      }
+      if (candidates.length === 0) {
+        candidates = await providers.resolve({ issuer: 'isbn13', value: isbn });
+      }
+
+      const ingested = await ingestCandidates(candidates, CANDIDATES_PER_TASK);
+      helpers.logger.info(
+        `catalog.isbn ${isbn}: ${candidates.length} candidate(s), ${ingested} ingested`
+      );
+    },
+
+    'pds-publish': async (payload, helpers) => {
+      if (!outbox) throw publisherConfigError(resolvePublisherConfig());
+      const limit = Number.isInteger(payload?.limit) ? payload.limit : DEFAULT_BATCH;
+      const result = await outbox.drain({ limit, logger: helpers.logger });
+      helpers.logger.info(
+        `pds-publish: ${result.published} published, ${result.failed} failed, ` +
+          `${result.batches} batch(es)`
+      );
+    },
+
+    // Operator-only: mints record URIs for rows that predate the feature and
+    // queues the records (and the editions that credit them). Nothing is minted
+    // automatically; `phase: 'editions'` is the post-publish republish pass.
+    'entities.prepare': async (payload, helpers) => {
+      const phase = payload?.phase === 'editions' ? 'editions' : 'mint';
+      const result = await prepareEntityRecords(pool, {
+        authority: publisherDid,
+        phase,
+        batchSize: Number.isInteger(payload?.batchSize) ? payload.batchSize : undefined,
+        logger: helpers.logger
+      });
+      helpers.logger.info(`entities.prepare[${phase}]: ${JSON.stringify(result)}`);
+    }
+  };
+}

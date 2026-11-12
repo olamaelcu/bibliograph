@@ -1,0 +1,45 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelf.create",
+  "description": "Create a shelf for the caller at a fresh TID rkey.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Create a shelf. Returns the new shelf's AT-URI.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 128,
+              "maxGraphemes": 128,
+              "description": "Human-readable shelf name."
+            },
+            "description": {
+              "type": "string",
+              "maxGraphemes": 8192,
+              "description": "Optional description of what the shelf collects."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the new shelf record."
+            }
+          }
+        }
+      }
+    }
+  }
+}

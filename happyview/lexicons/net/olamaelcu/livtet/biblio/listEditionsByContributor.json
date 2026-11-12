@@ -1,0 +1,68 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.listEditionsByContributor",
+  "description": "List every catalog edition credited to one contributor, across all credited roles. Anonymous and read-only; served by the bibliograph edge from the catalog tables.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["contributor"],
+        "properties": {
+          "contributor": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of a net.olamaelcu.livtet.biblio.contributor record. A URI from another collection is rejected rather than looked up."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "Maximum number of editions to return."
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Opaque pagination cursor from a previous response. A malformed cursor restarts at the beginning rather than erroring."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["items"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "description": "Editions credited to the contributor, newest catalog creation first. An edition in which the contributor holds several roles appears once.",
+              "items": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.defs#bookView"
+              }
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque cursor for the next page; absent when no more editions are credited."
+            },
+            "total": {
+              "type": "integer",
+              "description": "Total distinct credited editions. Present on the first page only."
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "contributor is missing, malformed, or not a contributor record URI."
+        },
+        {
+          "name": "RecordNotFound",
+          "description": "No catalog contributor has that URI."
+        }
+      ]
+    }
+  }
+}

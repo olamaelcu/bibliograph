@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#MISE description="Stage the worker payload (ESM sources + production node_modules)"
+#
+# The worker is plain ESM; its only runtime dependencies are graphile-worker and
+# pg. `pnpm deploy --prod` copies the package and that dependency tree into
+# ./packaging/payload/worker, so the installed payload needs no pnpm, no build
+# step and no dev dependencies. Verified by running the staged tree against a
+# scratch database (see docs/architecture.md).
+#
+# `--legacy` is required because the workspace does not set
+# inject-workspace-packages; the worker imports no sibling workspace package,
+# so injected dependencies would buy nothing.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+OUT="packaging/payload/worker"
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+printf '==> Deploying packages/worker to %s\n' "$OUT"
+rm -rf "$OUT"
+pnpm --filter worker deploy --prod --legacy "$ROOT/$OUT" >/dev/null
+
+# Tests are not runtime code; keep them out of the package.
+rm -rf "$OUT/test"
+
+for required in \
+  index.js \
+  lib/tasks.js \
+  lib/publish.js \
+  lib/edition-record.js \
+  lib/pds.js \
+  node_modules/graphile-worker/package.json \
+  node_modules/pg/package.json
+do
+  [[ -e "$OUT/$required" ]] || die "payload is missing $required"
+done
+
+# No dev toolchain: the worker declares none, but a stray workspace install
+# should not silently ship one.
+for forbidden in typescript esbuild vite; do
+  [[ -e "$OUT/node_modules/$forbidden" ]] && die "dev dependency '$forbidden' leaked into the payload"
+done
+
+printf '==> Payload staged at ./%s\n' "$OUT"
+du -sh "$OUT" | sed 's/^/    /'

@@ -1,3 +1,27 @@
+# Local development stack: Postgres, a local PLC directory, a local PDS, Caddy
+# (TLS for both), and a pinned HappyView.
+#
+# The network is closed: HappyView's Jetstream and relay point at a dead port, so
+# no public-network records enter the index. Only the local PDS's own repo is
+# indexed, via the procedures HappyView proxies and via backfill from RELAY_URL.
+#
+# Everything is reachable over HTTPS with Caddy's internal CA:
+#
+#   https://localhost        HappyView (dashboard at /, admin API at /admin/*)
+#   https://pds.localhost    the PDS        (`alice.pds.localhost` also routes)
+#
+# `*.localhost` resolves to 127.0.0.1 on Linux, so no DNS or /etc/hosts entry is
+# needed. The browser has to trust Caddy's root CA once: `mise run hv-ca` writes
+# it to .cache/caddy-root.crt and prints the import command.
+#
+# HappyView's PUBLIC_URL is a loopback name on purpose. `is_loopback_url` covers
+# `localhost`, so HappyView registers itself as the spec's localhost OAuth client
+# (client_id `http://localhost`). The PDS then synthesises its metadata instead
+# of fetching it, which keeps the TLS trust problem one-directional: HappyView
+# trusts Caddy (see docker/happyview-local-entrypoint.sh), the PDS never has to
+# trust HappyView.
+name: bibliograph
+
 services:
   postgres:
     image: postgres:18.4
@@ -6,6 +30,7 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/10-happyview.sql:ro
     environment:
       POSTGRES_USER: bibliograph
       POSTGRES_PASSWORD: bibliograph
@@ -16,23 +41,145 @@ services:
       timeout: 3s
       retries: 5
 
-  tap:
-    image: ghcr.io/bluesky-social/indigo/tap:latest
+  # did-method-plc's own server, so the DIDs the PDS mints are real did:plc
+  # DIDs resolvable by anything that points PLC_URL at it.
+  plc:
+    # ghcr.io/happyproto/pds-test/plc:latest, pinned by index digest.
+    image: ghcr.io/happyproto/pds-test/plc@sha256:6e61dc9c59d79cbc8b6cdcaac7464ae16258849ada92dd7cbbfc6d7979a81c3a
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "2480:2480"
-      - "2481:2481"
     environment:
-      TAP_DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/bibliograph?sslmode=disable
-      TAP_BIND: 0.0.0.0:2480
-      TAP_COLLECTION_FILTERS: net.olamaelcu.livtet.biblio.*
-      TAP_RELAY_URL: https://relay1.us-east.bsky.network
-      TAP_METRICS_LISTEN: 0.0.0.0:2481
-    env_file:
-      - .env
+      DB_CREDS_JSON: '{"username":"bibliograph","password":"bibliograph","host":"postgres","port":"5432","database":"plc"}'
+      ENABLE_MIGRATIONS: "true"
+      DB_MIGRATE_CREDS_JSON: '{"username":"bibliograph","password":"bibliograph","host":"postgres","port":"5432","database":"plc"}'
+      PORT: "2582"
+    ports:
+      - "2582:2582"
+
+  # tranquil-pds, the implementation HappyView's own e2e suite runs.
+  pds:
+    # ghcr.io/happyproto/pds-test/tranquil:latest, pinned by index digest.
+    image: ghcr.io/happyproto/pds-test/tranquil@sha256:96f4ce1f9eec42ca17e4f6d693f6ae842ffe1618f97c9f51c5604116fb9483ed
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      plc:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/pds
+      PLC_DIRECTORY_URL: http://plc:2582
+      TRANQUIL_PDS_ALLOW_INSECURE_SECRETS: "1"
+      DISABLE_RATE_LIMITING: "true"
+      DISABLE_ACCOUNT_VERIFICATION_GATE: "true"
+      # The PLC is a compose-network address. Without this, the PDS's SSRF guard
+      # rejects the DNS answer ("no resolved address for plc is inside the
+      # allowed host reach") and account creation cannot register a did:plc.
+      ALLOW_PRIVATE_FETCH: "true"
+      # Empty on purpose: unset, the PDS announces every new repo to eight public
+      # relays (bsky.network, firehose.network, …) on account creation. Those
+      # relays would then try to crawl https://pds.127-0-0-1.sslip.io, which
+      # resolves to 127.0.0.1 on their own machines. Set to a comma-separated
+      # list of relay URLs to announce to a reachable one instead.
+      CRAWLERS: ""
+    # The public lexicon authority this network's NSIDs resolve to. Pointing it
+    # at the container's own loopback makes the fetch fail, and the PDS then
+    # records `validationStatus: unknown` instead of validating against schemas
+    # this repo has diverged from (the published `follow` types `subject` as an
+    # at-uri). Keeps the local network hermetic: no record here is checked
+    # against the deployed lexicons.
+    extra_hosts:
+      - "biblio.livtet.olamaelcu.net:127.0.0.1"
+    volumes:
+      - ./docker/pds-config.toml:/etc/tranquil-pds/config.toml:ro
+      - pdsdata:/var/lib/tranquil-pds/blobs
+    ports:
+      - "2583:3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Holds Caddy's internal root CA; import it once (see `mise run hv-ca`).
+      - caddy_data:/data
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      default:
+        aliases:
+          # How the HappyView container reaches the PDS and its handle hosts
+          # without depending on public DNS.
+          - pds.127-0-0-1.sslip.io
+          - alice.pds.127-0-0-1.sslip.io
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /data/caddy/pki/authorities/local/root.crt"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+      start_period: 2s
+
+  happyview:
+    # ghcr.io/gamesgamesgamesgamesgames/happyview:2.17.4, pinned by index digest.
+    image: ghcr.io/gamesgamesgamesgamesgames/happyview@sha256:a981c30cb2bdad83413aa3126fb0eab6782427d0565f35e8b7349c098de2c841
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      caddy:
+        condition: service_healthy
+    # The image runs as root already, but the entrypoint needs root to read
+    # Caddy's `pki/` tree (mode 0700) and install its CA into the trust store.
+    user: root
+    entrypoint: ["/bin/sh", "/happyview-local-entrypoint.sh"]
+    ports:
+      - "3000:3000"
+    environment:
+      # HappyView's tables live in the `happyview` schema under this role, whose
+      # default search_path keeps them apart from the AppView's `public` tables.
+      DATABASE_URL: postgres://happyview_app:happyview@postgres:5432/bibliograph
+      # A loopback http name on purpose: `is_loopback_url` then makes HappyView
+      # the spec's localhost OAuth client (client_id `http://localhost`), which
+      # the PDS synthesises rather than fetching. The scheme must be http — the
+      # loopback client rejects anything else (`NotHttpScheme`).
+      PUBLIC_URL: http://127.0.0.1:3000
+      HOST: 0.0.0.0
+      PORT: "3000"
+      # Signs the dashboard session cookie (>= 64 chars).
+      SESSION_SECRET: local-dev-session-secret-0123456789-0123456789-0123456789-0123456789
+      # AES-256-GCM key for OAuth tokens and DPoP keys at rest. Required for
+      # DPoP sessions, so procedures can proxy writes; exactly 32 base64 bytes.
+      TOKEN_ENCRYPTION_KEY: ZGV2LW9ubHktMzJieXRlLWtleS1mb3ItaHZjcnlwdAA=
+      # DIDs come from the local PLC, never plc.directory.
+      PLC_URL: http://plc:2582
+      # Closed ports: no public Jetstream, no public relay. Records reach the
+      # index only through HappyView's own procedures, or backfill below.
+      JETSTREAM_URL: ws://127.0.0.1:1
+      # The local PDS implements `com.atproto.sync.listRepos`, which is all
+      # backfill needs to enumerate repos.
+      RELAY_URL: http://pds:3000
+      # The PDS from a DID document is a private address here, which HappyView
+      # otherwise refuses to connect to. Compiled in (env only, not a setting).
+      ALLOW_PRIVATE_DESTINATIONS: "true"
+    volumes:
+      - ./docker/happyview-local-entrypoint.sh:/happyview-local-entrypoint.sh:ro
+      - caddy_data:/caddy-data:ro
+    healthcheck:
+      # The runtime image carries no curl or wget; probe /health over bash's
+      # /dev/tcp (`sh` is dash here, so CMD rather than CMD-SHELL).
+      test:
+        - CMD
+        - bash
+        - -c
+        - 'exec 3<>/dev/tcp/127.0.0.1/3000 && printf "GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && head -n 1 <&3 | grep -q 200'
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    init: true
 
   prometheus:
     image: prom/prometheus:latest
@@ -46,13 +193,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=7d'
-    depends_on:
-      tap:
-        condition: service_started
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
 
 volumes:
   pgdata:
+  pdsdata:
+  caddy_data:
   promdata:

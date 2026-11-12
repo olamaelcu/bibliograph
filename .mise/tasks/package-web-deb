@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Build the bibliograph-web .deb (payload is the adapter-node output)"
+#MISE depends=["package-web-payload"]
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec packaging/web/build-deb.sh

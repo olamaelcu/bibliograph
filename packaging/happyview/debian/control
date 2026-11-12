@@ -1,0 +1,31 @@
+Package: bibliograph-happyview
+Version: @VERSION@
+Section: web
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @SIZE@
+Maintainer: Bibliograph Maintainers <maintainers@olamaelcu.net>
+Homepage: https://biblio.livtet.olamaelcu.net
+Depends: libc6, libssl3 | libssl3t64, libgcc-s1, zlib1g, python3, postgresql-client, adduser, ca-certificates
+Recommends: postgresql
+Description: HappyView activity plane for Bibliograph
+ HappyView indexes atproto activity records and serves the activity XRPC
+ queries and write procedures for the Bibliograph appview. It runs as its own
+ service on 127.0.0.1:3000; the SvelteKit application (bibliograph) proxies
+ /xrpc to it and is the only public origin.
+ .
+ The binary, its Postgres migrations and the built dashboard are extracted
+ from the pinned container image and installed under
+ /usr/lib/bibliograph-happyview. No Node.js or container runtime is needed on
+ the host.
+ .
+ A oneshot unit uploads this package's lexicons, query scripts and write
+ procedures on install and writes the activity indexes. It bootstraps an
+ administrative user and key first (in
+ /etc/bibliograph/happyview-admin.key), because a fresh HappyView has no
+ credentials with which to accept an upload.
+ .
+ Configuration lives in /etc/bibliograph/happyview.env. DATABASE_URL must name
+ a role whose default search_path is "happyview, public"; db-init.sql in
+ /usr/share/bibliograph-happyview creates that role and schema, and must be run
+ once as a Postgres superuser.

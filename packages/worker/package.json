@@ -1,0 +1,15 @@
+{
+  "name": "worker",
+  "version": "0.2.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test test/*.test.js",
+    "normalize:descriptions": "node scripts/normalize-isbndb-descriptions.mjs"
+  },
+  "dependencies": {
+    "graphile-worker": "^0.18.0",
+    "pg": "^8.23.1"
+  }
+}

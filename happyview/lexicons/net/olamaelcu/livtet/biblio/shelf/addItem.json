@@ -1,0 +1,49 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelf.addItem",
+  "description": "Put a book on a shelf. The shelfItem rkey is <shelf rkey>-<edition rkey>, so the same pair always lands on the same record.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Upsert one shelf membership edge.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["shelf", "book"],
+          "properties": {
+            "shelf": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the shelf record."
+            },
+            "book": {
+              "type": "ref",
+              "ref": "com.atproto.repo.strongRef",
+              "description": "The catalog edition to place on the shelf."
+            },
+            "metadata": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#shelfItemMetadata",
+              "description": "Optional position, notes and emoji for this book's place on the shelf."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the shelfItem record."
+            }
+          }
+        }
+      }
+    }
+  }
+}

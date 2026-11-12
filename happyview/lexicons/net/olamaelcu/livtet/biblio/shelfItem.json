@@ -1,0 +1,40 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelfItem",
+  "description": "A book placed on one of a reader's shelves. Unlike bookStatus, which carries the reading status of an edition, a shelfItem is a plain membership edge: one record per (shelf, book) pair, so a book can sit on any number of custom shelves independently of its reading status. The rkey is `<shelf rkey>-<edition rkey>`, so the same pair always lands on the same record.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "properties": {
+          "shelf": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the shelf record this book belongs to."
+          },
+          "book": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The book on the shelf (catalog edition record URI)."
+          },
+          "metadata": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#shelfItemMetadata",
+            "description": "Optional position, notes and emoji for this book's place on the shelf."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        },
+        "required": ["shelf", "book", "createdAt", "updatedAt"]
+      }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.review.update",
+  "description": "Edit one of the caller's reviews. Fields the input omits are left as they are.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Load the review, apply the supplied fields, save. Answers NotFound when the review does not exist.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the review record to update."
+            },
+            "subject": {
+              "type": "ref",
+              "ref": "community.lexicon.media.book.defs#editionRef",
+              "description": "Replacement book reference. Omit to keep the current one."
+            },
+            "subjectRecord": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "Replacement enrichment AT-URI."
+            },
+            "rating": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Replacement rating on a 1-20 scale."
+            },
+            "textContent": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Replacement plain-text review."
+            },
+            "content": {
+              "type": "union",
+              "refs": [],
+              "description": "Replacement rich content."
+            },
+            "flags": {
+              "type": "ref",
+              "ref": "community.lexicon.media.book.review#flags",
+              "description": "Replacement presentation flags."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "updated"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the updated review record."
+            },
+            "updated": {
+              "type": "boolean",
+              "description": "True when a field was changed, false when the input carried none."
+            }
+          }
+        }
+      }
+    }
+  }
+}

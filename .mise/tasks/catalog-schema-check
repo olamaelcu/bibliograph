@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#MISE description="Verify the catalog schema on a throwaway database (creates and drops it)"
+#
+# Uses DATABASE_URL only to create/drop the scratch database. The main database
+# Uses CATALOG_DATABASE_URL (or DATABASE_URL) only to create/drop the scratch
+# database. The main database is never touched: the scratch database starts
+# empty, gets the versioned SQL, and is removed on exit even when the tests
+# fail. CI can run this as-is because that role has CREATEDB.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+ADMIN_URL="${CATALOG_DATABASE_URL:-${DATABASE_URL:-}}"
+: "${ADMIN_URL:?set CATALOG_DATABASE_URL or DATABASE_URL}"
+command -v psql >/dev/null || { printf 'ERROR: psql is required\n' >&2; exit 1; }
+command -v node >/dev/null || { printf 'ERROR: node is required\n' >&2; exit 1; }
+
+DB_NAME="bibliograph_catalog_schema_check_$$"
+SCRATCH_URL="$(
+  node -e '
+    const url = new URL(process.argv[1]);
+    url.pathname = "/" + process.argv[2];
+    process.stdout.write(url.toString());
+  ' "$ADMIN_URL" "$DB_NAME"
+)"
+
+cleanup() {
+  psql "$ADMIN_URL" -X --quiet --set ON_ERROR_STOP=1 \
+    --command "DROP DATABASE IF EXISTS \"$DB_NAME\"" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+printf '==> catalog schema check: creating %s\n' "$DB_NAME"
+psql "$ADMIN_URL" -X --quiet --set ON_ERROR_STOP=1 \
+  --command "DROP DATABASE IF EXISTS \"$DB_NAME\""
+psql "$ADMIN_URL" -X --quiet --set ON_ERROR_STOP=1 \
+  --command "CREATE DATABASE \"$DB_NAME\""
+
+printf '==> catalog schema check: applying the versioned SQL\n'
+CATALOG_DATABASE_URL="$SCRATCH_URL" "$ROOT/.mise/tasks/catalog-schema"
+
+printf '==> catalog schema check: running worker integration tests\n'
+cd "$ROOT/packages/worker"
+CATALOG_SCHEMA_TEST_DATABASE_URL="$SCRATCH_URL" \
+  node --test test/catalog-schema.test.js
+
+printf '==> catalog schema check: ok (scratch database will be dropped)\n'

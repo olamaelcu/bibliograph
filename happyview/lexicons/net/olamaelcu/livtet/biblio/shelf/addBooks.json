@@ -1,0 +1,53 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.shelf.addBooks",
+  "description": "Put up to 100 books on one shelf in a single request; the shelfItems are written in parallel with Record.save_all.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Batch the same upsert as shelf.addItem. Entries that fail validation are counted in `failed` instead of aborting the call.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["shelf", "books"],
+          "properties": {
+            "shelf": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the shelf record."
+            },
+            "books": {
+              "type": "array",
+              "maxLength": 100,
+              "description": "Catalog editions to place on the shelf.",
+              "items": {
+                "type": "ref",
+                "ref": "com.atproto.repo.strongRef"
+              }
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["added", "failed"],
+          "properties": {
+            "added": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Shelf items written."
+            },
+            "failed": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Entries rejected before writing (bad strongRef, duplicate rkey, ...)."
+            }
+          }
+        }
+      }
+    }
+  }
+}

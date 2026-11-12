@@ -1,0 +1,55 @@
+bibliograph-web (0.2.2-1) unstable; urgency=medium
+
+  * 0.2.2 release: Prometheus metrics on the edge.
+
+    - Serve GET /metrics on the web loopback listener (127.0.0.1:5176) from a
+      dependency-free registry: HTTP requests and latency by matched route id,
+      HappyView and PDS proxy calls, catalog query counts and latency, feed
+      requests, and per-scrape process gauges.
+    - Deny an exact-match /metrics in the packaged nginx vhost so the public
+      name cannot expose internal telemetry.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 14:00:00 +0000
+
+bibliograph-web (0.2.1-1) unstable; urgency=medium
+
+  * 0.2.1 release: lexicon.community PR #18 book lexicons.
+
+    - Emit the PR #18 contributor shape from searchEditions and
+      resolveEditions: contributors[].displayName plus ONIX role codes
+      (A01 for by/co-author) instead of name/author.
+    - Ship the imported community.lexicon.media.book lexicons
+      (defs, edition, searchEditions, resolveEditions, review) as the source
+      of truth; the books-wg submodule stays pinned.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 12:00:00 +0000
+
+bibliograph-web (0.2.0-1) unstable; urgency=medium
+
+  * 0.2.0 release: feed generator, admin curation and split packaging.
+
+    - Serve com.atproto.feed.describeFeedGenerator and getFeedSkeleton at the
+      edge from HappyView's activity index; personalized feeds require
+      FEED_GENERATOR_DID and PLC_URL.
+    - Expand the private /admin UI with publisher search, book preview and
+      bounded bulk import proxied to the worker admin API.
+    - Show live catalog statistics and cap anonymous hydration enqueues.
+    - Read publisher records through PDS_URL and serve the books-wg catalog
+      procedures from the read-only catalog DATABASE_URL.
+    - Ship the TLS vhost as a conffile and enable it only when a certificate
+      and a valid nginx configuration make that safe.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 18:00:00 +0000
+
+bibliograph-web (0.1.0-1) unstable; urgency=medium
+
+  * Initial package. The SvelteKit edge from packages/web, built with
+    adapter-node and running on the host's nodejs:
+
+    - bibliograph-web.service serves the UI and /xrpc on 127.0.0.1:5176.
+    - The proxy injects the configured HappyView XRPC client identity and
+      relays Authorization/DPoP untouched; it holds no user session.
+    - /etc/bibliograph/web.env carries the upstream URL and the client
+      key/secret.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 11 Nov 2026 13:30:00 +0000

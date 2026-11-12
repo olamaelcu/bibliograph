@@ -1,0 +1,30 @@
+Package: bibliograph-web
+Version: @VERSION@
+Section: web
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @SIZE@
+Maintainer: Bibliograph Maintainers <maintainers@olamaelcu.net>
+Homepage: https://biblio.livtet.olamaelcu.net
+Depends: nodejs (>= 20), adduser, bibliograph-happyview
+Recommends: nginx
+Description: Bibliograph web edge (SvelteKit appview front end)
+ The public SvelteKit application for Bibliograph. It serves the UI and the
+ /xrpc surface, and is the only public origin: queries and procedures are
+ proxied server-side to HappyView on 127.0.0.1:3000, with the edge's own XRPC
+ client identity injected so a browser cannot choose it.
+ .
+ Catalog discovery (community.lexicon.media.book.resolveEditions and
+ searchEditions) is served here from the catalog tables; it is anonymous and
+ query-only. All other procedures are proxied to HappyView.
+ .
+ The adapter-node build is self-contained JavaScript (~2 MB) and runs on the
+ host's nodejs; no runtime is bundled. Configuration lives in
+ /etc/bibliograph/web.env — the HappyView client key and secret are required
+ for the proxy to identify itself upstream.
+ .
+ The service binds 127.0.0.1:5176. The package ships the TLS-terminating vhost
+ for biblio.livtet.olamaelcu.net as the conffile
+ /etc/nginx/sites-available/bibliograph-web; postinst enables it once the
+ certificate exists and nginx accepts the configuration, so installing the
+ package cannot take the host's other vhosts down.

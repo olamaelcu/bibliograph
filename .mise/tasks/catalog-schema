@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#MISE description="Apply the versioned catalog schema to DATABASE_URL (idempotent, never drops data)"
+#
+# Fresh database:
+#   createdb -O bibliograph bibliograph
+#   mise run catalog-schema
+#
+# CI/staging, where DATABASE_URL is not the mise-pinned local value:
+#   CATALOG_DATABASE_URL=postgres://… mise run catalog-schema
+#
+# The SQL files are additive and safe to re-run. They never drop a table,
+# sequence, index or row, and they never seed data. Existing catalog databases
+# only get missing containers (functions/views/triggers/indexes); a table that
+# already exists is left exactly as it is.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# mise.toml pins DATABASE_URL for local development, so an exported
+# DATABASE_URL is not enough to point this task at staging: mise re-applies the
+# pinned value. CATALOG_DATABASE_URL is the explicit target override.
+TARGET_URL="${CATALOG_DATABASE_URL:-${DATABASE_URL:-}}"
+: "${TARGET_URL:?set CATALOG_DATABASE_URL or DATABASE_URL (postgres://user:…@host:5432/db)}"
+
+command -v psql >/dev/null || {
+  printf 'ERROR: psql is required\n' >&2
+  exit 1
+}
+
+shopt -s nullglob
+files=("$ROOT"/packages/worker/sql/*.sql)
+if ((${#files[@]} == 0)); then
+  printf 'ERROR: no SQL files in packages/worker/sql\n' >&2
+  exit 1
+fi
+IFS=$'\n' files=($(printf '%s\n' "${files[@]}" | sort))
+unset IFS
+
+for file in "${files[@]}"; do
+  printf '==> catalog schema: %s\n' "$(basename "$file")"
+  psql "$TARGET_URL" \
+    -X \
+    --set ON_ERROR_STOP=1 \
+    --quiet \
+    --no-psqlrc \
+    --file "$file"
+done
+
+printf '==> catalog schema applied (idempotent; no data was dropped)\n'

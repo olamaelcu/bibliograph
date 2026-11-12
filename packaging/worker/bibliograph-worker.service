@@ -1,0 +1,53 @@
+[Unit]
+Description=Bibliograph catalog worker (provider hydration + PDS outbox)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+WorkingDirectory=/usr/lib/bibliograph-worker
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/bibliograph/worker.env
+ExecStart=/usr/bin/node /usr/lib/bibliograph-worker/index.js
+
+# The worker drains the PDS outbox, so an upstream outage must not exhaust the
+# start limit: restart gently and keep trying.
+Restart=on-failure
+RestartSec=10s
+# graphile-worker handles SIGTERM and exits 0; these cover the boot window
+# before its signal handlers are installed.
+SuccessExitStatus=143 130
+TimeoutStopSec=20s
+LimitNOFILE=65536
+SyslogIdentifier=bibliograph-worker
+
+StateDirectory=bibliograph
+StateDirectoryMode=0750
+LogsDirectory=bibliograph
+LogsDirectoryMode=0750
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

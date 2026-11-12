@@ -1,0 +1,117 @@
+#!/bin/sh
+# Hand-assembled package: debhelper does not run, so the unit is enabled and
+# started with deb-systemd-helper/-invoke, which is what debhelper's generated
+# snippets call. Using systemctl directly here would trip lintian and skip the
+# package's state tracking.
+set -e
+
+# Shared with the bibliograph and bibliograph-happyview packages.
+if ! getent group bibliograph >/dev/null; then
+    addgroup --system bibliograph
+fi
+if ! getent passwd bibliograph >/dev/null; then
+    adduser --system --ingroup bibliograph --home /var/lib/bibliograph \
+        --no-create-home --disabled-login --gecos "Bibliograph appview" bibliograph
+fi
+
+install -d -m 0750 -o root -g bibliograph /etc/bibliograph
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+    deb-systemd-helper enable bibliograph-web.service >/dev/null 2>&1 || true
+    deb-systemd-invoke restart bibliograph-web.service >/dev/null 2>&1 || true
+fi
+
+# --- nginx ---------------------------------------------------------------
+# The vhost is a conffile in sites-available and is only symlinked into
+# sites-enabled when doing so cannot break the host: a certificate for the name
+# exists, the retired combined package's vhost is not still enabled (both claim
+# the same :443 server_name, and nginx keeps whichever it parses first), and
+# `nginx -t` accepts the result. A server block pointing at a missing
+# certificate makes nginx refuse to start after a reboot, taking every other
+# vhost on the host with it.
+SITE_AVAILABLE=/etc/nginx/sites-available/bibliograph-web
+SITE_ENABLED=/etc/nginx/sites-enabled/bibliograph-web
+LEGACY_ENABLED=/etc/nginx/sites-enabled/bibliograph-platform
+SITE_CERT=/etc/letsencrypt/live/biblio.livtet.olamaelcu.net/fullchain.pem
+
+reload_or_start_nginx() {
+    [ -d /run/systemd/system ] || return 0
+    deb-systemd-invoke reload nginx >/dev/null 2>&1 && return 0
+    # reload fails when nginx is not running; start it instead of leaving the
+    # new site unserved.
+    deb-systemd-invoke start nginx >/dev/null 2>&1 || true
+}
+
+enable_nginx_site() {
+    if ! command -v nginx >/dev/null 2>&1; then
+        echo "bibliograph-web: nginx is not installed, so the vhost was left" >&2
+        echo "bibliograph-web: staged at $SITE_AVAILABLE." >&2
+        return 0
+    fi
+
+    # -L as well as -e: an existing symlink counts as enabled even when its
+    # target is momentarily missing.
+    if [ -e "$SITE_ENABLED" ] || [ -L "$SITE_ENABLED" ]; then
+        if nginx -t >/dev/null 2>&1; then
+            reload_or_start_nginx
+        else
+            echo "bibliograph-web: nginx configuration is invalid; nginx was" >&2
+            echo "bibliograph-web: NOT reloaded. Check $SITE_ENABLED." >&2
+        fi
+        return 0
+    fi
+
+    if [ -e "$LEGACY_ENABLED" ] || [ -L "$LEGACY_ENABLED" ]; then
+        echo "bibliograph-web: $LEGACY_ENABLED is still enabled (from the" >&2
+        echo "bibliograph-web: retired combined package), so the edge's vhost" >&2
+        echo "bibliograph-web: was staged but NOT enabled: nginx would keep" >&2
+        echo "bibliograph-web: sending biblio.livtet.olamaelcu.net to the old" >&2
+        echo "bibliograph-web: unit. Remove the old package, then run:" >&2
+        echo "bibliograph-web:   dpkg-reconfigure bibliograph-web" >&2
+        return 0
+    fi
+
+    if [ ! -f "$SITE_CERT" ]; then
+        echo "bibliograph-web: no certificate at $SITE_CERT, so the nginx" >&2
+        echo "bibliograph-web: vhost was staged but NOT enabled. nginx is" >&2
+        echo "bibliograph-web: untouched. After obtaining the certificate, run:" >&2
+        echo "bibliograph-web:   ln -s ../sites-available/bibliograph-web $SITE_ENABLED" >&2
+        echo "bibliograph-web:   nginx -t && systemctl reload nginx" >&2
+        return 0
+    fi
+
+    ln -s ../sites-available/bibliograph-web "$SITE_ENABLED"
+    if nginx -t >/dev/null 2>&1; then
+        reload_or_start_nginx
+    else
+        # Leave the host exactly as it was rather than shipping it a config
+        # nginx refuses to load on the next start.
+        rm -f "$SITE_ENABLED"
+        echo "bibliograph-web: nginx rejected the vhost, so it was removed from" >&2
+        echo "bibliograph-web: $SITE_ENABLED and stays staged in" >&2
+        echo "bibliograph-web: $SITE_AVAILABLE. nginx said:" >&2
+        nginx -t 2>&1 | sed 's/^/bibliograph-web:   /' >&2 || true
+    fi
+}
+
+enable_nginx_site
+
+# The pair normally comes from the HappyView package's generated file; web.env
+# can override it. Warn only when neither supplies a key, because the proxy
+# then reaches HappyView unattributed.
+client_key_configured() {
+    for file in /etc/bibliograph/happyview-client.env /etc/bibliograph/web.env; do
+        [ -r "$file" ] && grep -Eq '^HAPPYVIEW_CLIENT_KEY=..+' "$file" && return 0
+    done
+    return 1
+}
+
+if ! client_key_configured; then
+    echo "bibliograph-web: no HAPPYVIEW_CLIENT_KEY in web.env or" >&2
+    echo "bibliograph-web: happyview-client.env; proxied requests will reach" >&2
+    echo "bibliograph-web: HappyView unauthenticated. Install" >&2
+    echo "bibliograph-web: bibliograph-happyview and restart it to generate one." >&2
+fi
+
+exit 0

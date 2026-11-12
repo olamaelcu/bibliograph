@@ -47,18 +47,13 @@ override_dh_auto_install:
 	install -d debian/bibliograph/usr/lib/systemd/system
 	install -m 0644 debian/bibliograph-worker.service \
 		debian/bibliograph-migrate.service \
+		debian/bibliograph-hv-deploy.service \
 		debian/bibliograph-isbn-backfill.service \
 		debian/bibliograph-isbn-backfill.timer \
 		debian/bibliograph-description-backfill.service \
 		debian/bibliograph-description-backfill.timer \
-		debian/bibliograph-bookhive-catalog.service \
-		debian/bibliograph-bookhive-catalog.timer \
 		debian/bibliograph-cover-backfill.service \
 		debian/bibliograph-cover-backfill.timer \
-		debian/bibliograph-follows-backfill.service \
-		debian/bibliograph-follows-backfill.timer \
-		debian/bibliograph-actors-backfill.service \
-		debian/bibliograph-actors-backfill.timer \
 		debian/bibliograph/usr/lib/systemd/system/
 
 override_dh_installsystemd:
@@ -69,15 +64,13 @@ override_dh_installsystemd:
 	# The backfill .service units are oneshots owned by their .timer, so only the
 	# timers are enabled and started: a oneshot enabled on its own would run at
 	# install time, before the database is ready.
-	dh_installsystemd -Xbibliograph-migrate.service -Xbibliograph-isbn-backfill.service -Xbibliograph-description-backfill.service -Xbibliograph-bookhive-catalog.service -Xbibliograph-cover-backfill.service -Xbibliograph-follows-backfill.service -Xbibliograph-actors-backfill.service
+	dh_installsystemd -Xbibliograph-migrate.service -Xbibliograph-isbn-backfill.service -Xbibliograph-description-backfill.service -Xbibliograph-cover-backfill.service -Xbibliograph-follows-backfill.service -Xbibliograph-actors-backfill.service
 	dh_installsystemd --no-enable --no-start \
 		bibliograph-migrate.service \
 		bibliograph-isbn-backfill.service \
 		bibliograph-description-backfill.service \
-		bibliograph-bookhive-catalog.service \
 		bibliograph-cover-backfill.service \
-		bibliograph-follows-backfill.service \
-		bibliograph-actors-backfill.service
+		bibliograph-hv-deploy.service
 
 override_dh_fixperms:
 	dh_fixperms

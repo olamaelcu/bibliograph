@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE description="Upload the activity lexicons and the query/procedure scripts to HappyView and apply the activity indexes"
+# Thin wrapper over happyview/bin/hv-deploy, which is also what the Debian
+# package's `bibliograph-happyview-deploy.service` runs. Keeping one
+# implementation means the local loop and an installed host cannot drift.
+#
+# This wrapper only supplies the compose way of reaching SQL: the tool itself
+# takes HV_PSQL (a command) or HV_DATABASE_URL (a connection string), so the
+# package can use a plain psql on the host.
+#
+# Idempotent: HappyView upserts on POST, so a second run answers 200 with a
+# bumped revision rather than erroring.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HV_PSQL="docker compose exec -T postgres psql -U bibliograph -d bibliograph" \
+  exec python3 happyview/bin/hv-deploy --root "$ROOT/happyview" "$@"

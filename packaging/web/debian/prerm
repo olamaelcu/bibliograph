@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ]; then
+    if [ -d /run/systemd/system ]; then
+        deb-systemd-invoke stop bibliograph-web.service >/dev/null 2>&1 || true
+        deb-systemd-helper disable bibliograph-web.service >/dev/null 2>&1 || true
+    fi
+
+    # The sites-enabled symlink is created by postinst, not shipped, so dpkg
+    # will not clean it up. Left behind it would keep the public hostname
+    # proxying to a port nothing listens on (a 502 on another package's host).
+    # The conffile in sites-available stays until the package is purged.
+    rm -f /etc/nginx/sites-enabled/bibliograph-web
+    if [ -d /run/systemd/system ] && command -v nginx >/dev/null 2>&1 &&
+        nginx -t >/dev/null 2>&1; then
+        deb-systemd-invoke reload nginx >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0

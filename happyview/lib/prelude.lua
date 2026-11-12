@@ -1,0 +1,14 @@
+-- Shared helper anchor. Every endpoint starts with `-- @include lib/prelude.lua`;
+-- hv-deploy expands that line recursively (v2 Lua has no `require`), so the
+-- modules below land in the same chunk as the endpoint's `handle()`.
+--
+-- HappyView's v2 script contract supplies `handle()`, `params`/`input`/`env`,
+-- `db.raw(sql, args)`, `json`, `toarray`, `Record`, `now` and `TID`. Query
+-- parameters arrive as strings. Module helpers and constants are locals, so
+-- only `handle` and those runtime globals remain global.
+
+-- @include lib/core.lua
+-- @include lib/cursors.lua
+-- @include lib/views.lua
+-- @include lib/validate.lua
+-- @include lib/pds.lua

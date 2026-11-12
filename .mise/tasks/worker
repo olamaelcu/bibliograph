@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Run the catalog worker against the local database (hydration + pds-publish)"
+#
+# Environment comes from mise's [env] (DATABASE_URL) and the shell. pds-publish
+# needs PDS_URL, the publisher DID and PDS_ACCOUNT_PASSWORD or PDS_ACCESS_TOKEN;
+# without them the worker logs that pds-publish is disabled and still runs the
+# hydration tasks.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec pnpm --filter worker start

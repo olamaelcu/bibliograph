@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+fi
+
+# Graphile worker state lives in Postgres; local state directories may briefly
+# hold cover cache files, which are disposable.
+exit 0

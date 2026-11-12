@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#MISE description="Create the provisional atproto account on the local PDS (did:plc registered in the local PLC)"
+# Creates one account under the PDS's handle domain and nothing else. The
+# account's DID is a real did:plc registered with the local PLC, so HappyView
+# resolves it without touching plc.directory. Idempotent: an existing account
+# is reported and left alone.
+#
+# The password is only needed to sign in to the PDS directly (or to complete the
+# dashboard login in a browser); HappyView does not store it.
+#
+# This is the `--handle` form of `scripts/dev-seed.py accounts`, the same code
+# `mise run hv-accounts` uses for the fixture list, so the one-account and
+# N-account paths cannot drift. TLS verifies against `.cache/caddy-root.crt`
+# (written by `mise run hv-ca`) when it exists and falls back to an unverified
+# connection only for this local host.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+HANDLE="${1:-${HV_ACCOUNT_HANDLE:-alice.pds.127-0-0-1.sslip.io}}"
+PASSWORD="${HV_ACCOUNT_PASSWORD:-Dev-account-password1}"
+EMAIL="${HV_ACCOUNT_EMAIL:-alice@example.invalid}"
+
+exec python3 scripts/dev-seed.py accounts \
+  --handle "$HANDLE" \
+  --password "$PASSWORD" \
+  --email "$EMAIL"

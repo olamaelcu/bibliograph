@@ -1,0 +1,39 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.graph.unfollow",
+  "description": "Unfollow a person by DID: finds the caller's follow records whose subject is that DID (including legacy rows) and deletes them.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Unfollow a DID. Answers NotFound when the follow does not exist.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["subject"],
+          "properties": {
+            "subject": {
+              "type": "string",
+              "format": "did",
+              "description": "DID of the person to unfollow."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the deleted follow record."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.readingGoal.set",
+  "description": "Set the caller's reading goal. The readingGoal record lives at rkey 'current', which the getReadingGoal query reads.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "description": "Upsert the reading goal at rkey 'current'.",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["period", "year", "booksGoal"],
+          "properties": {
+            "period": {
+              "type": "string",
+              "knownValues": ["weekly", "monthly", "annual"],
+              "description": "weekly = Mon-Sun, monthly = calendar month, annual = calendar year."
+            },
+            "year": {
+              "type": "integer",
+              "minimum": 1900,
+              "maximum": 9999,
+              "description": "Calendar year the goal belongs to."
+            },
+            "booksGoal": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Number of books to finish in the period."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "period", "year", "booksGoal"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the readingGoal record."
+            },
+            "period": {
+              "type": "string",
+              "description": "The period that was written."
+            },
+            "year": {
+              "type": "integer",
+              "description": "The year that was written."
+            },
+            "booksGoal": {
+              "type": "integer",
+              "description": "The goal that was written."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+fi
+
+# The generated admin key and the database are deliberately not removed on
+# remove. On purge, drop the key; the database is the operator's, never ours.
+if [ "$1" = "purge" ]; then
+    rm -f /etc/bibliograph/happyview-admin.key
+    rmdir /var/lib/bibliograph 2>/dev/null || true
+fi
+
+exit 0

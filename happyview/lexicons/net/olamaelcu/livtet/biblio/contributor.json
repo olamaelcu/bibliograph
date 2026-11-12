@@ -1,0 +1,74 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.contributor",
+  "description": "A person credited in the production of book editions, published by the catalog as a stable reference target for the inline `community.lexicon.media.book.defs#contributor` entries on edition records. Records are keyed by TID and addressed under the catalog publisher's DID.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "description": "A contributor entity. The name and identifiers mirror `community.lexicon.media.book.defs#contributor`; `role` belongs to an individual credit on an edition and is deliberately absent here.",
+      "record": {
+        "type": "object",
+        "required": ["displayName", "createdAt"],
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "maxGraphemes": 64,
+            "description": "The contributor's name as it should be displayed, preserving the supplied name order. Identifiers, not this name, are the matching mechanism."
+          },
+          "nameInverted": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "maxGraphemes": 64,
+            "description": "Optional name in filing or sorting order, when known, such as Le Guin, Ursula K. Consumers must not infer this by rearranging displayName."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 8192,
+            "maxGraphemes": 1024,
+            "description": "Free-text biography or description of the contributor."
+          },
+          "image": {
+            "type": "blob",
+            "accept": ["image/*"],
+            "description": "Optional portrait image. The blob must belong to the repository containing this record, so a catalog that does not own the bytes must use imageUrl instead. May coexist with imageUrl."
+          },
+          "imageUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Optional portrait image URL. Unlike image, a URL does not preserve the bytes in the repository; it is what a host that does not own the blob can publish."
+          },
+          "identifiers": {
+            "type": "array",
+            "maxLength": 16,
+            "description": "Identifiers denoting this contributor in global or provider namespaces, compared exactly by issuer and value. Shared with the edition lexicons so an edition's inline identifiers and this record agree.",
+            "items": {
+              "type": "ref",
+              "ref": "community.lexicon.media.book.defs#identifier"
+            }
+          },
+          "born": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 10,
+            "description": "Birth date as a full ISO 8601 calendar date, exactly YYYY-MM-DD (for example 1929-10-21). Partial dates are not allowed, and the value must be a real calendar date: Lexicon strings cannot carry a regex, so writers must validate the pattern and the calendar (reject 2023-02-29, month 00 or 13, day 00 or 32)."
+          },
+          "died": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 10,
+            "description": "Death date as a full ISO 8601 calendar date, exactly YYYY-MM-DD, with the same real-calendar validation as born."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Time this contributor record was created, not a birth or death date."
+          }
+        }
+      }
+    }
+  }
+}

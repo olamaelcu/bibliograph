@@ -1,376 +1,397 @@
 # Debian package deployment
 
-How Bibliograph is packaged and installed as a native Debian package, following
-the same shape as the Livtet platform package (`../platform/debian`): a prebuilt
-payload under `/usr/lib`, a conffile under `/etc`, systemd-owned writable paths,
-and an nginx site generated around a debconf-selected port.
+Bibliograph ships as three Debian packages, installed dependency-first. One
+command builds all three, uploads them, installs them in order, applies the
+database prerequisites, restarts the units in order and verifies the result:
 
-## Layout
+```bash
+mise run deploy                          # veve@lescayes.ts.olamaelcu.net
+mise run deploy -- alice@server          # another host
+DEPLOY_HOST=alice@server mise run deploy
+mise run deploy -- --dry-run             # select packages, print the plan, no ssh
+```
 
-| Path | Contents | Managed by |
-| --- | --- | --- |
-| `/usr/lib/bibliograph` | vite output, the TypeScript sources `tsx` runs, generated lexicon modules, drizzle migrations, production `node_modules` | dpkg (read-only) |
-| `/etc/bibliograph/bibliograph.env` | All runtime configuration | dpkg conffile |
-| `/etc/bibliograph/port.conf` | `PORT=…`, rendered from debconf | postinst |
-| `/etc/nginx/sites-enabled/bibliograph-platform` | TLS server block + reverse proxy | dpkg conffile |
-| `/etc/nginx/conf.d/bibliograph-upstream.conf` | `upstream bibliograph_backend` | postinst |
-| `/var/lib/bibliograph/lex` | published lexicon CAR files | systemd `StateDirectory` |
-| `/var/log/bibliograph` | pino per-process log files | systemd `LogsDirectory` |
-| `/usr/lib/systemd/system/bibliograph.service` | web process | dpkg |
-| `/usr/lib/systemd/system/bibliograph-worker.service` | TAP consumer | dpkg |
-| `/usr/lib/systemd/system/bibliograph-migrate.service` | oneshot migrator | dpkg |
-| `/usr/lib/sysusers.d/bibliograph.conf` | `bibliograph` system user | dpkg |
+> **Fresh-start deployment.** This flow provisions a new host/package set. There
+> is **no data migration, no import and no seed**: the catalog grows from XRPC
+> traffic after the worker and edge are running. Staging, canary and automated
+> rollback are out of scope. Rollback is a pin to an older package version, and
+> the catalog schema is forward-only (see [Upgrade](#upgrade)). Database roles,
+> PostgreSQL, Node and TLS certificates are host prerequisites, not things the
+> packages install.
 
-There is no state directory for the application itself: every piece of state is
-in PostgreSQL. `/var/lib/bibliograph` exists only to hold the lexicon CAR files
-that the XRPC lex publisher serves.
+> **Legacy host?** A host still running the retired combined `bibliograph`
+> package is refused by a plain deploy (preflight aborts before uploading); see
+> [Legacy host cutover](#legacy-host-cutover) and use `--replace-legacy`
+> explicitly. The old nginx site must not keep owning the public name.
 
-## Three units, not one
+## Packages
 
-The Livtet package runs a single process. Bibliograph has three:
+| Package | Payload | Units | Depends |
+| --- | --- | --- | --- |
+| `bibliograph-happyview` | `/usr/lib/bibliograph-happyview` (binary, migrations, dashboard, lexicons/scripts, db-init SQL) | `happyview.service`, `bibliograph-happyview-client.service` (oneshot), `bibliograph-happyview-deploy.service` (oneshot) | `libc6`, `libssl3`, `postgresql-client`, `python3`, … |
+| `bibliograph-worker` | `/usr/lib/bibliograph-worker` (ESM + production `node_modules` + `sql/`) | `bibliograph-worker.service` | `nodejs (>= 22)` |
+| `bibliograph-web` | `/usr/lib/bibliograph-web/build` (adapter-node output) | `bibliograph-web.service` | `nodejs (>= 20)`, **`bibliograph-happyview`** |
 
-| Unit | Runs | Why separate |
-| --- | --- | --- |
-| `bibliograph.service` | `tsx server.ts` | The WebSocket label stream needs the `upgrade` event, so the package runs the custom entrypoint, not `build/index.js` |
-| `bibliograph-worker.service` | `tsx worker.ts` | TAP consumption must survive web restarts and back off on its own |
-| `bibliograph-migrate.service` | `tsx src/lib/server/db/migrate.ts` | `Type=oneshot`, `Requires=`d by both. No `RemainAfterExit`, so it re-runs every time either unit starts — that is how an upgrade applies new migrations |
+Only `bibliograph-web` depends on another split package, and it depends on
+`bibliograph-happyview`: the edge has no upstream without it. That fixes the
+install order.
 
-The migrator fails closed: any unrecognized PostgreSQL error aborts it, and the
-units that require it refuse to start, rather than serving traffic against a
-stale schema. It is idempotent — drizzle records applied migrations in
-`drizzle.__drizzle_migrations`.
+## Build order
 
-### Shutdown
+`mise run deploy` declares the three build tasks as dependencies, so all of them
+must succeed **before** anything is uploaded or installed. They stage separate
+directories, so mise may run them concurrently; each deb is selected from
+`dist/` afterwards.
 
-Both long-running units stop on SIGTERM in well under a second:
+```bash
+mise run package-hv-deb      # package-hv-payload, then dpkg-deb
+mise run package-worker-deb  # package-worker-payload, then dpkg-deb
+mise run package-web-deb     # package-web-payload (pnpm build), then dpkg-deb
+```
 
-| Process | What it does |
+A failed build aborts the task: `deploy.sh` never runs, and no partial set is
+installed. `deploy.sh` selects the newest `dist/bibliograph-happyview_*.deb`,
+`dist/bibliograph-worker_*.deb` and `dist/bibliograph-web_*.deb` by version
+sort; if any one is missing it stops and names the task to run. Set `DIST_DIR`
+to select from another directory, or `HV_PKG`/`WORKER_PKG`/`WEB_PKG` to pin an
+exact file.
+
+## Install order
+
+The order is dependency-first, and `deploy.sh` installs one package at a time
+with:
+
+```bash
+apt-get install -y --reinstall \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold \
+  /tmp/<package>.deb
+```
+
+1. **`bibliograph-happyview`** — the activity plane and the upstream the edge
+   proxies to. Installing it makes `psql` and the one-time `db-init.sql`
+   available, so the HappyView role/schema gate runs here.
+2. **`bibliograph-worker`** — installed next. Its deb ships the versioned
+   catalog schema at `/usr/lib/bibliograph-worker/sql/`; that schema is applied
+   immediately after the install (the worker is stopped first so a fresh
+   database is not hit by a worker whose tables do not exist yet).
+3. **`bibliograph-web`** — installed last. It depends on `bibliograph-happyview`,
+   and the public edge must not exist before its upstream and the worker.
+
+`--reinstall` makes re-running the deploy a real redeploy of the same version.
+`--force-confold` keeps local edits to the env conffiles and the nginx vhost;
+new files are installed when absent.
+
+The retired combined `bibliograph_*.deb` is never selected, uploaded or
+installed.
+
+## Legacy host cutover
+
+A host that still runs the retired combined package cannot be upgraded in place
+by the normal flow:
+
+- both `bibliograph` and `bibliograph-worker` ship
+  `/usr/lib/systemd/system/bibliograph-worker.service`, so dpkg refuses the
+  split worker install (and purging the old package afterwards would delete the
+  newly installed unit);
+- `sites-enabled/bibliograph-platform` owns the public `:443 server_name`, and
+  `bibliograph-web`'s postinst deliberately refuses to enable its vhost while
+  that legacy symlink exists.
+
+Every run checks the host during preflight (`dpkg-query -W bibliograph`,
+`systemctl is-active bibliograph.service`, and
+`/etc/nginx/sites-enabled/bibliograph-platform`, symlink included). If any
+legacy artifact is found and `--replace-legacy` was not passed, **nothing is
+uploaded or changed** and the deploy exits non-zero with the removal commands.
+It never reports success while the old app can still serve.
+
+### Preconditions checked before upload
+
+`--replace-legacy` refuses to upload until the target already has the new
+package conffiles and the services they configure can start:
+
+- `/etc/bibliograph/worker.env` with a non-empty, parseable `DATABASE_URL`
+  (`postgres://` or `postgresql://`). Publisher keys are warned about, not
+  required — `pds-publish` disables itself when they are absent.
+- `/etc/bibliograph/web.env` with a non-empty `HAPPYVIEW_URL`; `PORT` is
+  optional (default `5176`) but must be a valid port if set. Set
+  `FEED_GENERATOR_DID` and `PLC_URL` for the feed generator: neither has a code
+  default, and without them the feed methods answer `503 ServiceUnavailable`.
+  Missing catalog `DATABASE_URL` or `PDS_URL` are warnings (those methods answer
+  `503`). The HappyView client key is generated by the package later and is not
+  required.
+- nginx installed and `nginx -t` passing.
+- the certificate the new vhost references (or
+  `/etc/letsencrypt/live/biblio.livtet.olamaelcu.net/fullchain.pem`) present.
+
+These files do not exist yet on a host that still runs the old package, so
+stage them from the built debs, then edit them. They are conffiles: dpkg
+preserves them (`--force-confold`) when the packages install later.
+
+```bash
+# from this checkout, for each of worker and web:
+dpkg-deb -x dist/bibliograph-worker_*.deb /tmp/bpkg-worker
+scp /tmp/bpkg-worker/etc/bibliograph/worker.env <host>:/tmp/worker.env
+ssh <host> 'sudo install -D -m 0640 -o root -g root /tmp/worker.env /etc/bibliograph/worker.env'
+
+dpkg-deb -x dist/bibliograph-web_*.deb /tmp/bpkg-web
+scp /tmp/bpkg-web/etc/bibliograph/web.env <host>:/tmp/web.env
+ssh <host> 'sudo install -D -m 0640 -o root -g root /tmp/web.env /etc/bibliograph/web.env'
+```
+
+Then set `DATABASE_URL` (and publisher keys if publishing) in `worker.env`, and
+check `HAPPYVIEW_URL`/`PORT`, set `FEED_GENERATOR_DID` and `PLC_URL` (required
+for feeds), and the catalog `DATABASE_URL`/`PDS_URL` if those methods should
+answer, in `web.env`. Re-run with `--replace-legacy`.
+
+Any failure here exits before scp/apt and leaves the retired package, units and
+site untouched. The HappyView DB gate still runs after the happyview install
+and before the cutover, so a database failure also leaves the old app serving.
+The remote install script repeats the same prerequisite checks immediately
+before its first install, so a changed target cannot be purged unprepared.
+
+`--replace-legacy` is explicit and destructive. After installing happyview and
+passing the HappyView DB gate (so a database failure leaves the old app
+serving), it:
+
+1. stops and disables `bibliograph.service` and `bibliograph-worker.service`;
+2. removes `sites-enabled/bibliograph-platform`;
+3. purges the `bibliograph` package — this removes its units, the old
+   `sites-available/bibliograph-platform` and its conffiles including
+   `bibliograph.env`;
+4. removes `sites-available/bibliograph-platform` if it survived, but only when
+   `dpkg -S` shows no installed package owns that path;
+5. runs `systemctl daemon-reload`, `nginx -t` and reloads nginx;
+6. installs worker → catalog schema → web, then requires
+   `sites-enabled/bibliograph-web` (re-running the web postinst if needed) and
+   `https://<server_name>/` through 127.0.0.1 to answer `200`. Only then does it
+   print `DEPLOY_OK`.
+
+Downtime runs from the stop until the new vhost is enabled, and purging
+discards edits to the old package's conffiles. PostgreSQL data and roles are
+untouched (no migration, no seed). Because the certificate and nginx are
+preflight prerequisites, a missing certificate aborts before the old site is
+removed. Use `--dry-run` first; the actual legacy state is read from the host
+during preflight.
+
+The replacement checks are tied to the flag, not to finding the old package, so
+re-running `--replace-legacy` after a partial failure still requires the new
+vhost and HTTPS before reporting success.
+
+## Database prerequisites (fresh host, two passes)
+
+PostgreSQL 14+ and the application role/database are prerequisites. On a brand
+new database:
+
+```bash
+sudo -u postgres createuser --pwprompt bibliograph
+sudo -u postgres createdb -O bibliograph bibliograph
+```
+
+The first `mise run deploy` installs `bibliograph-happyview`, then stops at the
+HappyView database gate with the exact command to run. The gate requires
+`DATABASE_URL` to connect and either the `happyview` schema (shared-database
+layout, created by `db-init.sql`) or HappyView's migrated tables (a dedicated
+database) to exist. Stopping instead of creating the role is intentional:
+`/usr/share/bibliograph-happyview/db-init.sql` creates the `happyview_app` role
+with a password placeholder and is **not** safely re-runnable on the role line,
+so the deploy script never invents a password for it.
+
+After the first pass:
+
+```bash
+# once, as a Postgres superuser — change the placeholder password in the file
+# first if you are creating the role with this SQL
+sudo -u postgres psql -v db=bibliograph -f /usr/share/bibliograph-happyview/db-init.sql
+
+# then the two URLs the services read (conffiles, 0640 root:bibliograph):
+#   /etc/bibliograph/happyview.env  DATABASE_URL=postgres://happyview_app:…@localhost/bibliograph
+#   /etc/bibliograph/worker.env     DATABASE_URL=postgres://bibliograph:…@localhost/bibliograph
+```
+
+Re-run `mise run deploy`. It installs the worker, applies every file in
+`/usr/lib/bibliograph-worker/sql/` in lexical order, installs the web package,
+and then restarts the units. The schema SQL is **idempotent and additive**: it
+creates missing tables/sequences/indexes/functions/views and never drops or
+truncates data. Running it on an existing database is safe. It does not alter an
+existing table — a new column belongs in a new numbered file.
+
+`0003-feed-read.sql` is re-applied after `happyview.service` (and its deploy
+oneshot) has migrated, because the first catalog pass runs before
+`happyview.happyview_records` exists. That re-apply is idempotent and adds only
+the feed indexes and grants. If `web.env` uses the `bibliograph-web` role, create
+it before deploying so 0003 can grant it `USAGE` on `happyview` and `SELECT` on
+`happyview.happyview_records`; otherwise those methods answer `503`.
+
+`web.env` needs its own read-only `DATABASE_URL` for the anonymous catalog
+procedures; without it those methods answer `503 ServiceUnavailable` while the
+rest of the edge still works. The HappyView role receives `SELECT` on the
+catalog tables when the catalog schema is applied after `db-init.sql`.
+
+Use `--skip-db` only when another tool owns the database (schema already
+applied, or a managed service): it skips both the HappyView gate and the catalog
+schema. The restart verification still runs.
+
+## What the script verifies
+
+On the target, after the installs:
+
+- Preflight looks for the retired combined install (`dpkg-query -W
+  bibliograph`, `bibliograph.service`, and a
+  `sites-enabled/bibliograph-platform` file or symlink). If it is present and
+  `--replace-legacy` was not passed, the run stops before uploading anything.
+- With `--replace-legacy`, preflight also requires the staged `worker.env`
+  (valid `DATABASE_URL`), `web.env` (valid `HAPPYVIEW_URL`, valid/default
+  `PORT`), working nginx (`nginx -t`), and the vhost certificate. Missing
+  prerequisites stop the run before upload; publisher and optional web keys
+  only warn.
+- `dpkg-query` reports exactly the version of each uploaded deb.
+- Units are restarted in dependency order:
+  `bibliograph-happyview-client` → `happyview` →
+  `bibliograph-happyview-deploy` → `bibliograph-worker` → `bibliograph-web`.
+  The client seed runs before HappyView because HappyView loads its XRPC client
+  registry into memory at boot; the deploy oneshot is awaited so the lexicon,
+  script and index upload has finished.
+- `systemctl is-active` is `active` for all five units.
+- `GET http://127.0.0.1:<PORT>/` answers `200`, where `<PORT>` is `PORT=` from
+  `/etc/bibliograph/web.env` (default `5176`).
+- Best-effort XRPC probe: `POST /xrpc/community.lexicon.media.book.searchEditions`.
+  `200` is healthy; `503` is reported as "catalog database not configured in
+  web.env" rather than a deploy failure.
+- If nginx is installed: `nginx -t`, then a reload. A rejected configuration
+  fails the deploy, and the result says whether the vhost is enabled or only
+  staged (no certificate). If nginx is absent the edge is only reachable on
+  loopback and the script says so.
+- With `--replace-legacy`, `sites-enabled/bibliograph-web` is required after
+  the web install (the postinst is re-run if needed) and `https://<server_name>/`
+  through 127.0.0.1 must answer `200`; otherwise the run fails. These two
+  replacement checks are **not** skipped by `--skip-nginx`.
+
+## Options
+
+| Option | Effect |
 | --- | --- |
-| `bibliograph-worker` | flushes the TAP batch buffers, asks the subscription to close its websocket (bounded at 200 ms, because the iterator's `return()` does not settle a pending `next()`), then exits 0 |
-| `bibliograph.service` | `server.close()` + `closeAllConnections()`, then exits 0; a 10 s timer exits 1 if sockets refuse to go |
+| `--dry-run` | Select the three debs, validate their metadata, print the plan; no ssh, no upload. |
+| `--print-remote` | Print the remote install/verify script and exit (review/debug; `bash -n`-able). |
+| `--replace-legacy` | Explicitly stop and purge the retired combined package, remove its nginx site, then cut over and require the new vhost + HTTPS. Destructive: purges old conffile edits; PostgreSQL data is untouched. Without it, a detected legacy install aborts before upload. |
+| `--skip-db` | Skip the HappyView role/schema gate and the catalog schema. |
+| `--skip-nginx` | Do not run `nginx -t`/reload after installing the web package. |
+| `-h`, `--help` | Usage. |
 
-Signal handlers are registered *before* the dependency graph is imported — the
-worker therefore uses `await import()` for its two internal modules, since a
-static import would evaluate the whole graph (tsx loader, pino, `@atcute/tap`,
-pg, graphile-worker) before any handler existed. That boot window was the source
-of the `exit 143` / `Failed with result 'exit-code'` noise during upgrades.
+`deploy.sh` is the single implementation; `.mise/tasks/deploy` only adds the
+three build dependencies. Both can be run directly:
 
-Two related decisions:
-
-- `SuccessExitStatus=143 130` is set on both units. A SIGTERM arriving in the
-  first few hundred milliseconds, before the interpreter has loaded our module,
-  still hits the default disposition; this keeps systemd from calling that a
-  failure.
-- If the TAP subscription ends *without* a signal, the worker throws and exits
-  non-zero on purpose. Exiting 0 there would look like a clean stop and
-  `Restart=on-failure` would never bring the consumer back.
-
+```bash
+bash deploy.sh --help
+bash deploy.sh --dry-run
+bash deploy.sh --print-remote | bash -n
+```
 
 ## Host prerequisites
 
-### Node.js is not bundled
+- **Node.js ≥ 22** from NodeSource (`nodejs (>= 22)` is a hard dependency of the
+  worker; the distro's 18 does not satisfy it). `apt-get` refuses the install
+  otherwise.
+- **PostgreSQL 14+** and `psql` on the target (the HappyView package depends on
+  `postgresql-client`). PostgreSQL may be remote; `DATABASE_URL` decides.
+- **nginx** (the web package recommends it) if the edge should be public.
+  Certificates are the host's job; see below.
+- **Passwordless sudo** for the ssh user, plus `systemd`, `apt-get`, `dpkg` and
+  `curl`.
+- **PDS publisher credentials** for catalog publishing (`ATP_SERVICE_DID`,
+  `PDS_URL`, `PDS_ACCOUNT_DID` and `PDS_ACCOUNT_PASSWORD` or
+  `PDS_ACCESS_TOKEN`). Without them the worker still hydrates the catalog, but
+  `pds-publish` is disabled and rows stay in `pds_outbox`.
 
-The package `Depends: nodejs (>= 22.0.0)` and ships no runtime. Install it from
-NodeSource:
+## Configuration after install
 
-```bash
-install -d /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-  | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+The packages ship these conffiles; deploy preserves local edits:
 
-cat > /etc/apt/sources.list.d/nodesource.sources <<'EOF'
-Types: deb
-URIs: https://deb.nodesource.com/node_22.x/
-Suites: nodistro
-Components: main
-Signed-By: /etc/apt/keyrings/nodesource.gpg
-EOF
-
-apt-get update
-apt-get install -y nodejs
-node --version   # must be >= v22.0.0
-```
-
-The distro's own `nodejs` (18.x on Debian 12 and Ubuntu 24.04) does **not**
-satisfy the dependency, and apt reports the conflict instead of silently
-running on 18.x.
-
-### PostgreSQL
-
-Only `Recommends: postgresql`, so a managed or remote instance is fine. Either
-install it locally and create a role:
-
-```bash
-apt-get install -y postgresql
-su - postgres -c "createuser bibliograph --pwprompt"
-su - postgres -c "createdb -O bibliograph bibliograph"
-```
-
-or point `DATABASE_URL` at a remote server and open the firewall. Migrations run
-automatically on service start.
-
-### TAP
-
-The worker consumes an ATProto TAP service. Set `TAP_URL` and
-`TAP_ADMIN_PASSWORD`; without them the worker exits and restarts in a loop, and
-the index stops advancing. The web process is unaffected.
-
-## Install and operate
-
-```bash
-apt-get install -y ./bibliograph_0.5.16_amd64.deb
-$EDITOR /etc/bibliograph/bibliograph.env   # fill in the REQUIRED entries
-systemctl restart bibliograph bibliograph-worker
-systemctl status bibliograph bibliograph-worker
-journalctl -u bibliograph -u bibliograph-worker -f
-```
-
-Required entries have no defaults: `DATABASE_URL`, `TAP_URL`,
-`TAP_ADMIN_PASSWORD`, `ATP_SIGNING_KEY`, `ATP_LABEL_SIGNING_KEY`. The conffile
-marks each one.
-
-## Signing keys
-
-Two independent K-256 keypairs. Generate them **on the host** so the private
-halves never leave it, and never commit them:
-
-```bash
-cd /usr/lib/bibliograph/packages/bibliograph-service
-export LEX_PUBLISHER_HOSTNAME=biblio.livtet.olamaelcu.net
-
-# repository / lex publisher:  ATP_SIGNING_KEY + ATP_SERVICE_KEY_MULTIBASE
-./node_modules/.bin/tsx scripts/gen-lex-publisher-key.ts
-
-# labeler:                     ATP_LABEL_SIGNING_KEY + ATP_LABEL_KEY_MULTIBASE
-./node_modules/.bin/tsx scripts/gen-label-key.ts
-```
-
-Each script prints a **private** half (`*_SIGNING_KEY`, 64 hex chars) and the
-matching **public** half (`*_MULTIBASE`, `zQ3s…`). They are two halves of one
-keypair: the private key signs, the public key is what verifiers resolve. Note
-the asymmetry in the variable names — the DID document publishes `#atproto`
-from `ATP_SERVICE_KEY_MULTIBASE` and `#atproto_label` from
-`ATP_LABEL_KEY_MULTIBASE`, so setting `ATP_SIGNING_KEY` alone leaves `#atproto`
-at the placeholder.
-
-Put all four values in `/etc/bibliograph/bibliograph.env`, then
-`systemctl restart bibliograph`. The keys are exposed at
-`https://biblio.livtet.olamaelcu.net/.well-known/did.json`; until they are set,
-`did.ts` serves `z6Mkplaceholder…` and logs a `[did] … is not set` warning per
-missing variable.
-
-Keep the two pairs distinct: the labeler key must be rotatable without touching
-repository signing, and the blast radii differ. A wrong public half makes every
-label signature invalid, because verifiers check each label against the key
-resolved from the DID document. Changing either key therefore invalidates
-everything signed with the old one.
-
-## Lexicon publication
-
-The DID document advertises `#atproto_pds` because that is the only discovery
-hook ATProto offers for fetching a DID's repository. The chain a resolver walks
-is:
-
-```
-com.atproto.lexicon.resolveLexicon
-  -> resolve did:web:biblio.livtet.olamaelcu.net
-  -> service #atproto_pds  (this host)
-  -> com.atproto.sync.getRecord for com.atproto.lexicon.schema/<nsid>
-```
-
-The app does not run a PDS. It serves a **read-only, single-repo** surface built
-offline from `lexicons/**/*.json` and signed with `ATP_SIGNING_KEY`:
-
-```bash
-mise run publish-lex     # also runs automatically from deploy-deb once a key exists
-```
-
-That writes into `LEX_OUT_DIR` (`/var/lib/bibliograph/lex`):
-
-| File | Contents |
+| File | Required/important values |
 | --- | --- |
-| `full.car` | commit + MST + every schema record (`sync.getRepo`) |
-| `<nsid_safe>.car` | commit + MST proof + one record (`sync.getRecord`) |
+| `/etc/bibliograph/happyview.env` | `DATABASE_URL`; `SESSION_SECRET` (≥ 64 chars); `TOKEN_ENCRYPTION_KEY` (base64, 32 bytes) for DPoP/OAuth |
+| `/etc/bibliograph/worker.env` | `DATABASE_URL`; publisher identity and PDS credentials; optional `GOOGLE_BOOKS_API_KEY`, `ISBNDB_API_KEY`, `ISBNDB_DAILY_LIMIT`; metrics host/port (`127.0.0.1:9464` by default) |
+| `/etc/bibliograph/web.env` | `HOST=127.0.0.1`, `PORT=5176`, `HAPPYVIEW_URL`; required `FEED_GENERATOR_DID` and `PLC_URL` (no code default; unset answers the feed methods with `503`); read-only catalog `DATABASE_URL`; `PDS_URL`; `ORIGIN` (or `PROTOCOL_HEADER`/`HOST_HEADER`) for absolute URLs |
 
-The directory is a systemd `StateDirectory` (`StateDirectory=bibliograph
-bibliograph/lex`), so it is created with the right ownership; the publisher
-reads the files per request, so publishing needs no restart.
-
-Implemented verbs: `sync.getRepo`, `getRepoStatus`, `getLatestCommit`,
-`getBlocks`, `getRecord` (only for `com.atproto.lexicon.schema`),
-`repo.getRecord`, `repo.describeRepo`, `identity.resolveHandle/resolveDid/
-resolveIdentity` (only this DID), and `server.describeServer`. There are **no
-write paths** — `createRecord`, `uploadBlob`, `createAccount` are absent, so
-anything treating this as a general PDS will fail on account operations.
-
-Publishing is what makes the DID claim true. Without CARs, every `sync.*` and
-`repo.*` call answers `400 RepoNotFound` — which is what a fresh install looks
-like before the first publish. Verify end to end with the canonical resolver
-(it walks the local lexicon sources, resolves over https, and checks signatures):
-
-```bash
-pnpm --filter bibliograph-service exec tsx scripts/verify-resolver.ts
-```
-
-### Livtet space declarations
-
-The same publisher is the lexicon authority for `net.olamaelcu.livtet.*`, so it
-also publishes the `type: "space"` declarations that an ATProto spaces OAuth
-provider resolves before issuing `space:` scopes:
-
-- `net.olamaelcu.livtet.readingList`
-- `net.olamaelcu.livtet.bookClub`
-- `net.olamaelcu.livtet.clubBookmarks`
-
-`build-lex-repo.ts` defaults `LEX_AUTHORITY` to the authority root
-(`net/olamaelcu/livtet`) and `publish-lex` exports the same default. The
-`@atcute/lex-cli` codegen step deliberately excludes those top-level space
-documents: it does not model the alpha `type: "space"` type, while the static
-publisher stores the declaration verbatim.
-
-Point the authority's DNS at this publisher:
-
-```text
-_lexicon.livtet.olamaelcu.net. 300 IN TXT "did=did:web:biblio.livtet.olamaelcu.net"
-```
-
-The DID document already exposes `#atproto_pds`; exactly one `did=` TXT value
-is required. After publishing and DNS propagation, verify the three records
-through the static publisher before retrying OAuth:
-
-```bash
-LEX_OUT_DIR=/var/lib/bibliograph/lex \
-  pnpm --filter bibliograph-service verify:space
-```
-
-`apt upgrade` treats `/etc/bibliograph/bibliograph.env` as a conffile and prompts
-instead of overwriting local edits. debhelper's generated `postinst` restarts
-both long-running units after an upgrade, which re-runs the migrator.
+The HappyView client key pair is generated by
+`bibliograph-happyview-client.service` into
+`/etc/bibliograph/happyview-client.env`; `bibliograph-web.service` loads it after
+`web.env`, so the edge authenticates to HappyView without a manual copy. Only
+set the pair in `web.env` to override it.
 
 ## nginx and TLS
 
-The package depends on `nginx` and installs one conffile,
-`/etc/nginx/sites-available/bibliograph-platform`, for
-`biblio.livtet.olamaelcu.net`: port 80 redirects to HTTPS and serves the
-`/.well-known/acme-challenge/` path from `/var/lib/certbot` (the host's certbot
-`webroot_path`); port 443 terminates TLS and proxies to `127.0.0.1`.
+`bibliograph-web` ships its vhost as the conffile
+`/etc/nginx/sites-available/bibliograph-web`. Its `postinst` enables it (symlink
+into `sites-enabled`) only when all of these hold: nginx is installed, a
+certificate exists for `biblio.livtet.olamaelcu.net`, the retired combined
+package's `bibliograph-platform` site is not still enabled, and `nginx -t`
+accepts the result. If enabling would break `nginx -t`, the symlink is removed
+again and the site stays staged — an enabled server block with a missing
+certificate would keep nginx from starting after a reboot and take every other
+vhost with it. `prerm` removes the symlink on removal.
 
-The site is **staged, not enabled**. The `postinst` symlinks it into
-`sites-enabled` only once the certificate exists, because an enabled server
-block pointing at a missing `ssl_certificate` makes `nginx -t` fail globally and
-keeps nginx from starting after a reboot — taking every other vhost on the host
-with it. This is the same arrangement the Livtet package uses.
-
-Certificates are the host's job — this package never calls certbot. To bootstrap
-one and enable the vhost:
-
-```bash
-mise run enable-tls     # obtain the cert, re-run the postinst, verify HTTPS
-```
-
-That task issues the certificate with the webroot authenticator against
-`/var/lib/certbot`, using a temporary :80 server block for this name only (the
-host's `:80` default server answers 444 for unknown names, so the challenge
-needs somewhere to land before the real vhost can be enabled). It then runs
-`dpkg-reconfigure bibliograph`, which is the hook that performs the symlink, and
-verifies `https://<host>/health` through loopback and from the caller. Renewal
-afterwards belongs to the host's `certbot.timer`.
-
-To enable the site by hand, once a certificate is in place:
+`mise run deploy` runs `nginx -t` and reloads nginx after the web package
+installs, and fails if nginx rejects the configuration. It does not create
+certificates and does not edit the vhost. The vhost's `upstream` port is
+`127.0.0.1:5176`; keep `PORT` in `web.env` in sync (the deploy reports a
+mismatch). Certificates are obtained on the host, e.g. with the webroot
+authenticator:
 
 ```bash
-dpkg-reconfigure bibliograph
+certbot certonly --webroot -w /var/lib/certbot -d biblio.livtet.olamaelcu.net
+dpkg-reconfigure bibliograph-web   # runs postinst, enables the vhost
+nginx -t && systemctl reload nginx
 ```
 
-### The label stream needs an Upgrade
+The `mise run enable-tls` task belonged to the retired combined package's
+debconf/port arrangement and is not part of this flow.
 
-`location = /xrpc/com.atproto.label.subscribeLabels` is a dedicated proxy block
-that forwards `Upgrade`/`Connection` and uses HTTP/1.1. Without it the handshake
-is proxied as a plain GET and every label consumer sees a 404. This is also why
-the units run `server.ts`: adapter-node's generated `build/index.js` builds its
-own `http.Server` internally and offers no `upgrade` hook.
+## Units
 
-The ordinary `location /` block clears `Connection`, so normal requests stay
-poolable instead of asking for an upgrade.
+| Unit | Runs | Notes |
+| --- | --- | --- |
+| `happyview.service` | `/usr/lib/bibliograph-happyview/happyview` | loopback `127.0.0.1:3000`; migrations load from its working directory |
+| `bibliograph-happyview-client.service` | `bin/hv-client` | oneshot, `Before=happyview.service`: seeds the edge's XRPC client |
+| `bibliograph-happyview-deploy.service` | `bin/hv-deploy --wait --seed` | oneshot, applies lexicons/scripts/indexes; mints the admin key on first run |
+| `bibliograph-worker.service` | `node /usr/lib/bibliograph-worker/index.js` | catalog hydration + `pds_outbox` drain; `/metrics` on `127.0.0.1:9464` (loopback) |
+| `bibliograph-web.service` | `node /usr/lib/bibliograph-web/build/index.js` | public edge on `127.0.0.1:5176`, proxied by the packaged nginx vhost; `/metrics` on the same loopback listener, denied by the vhost |
 
-### Application port (debconf)
+Both `/metrics` endpoints are loopback-only. Prometheus scrapes
+`127.0.0.1:5176` (web) and `127.0.0.1:9464` (worker) directly; the packaged
+nginx vhost answers a public `/metrics` with `403` and never proxies it. No
+extra package configuration is needed for either endpoint.
 
-The port the app binds is the debconf question `bibliograph/port`, default
-`5000`. It is the single source of truth for both sides of the proxy:
+## Upgrade
 
-| Generated file | Contents |
+```bash
+mise run deploy    # rebuilds all three, reinstalls, reapplies schema, restarts
+```
+
+The catalog schema is forward-only: apply new numbered files (deploy does) before
+running units from a newer package. An older package must not be run against a
+database a newer one has migrated. Rollback is a version pin to an older package
+set (`apt-get install -y bibliograph-web=<version> …`); automated rollback and
+staging/canary workflows are not provided.
+
+## Retired combined package
+
+The old single `bibliograph` package and its deploy path are retired and are not
+used by the current flow:
+
+| Retired | Current replacement |
 | --- | --- |
-| `/etc/bibliograph/port.conf` | `PORT=5000`, read by `bibliograph.service` |
-| `/etc/nginx/conf.d/bibliograph-upstream.conf` | `upstream bibliograph_backend { server 127.0.0.1:5000; }` |
+| `debian/`, `package-payload`, `package-deb` → `dist/bibliograph_*.deb`, `bibliograph.service` | `packaging/{happyview,worker,web}`, `package-{hv,worker,web}-{payload,deb}` |
+| `mise run deploy-deb` (combined deb + PostgreSQL provisioning) | `mise run deploy` |
+| drizzle migrator / `bibliograph-migrate.service` | none; catalog schema is applied once from `/usr/lib/bibliograph-worker/sql/` |
+| `bibliograph.env`, `port.conf`, debconf `bibliograph/port` | `happyview.env`, `worker.env`, `web.env`; web port is `PORT` in `web.env` (default 5176) |
+| combined nginx site `bibliograph-platform` | `bibliograph-web` package's vhost conffile |
 
-Neither is a conffile; the `postinst` renders both from
-`/usr/share/bibliograph/bibliograph-upstream.conf.in`. The site file stays a
-conffile and only says `proxy_pass http://bibliograph_backend;`.
-
-```bash
-dpkg-reconfigure bibliograph          # re-renders both, validates nginx, restarts on change
-echo "bibliograph bibliograph/port string 5001" | debconf-set-selections   # unattended
-```
-
-`PORT` in `bibliograph.env` is deliberately ignored: the unit reads `port.conf`
-after the env file, so the debconf answer wins.
-
-## Building the package
-
-```bash
-mise run package-payload     # stage ./packaging/payload/app
-mise run package-deb         # payload, then dpkg-buildpackage → dist/bibliograph_*.deb
-mise run package-verify-deb  # layout, conffiles, maintainer scripts, units, nginx wiring
-mise run deploy-deb          # install on DEPLOY_HOST, provision PostgreSQL
-mise run enable-tls          # certificate + enable the nginx vhost
-```
-
-The tasks are file-based Mise tasks in `.mise/tasks/`; `package-deb` declares
-`depends=["package-payload"]`, so the two steps cannot be run in the wrong
-order. The `pnpm pkg:*` scripts in the root `package.json` forward to them for
-callers that only know pnpm.
-
-Requirements: Mise, `debhelper (>= 13)`, `dpkg-dev`, `fakeroot`, `rsync`,
-Node, pnpm.
-
-Unlike the Livtet payload, this one is **not** built in a container. There is no
-native addon: the only ELF object is esbuild's bundled binary, which arrives
-prebuilt per architecture from the npm registry via `tsx`. The package is
-therefore `Architecture: any` and is built for the host's architecture.
-
-`mise run package-payload` builds with the full dev dependency set (the build
-regenerates the gitignored lexicon modules into `src/`), stages the runtime
-files, then runs `pnpm install --prod --ignore-scripts --frozen-lockfile` inside
-the payload so the shipped `node_modules` holds production dependencies only. It
-fails closed if `build/handler.js`, the generated lexicons, the drizzle journal,
-or `node_modules/.bin/tsx` is missing, and if a build-only devDependency is
-linked as a direct dependency.
-
-Note that `typescript` *is* present in the production tree, transitively via
-`cosmiconfig` (graphile-worker) and `valibot`. That is unavoidable and harmless.
-
-## Why a package instead of a container
-
-The Dokku/Docker path (image build, `Procfile`, push-to-deploy) was retired with
-0.1.5. Nothing in the repository builds a container any more; this table is the
-rationale for what replaced it.
-
-| Container deploy (before) | Debian package (now) |
-| --- | --- |
-| `ENTRYPOINT` ran the migrator then exec'd the web process | dedicated oneshot unit, `Requires=`d by both long-running units |
-| process types declared in a `Procfile` | `bibliograph-worker.service` (TAP consumer + graphile task lists) |
-| environment baked into the image | `/etc/bibliograph/bibliograph.env` conffile, 0640 root:root, read by PID 1 |
-| `EXPOSE 5000`, `HOST=0.0.0.0` behind the platform proxy | unit binds `127.0.0.1`; the package ships the nginx site that proxies to it |
-| `docker save` + `rsync` + `docker load` | `apt install`, previous version kept in the apt cache |
-| logs to stdout captured by the container runtime | pino files under `/var/log/bibliograph` plus stdout in the journal |
-
-## Upgrade and rollback
-
-```bash
-apt-get update && apt-get install -y --only-upgrade bibliograph
-apt-get install -y bibliograph=0.5.15   # rollback is a version pin
-apt-mark hold bibliograph
-```
-
-Schema changes are forward-only: an older package must not be run against a
-database a newer one has migrated.
+`deploy.sh` itself used to install `dist/bibliograph_*.deb` and restart
+`bibliograph`/`bibliograph-worker`; it now selects only the three split packages
+and never touches the retired unit unless `--replace-legacy` explicitly asks it
+to remove that install. If `/etc/nginx/sites-enabled/bibliograph-platform`
+still exists on a host, use `mise run deploy -- --replace-legacy` (see [Legacy
+host cutover](#legacy-host-cutover)) or remove the old package manually first:
+both vhosts claim the same `:443 server_name`, and the web package
+intentionally refuses to enable its site while the old one is enabled.

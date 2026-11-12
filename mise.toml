@@ -4,60 +4,28 @@ pnpm = "11.13.1"
 
 [env]
 _.file = ".env"
-TAP_ADMIN_PASSWORD = "19b37984434cbe7908fedcc267d535eee21b15a13971eb4c873a00d371f0b493"
 DATABASE_URL = "postgres://bibliograph:bibliograph@localhost:5432/bibliograph"
-
-[tasks.containers]
-run = ["docker compose up --detach"]
-
-[tasks.web-dev]
-run = ["pnpm run dev --host"]
-
-[tasks.worker-dev]
-run = ["pnpm run worker"]
-
-[tasks."backfill:isbns"]
-description = "Run the ISBN backfill scan once (enqueues jobs for the worker)"
-run = ["pnpm --filter bibliograph-service run backfill:isbns"]
-
-[tasks."backfill:requeue-isbns"]
-description = "Re-enqueue ISBN lookups for editions stamped shadow/none/ambiguous"
-run = ["pnpm --filter bibliograph-service run backfill:requeue-isbns"]
-
-[tasks."backfill:bookhive-catalog"]
-description = "Fill bh.* editions from Bookhive's catalog: on-protocol ISBNs and contributor refs"
-run = ["pnpm --filter bibliograph-service run backfill:bookhive-catalog"]
-
-[tasks."backfill:descriptions"]
-description = "Run the description backfill scan once (enqueues jobs for the worker)"
-run = ["pnpm --filter bibliograph-service run backfill:descriptions"]
-
-[tasks."backfill:actors"]
-description = "Seed the reader-directory DIDs and resolve their handles/profiles"
-run = ["pnpm --filter bibliograph-service run backfill:actors"]
-
-[tasks.worker]
-description = "Run the worker (TAP consumer + graphile task lists) to drain the queue"
-run = ["pnpm --filter bibliograph-service run worker"]
-
-[tasks.dev]
-depends = ["containers"]
-run = ["mise run worker-dev ::: web-dev"]
+# HappyView tables live in their own schema; keep DATABASE_URL public-only.
+HAPPYVIEW_DATABASE_URL = "postgres://happyview_app:happyview@localhost:5432/bibliograph"
 
 [tasks.sql]
 description = "Open a psql shell against the local bibliograph database"
 run = ["psql ${DATABASE_URL}"]
 
-[tasks.lex-keygen]
-description = "Generate an ATProto lex-publisher K-256 keypair (one-time)"
-run = [
-  "pnpm --filter bibliograph-service exec tsx scripts/gen-lex-publisher-key.ts",
-]
+[tasks.worker-dev]
+dir = "packages/worker"
+run = ["pnpm run start"]
 
-[tasks.lex-build]
-description = "Build the signed lex repo CAR files from lexicons/*.json"
-run = ["pnpm --filter bibliograph-service exec tsx scripts/build-lex-repo.ts"]
+[tasks.web-dev]
+dir = "packages/web"
+run = ["docker compose up -d", "pnpm run dev"]
+
+[tasks.dev]
+run = ["mise run web-dev ::: worker-dev"]
+
+[tasks.hv-test]
+description = "Syntax-check and unit-test the HappyView Lua scripts"
+run = ["happyview/test/run.sh"]
 
 [shell_alias]
 sql = "mise sql"
-dev = "mise dev"

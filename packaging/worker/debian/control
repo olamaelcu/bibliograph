@@ -1,0 +1,24 @@
+Package: bibliograph-worker
+Version: @VERSION@
+Section: misc
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @SIZE@
+Maintainer: Bibliograph Maintainers <maintainers@olamaelcu.net>
+Homepage: https://biblio.livtet.olamaelcu.net
+Depends: nodejs (>= 22), adduser
+Recommends: postgresql
+Description: Bibliograph catalog worker (provider hydration and PDS outbox)
+ The long-running graphile-worker process behind Bibliograph. It enriches the
+ catalog from Google Books, ISBNdb and Goodreads, and drains
+ public.pds_outbox into the publisher PDS with
+ com.atproto.repo.applyWrites.
+ .
+ The payload is plain ESM with its production dependencies (graphile-worker,
+ pg) deployed beside it at /usr/lib/bibliograph-worker, so it runs on the
+ host's nodejs with no pnpm or build toolchain. Configuration lives in
+ /etc/bibliograph/worker.env.
+ .
+ Without publisher credentials (PDS_URL, a publisher DID, and an app password
+ or provisioned access token) hydration still runs, but pds-publish is
+ disabled and says so at boot; catalog rows stay queued in pds_outbox.
