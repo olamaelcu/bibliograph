@@ -14,14 +14,54 @@ const gate = createGate(1000);
 // The quote marks and the trailing attribution are payload formatting, not
 // part of the synopsis. Only a value that is wholly one quoted citation is
 // unwrapped; unquoted descriptions and interior quotes are left untouched.
-const QUOTED_CITATION = /^["“](.+)["”](?:\s*(?:--|—|–)\s*[^"“”]+)?$/u;
+// The attribution must be a single source line: sentence punctuation means the
+// value continues with real synopsis text after the blurb and must stay whole.
+// A source is also short (at most eight words); a longer tail is a following
+// synopsis, not an attribution.
+const QUOTED_CITATION =
+  /^["“](.+?)["”](?:\s*(?:--|—|–)\s*[^\s.!?"“”]+(?:\s+[^\s.!?"“”]+){0,7}\.?)?$/u;
+// A body containing its own closing quote followed by an attribution marker is
+// several concatenated citations, not one quoted citation. Leave it alone
+// rather than stripping the outer quotes and a later attribution.
+const INTERNAL_ATTRIBUTION = /["”]\s*(?:--|—|–)/u;
+
+// Concatenated citations can also be adjacent quoted segments with no dash
+// attribution between them. A single quoted body may contain balanced interior
+// quotes, so reject any body whose quote marks do not pair up.
+function hasBalancedQuotes(value) {
+  let depth = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === '“') {
+      depth += 1;
+    } else if (char === '”') {
+      if (depth === 0) return false;
+      depth -= 1;
+    } else if (char === '"') {
+      // Straight quotes serve as both delimiters. A quote after whitespace or
+      // an opening bracket and before a word opens; otherwise it closes.
+      const previous = value[index - 1] ?? ' ';
+      const next = value[index + 1] ?? ' ';
+      const opens = /[\s([{—–-]/.test(previous) && !/[\s.,;:!?)]/.test(next);
+      if (opens) {
+        depth += 1;
+      } else {
+        if (depth === 0) return false;
+        depth -= 1;
+      }
+    }
+  }
+  return depth === 0;
+}
 
 export function cleanIsbndbSynopsis(value) {
   const text = stripHtml(value);
   if (!text) return undefined;
 
   const match = QUOTED_CITATION.exec(text);
-  if (!match) return text;
+  if (!match || INTERNAL_ATTRIBUTION.test(match[1]) || !hasBalancedQuotes(match[1])) {
+    return text;
+  }
 
   const body = match[1].trim();
   return body === '' ? text : body;

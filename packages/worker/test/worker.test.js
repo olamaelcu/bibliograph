@@ -261,6 +261,17 @@ test('unwraps ISBNdb synopsis citations without touching other descriptions', ()
   assert.equal(cleanIsbndbSynopsis(apostrophes), apostrophes);
   const notWholeValue = '"A novel." and more.';
   assert.equal(cleanIsbndbSynopsis(notWholeValue), notWholeValue);
+  const multiCitation =
+    '"A seminal text in the womenís movement." –Ethel S. Person, author of The Sexual Century ' +
+    '"Still the most important work of feminist psychoanalytic exploration." –Eli Sagan, ' +
+    'author of Freud, Women and Mortality';
+  assert.equal(cleanIsbndbSynopsis(multiCitation), multiCitation);
+  const adjacentCitations = '"First review." "Second review continues."--Jacket.';
+  assert.equal(cleanIsbndbSynopsis(adjacentCitations), adjacentCitations);
+  const blurbWithSynopsis =
+    '"A magical revolution on the page." -- Leigh Bardugo, author of Six of Crows ' +
+    'Shadowhouse rising begins a new story.';
+  assert.equal(cleanIsbndbSynopsis(blurbWithSynopsis), blurbWithSynopsis);
   assert.equal(cleanIsbndbSynopsis(undefined), undefined);
 
   const candidate = candidateFromIsbndb({
