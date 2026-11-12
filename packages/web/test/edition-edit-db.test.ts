@@ -396,14 +396,14 @@ test('rejects invalid bodies before opening a transaction', async (t) => {
   );
 });
 
-test('server rejects invalid language and roles, and stores canonical language', async (t) => {
+test('server rejects invalid language/roles, saves null language and canonicalises tags', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
   const seeded = await seedEdition('Strict validation');
   const original = await loaded(seeded.rkey);
 
   await assert.rejects(
-    updateAdminEdition(db, seeded.rkey, bodyFrom(original, { language: 'English' })),
+    updateAdminEdition(db, seeded.rkey, bodyFrom(original, { language: 'en_US' })),
     (error: unknown) =>
       error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
   );
@@ -415,7 +415,7 @@ test('server rejects invalid language and roles, and stores canonical language',
       error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
   );
 
-  const unchanged = await db.query<{ title: string; language: string }>(
+  const unchanged = await db.query<{ title: string; language: string | null }>(
     'SELECT title, language FROM editions WHERE uri = $1',
     [seeded.uri]
   );
@@ -427,11 +427,21 @@ test('server rejects invalid language and roles, and stores canonical language',
   );
   assert.equal(credit.rows[0]?.role, 'A01');
 
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  const cleared = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+    language: null
+  }));
+  assert.equal(cleared.language, null);
+  const clearedRow = await db.query<{ language: string | null }>(
+    'SELECT language FROM editions WHERE uri = $1',
+    [seeded.uri]
+  );
+  assert.equal(clearedRow.rows[0]?.language, null);
+
+  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(cleared, {
     language: 'EN-us'
   }));
   assert.equal(saved.language, 'en-US');
-  const stored = await db.query<{ language: string }>(
+  const stored = await db.query<{ language: string | null }>(
     'SELECT language FROM editions WHERE uri = $1',
     [seeded.uri]
   );

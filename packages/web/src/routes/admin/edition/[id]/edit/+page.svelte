@@ -562,7 +562,7 @@
             ></wa-input>
           </div>
           <div class="field">
-            <span class="field-label">Language (BCP 47)</span>
+            <span class="field-label">Language (BCP 47, optional)</span>
             <wa-input
               aria-label="Language"
               value={language}
@@ -570,7 +570,8 @@
               oninput={(event: Event) => (language = valueOf(event))}
             ></wa-input>
             <span class="muted admin-small">
-              BCP 47 tag, for example en, en-US or zh-Hant-TW.
+              Leave empty for unknown. Otherwise a BCP 47 tag, for example en, en-US or
+              zh-Hant-TW.
             </span>
             {#if fieldError('language')}
               <span class="field-error">{fieldError('language')}</span>

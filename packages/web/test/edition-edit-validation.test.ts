@@ -46,7 +46,9 @@ test('canonicalises valid BCP 47 language tags', () => {
     ['EN-us', 'en-US'],
     ['zh-Hant-TW', 'zh-Hant-TW'],
     ['zh-hant-tw', 'zh-Hant-TW'],
-    ['en-US-u-ca-gregory', 'en-US-u-ca-gregory']
+    ['en-US-u-ca-gregory', 'en-US-u-ca-gregory'],
+    ['ja-Latn-hepburn-heploc', 'ja-Latn-alalc97'],
+    ['English', 'english']
   ]) {
     const parsed = parseEditionEdit({ ...valid(), language: input });
     assert.deepEqual(parsed.errors, [], input);
@@ -54,16 +56,22 @@ test('canonicalises valid BCP 47 language tags', () => {
   }
 });
 
-test('rejects invalid or empty BCP 47 language tags', () => {
-  for (const value of ['English', 'english', 'en_US', '', '   ', 'en-', '123']) {
+test('treats empty or missing language as null', () => {
+  for (const value of [undefined, null, '', '   ']) {
+    const parsed = parseEditionEdit({ ...valid(), language: value });
+    assert.deepEqual(parsed.errors, []);
+    assert.equal(parsed.value?.language, null);
+  }
+});
+
+test('rejects invalid BCP 47 language tags', () => {
+  for (const value of ['en_US', 'en-', 'en--US', '123', 'not a tag']) {
     const errors = parseEditionEdit({ ...valid(), language: value }).errors;
     assert.ok(
       errors.some((issue) => issue.path === 'language'),
       `expected a language error for ${JSON.stringify(value)}`
     );
   }
-  const missing = parseEditionEdit({ ...valid(), language: undefined }).errors;
-  assert.ok(missing.some((issue) => issue.path === 'language'));
 });
 
 test('rejects negative, fractional and oversized integers', () => {

@@ -71,13 +71,16 @@ export const EDITION_EDIT_LIMITS = {
 /** YYYY, YYYY-MM or YYYY-MM-DD, as the lexicon's publishedDate permits. */
 const PUBLISHED_DATE = /^\d{4}(-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?)?$/;
 const AT_URI = /^at:\/\/[^\s/]+\/[^\s/]+\/[^\s/]+$/;
-// Intl accepts any syntactically valid primary language subtag, including the
-// word "English" (canonicalised to "english"). The editor requires a real
-// language tag, so the common 2–3 letter primary subtag plus optional script,
-// region, variants and extensions is enforced before canonicalisation.
+// Structural BCP 47 well-formedness: a 2–8 letter primary language subtag,
+// optional script/region/variants/extensions/private use, or private use
+// alone. Intl.getCanonicalLocales is still the authority for canonicalisation
+// and rejects forms it cannot parse. This checks well-formedness, not IANA
+// registration: a syntactically valid but unregistered word such as
+// "English" canonicalises to "english" and is accepted.
 const BCP47_TAG =
-  /^[a-z]{2,3}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|\d{3}))?(?:-(?:[a-z0-9]{5,8}|\d[a-z0-9]{3}))*(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*(?:-x(?:-[a-z0-9]{1,8})+)?$/i;
-const BCP47_ERROR = 'must be a valid BCP 47 language tag such as en, en-US or zh-Hant-TW';
+  /^(?:[a-z]{2,8}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|\d{3}))?(?:-(?:[a-z0-9]{5,8}|\d[a-z0-9]{3}))*(?:-[0-9a-wy-z](?:-[a-z0-9]{2,8})+)*(?:-x(?:-[a-z0-9]{1,8})+)?|x(?:-[a-z0-9]{1,8})+)$/i;
+const BCP47_ERROR =
+  'must be a well-formed BCP 47 language tag such as en, en-US or zh-Hant-TW';
 
 function publishedDateProblem(value: string): string | null {
   if (!PUBLISHED_DATE.test(value)) return 'use YYYY, YYYY-MM or YYYY-MM-DD';
@@ -236,17 +239,17 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
   const subtitle = text(fields.subtitle, 'subtitle', EDITION_EDIT_LIMITS.subtitle);
   const rawLanguage = text(fields.language, 'language', EDITION_EDIT_LIMITS.language);
   let language: string | null = null;
-  if (rawLanguage === null) {
-    if (!errors.some((error) => error.path === 'language')) issue('language', BCP47_ERROR);
-  } else if (!BCP47_TAG.test(rawLanguage)) {
-    issue('language', BCP47_ERROR);
-  } else {
-    try {
-      const canonical = Intl.getCanonicalLocales(rawLanguage)[0];
-      if (canonical === undefined) issue('language', BCP47_ERROR);
-      else language = canonical;
-    } catch {
+  if (rawLanguage !== null) {
+    if (!BCP47_TAG.test(rawLanguage)) {
       issue('language', BCP47_ERROR);
+    } else {
+      try {
+        const canonical = Intl.getCanonicalLocales(rawLanguage)[0];
+        if (canonical === undefined) issue('language', BCP47_ERROR);
+        else language = canonical;
+      } catch {
+        issue('language', BCP47_ERROR);
+      }
     }
   }
   const publishedDate = text(fields.publishedDate, 'publishedDate', 10);
