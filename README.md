@@ -172,11 +172,11 @@ pnpm web:check && pnpm web:test && pnpm worker:test && pnpm verify:lex
 
 ## Documentation
 
-See [`architecture.md`](docs/architecture.md), [`xrpc.md`](docs/xrpc.md),
-[`books-wg-lexicons.md`](docs/books-wg-lexicons.md),
-[`operations/fresh-database.md`](docs/operations/fresh-database.md) and
-[`dev-environment.md`](docs/dev-environment.md) for the seam, endpoint contract,
-lexicons, fresh-database bootstrap and local setup.
+See [`architecture.md`](docs/architecture.md) for the seam, publication and
+lexicon provenance; [`xrpc.md`](docs/xrpc.md) for the endpoint contract;
+[`operations/fresh-database.md`](docs/operations/fresh-database.md) for the
+empty-database bootstrap; and [`dev-environment.md`](docs/dev-environment.md)
+for local accounts, fixtures and admin curation.
 
 [appview]: https://atproto.com/guides/glossary#app-view
 [livtet]: https://livtet.olamaelcu.net

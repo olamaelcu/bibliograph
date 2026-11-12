@@ -721,5 +721,6 @@ found by them.
   upstream defines it), so a client cannot be told via the response that work is outstanding; it
   can only re-call. Without the hydration queue installed the edge skips enqueueing.
 - No cache headers are set by the edge, and no cache-control is relayed from HappyView.
-- No works/contributors/publishers records, and no label or lexicon endpoints on this surface. The
-  feed generator has exactly the four feeds above; there is no `recommendations` feed.
+- No works records, and no label or lexicon endpoints on this surface. Contributor and publisher
+  records exist under `net.olamaelcu.livtet.biblio.*` and are served by the edge methods above.
+  The feed generator has exactly the four feeds above; there is no `recommendations` feed.

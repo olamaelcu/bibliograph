@@ -3,15 +3,15 @@
 Bibliograph is an AppView with a deliberately narrow seam:
 
 - **Catalog/authoring plane (TypeScript).** Catalog tables are the mutable source
-  of truth. Provider clients, enrichment, edition publication, the labeler, the
-  feed generator, image routes and the public `/xrpc` gateway run here.
+  of truth. Provider clients, enrichment, catalog publication, the feed
+  generator and the public `/xrpc` gateway run here.
 - **Activity plane (HappyView).** Jetstream + backfill index activity
   collections into `happyview_records`; Lua query scripts serve every activity
   query from that index.
 
 One Postgres database holds both planes, in two schemas: `public` for the
-catalog, `happyview` for HappyView's tables (its `labels` table collides with the
-labeler's otherwise). Activity scripts join `appview_book_lua`, a text projection
+catalog, `happyview` for HappyView's tables (its `labels` table motivates the
+separate schema). Activity scripts join `appview_book_lua`, a text projection
 of `appview_book` over the catalog tables, because HappyView's `db.raw` cannot
 decode jsonb or timestamptz columns. No other catalog coupling exists at read
 time. Catalog editions are published to the publisher PDS by an outbox
@@ -316,8 +316,9 @@ inline fallback.
   (`lxm = com.atproto.feed.getFeedSkeleton`). The edge verifies the signature against the issuer's
   `#atproto` Multikey and enforces `aud`, `lxm`, `iss` and `exp`/`iat`; it never trusts a
   caller-supplied viewer DID header.
-- The admin UI is gated on `ADMIN_TOKEN`; there is no end-user login and no
-  AppView write procedure. Its provider search and ingest calls go to the
+- The admin UI is gated on `ADMIN_TOKEN`; there is no end-user login. Activity
+  procedures require a DPoP session and write to the caller's PDS. The admin
+  UI's provider search and ingest calls go to the
   worker's loopback admin API (`WORKER_ADMIN_HOST`:`WORKER_ADMIN_PORT`,
   default `127.0.0.1:9465`) with the same token. Edition merges run in a web
   server transaction against the catalog; the base keeps its URI, identifiers
@@ -331,3 +332,33 @@ inline fallback.
   created, already indexed or failed, plus the page to resume from.
   Books without a checksum-valid ISBN-13 are excluded, because the ISBNdb
   candidate parser requires one.
+
+## Lexicon provenance
+
+`happyview/lexicons/community/lexicon/media/book/` is the source of truth for
+the shared book NSIDs. It imports five files verbatim from
+[lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest)
+(`1f246574e733dfb37ef30637b97d8bbc371820a2`), which is open, not merged.
+`vendor/books-wg-lexicons` is a separate upstream working-set submodule pinned
+at `3bcee8e344681fc5251abf43537d2c13ba85ff94` for provenance only; no build
+reads it, and its `defs.json`/`edition.json` predate the PR, so they must not
+replace the imports. Update it with
+`git -C vendor/books-wg-lexicons fetch && git -C vendor/books-wg-lexicons checkout <sha>`
+and commit the gitlink.
+
+Lexicons publish as `com.atproto.lexicon.schema` records with
+`mise run publish-lex`. A repo write is not a namespace claim: consumers also
+need `_lexicon.<authority>` TXT to name the publisher DID.
+`com.atproto.lexicon.resolveLexicon` is not implemented by the PDS and is not
+served by this edge. `defs#publisher.ref` is a local extension to PR #18 and
+remains to be proposed upstream.
+
+## Residual roadmap
+
+- **Books-wg import sync.** Keep the PR #18 imports current and re-pin or
+  remove `vendor/books-wg-lexicons` when upstream lands; propose
+  `defs#publisher.ref` upstream. See [Lexicon provenance](#lexicon-provenance).
+- **Batch edition lookup.** `net.olamaelcu.livtet.biblio.getEditions`
+  (1–100 AT-URIs → `defs#bookView`) was planned but has no lexicon or handler;
+  only `packages/web/src/lib/server/metrics.ts` names it. Implement it or
+  remove the stale allowlist entry.
