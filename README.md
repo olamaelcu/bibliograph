@@ -176,6 +176,36 @@ mise run publish-lex          # publish lexicons as com.atproto.lexicon.schema r
 pnpm web:check && pnpm web:test && pnpm worker:test && pnpm verify:lex
 ```
 
+### Local email
+
+Mailtrap Local is a loopback-only SMTP sink, inbox and JSON API. Compose pins
+the `mailtrap/mailtrap-local` image and publishes SMTP on
+`127.0.0.1:3535` and the UI/API on `127.0.0.1:3550`; there is no account,
+credential or external mail service. The PDS relays every notification through
+`[email.smarthost]` in `docker/pds-config.toml` (`host = "mailtrap"`,
+`port = 3535`, `tls = "none"`), sends from
+`noreply@pds.127-0-0-1.sslip.io`, and persists captured messages in the
+`mailtrapdata` volume. The sandbox accepts `@example.invalid` recipients and
+nothing leaves the machine.
+
+Open `http://127.0.0.1:3550` for the inbox, or use
+`http://127.0.0.1:3550/api/v1/messages` and
+`http://127.0.0.1:3550/api/v1/message/{id}`. The seed fixtures start
+unverified, so trigger verification rather than password reset; the PDS only
+sends password-reset mail to a verified address.
+
+```bash
+DID=$(curl -sk 'https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.identity.resolveHandle?handle=seed-01.pds.127-0-0-1.sslip.io' | jq -r .did)
+curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.resendVerification \
+  -H 'content-type: application/json' -d "{\"did\":\"$DID\"}"
+curl -s 'http://127.0.0.1:3550/api/v1/messages' |
+  jq '.messages[] | {id, subject, to: [.to[].address]}'
+```
+
+Fetch a message by `id` to read its full text, and clear the inbox with
+`DELETE /api/v1/messages` when stale mail gets in the way. Full commands are in
+[`docs/dev-environment.md#local-email`](docs/dev-environment.md#local-email).
+
 ## Operations and limits
 
 - **Fresh start.** No migration, import or seed: run `mise run catalog-schema`
