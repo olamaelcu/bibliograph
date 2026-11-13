@@ -227,7 +227,7 @@ signal. Queued work is not a promise that anything will be found.
 | `getBookOnShelf` | `uri` | `{ bookShelf }` |
 | `listBooksOnShelf` | `shelf`, `limit` 50 (≤100), `cursor` | `{ bookShelves, cursor? }` |
 | `getShelvingOfBook` | `book`, `did`, `limit` 50 (≤100), `cursor` | `{ bookShelves, cursor? }` |
-| `getShelversOfBook` | `bookUri`, `shelvingRkey?` (≤512), `limit` 50 (≤100), `cursor` | `{ bookUri, dids, cursor? }` |
+| `getShelversOfBook` | `bookUri`, `limit` 50 (≤100), `cursor` | `{ bookUri, dids, cursor? }` |
 | `listRecentShelving` | `limit` 50 (≤100), `cursor` | `{ bookShelves, cursor? }` |
 | `listShelfItems` | `shelf`, `limit` 50 (≤100), `cursor` | `{ items, cursor? }` |
 | `listShelfItemsByBook` | `book`, `did`, `limit` 50 (≤100), `cursor` | `{ items, cursor? }` |
@@ -377,9 +377,10 @@ offset cursor. Returns `{ bookShelves, cursor? }`.
 
 #### `getShelversOfBook`
 
-Groups `bookStatus` rows by `did` for a `(shelvingRkey, book URI)` pair and pages the groups by
-`min(uri)` ascending, returning `{ bookUri, dids, cursor? }`. `shelvingRkey` defaults to the last
-path segment of `bookUri` (the edition rkey), matching the record-key contract.
+Groups `bookStatus` rows by `did` where `record.book.uri` equals `bookUri` and pages the groups by
+`min(uri)` ascending, returning `{ bookUri, dids, cursor? }`. The record rkey is not derivable from
+the book: the writer mints a TID per (reader, edition), so the book association is the record's
+`book.uri` and nothing else.
 
 #### `listRecentShelving`
 

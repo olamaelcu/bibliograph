@@ -14,11 +14,6 @@
             "format": "at-uri",
             "description": "AT-URI of the catalog book whose shelvers to list."
           },
-          "shelvingRkey": {
-            "type": "string",
-            "description": "rkey the matching bookStatus records must carry. Records derive it from the catalog edition URI (last segment after the final '/'), so it is computed from `bookUri` when omitted; pass it explicitly only to follow a non-conforming writer.",
-            "maxLength": 512
-          },
           "limit": {
             "type": "integer",
             "minimum": 1,

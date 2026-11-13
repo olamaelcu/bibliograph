@@ -1165,6 +1165,40 @@ test('shelf.delete filters in SQL and batches Record.load_all', function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Tests: getShelversOfBook keys on the book, never on the record key.
+-- ---------------------------------------------------------------------------
+
+test('getShelversOfBook finds edition-keyed and TID-keyed rows for one book', function()
+  local book = 'at://did:plc:catalog/community.lexicon.media.book.edition/3n23ab2mhlkgg'
+  -- The writer mints a TID per (reader, edition), so the edition's rkey never
+  -- appears in the record's rkey. A query that filters on it finds nothing.
+  local rows = {
+    -- One row from a repo that never migrated (rkey = the edition rkey), one
+    -- from the app's writer (a TID). Both name the same book.uri, so both must
+    -- be found: the query is keyed by the book, not by the record's key.
+    { did = 'did:plc:legacy', uri = 'at://did:plc:legacy/net.olamaelcu.livtet.biblio.bookStatus/3n23ab2mhlkgg' },
+    { did = 'did:plc:reader', uri = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.bookStatus/3n25povukncfu' },
+  }
+  local response, calls = run_endpoint('query', 'getShelversOfBook', {
+    params = { bookUri = book, shelvingRkey = 'ignored' },
+    responder = function(sql, args)
+      assert_true(not string.find(sql, 'rkey', 1, true), 'the query must not filter on rkey')
+      assert_equal(args[1], 'net.olamaelcu.livtet.biblio.bookStatus')
+      assert_equal(args[2], book, 'bookUri is bound at $2')
+      assert_equal(args[3], '', 'no cursor on the first page')
+      assert_equal(args[4], 51, 'limit + 1 probe row')
+      return rows
+    end,
+  })
+
+  assert_equal(#calls, 1)
+  assert_equal(#response.dids, 2)
+  assert_equal(response.dids[1], 'did:plc:legacy')
+  assert_equal(response.dids[2], 'did:plc:reader')
+  assert_nil(response.cursor)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Tests: expansion parses and every endpoint loads.
 -- ---------------------------------------------------------------------------
 
