@@ -323,7 +323,14 @@ def psql_rows(query: str) -> list[list[str]]:
 
 
 def load_editions(limit: int) -> list[dict]:
-    """Deterministic catalog sample the fixtures may reference."""
+    """Deterministic catalog sample the fixtures may reference.
+
+    Newest editions first. `catalog-seed` appends Project Gutenberg records, and
+    these fixtures exist to exercise whatever the catalog holds right now, so a
+    freshly seeded stack is what the shelves and reviews point at. `created_at`
+    is the record's own timestamp (ingest time for imported editions) and `uri`
+    breaks ties, so a fixed catalog always yields the same sample.
+    """
     rows = psql_json(
         f"""
         SELECT json_agg(row_to_json(x)) FROM (
@@ -334,7 +341,7 @@ def load_editions(limit: int) -> list[dict]:
            WHERE v.identifiers IS NOT NULL AND v.identifiers <> '[]'
              AND v.contributors IS NOT NULL AND v.contributors <> '[]'
              AND v.cover_url IS NOT NULL
-           ORDER BY v.uri
+           ORDER BY v.created_at DESC, v.uri DESC
            LIMIT {limit}
         ) x
         """
