@@ -105,6 +105,20 @@ services:
     ports:
       - "2583:3000"
 
+  # Serves the desktop dev build's OAuth client document on the PDS's own
+  # loopback. The PDS fetches `client_id http://localhost:6010/...` from its own
+  # namespace, where nothing listens; this shares that namespace and forwards
+  # to the host's platform dev server, so the document keeps one source and no
+  # TLS trust or host name has to be arranged for the fetch.
+  pds-client-doc:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - pds
+    network_mode: "service:pds"
+    volumes:
+      - ./docker/pds-client-doc.Caddyfile:/etc/caddy/Caddyfile:ro
+
   # Mailtrap Local: a self-contained SMTP sink, web inbox and JSON API with no
   # account, credentials or external service. The PDS relays every notification
   # it sends here instead of the internet (see `[email]` in
