@@ -40,7 +40,7 @@
             },
             "dids": {
               "type": "array",
-              "description": "Distinct DIDs, in the order their shelving record was found.",
+              "description": "Distinct DIDs in `min(uri)` order. Every uri starts with `at://<did>/…`, so this is lexicographic DID order — which is what makes the keyset cursor strict.",
               "items": {
                 "type": "string",
                 "format": "did"

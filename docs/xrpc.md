@@ -378,9 +378,10 @@ offset cursor. Returns `{ bookShelves, cursor? }`.
 #### `getShelversOfBook`
 
 Groups `bookStatus` rows by `did` where `record.book.uri` equals `bookUri` and pages the groups by
-`min(uri)` ascending, returning `{ bookUri, dids, cursor? }`. The record rkey is not derivable from
-the book: the writer mints a TID per (reader, edition), so the book association is the record's
-`book.uri` and nothing else.
+`min(uri)` ascending, returning `{ bookUri, dids, cursor? }`. Every uri starts with
+`at://<did>/…`, so `min(uri)` order is lexicographic DID order, which is what makes the keyset
+cursor strict. The record rkey is not derivable from the book: the writer mints a TID per
+(reader, edition), so the book association is the record's `book.uri` and nothing else.
 
 #### `listRecentShelving`
 
