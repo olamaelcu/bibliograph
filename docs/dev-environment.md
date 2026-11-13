@@ -86,7 +86,7 @@ from Postgres. Per account:
 | `net.olamaelcu.livtet.actor.profile` | 1 (`self`) |
 | `app.bsky.actor.profile` | 1 (`self`) |
 | `net.olamaelcu.livtet.biblio.shelf` | 5 (the four fixed shelves + one custom) |
-| `net.olamaelcu.livtet.biblio.bookStatus` | 6 (rkey = the edition rkey) |
+| `net.olamaelcu.livtet.biblio.bookStatus` | 6 (the fixture keeps the legacy edition-rkey shape; the app writes TIDs) |
 | `net.olamaelcu.livtet.biblio.shelfItem` | 3 on the custom shelf |
 | `community.lexicon.media.book.review` | 2 |
 | `net.olamaelcu.livtet.biblio.follow` | 2 (TID rkeys) |

@@ -57,8 +57,8 @@ records written straight to a PDS arrive through Jetstream or a backfill.
 | `net.olamaelcu.livtet.biblio.contributor` | `tid` | publisher worker | `contributors` + `edition_contributors` |
 | `net.olamaelcu.livtet.biblio.publisher` | `tid` | publisher worker | `publishers` + `edition_publishers` |
 | `net.olamaelcu.livtet.biblio.shelf` | `any`; custom shelves use TID, fixed status shelves are virtual rkeys | reader / `shelf.create` | reader PDS |
-| `net.olamaelcu.livtet.biblio.shelfItem` | `any`; derived `<shelf-rkey>-<edition-rkey>` | reader / `shelf.addItem` | reader PDS |
-| `net.olamaelcu.livtet.biblio.bookStatus` | `any`; edition rkey | reader / `status.set` | reader PDS |
+| `net.olamaelcu.livtet.biblio.shelfItem` | `tid`; one edge per (shelf, book), found by `record.shelf` + `record.book.uri` | reader / `shelf.addItem` | reader PDS |
+| `net.olamaelcu.livtet.biblio.bookStatus` | `tid`; one status per (reader, edition), found by `record.book.uri` | reader / `status.set` | reader PDS |
 | `net.olamaelcu.livtet.biblio.follow` | `tid`; unique by `subject` | reader / `graph.follow` | reader PDS |
 | `net.olamaelcu.livtet.biblio.readingGoal` | literal `current` | reader / `readingGoal.set` | reader PDS |
 | `net.olamaelcu.livtet.actor.profile` | literal `self` | reader / `profile.set` | reader PDS |
