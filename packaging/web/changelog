@@ -1,3 +1,30 @@
+bibliograph-web (0.2.7-1) unstable; urgency=medium
+
+  * 0.2.7 release: entity editors and catalog reports in the admin UI.
+
+    - Add contributor and publisher editors at /admin/contributor/<id>/edit
+      and /admin/publisher/<id>/edit (numeric id or percent-encoded at-URI),
+      with admin-only GET/POST APIs under /admin/api/{contributors,publishers}
+      /<id>. Updates are single-row transactions that preserve id, at_uri and
+      createdAt, validate names, identifier pairs, descriptions, http(s) image
+      URLs and strict YYYY-MM-DD dates, and use a content-revision token for
+      409 conflicts. Catalog triggers queue the entity record and dependent
+      editions; the routes never write pds_outbox.
+    - Add Edit contributors and Edit publishers tabs with independent local
+      search and links into the full editors.
+    - Add the admin-only read-only Reports API: a registry endpoint plus one
+      paginated result endpoint per report, with validated filters, stable
+      ordering, full totals and JSON-safe rows. Reports cover missing covers,
+      descriptions, languages, pages and published dates; identifier counts;
+      contributors and publishers without identifiers; editions without
+      contributors, publishers or CIDs; duplicate identifier pairs; and
+      pending/stale publish outbox rows. Edition rows carry the canonical
+      at-URI.
+    - Add the Reports tab with report selection, identifier filters, table,
+      totals and paging.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 21:45:00 +0000
+
 bibliograph-web (0.2.6-1) unstable; urgency=medium
 
   * 0.2.6 release: admin edition editor, tabbed curation, input validation

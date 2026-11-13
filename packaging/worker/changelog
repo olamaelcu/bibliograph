@@ -1,3 +1,27 @@
+bibliograph-worker (0.2.7-1) unstable; urgency=medium
+
+  * 0.2.7 release: ISBNdb author normalization and the conflict backfill.
+
+    - Add an ISBNdb-specific author parser (lib/isbndb-names.js) that rewrites
+      unambiguous "Last, First" values to display order, handles generational
+      and professional suffixes and name particles (including trailing ones),
+      and derives the normalized comma form as nameInverted. Ambiguous,
+      organizational, multi-author and malformed values are left untouched.
+    - Use the parser in the ISBNdb provider and persist nameInverted at ingest
+      without overwriting a curated value; admin candidate normalization keeps
+      it through imports.
+    - Ship scripts/normalize-isbndb-author-names.mjs (dry run by default) for
+      pre-existing rows: --apply updates name/name_inverted only; optional
+      --merge-conflicts folds an inverted duplicate into one display-order
+      contributor via identifier-bag or unique display-order match, unions
+      identifiers, repoints edition links with positions/roles/refs intact and
+      deletes the source only after a savepoint-protected merge. Triggers queue
+      republication; the script never writes pds_outbox or talks to the PDS.
+    - Add the normalize:isbndb-authors package script and document the backfill.
+      The production data repair already ran; the script ships for re-use.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 21:40:00 +0000
+
 bibliograph-worker (0.2.6-1) unstable; urgency=medium
 
   * 0.2.6 release: lockstep version bump, no worker payload changes.
