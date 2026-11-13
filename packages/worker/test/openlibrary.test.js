@@ -375,7 +375,9 @@ test('the ISBN chain tries Goodreads before OpenLibrary', async () => {
       return jsonResponse(authorDocument);
     }
     if (parsed.pathname.startsWith('/goodreads/')) {
-      order.push('goodreads');
+      // The ISBN page answers empty, so the provider falls back to search;
+      // the chain position is recorded once at the search step.
+      if (parsed.pathname === '/goodreads/search') order.push('goodreads');
       return new Response('<html></html>', { status: 200 });
     }
     return jsonResponse({}, 404);

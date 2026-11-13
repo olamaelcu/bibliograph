@@ -120,9 +120,14 @@ export function candidatesFromSearchPage(html) {
 }
 
 export function createGoodreads({ baseUrl, fetchImpl = fetch }) {
-  const headers = { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml' };
+  // Book pages answer the full browser Accept; `/search` does not: asked for
+  // `application/xhtml+xml` it 302s to itself until the redirect limit trips,
+  // which surfaced as a 502 from `/resolve-format`. The default `*/*` Accept
+  // follows the single redirect to `/book/show/<id>`.
+  const pageHeaders = { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml' };
+  const searchHeaders = { 'user-agent': USER_AGENT };
 
-  async function get(path) {
+  async function get(path, headers = pageHeaders) {
     try {
       return await gate(() => fetchText(fetchImpl, `${baseUrl}${path}`, { headers }));
     } catch (error) {
@@ -132,6 +137,14 @@ export function createGoodreads({ baseUrl, fetchImpl = fetch }) {
     }
   }
 
+  async function searchResults(query) {
+    const page = await get(`/search?q=${encodeURIComponent(query)}`, searchHeaders);
+    if (!page) return [];
+    return /\/book\/show\//.test(new URL(page.url).pathname)
+      ? candidatesFromBookPage(page.text)
+      : candidatesFromSearchPage(page.text);
+  }
+
   return {
     async byId(id) {
       const page = await get(`/book/show/${encodeURIComponent(id)}`);
@@ -139,15 +152,19 @@ export function createGoodreads({ baseUrl, fetchImpl = fetch }) {
     },
 
     async byIdentifier(value) {
-      const page = await get(`/search?q=${encodeURIComponent(value)}`);
-      if (!page) return [];
-      return /\/book\/show\//.test(new URL(page.url).pathname)
-        ? candidatesFromBookPage(page.text)
-        : candidatesFromSearchPage(page.text);
+      // ISBNs resolve straight to the book page; anything else (a legacy
+      // numeric Goodreads id, a title) keeps the search behavior.
+      const isbn = normalizeIsbn13(value);
+      if (isbn) {
+        const page = await get(`/book/isbn/${isbn}`);
+        const candidates = page ? candidatesFromBookPage(page.text) : [];
+        if (candidates.length > 0) return candidates;
+      }
+      return searchResults(isbn ?? value);
     },
 
     async search(text) {
-      const page = await get(`/search?q=${encodeURIComponent(text)}`);
+      const page = await get(`/search?q=${encodeURIComponent(text)}`, searchHeaders);
       if (!page) return [];
       return [candidatesFromBookPage(page.text), candidatesFromSearchPage(page.text)].flat();
     }
