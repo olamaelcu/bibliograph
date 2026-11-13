@@ -7,7 +7,8 @@
     type AdminEntitySearchResponse,
     type AdminEdition,
     type EditionEditResponse,
-    type Identifier
+    type Identifier,
+    type ResolveFormatResponse
   } from '$lib/admin/types';
   import { normalizeContributorRole } from '$lib/contributor-roles';
 
@@ -93,6 +94,9 @@
   let saveError = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let attempted = $state(false);
+  let resolvingFormat = $state(false);
+  let formatError = $state<string | null>(null);
+  let formatNotice = $state<string | null>(null);
 
   function valueOf(event: Event): string {
     const target = event.currentTarget as EventTarget & { value?: unknown };
@@ -115,6 +119,12 @@
     return rows
       .filter((row) => row.issuer.trim() !== '' || row.value.trim() !== '')
       .map((row) => ({ issuer: row.issuer.trim(), value: row.value.trim() }));
+  }
+
+  function currentIsbns(): string[] {
+    return usedIdentifiers(identifiers)
+      .filter((identifier) => ['isbn', 'isbn10', 'isbn13'].includes(identifier.issuer.toLowerCase()))
+      .map((identifier) => identifier.value);
   }
 
   function buildPayload() {
@@ -385,6 +395,8 @@
   }
 
   function applyEdition(edition: AdminEdition) {
+    formatError = null;
+    formatNotice = null;
     uri = edition.uri;
     rkey = edition.rkey;
     createdAt = edition.createdAt;
@@ -452,6 +464,39 @@
       saveError = error instanceof Error ? error.message : 'The save failed.';
     } finally {
       saving = false;
+    }
+  }
+
+  async function resolveFormatFromGoodreads() {
+    formatError = null;
+    formatNotice = null;
+    const isbns = currentIsbns();
+    if (isbns.length === 0) {
+      formatError =
+        'Add an ISBN identifier (issuer isbn, isbn10 or isbn13) before resolving from Goodreads.';
+      return;
+    }
+    resolvingFormat = true;
+    try {
+      const response = await fetch(
+        `/admin/api/editions/${encodeURIComponent(rkey)}/resolve-format`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ isbns })
+        }
+      );
+      if (!response.ok) throw new Error(await responseError(response));
+      const payload = (await response.json()) as ResolveFormatResponse;
+      if (typeof payload.format !== 'string' || payload.format.trim() === '') {
+        throw new Error('Goodreads returned no usable format.');
+      }
+      format = payload.format;
+      formatNotice = `Resolved “${payload.format}” from ISBN ${payload.isbn} using Goodreads. Save the edition to keep it.`;
+    } catch (error) {
+      formatError = error instanceof Error ? error.message : 'The format lookup failed.';
+    } finally {
+      resolvingFormat = false;
     }
   }
 
@@ -589,18 +634,39 @@
               <span class="field-error">{fieldError('publishedDate')}</span>
             {/if}
           </div>
-          <div class="field">
+          <div class="field editor-span-2">
             <span class="field-label">Format</span>
-            <wa-select
-              aria-label="Format"
-              value={format}
-              onchange={(event: Event) => (format = valueOf(event))}
-            >
-              <wa-option value="">Unknown</wa-option>
-              <wa-option value="physical">Physical</wa-option>
-              <wa-option value="ebook">Ebook</wa-option>
-              <wa-option value="audio">Audio</wa-option>
-            </wa-select>
+            <div class="format-row">
+              <wa-input
+                aria-label="Format"
+                value={format}
+                placeholder="Paperback, Hardcover, Audiobook…"
+                oninput={(event: Event) => {
+                  format = valueOf(event);
+                  formatError = null;
+                  formatNotice = null;
+                }}
+              ></wa-input>
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <wa-button
+                size="small"
+                appearance="outlined"
+                disabled={resolvingFormat}
+                onclick={() => void resolveFormatFromGoodreads()}
+              >
+                {resolvingFormat ? 'Resolving…' : 'Resolve from Goodreads'}
+              </wa-button>
+            </div>
+            <span class="muted admin-small">
+              Free text; the Goodreads value (for example Paperback, Hardcover or Audiobook) is
+              stored exactly. The lookup uses ISBN identifiers in this form and never auto-saves.
+            </span>
+            {#if formatNotice}
+              <wa-callout variant="success">{formatNotice}</wa-callout>
+            {/if}
+            {#if formatError}
+              <span class="field-error">{formatError}</span>
+            {/if}
             {#if fieldError('format')}
               <span class="field-error">{fieldError('format')}</span>
             {/if}
@@ -1116,6 +1182,17 @@
   .field-error {
     color: var(--wa-color-danger-border-loud, var(--wa-color-danger-text));
     font-size: var(--wa-font-size-xs);
+  }
+
+  .format-row {
+    display: flex;
+    align-items: center;
+    gap: var(--wa-space-s);
+    flex-wrap: wrap;
+  }
+
+  .format-row wa-input {
+    flex: 1 1 16rem;
   }
 
   .issue-list {

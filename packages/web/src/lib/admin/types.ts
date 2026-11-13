@@ -202,6 +202,13 @@ export type PublisherEditResponse = { publisher: AdminPublisherRecord };
 
 export type EditionEditResponse = { edition: AdminEdition };
 
+/** Goodreads returns the free-text format it uses on the edition page. */
+export type ResolveFormatResponse = {
+  isbn: string;
+  format: string;
+  source: 'goodreads';
+};
+
 export type MergeField =
   | 'title'
   | 'subtitle'

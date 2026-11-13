@@ -9,6 +9,7 @@ const TIMEOUT_MS = 20_000;
 export type AdminWorkerPath =
   | '/provider-search'
   | '/contributor-search'
+  | '/resolve-format'
   | '/ingest'
   | '/publisher-search'
   | '/publisher-books'

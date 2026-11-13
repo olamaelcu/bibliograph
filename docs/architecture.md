@@ -370,6 +370,19 @@ inline fallback.
   newly addressed entity records. A save that carries a stale `revision`
   (returned by the page load) answers 409, and the form keeps its unsaved state
   on every validation or conflict error.
+- The edition editor's **Resolve from Goodreads** button next to Format asks
+  only Goodreads, never the fallback chain. The browser sends the ISBN
+  identifiers currently in the form (including unsaved additions); when that
+  field is omitted, `POST /admin/api/editions/<id>/resolve-format` loads the
+  edition's persisted ISBN identifiers instead. The web proxy filters both
+  sources to checksum-valid ISBN-10/13s, dedupes and caps the list before
+  forwarding to the worker's `POST /resolve-format`. The worker tries the ISBNs
+  in order and returns the first non-empty Goodreads `format`; no format is
+  404, provider failure is 502, and the resolver performs no writes. The
+  editor stores the raw Goodreads value (for example `Paperback`,
+  `Hardcover` or `Audiobook`) exactly and does not auto-save; the operator
+  still reviews the dirty form and presses Save. Format is free text in the
+  catalog/lexicon, so the editor no longer limits it to physical/ebook/audio.
 - The admin UI also searches ISBNdb publisher names, previews one publisher's
   books through `GET /publisher/{name}` (paged, filtered by `publishedFrom`,
   `publishedTo` and `language`), and ingests either the selected candidates or

@@ -11,6 +11,7 @@
 import http from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createIngest } from './ingest.js';
+import { FormatResolveError, normalizeFormatIsbns, resolveFormat } from './resolve-format.js';
 import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
 import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
 import { openLibraryBookKey } from './providers/openlibrary.js';
@@ -404,6 +405,25 @@ export function createAdminHandler({ providers, ingest, token, logger = console 
         return;
       }
 
+      if (url.pathname === '/resolve-format') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const body = objectBody(await readJson(request));
+        const isbns = normalizeFormatIsbns(body.isbns);
+        const resolved = await resolveFormat(providers, isbns);
+        if (!resolved) {
+          throw new AdminRequestError(
+            404,
+            'Goodreads returned no format for the supplied ISBNs',
+            'FormatNotFound'
+          );
+        }
+        sendJson(response, 200, resolved);
+        return;
+      }
+
       if (url.pathname === '/ingest') {
         if (request.method !== 'POST') {
           sendJson(response, 405, { error: 'MethodNotAllowed' });
@@ -539,6 +559,10 @@ export function createAdminHandler({ providers, ingest, token, logger = console 
 
       sendJson(response, 404, { error: 'NotFound' });
     } catch (error) {
+      if (error instanceof FormatResolveError) {
+        sendJson(response, error.status, { error: error.code, message: error.message });
+        return;
+      }
       if (error instanceof AdminRequestError) {
         sendJson(response, error.status, { error: error.code, message: error.message });
         return;
