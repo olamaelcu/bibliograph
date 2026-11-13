@@ -9,6 +9,8 @@
 #
 #   http://127.0.0.1:3000           HappyView (dashboard at /, admin API at /admin/*)
 #   https://pds.127-0-0-1.sslip.io the PDS (`alice.pds.127-0-0-1.sslip.io` also routes)
+#   http://127.0.0.1:3550           Mailtrap Local inbox + JSON API
+#   smtp://127.0.0.1:3535           Mailtrap Local SMTP sink the PDS delivers to
 #
 # `*.127-0-0-1.sslip.io` resolves to 127.0.0.1 through public DNS, so no DNS or
 # /etc/hosts entry is needed; `docker/Caddyfile` terminates TLS for the PDS with
@@ -69,6 +71,10 @@ services:
         condition: service_healthy
       plc:
         condition: service_started
+      # The PDS starts sending as soon as an account flow enqueues a message;
+      # mail is queued and retried if the sandbox is not listening yet.
+      mailtrap:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/pds
       PLC_DIRECTORY_URL: http://plc:2582
@@ -98,6 +104,35 @@ services:
       - pdsdata:/var/lib/tranquil-pds/blobs
     ports:
       - "2583:3000"
+
+  # Mailtrap Local: a self-contained SMTP sink, web inbox and JSON API with no
+  # account, credentials or external service. The PDS relays every notification
+  # it sends here instead of the internet (see `[email]` in
+  # `docker/pds-config.toml`).
+  mailtrap:
+    # mailtrap/mailtrap-local:0.5.0, pinned by index digest.
+    image: mailtrap/mailtrap-local@sha256:6bada103dffdec9a86e6f2fcb7631f173f0ff3af65f8c5ec80f10becb1469316
+    restart: unless-stopped
+    # The image is distroless and binds 0.0.0.0 with `--unsafe-non-loopback
+    # --allow-attached-networks`, so sibling containers reach it on the compose
+    # network. Publishing on 127.0.0.1 keeps SMTP and the unauthenticated API
+    # off the LAN (VM-based Docker engines refuse all-interface publishes
+    # anyway: every connection then arrives from the VM gateway).
+    ports:
+      - "127.0.0.1:3535:3535"
+      - "127.0.0.1:3550:3550"
+    volumes:
+      # SQLite store for captured messages, plus the at-rest key the image
+      # pins to this directory, so recreating the container keeps the inbox.
+      - mailtrapdata:/var/lib/mailtrap-local
+    healthcheck:
+      # No shell, curl or wget in the distroless image, so the binary is the
+      # only probe available. A listener failure exits the process; this
+      # catches a broken image or entrypoint.
+      test: ["CMD", "/usr/local/bin/mailtrap-local", "--version"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   caddy:
     image: caddy:2-alpine
@@ -200,5 +235,6 @@ services:
 volumes:
   pgdata:
   pdsdata:
+  mailtrapdata:
   caddy_data:
   promdata:

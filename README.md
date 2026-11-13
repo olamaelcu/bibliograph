@@ -152,13 +152,14 @@ worker's loopback admin API.
 
 ## Development
 
-The local stack is Postgres, a local PLC directory, a local PDS, Caddy and
-HappyView, all from `docker compose`; the edge listens on
-`http://127.0.0.1:5176` and the HappyView dashboard on
-`http://127.0.0.1:3000`.
+The local stack is Postgres, a local PLC directory, a local PDS, Mailtrap Local,
+Caddy and HappyView, all from `docker compose`; the edge listens on
+`http://127.0.0.1:5176`, the HappyView dashboard on
+`http://127.0.0.1:3000`, and the Mailtrap Local inbox on
+`http://127.0.0.1:3550`.
 
 ```bash
-docker compose up -d          # postgres, plc, pds, caddy, happyview, prometheus
+docker compose up -d          # postgres, plc, pds, mailtrap, caddy, happyview, prometheus
 mise run catalog-schema       # apply packages/worker/sql/*.sql (idempotent)
 mise run hv-account && mise run hv-seed && mise run hv-ca  # account, keys, CA
 mise run hv-deploy            # upload HappyView lexicons/scripts, apply indexes

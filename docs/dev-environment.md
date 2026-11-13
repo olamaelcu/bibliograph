@@ -1,15 +1,15 @@
 # Local development
 
-The local stack is Postgres, a local PLC directory, a local PDS, Caddy, and
-HappyView. Identity resolution and dashboard sign-in happen entirely against
-that local network — no `plc.directory`, no public relay, no real ATProto
-account. `docs/happyview.md` has the reasoning behind each setting; this page is
-the day-to-day loop.
+The local stack is Postgres, a local PLC directory, a local PDS, Mailtrap Local,
+Caddy, and HappyView. Identity resolution, dashboard sign-in and email happen
+entirely against that local network — no `plc.directory`, no public relay, no
+real ATProto account, and no outbound mail. `docs/happyview.md` has the
+reasoning behind each setting; this page is the day-to-day loop.
 
 ## Bringing it up
 
 ```bash
-docker compose up -d          # postgres, plc, pds, caddy, happyview, prometheus
+docker compose up -d          # postgres, plc, pds, mailtrap, caddy, happyview, prometheus
 mise run hv-account           # mint the provisional account on the local PDS
 mise run hv-seed              # make it superuser, write the admin key + XRPC client
 mise run hv-ca                # trust Caddy's CA in Chrome and Firefox
@@ -24,9 +24,58 @@ mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 | `https://pds.127-0-0-1.sslip.io` | the local PDS (HTTPS, Caddy's internal CA) |
 | `https://<handle>.pds.127-0-0-1.sslip.io` | handle resolution: `/.well-known/atproto-did` and `/xrpc/*`; every other path 301s to the canonical PDS host |
 | `http://127.0.0.1:2582` | the local PLC directory |
+| `http://127.0.0.1:3550` | Mailtrap Local inbox and JSON API |
+| `smtp://127.0.0.1:3535` | Mailtrap Local SMTP sink (the PDS uses `mailtrap:3535` inside the compose network) |
 | `postgres://bibliograph:bibliograph@127.0.0.1:5432/bibliograph` | the catalog + `happyview` schema |
 
 `mise run sql` opens psql against the same database.
+
+## Local email
+
+The PDS relays every notification it sends — password reset, email
+verification, welcome — to the pinned Mailtrap Local container rather than
+resolving recipient MX records. Nothing leaves the machine, so fixture
+addresses such as `seed-01@example.invalid` are fine: the sandbox accepts every
+sender and recipient. `docker/pds-config.toml` sets `[email]` and
+`[email.smarthost]` with `tls = "none"` and no credentials, which is exactly
+what Mailtrap Local requires. Captured mail lives in the `mailtrapdata` volume
+across restarts.
+
+Open `http://127.0.0.1:3550` for the inbox, or drive it over the JSON API. The
+seeded fixture accounts start unverified, and the PDS only sends *secret*
+notices (password reset, 2FA) to a verified channel — an unverified account is
+skipped with `doesn't have a valid recipient`. So the end-to-end check for an
+existing fixture is the verification email, which needs no authentication:
+
+```bash
+DID=$(curl -sk 'https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.identity.resolveHandle?handle=seed-01.pds.127-0-0-1.sslip.io' |
+  jq -r .did)
+curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.resendVerification \
+  -H 'content-type: application/json' \
+  -d "{\"did\":\"$DID\"}"
+
+curl -s 'http://127.0.0.1:3550/api/v1/messages' |
+  jq '.messages[] | {id, from: .from.address, to: [.to[].address], subject}'
+```
+
+The code is in the message body, so refetch by `id` only when you need it.
+Once an account's email is verified, `requestPasswordReset` delivers too:
+
+```bash
+curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.requestPasswordReset \
+  -H 'content-type: application/json' \
+  -d '{"email":"seed-01@example.invalid"}'
+```
+
+Fetch one message in full by the `id` above (its `text` carries the code):
+
+```bash
+curl -s http://127.0.0.1:3550/api/v1/message/<id> | jq '{subject, text}'
+```
+
+The UI and API have no authentication and are published on loopback only.
+`curl -s -X DELETE http://127.0.0.1:3550/api/v1/messages -d '{"all":true}'`
+wipes the inbox when stale messages get in the way.
 
 ## Seeding test accounts and activity
 

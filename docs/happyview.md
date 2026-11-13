@@ -43,15 +43,18 @@ rebuild.
 | `ghcr.io/gamesgamesgamesgamesgames/happyview` | `sha256:a981c30cb2bdad83413aa3126fb0eab6782427d0565f35e8b7349c098de2c841` |
 | `ghcr.io/happyproto/pds-test/plc` | `sha256:6e61dc9c59d79cbc8b6cdcaac7464ae16258849ada92dd7cbbfc6d7979a81c3a` |
 | `ghcr.io/happyproto/pds-test/tranquil` | `sha256:96f4ce1f9eec42ca17e4f6d693f6ae842ffe1618f97c9f51c5604116fb9483ed` |
+| `mailtrap/mailtrap-local` | `sha256:6bada103dffdec9a86e6f2fcb7631f173f0ff3af65f8c5ec80f10becb1469316` |
 
 `plc` is did-method-plc's own server, so the DIDs the PDS mints are real
 `did:plc` DIDs that anything pointed at `PLC_URL` can resolve. `tranquil` is the
-PDS implementation HappyView's own e2e suite runs.
+PDS implementation HappyView's own e2e suite runs. `mailtrap-local` catches
+every notification the PDS sends, so account flows never reach the internet;
+`docs/dev-environment.md` covers its inbox and API.
 
 ## Bring-up
 
 ```bash
-docker compose up -d                # postgres, plc, pds, caddy, happyview, prometheus
+docker compose up -d                # postgres, plc, pds, mailtrap, caddy, happyview, prometheus
 mise run hv-account                 # mint alice.pds.127-0-0-1.sslip.io
 mise run hv-seed                    # make it superuser; write admin key + XRPC client
 mise run hv-ca                      # trust Caddy's CA in Chrome and Firefox
