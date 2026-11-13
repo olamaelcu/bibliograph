@@ -1,3 +1,14 @@
+bibliograph-web (0.2.9-1) unstable; urgency=medium
+
+  * 0.2.9 release: lockstep version bump, no web payload changes.
+
+    - The Goodreads format fix is in the worker's provider client. The
+      edition editor's Format field, Resolve from Goodreads button and
+      /admin/api/editions/<id>/resolve-format proxy are unchanged and now
+      receive a real provider answer instead of the worker's 502.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 13 Nov 2026 03:42:00 +0000
+
 bibliograph-web (0.2.8-1) unstable; urgency=medium
 
   * 0.2.8 release: resolve an edition's format from Goodreads in the editor.

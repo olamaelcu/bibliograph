@@ -1,3 +1,22 @@
+bibliograph-worker (0.2.9-1) unstable; urgency=medium
+
+  * 0.2.9 release: fix the Goodreads ISBN lookup used by /resolve-format.
+
+    - Goodreads 302s /search?q=<isbn> back to itself when asked for
+      text/html,application/xhtml+xml, so the resolver answered 502
+      ProviderUnavailable for every ISBN. ISBN identifiers (ISBN-10 and
+      ISBN-13) now go straight to /book/isbn/<isbn13> (ISBN-10 normalised
+      first), which redirects once to /book/show/<id> and parses as a book
+      page.
+    - If the book page is missing or yields no candidate, the provider falls
+      back to /search with the default Accept header, which follows the single
+      redirect instead of looping. Numeric Goodreads ids keep using byId and
+      the existing 401/403 handling is unchanged.
+    - Add provider tests covering the ISBN paths, search fallback, redirect
+      handling and the existing book/search parsing.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 13 Nov 2026 03:40:00 +0000
+
 bibliograph-worker (0.2.8-1) unstable; urgency=medium
 
   * 0.2.8 release: Goodreads-only edition format resolver.
