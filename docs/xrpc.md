@@ -309,13 +309,14 @@ pages with a cursor and empty pages; a full page emits the last follower DID as 
 
 #### `graph.listFollowees`
 
-Rows whose record DID equals `did`, ordered by the record's opaque TID rkey ascending, keyset on the
-same column. The emitted `did` is read from `record.subject` (legacy `at://did` is normalized to
-`did`); a row without a DID-shaped subject is omitted from the page. `total` is the full followee
-count over the same DID-shaped subject rows and is emitted on every page. A full page emits the
-last TID rkey as the cursor. `followedAt` falls back to the indexed `created_at` when the record
-body has no `createdAt`. A cursor that is not a 13-character TID (for example a pre-TID DID cursor)
-restarts the page instead of skipping rows.
+Rows whose record DID equals `did`, ordered by `rkey` ascending (a TID for rows the procedure wrote,
+the subject DID for rows that predate that change), keyset on the same column. The emitted `did` is
+read from `record.subject` (legacy `at://did` is normalized to `did`); a row without a DID-shaped
+subject is omitted from the page. `total` is the full followee count over the same DID-shaped
+subject rows and is emitted on every page. A full page emits an opaque cursor carrying the last
+emitted `rkey`; because both key shapes are plain text, the same keyset pages either population
+(and a mixed repo) without inspecting the cursor. `followedAt` falls back to the indexed
+`created_at` when the record body has no `createdAt`. A malformed cursor restarts the page.
 
 ### Shelves
 
@@ -355,8 +356,9 @@ cursor.
 
 ### Shelving (book status)
 
-`net.olamaelcu.livtet.biblio.bookStatus` is the reading-status record: one per (reader, edition),
-rkey = the edition rkey. `metadata.status` is required by the view.
+`net.olamaelcu.livtet.biblio.bookStatus` is the reading-status record: one per (reader, edition).
+The writer mints a fresh TID for it, so the record is found by the `book.uri` it names; rows that
+predate that change may still carry the edition rkey. `metadata.status` is required by the view.
 
 #### `getBookOnShelf`
 
@@ -626,41 +628,48 @@ loaded in one `Record.load_all` batch, and deleted first; then the shelf itself.
 
 Upsert of one membership edge. `shelf` must be an owned, existing shelf (`404` when it does not
 exist, `403` when it belongs to another DID). `book` must be a strongRef with a CID;
-`metadata.position` must be an integer ≥ 1, `metadata.notes` and `metadata.emoji` strings. The rkey is derived as
-`<shelf rkey>-<edition rkey>` (rejected if longer than 512 characters), so the pair always maps to
-one record. On an existing record the metadata is merged key-by-key (omitted keys keep their value)
-and `updatedAt` is bumped; on create the metadata object is stored as given. Returns `{ uri }`.
+`metadata.position` must be an integer ≥ 1, `metadata.notes` and `metadata.emoji` strings. The edge
+is the caller's `shelfItem` whose `record.shelf` and `record.book.uri` name the pair; a row written
+before the TID change may still carry the derived `<shelf rkey>-<edition rkey>` key. On an existing
+record the metadata is merged key-by-key (omitted keys keep their value) and `updatedAt` is bumped;
+a missing one is created at a fresh TID and the metadata object is stored as given. Returns
+`{ uri }`.
 
 #### `shelf.removeItem`
 
-Deletes the derived `<shelf rkey>-<edition rkey>` record. `book` may be a strongRef or a bare
-`{ uri }`. Not on the shelf: `404 NotFound`.
+Finds every one of the caller's `shelfItem` rows whose `record.shelf` and `record.book.uri` name the
+pair and deletes each (the record key is a TID, so it is never derived). `book` may be a strongRef
+or a bare `{ uri }`. Not on the shelf: `404 NotFound`.
 
 #### `shelf.addBooks`
 
 Batch upsert of up to 100 strongRefs into an owned, existing shelf (`404`/`403` as in
 `shelf.addItem`). Each entry is validated independently; invalid entries
-(missing CID, malformed URI, duplicate derived rkey inside the request, rkey over 512 characters)
-are counted in `failed` instead of failing the call. Valid entries are written in parallel with
-`Record.save_all`; an existing record has its `shelf`, `book` and `updatedAt` refreshed (its
-`metadata` is left alone, unlike `shelf.addItem`). A PDS rejection is `502 UpstreamFailure`. Returns
-`{ added, failed }`.
+(missing CID, malformed URI, duplicate `(shelf, book)` pair inside the request) are counted in
+`failed` instead of failing the call. The existing edges are resolved for the whole batch in one
+query on `record.shelf` and `record.book.uri`, then written in parallel with `Record.save_all`; an
+existing record has its `shelf`, `book` and `updatedAt` refreshed (its `metadata` is left alone,
+unlike `shelf.addItem`), and a missing one is created at a fresh TID. A PDS rejection is
+`502 UpstreamFailure`. Returns `{ added, failed }`.
 
 ### Reading status
 
 #### `status.set`
 
-Upsert of `bookStatus` at the edition rkey. Requires a strongRef `book` (CID included) and a
-`status` ∈ `to-read|reading|read|dnf`; `shelf` is optional, but when present it must exist and belong
-to the caller (`404`/`403`), so the read views never receive a dangling shelf reference.
-`metadata` may carry `startedAt`/`finishedAt` (strings), `position` (integer ≥ 1), `notes` and
-`emoji` (strings). On an existing record the metadata is merged, `status` is overwritten,
-`createdAt` survives and `updatedAt` is bumped. Returns `{ uri, status }`.
+Upsert of the caller's `bookStatus` for one edition, found by the `book.uri` it names (the record
+key is a TID minted at write time; a row predating that change may still carry the edition rkey).
+Requires a strongRef `book` (CID included) and a `status` ∈ `to-read|reading|read|dnf`; `shelf` is
+optional, but when present it must exist and belong to the caller (`404`/`403`), so the read views
+never receive a dangling shelf reference. `metadata` may carry `startedAt`/`finishedAt` (strings),
+`position` (integer ≥ 1), `notes` and `emoji` (strings). On an existing record the metadata is
+merged, `status` is overwritten, `createdAt` survives and `updatedAt` is bumped; a missing one is
+created at a fresh TID. Returns `{ uri, status }`.
 
 #### `status.clear`
 
-Deletes the `bookStatus` at the edition rkey derived from `book` (strongRef or bare `{ uri }`). No
-status: `404 NotFound`. Returns `{ uri }`.
+Deletes every `bookStatus` of the caller whose `book.uri` is `book` (strongRef or bare `{ uri }`),
+like `graph.unfollow`; the record key is never derived. No status: `404 NotFound`. Returns the `uri`
+of the first deleted record.
 
 ### Reviews
 
@@ -690,21 +699,21 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 | Collection | Key | Required fields | Written by |
 | --- | --- | --- | --- |
 | `net.olamaelcu.livtet.biblio.shelf` | `any` — TID for custom shelves, fixed `reading`/`read`/`to-read`/`dnf` for the reading-status shelves | `name` (≤128), `createdAt`, `updatedAt`; optional `description` | `shelf.create`, `shelf.update` |
-| `net.olamaelcu.livtet.biblio.shelfItem` | `any` — `<shelf rkey>-<edition rkey>` by contract | `shelf`, `book`, `createdAt`, `updatedAt`; optional `metadata` (`position` ≥ 1, `notes`, `emoji`) | `shelf.addItem`, `shelf.addBooks` |
-| `net.olamaelcu.livtet.biblio.bookStatus` | `any` — the edition rkey by contract | no record-level `required`; the view needs `metadata.status` (`to-read`/`reading`/`read`/`dnf`) plus a resolvable `book` and `shelf`; `book` is a strongRef; optional `startedAt`, `finishedAt`, `position`, `notes`, `emoji` | `status.set` |
+| `net.olamaelcu.livtet.biblio.shelfItem` | `tid` — a fresh TID per (shelf, book); legacy rows may carry `<shelf rkey>-<edition rkey>` | `shelf`, `book`, `createdAt`, `updatedAt`; optional `metadata` (`position` ≥ 1, `notes`, `emoji`) | `shelf.addItem`, `shelf.addBooks` |
+| `net.olamaelcu.livtet.biblio.bookStatus` | `tid` — a fresh TID per (reader, edition); legacy rows may carry the edition rkey | no record-level `required`; the view needs `metadata.status` (`to-read`/`reading`/`read`/`dnf`) plus a resolvable `book` and `shelf`; `book` is a strongRef; optional `startedAt`, `finishedAt`, `position`, `notes`, `emoji` | `status.set` |
 | `net.olamaelcu.livtet.biblio.follow` | `tid` — a fresh TID minted by `graph.follow`; legacy rows may use the subject DID | `subject` (DID), `createdAt` | `graph.follow` |
 | `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
 | `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
 | `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`; contributors have `displayName` + ONIX `role`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
 | `community.lexicon.media.book.edition` | `tid` — always a TID minted by `editions_next_tid()`; never provider-prefixed | `title`, `identifiers`, `contributors` (`displayName` + ONIX `role`), `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
 
-The record keys are part of the contract: the queries resolve records by them. `bookStatus` derives
-from the edition URI, `shelfItem` from the shelf and edition rkeys, `readingGoal` and
-`actor.profile` from their literal keys, and the follow graph by its `subject` field (the follow
-rkey is opaque). A writer that invents its own scheme produces records the queries cannot see.
-`shelf.delete` and `status.clear` also rely on these derivations (and on
-`record.shelf`/`record.book`), so records written directly to a PDS with a different shape are not
-found by them.
+The record key is an address, not an index: every association lives in the record body. Only the
+literal singleton keys are part of the contract — `readingGoal` reads `current`, `actor.profile`
+reads `self`, and the follow graph is keyed by `subject` — so a writer that mints its own key
+scheme still produces records every query can read. `bookStatus` is found by `record.book.uri`,
+`shelfItem` by `record.shelf` + `record.book.uri`, and `shelf.delete`/`status.clear` use those same
+fields, so a record written into a PDS with a different body shape is the only thing the queries
+cannot see.
 
 ## What the surface does not do
 

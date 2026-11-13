@@ -1,9 +1,12 @@
 -- @include lib/prelude.lua
 -- net.olamaelcu.livtet.biblio.shelf.addItem — put a book on a shelf.
 --
--- The shelfItem rkey is derived (`<shelf rkey>-<edition rkey>`), so the pair
--- (shelf, book) always maps to one record and a second call updates it. The
--- target shelf must exist and belong to the caller; a missing shelf is 404.
+-- The edge is found by the fields the record names: the caller's shelfItem
+-- whose `record.shelf` is this shelf and whose `record.book.uri` is this book.
+-- The rkey is a TID minted at write time, so deriving it from the two URIs
+-- would miss the app's rows and mint a duplicate edge; a second call updates
+-- the existing record instead. The target shelf must exist and belong to the
+-- caller; a missing shelf is 404.
 
 function handle()
   if type(input) ~= 'table' then
@@ -17,7 +20,6 @@ function handle()
   if book == nil then
     return fail(400, 'InvalidRequest', '`book` must be a strongRef {uri, cid} with an at:// uri')
   end
-  local _, _, book_rkey = at_uri_parts(book.uri)
 
   local provided = nil
   if input.metadata ~= nil then
@@ -28,14 +30,19 @@ function handle()
     end
   end
 
-  local rkey = shelf.rkey .. '-' .. book_rkey
-  if #rkey > 512 then
-    return fail(400, 'InvalidRequest', 'the derived shelfItem rkey is longer than 512 characters')
-  end
-  local uri = 'at://' .. caller_did .. '/' .. SHELF_ITEM .. '/' .. rkey
+  local found = db.raw(
+    [[SELECT uri FROM happyview_records
+       WHERE collection = $1 AND did = $2
+         AND (record::jsonb)->>'shelf' = $3
+         AND (record::jsonb)->'book'->>'uri' = $4
+       ORDER BY uri ASC
+       LIMIT 1]],
+    { SHELF_ITEM, caller_did, shelf.uri, book.uri }
+  )
+  local record = nil
+  if found[1] ~= nil then record = Record.load(found[1].uri) end
   local stamp = now()
 
-  local record = Record.load(uri)
   if record ~= nil then
     local metadata = copy_table(record.metadata)
     merge_fields(metadata, provided, { 'position', 'notes', 'emoji' })
@@ -52,7 +59,7 @@ function handle()
       createdAt = stamp,
       updatedAt = stamp,
     })
-    record:set_rkey(rkey)
+    record:set_rkey(TID())
   end
 
   failure = pds_save(record)

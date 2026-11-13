@@ -1,10 +1,11 @@
 -- @include lib/prelude.lua
 -- net.olamaelcu.livtet.biblio.graph.listFollowees — who `did` follows.
 --
--- Follow rkeys are opaque TIDs now, so the page orders and keysets on `rkey`
--- (stable and sortable) but reads the followed DID from the record's `subject`
--- field. Legacy rows may store subject as `at://<did>` or keep the subject DID
--- as their rkey; only the subject is used for the output.
+-- Follow rkeys are opaque TIDs for rows the procedure wrote, and the subject
+-- DID for rows predating that change. The page orders and keysets on `rkey`
+-- (plain text, stable and sortable) and reads the followed DID from the
+-- record's `subject` field; only the subject is used for the output. The cursor
+-- carries the last emitted rkey, whatever its shape, so both populations page.
 
 local function subject_did(row, record)
   local subject = row.subject
@@ -27,10 +28,7 @@ function handle()
   local did, err = required_did(params.did, 'did')
   if err ~= nil then return fail(400, 'InvalidRequest', err) end
   local limit = clamp_int(params.limit, 100, 1, 1000)
-  local cursor = string_field(params.cursor) or ''
-  -- TIDs are 13 characters. A pre-TID cursor was a DID; restarting is safer
-  -- than comparing it against TIDs and silently skipping the first page.
-  if #cursor ~= 13 then cursor = '' end
+  local cursor = string_field(decode_cursor(params.cursor).u) or ''
 
   local rows = db.raw(
     [[SELECT uri, did, record, created_at, rkey, (record::jsonb)->>'subject' AS subject
@@ -62,6 +60,6 @@ function handle()
   )
 
   local response = { followees = toarray(out), total = counted[1] and counted[1].n or 0 }
-  if #rows > limit then response.cursor = rows[limit].rkey end
+  if #rows > limit then response.cursor = encode_cursor({ u = rows[limit].rkey }) end
   return response
 end

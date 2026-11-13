@@ -1,10 +1,12 @@
 -- @include lib/prelude.lua
 -- net.olamaelcu.livtet.biblio.status.set — set one edition's reading status.
 --
--- The bookStatus rkey is the edition rkey, so a status change replaces the
--- previous record. On an existing record the metadata is merged, createdAt is
--- kept and updatedAt is bumped. An optional `shelf` must exist and belong to
--- the caller; the read views drop references to shelves they cannot resolve.
+-- The record's rkey is not an index: the writer mints a TID per (reader,
+-- edition), so the caller's row is found by the `book.uri` it names. On an
+-- existing record the metadata is merged, createdAt is kept and updatedAt is
+-- bumped; a missing one is created at a fresh TID. An optional `shelf` must
+-- exist and belong to the caller; the read views drop references to shelves
+-- they cannot resolve.
 
 local STATUSES = { ['to-read'] = true, reading = true, read = true, dnf = true }
 local PROGRESS = { 'startedAt', 'finishedAt', 'position', 'notes', 'emoji' }
@@ -18,7 +20,6 @@ function handle()
   if book == nil then
     return fail(400, 'InvalidRequest', '`book` must be a strongRef {uri, cid} with an at:// uri')
   end
-  local _, _, book_rkey = at_uri_parts(book.uri)
 
   local status = string_field(input.status)
   if status == nil or not STATUSES[status] then
@@ -42,8 +43,18 @@ function handle()
   end
 
   local stamp = now()
-  local uri = 'at://' .. caller_did .. '/' .. BOOK_STATUS .. '/' .. book_rkey
-  local record = Record.load(uri)
+  -- Resolve the caller's record by the book it names. A predicate on the record
+  -- key would find only the seeded edition-keyed rows and would mint a second
+  -- status for every book the app wrote under a TID.
+  local found = db.raw(
+    [[SELECT uri FROM happyview_records
+       WHERE collection = $1 AND did = $2 AND (record::jsonb)->'book'->>'uri' = $3
+       ORDER BY uri ASC
+       LIMIT 1]],
+    { BOOK_STATUS, caller_did, book.uri }
+  )
+  local record = nil
+  if found[1] ~= nil then record = Record.load(found[1].uri) end
 
   if record ~= nil then
     local metadata = copy_table(record.metadata)
@@ -64,7 +75,7 @@ function handle()
     }
     if shelf_uri ~= nil then data.shelf = shelf_uri end
     record = Record(BOOK_STATUS, data)
-    record:set_rkey(book_rkey)
+    record:set_rkey(TID())
   end
 
   local failure = pds_save(record)

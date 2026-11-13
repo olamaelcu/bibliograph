@@ -700,7 +700,7 @@ end)
 -- Tests: graph totals and follow predicates (P1).
 -- ---------------------------------------------------------------------------
 
-test('listFollowees derives did from subject and pages on TID rkey', function()
+test('listFollowees derives did from subject and pages both cursor shapes', function()
   local follow_rows = {
     { uri = 'u1', did = 'did:plc:d', record = '{"createdAt":"2026-01-01T00:00:00.000Z"}', created_at = '2026-02-01T00:00:00.000Z', rkey = '3n0000000000a', subject = 'did:plc:a' },
     { uri = 'u2', did = 'did:plc:d', record = '{}', created_at = '2026-02-02T00:00:00.000Z', rkey = '3n0000000000b', subject = 'at://did:plc:b' },
@@ -720,7 +720,7 @@ test('listFollowees derives did from subject and pages on TID rkey', function()
   assert_equal(response.followees[1].did, 'did:plc:a')
   assert_equal(response.followees[2].did, 'did:plc:b', 'legacy at://did is normalized')
   assert_equal(response.followees[2].followedAt, '2026-02-02T00:00:00.000Z', 'falls back to selected created_at')
-  assert_equal(response.cursor, '3n0000000000b', 'cursor is the last TID rkey')
+  assert_equal(helpers.decode_cursor(response.cursor).u, '3n0000000000b', 'cursor carries the last rkey')
 
   assert_contains(calls[1].sql, 'created_at')
   assert_contains(calls[1].sql, 'rkey')
@@ -733,18 +733,27 @@ test('listFollowees derives did from subject and pages on TID rkey', function()
   assert_absent(calls[1].sql, 'split_part')
 
   local cursor_response, cursor_calls = run_endpoint('query', 'graph.listFollowees', {
-    params = { did = 'did:plc:d', limit = '2', cursor = '3n0000000000a' },
+    params = { did = 'did:plc:d', limit = '2', cursor = helpers.encode_cursor({ u = '3n0000000000a' }) },
     responder = responder,
   })
   assert_equal(cursor_response.total, 7, 'total is present on later pages')
   assert_equal(cursor_calls[1].args[3], '3n0000000000a')
 
+  -- Legacy follows are keyed by the subject DID, not a TID. The cursor must
+  -- carry that key and page from it instead of restarting at the beginning.
   local legacy_cursor_calls
   _, legacy_cursor_calls = run_endpoint('query', 'graph.listFollowees', {
-    params = { did = 'did:plc:d', limit = '2', cursor = 'did:plc:a' },
+    params = { did = 'did:plc:d', limit = '2', cursor = helpers.encode_cursor({ u = 'did:plc:a' }) },
     responder = responder,
   })
-  assert_equal(legacy_cursor_calls[1].args[3], '', 'a pre-TID DID cursor restarts the page')
+  assert_equal(legacy_cursor_calls[1].args[3], 'did:plc:a', 'a legacy DID-keyed rkey pages')
+
+  local malformed_calls
+  _, malformed_calls = run_endpoint('query', 'graph.listFollowees', {
+    params = { did = 'did:plc:d', limit = '2', cursor = 'not-a-cursor!' },
+    responder = responder,
+  })
+  assert_equal(malformed_calls[1].args[3], '', 'a malformed cursor restarts the page')
 
   local empty_response = run_endpoint('query', 'graph.listFollowees', {
     params = { did = 'did:plc:d' },
@@ -1196,6 +1205,224 @@ test('getShelversOfBook finds edition-keyed and TID-keyed rows for one book', fu
   assert_equal(response.dids[1], 'did:plc:legacy')
   assert_equal(response.dids[2], 'did:plc:reader')
   assert_nil(response.cursor)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests: the write procedures key on what the record names, never on its rkey.
+-- ---------------------------------------------------------------------------
+
+test('status.set updates the row found by book uri and creates at a TID', function()
+  local book = 'at://did:plc:catalog/community.lexicon.media.book.edition/3n24tkv3k7v7z'
+  local existing = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.bookStatus/3n24tpbw6kkyp'
+  -- The writer mints a TID per (reader, edition), so the edition's rkey is not
+  -- the record's rkey and a lookup by the derived key finds nothing.
+  local api = make_record_api()
+  seed_record(api, existing, 'net.olamaelcu.livtet.biblio.bookStatus', {
+    book = { uri = book },
+    shelf = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelf/read',
+    metadata = { status = 'read', position = 3 },
+    createdAt = '2026-01-01T00:00:00.000Z',
+  })
+
+  local response = run_endpoint('procedure', 'status.set', {
+    input = { book = { uri = book, cid = 'bafy' }, status = 'dnf', metadata = { notes = 'dropped it' } },
+    caller_did = 'did:plc:reader',
+    responder = function(sql, args)
+      assert_contains(sql, "->'book'->>'uri' = $3")
+      assert_equal(args[1], 'net.olamaelcu.livtet.biblio.bookStatus')
+      assert_equal(args[2], 'did:plc:reader')
+      assert_equal(args[3], book)
+      return { { uri = existing } }
+    end,
+    RecordAPI = api,
+  })
+
+  assert_equal(response.uri, existing, 'the TID-keyed row is updated')
+  assert_equal(response.status, 'dnf')
+  assert_equal(api.options.saved, 1)
+  assert_equal(count_store(api.store), 1, 'no second status was minted')
+  assert_equal(api.store[existing].metadata.position, 3, 'metadata merges')
+  assert_equal(api.store[existing].metadata.status, 'dnf')
+
+  local fresh = run_endpoint('procedure', 'status.set', {
+    input = { book = { uri = book, cid = 'bafy' }, status = 'to-read' },
+    caller_did = 'did:plc:reader',
+    responder = function() return {} end,
+    RecordAPI = make_record_api(),
+  })
+  local fresh_rkey = fresh.uri:match('([^/]+)$')
+  assert_equal(#fresh_rkey, 13, 'a fresh TID rkey')
+  assert_true(fresh_rkey ~= '3n24tkv3k7v7z', 'not the edition rkey')
+end)
+
+test('status.clear deletes every row that names the book', function()
+  local book = 'at://did:plc:catalog/community.lexicon.media.book.edition/abc'
+  local one = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.bookStatus/3n24tpbw6kkyp'
+  local two = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.bookStatus/3n24uuypy3khk'
+  local api = make_record_api()
+  seed_record(api, one, 'net.olamaelcu.livtet.biblio.bookStatus', { book = { uri = book } })
+  seed_record(api, two, 'net.olamaelcu.livtet.biblio.bookStatus', { book = { uri = book } })
+
+  local response = run_endpoint('procedure', 'status.clear', {
+    input = { book = { uri = book } },
+    caller_did = 'did:plc:reader',
+    responder = function(sql, args)
+      assert_contains(sql, "->'book'->>'uri' = $3")
+      assert_equal(args[1], 'net.olamaelcu.livtet.biblio.bookStatus')
+      assert_equal(args[2], 'did:plc:reader')
+      assert_equal(args[3], book)
+      return { { uri = one }, { uri = two } }
+    end,
+    RecordAPI = api,
+  })
+
+  assert_equal(response.uri, one, 'returns the first deleted uri')
+  assert_equal(api.options.deleted, 2, 'every match is deleted')
+  assert_equal(count_store(api.store), 0)
+
+  local missing = run_endpoint('procedure', 'status.clear', {
+    input = { book = { uri = book } },
+    caller_did = 'did:plc:reader',
+    responder = function() return {} end,
+    RecordAPI = make_record_api(),
+  })
+  assert_equal(missing.__bib_http.status, 404)
+end)
+
+test('shelf.addItem resolves the edge by (shelf, book) and creates at a TID', function()
+  local shelf = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelf/autumn-stack'
+  local book = 'at://did:plc:catalog/community.lexicon.media.book.edition/3n23a5lqxk4d5'
+  local existing = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelfItem/3n24uv4peb2r7'
+  local api = make_record_api()
+  seed_record(api, shelf, 'net.olamaelcu.livtet.biblio.shelf', { name = 'Autumn stack' })
+  seed_record(api, existing, 'net.olamaelcu.livtet.biblio.shelfItem', {
+    shelf = shelf,
+    book = { uri = book },
+    metadata = { position = 2 },
+    createdAt = '2026-01-01T00:00:00.000Z',
+  })
+
+  local response = run_endpoint('procedure', 'shelf.addItem', {
+    input = { shelf = shelf, book = { uri = book, cid = 'bafy' }, metadata = { notes = 'reread' } },
+    caller_did = 'did:plc:reader',
+    responder = function(sql, args)
+      assert_contains(sql, "(record::jsonb)->>'shelf' = $3")
+      assert_contains(sql, "->'book'->>'uri' = $4")
+      assert_equal(args[1], 'net.olamaelcu.livtet.biblio.shelfItem')
+      assert_equal(args[2], 'did:plc:reader')
+      assert_equal(args[3], shelf)
+      assert_equal(args[4], book)
+      return { { uri = existing } }
+    end,
+    RecordAPI = api,
+  })
+
+  assert_equal(response.uri, existing, 'the app-written TID row is updated')
+  assert_equal(count_store(api.store), 2, 'shelf + one item, no duplicate')
+  assert_equal(api.store[existing].metadata.notes, 'reread')
+  assert_equal(api.store[existing].metadata.position, 2)
+
+  local fresh_api = make_record_api()
+  seed_record(fresh_api, shelf, 'net.olamaelcu.livtet.biblio.shelf', { name = 'Autumn stack' })
+  local fresh = run_endpoint('procedure', 'shelf.addItem', {
+    input = { shelf = shelf, book = { uri = book, cid = 'bafy' } },
+    caller_did = 'did:plc:reader',
+    responder = function() return {} end,
+    RecordAPI = fresh_api,
+  })
+  local fresh_rkey = fresh.uri:match('([^/]+)$')
+  assert_equal(#fresh_rkey, 13, 'a fresh TID rkey')
+  assert_true(fresh_rkey ~= 'autumn-stack-3n23a5lqxk4d5', 'not the derived key')
+end)
+
+test('shelf.removeItem deletes every row that names the pair', function()
+  local shelf = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelf/autumn-stack'
+  local book = 'at://did:plc:catalog/community.lexicon.media.book.edition/abc'
+  local one = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelfItem/3n24uv4peb2r7'
+  local two = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelfItem/autumn-stack-abc'
+  local api = make_record_api()
+  seed_record(api, one, 'net.olamaelcu.livtet.biblio.shelfItem', { shelf = shelf, book = { uri = book } })
+  seed_record(api, two, 'net.olamaelcu.livtet.biblio.shelfItem', { shelf = shelf, book = { uri = book } })
+
+  local response = run_endpoint('procedure', 'shelf.removeItem', {
+    input = { shelf = shelf, book = { uri = book } },
+    caller_did = 'did:plc:reader',
+    responder = function(sql, args)
+      assert_contains(sql, "(record::jsonb)->>'shelf' = $3")
+      assert_contains(sql, "->'book'->>'uri' = $4")
+      assert_equal(args[1], 'net.olamaelcu.livtet.biblio.shelfItem')
+      assert_equal(args[2], 'did:plc:reader')
+      assert_equal(args[3], shelf)
+      assert_equal(args[4], book)
+      return { { uri = one }, { uri = two } }
+    end,
+    RecordAPI = api,
+  })
+
+  assert_equal(response.uri, one, 'returns the first deleted uri')
+  assert_equal(api.options.deleted, 2, 'every match is deleted')
+  assert_equal(count_store(api.store), 0)
+
+  local missing = run_endpoint('procedure', 'shelf.removeItem', {
+    input = { shelf = shelf, book = { uri = book } },
+    caller_did = 'did:plc:reader',
+    responder = function() return {} end,
+    RecordAPI = make_record_api(),
+  })
+  assert_equal(missing.__bib_http.status, 404)
+end)
+
+test('shelf.addBooks resolves one batch by (shelf, book) and counts real failures', function()
+  local shelf = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelf/autumn-stack'
+  local book_a = 'at://did:plc:catalog/community.lexicon.media.book.edition/3n23a5lqxk4d5'
+  local book_b = 'at://did:plc:catalog/community.lexicon.media.book.edition/abc'
+  local existing = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.shelfItem/3n24uv4peb2r7'
+  local api = make_record_api()
+  seed_record(api, shelf, 'net.olamaelcu.livtet.biblio.shelf', { name = 'Autumn stack' })
+  seed_record(api, existing, 'net.olamaelcu.livtet.biblio.shelfItem', {
+    shelf = shelf,
+    book = { uri = book_a },
+    createdAt = '2026-01-01T00:00:00.000Z',
+  })
+  local saved = nil
+  local save_all = api.Record.save_all
+  api.Record.save_all = function(records)
+    saved = records
+    return save_all(records)
+  end
+
+  local response, calls = run_endpoint('procedure', 'shelf.addBooks', {
+    input = { shelf = shelf, books = {
+      { uri = book_a, cid = 'bafy' },
+      { uri = book_a, cid = 'bafy' },
+      { uri = 'not-an-at-uri' },
+      { uri = book_b, cid = 'bafy' },
+    } },
+    caller_did = 'did:plc:reader',
+    responder = function(sql, args)
+      assert_contains(sql, "(record::jsonb)->>'shelf' = $3")
+      assert_contains(sql, 'jsonb_array_elements_text($4::jsonb)')
+      assert_equal(args[1], 'net.olamaelcu.livtet.biblio.shelfItem')
+      assert_equal(args[2], 'did:plc:reader')
+      assert_equal(args[3], shelf)
+      local uris = json.decode(args[4])
+      assert_equal(#uris, 2, 'the duplicate and the invalid entry never reach the query')
+      assert_equal(uris[1], book_a)
+      assert_equal(uris[2], book_b)
+      return { { uri = existing, book_uri = book_a } }
+    end,
+    RecordAPI = api,
+  })
+
+  assert_equal(#calls, 1, 'one batched lookup')
+  assert_equal(response.added, 2, 'one updated edge and one new edge')
+  assert_equal(response.failed, 2, 'the duplicate pair and the bad strongRef')
+  assert_equal(api.options.saved_all, 2)
+  assert_equal(#saved, 2)
+  assert_equal(saved[1]._uri, existing, 'the app-written edge is updated in place')
+  assert_equal(#saved[2]._rkey, 13, 'the missing edge is created at a TID')
+  assert_true(saved[2]._rkey ~= 'autumn-stack-abc', 'not the derived key')
+  assert_equal(count_store(api.store), 2, 'the update did not mint a duplicate')
 end)
 
 -- ---------------------------------------------------------------------------
