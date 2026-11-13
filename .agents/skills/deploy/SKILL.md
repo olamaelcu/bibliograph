@@ -18,7 +18,7 @@ This is a fresh-start deployment: no data migration, no import, no seed. The
 catalog grows from XRPC traffic after the worker and edge run. There is no
 staging/canary flow; rollback is a version pin (see [Rollback](#rollback)).
 
-## Packages, payloads and install order
+## Deployables (packages, payloads, install order)
 
 | Package | Payload / conffiles | Units | Depends |
 | --- | --- | --- | --- |
@@ -29,6 +29,48 @@ staging/canary flow; rollback is a version pin (see [Rollback](#rollback)).
 `bibliograph-web` depends on HappyView, which fixes the order: the edge is
 never exposed before its upstream exists. The worker's catalog schema is
 applied immediately after it installs, before any unit from the new set starts.
+Each package is independently installable, but `mise run deploy` always builds
+and installs all three; there is no partial-deploy automation (see
+[Targeted rebuild, install and checks](#targeted-rebuild-install-and-checks)).
+
+## What change rebuilds which package
+
+Globs are relative to the repository root. "Rebuild" means the package payload
+changes; every rebuild still needs an install (and its package's checks) before
+the host sees it.
+
+| Paths | Package(s) | Notes |
+| --- | --- | --- |
+| `happyview/scripts/**`, `happyview/lib/**` | HappyView | Lua procedures/queries and their includes. The deploy oneshot uploads them; the deb version stays the pinned image version. |
+| `happyview/bin/**` | HappyView | `hv-deploy`, `hv-client`, `hvlib.py`. Reinstalling restarts the client seeder, HappyView and the deploy oneshot. |
+| `happyview/sql/**` | HappyView | `indexes.sql` is applied by the deploy oneshot; `admin-bootstrap.sql`/`client-bootstrap.sql` back `--seed` and the client oneshot. |
+| `happyview/lexicons/**` | HappyView **and web** | HappyView ships/uploads them. The web build's `packages/web/scripts/generate-catalog.mjs` reads the same tree to generate `packages/web/src/lib/xrpc-catalog.json` (gitignored), so a lexicon change also changes the edge build. Separately, run `mise run publish-lex` if the `com.atproto.lexicon.schema` PDS records must be updated — that is not a Debian package. |
+| `packaging/happyview/**` | HappyView | Unit files, env defaults, nginx examples, `build-deb.sh`. Only an image digest/version change bumps `HAPPYVIEW_VERSION`/`HAPPYVIEW_REVISION`. |
+| `packages/worker/**` (incl. `sql/**`, `scripts/**`) | worker | ESM and production `node_modules`. `packages/worker/sql/*.sql` are applied on the host by `deploy.sh` in lexical order after install; a manual worker install must run them too. |
+| `packaging/worker/**` | worker | Unit, env default, maintainer scripts, changelog, `build-deb.sh`. |
+| `packages/web/**` | web | SvelteKit sources, static assets, configs, and `scripts/generate-catalog.mjs`. Only the adapter-node `build/` is packaged; tests are not shipped. |
+| `packaging/web/**` (incl. `nginx/**`) | web | `web.env`, the unit, the TLS vhost conffile, maintainer scripts, changelog, `build-deb.sh`. |
+| root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, shared TS/JS/workspace config | web + worker | Node dependency/workspace changes affect both Node payloads, never HappyView's image payload. Root `package.json` `version` is metadata only (see [Version sources](#version-sources-do-not-guess)). |
+| `deploy.sh`, `.mise/tasks/**`, `mise.toml` | none (tooling) | No payload by themselves. They change how packages are built/selected/installed; rerun a full `mise run deploy` to exercise them. |
+| `docs/**`, `README.md`, `AGENTS.md`, `.agents/**`, package tests (`packages/*/test/**`, `happyview/test/**`) | none | Documentation and checks only; no package deploy. |
+| `docker/**`, `docker-compose.yml` | none | Local/dev compose stack (Postgres, PLC, PDS, Caddy, HappyView) — never the production deployment. |
+| `scripts/publish-lexicons.mjs` | none (separate step) | No Debian package; `mise run publish-lex` publishes schema records to the PDS. `scripts/verify-lexicons.mjs` and `scripts/dev-seed.py` are check/dev-only. |
+
+Cross-package notes and false assumptions:
+
+- A Bibliograph version bump (`packages/{worker,web}/package.json`) is **not**
+  a HappyView version bump. HappyView tracks the pinned image digest; leave it
+  at `2.17.4-2` unless the extracted image changes.
+- HappyView script/lexicon/lib changes are installed by rebuilding the **same**
+  `2.17.4-2` package and reinstalling it. Same-version reinstalls are normal
+  and expected; `deploy.sh` always uses `apt-get install --reinstall`.
+- `mise run deploy` always builds and installs all three packages. Pinning
+  `HV_PKG`/`WORKER_PKG`/`WEB_PKG` selects exact debs but does **not** narrow
+  the install set, and `HV_PKG` still requires all three files to be present.
+- The web package depends on HappyView, and the worker's schema must be applied
+  after the worker install. The safe manual order is therefore the automated
+  one: HappyView → worker (+ SQL) → web.
+- Documentation, tests and `.agents/**` changes need no deploy at all.
 
 Ports: the packaged HappyView default is `127.0.0.1:3000`, but on
 `lescayes.ts.olamaelcu.net` that address belongs to the unrelated
@@ -60,6 +102,9 @@ worker metrics `127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
   pinned HappyView container image, **not** the Bibliograph release semver.
   Never "sync" it to the app version; bump it only when the extracted image
   changes.
+  A Lua/lexicon/lib change rebuilds that same `<version>-<revision>` and is
+  installed with `--reinstall`; that is the supported path and does not imply
+  a revision bump.
 - **root** `package.json` — metadata only; no build path reads it.
 - Each split package has a static changelog under `packaging/<name>/changelog`,
   gzipped into the deb as documentation. The build scripts do **not** read it,
@@ -94,6 +139,69 @@ mise run package-worker-deb  # package-worker-payload (pnpm deploy --prod) -> dp
 `deploy.sh` selects the newest `dist/bibliograph-{happyview,worker,web}_*.deb`
 by version sort. `DIST_DIR` changes the directory; `HV_PKG`, `WORKER_PKG`,
 `WEB_PKG` pin exact files. A missing deb aborts with the task to run.
+
+## Targeted rebuild, install and checks
+
+Package-specific builds use the same tasks the full deploy uses:
+
+```bash
+mise run package-hv-deb      # happyview payload -> dist/bibliograph-happyview_<image>-<rev>_<arch>.deb
+mise run package-worker-deb  # pnpm deploy --prod -> dist/bibliograph-worker_<version>-1_all.deb
+mise run package-web-deb     # adapter-node build -> dist/bibliograph-web_<version>-1_all.deb
+```
+
+Use the targeted build when only one payload changed (see the matrix above).
+Use a full `mise run deploy` when the change is cross-package (e.g. lexicons,
+the lockfile, workspace config), when you need the install/DB/nginx/verification
+automation, or when unsure. `mise run deploy -- --dry-run` builds all three and
+prints the plan without touching the host.
+
+There is **no single-package deploy task**. `deploy.sh` always verifies, uploads,
+and installs all three packages; the pin variables only choose files. Shipping
+one package means doing it by hand:
+
+```bash
+scp dist/<package>.deb HOST:/tmp/
+ssh HOST 'sha256sum /tmp/<package>.deb'   # compare with the local sha256sum
+ssh HOST 'sudo apt-get install -y --reinstall \
+  -o Dpkg::Options::=--force-confdef \
+  -o Dpkg::Options::=--force-confold /tmp/<package>.deb'
+```
+
+Then finish the package's own steps:
+
+- **HappyView**: the postinst restarts the client seeder, `happyview.service`
+  (whose `ExecStartPre hv-prepare-static` rewrites the dashboard to the
+  configured `BASE_PATH`) and the deploy oneshot, which uploads lexicons,
+  scripts and indexes. Verify the installed script hashes and the oneshot's
+  `uploaded … lexicons … scripts / indexes applied` lines. No worker/web
+  package is touched, and the unchanged version still satisfies web's
+  dependency.
+- **worker**: the postinst only restarts the unit. Stop the worker, apply
+  `/usr/lib/bibliograph-worker/sql/*.sql` in lexical order with `psql` using
+  `worker.env`'s `DATABASE_URL`, then start it (this is what `deploy.sh` does).
+  A worker payload change without a SQL change still needs the reinstall and
+  restart.
+- **web**: the postinst restarts the unit and conditionally enables/reloads the
+  nginx vhost. If the site was staged rather than enabled, run
+  `dpkg-reconfigure bibliograph-web` and then `nginx -t && systemctl reload nginx`.
+
+Quick check selection:
+
+| Change | Run |
+| --- | --- |
+| `happyview/scripts/**`, `happyview/lib/**`, `happyview/bin/**`, `happyview/sql/**` | `mise run hv-test` |
+| `happyview/lexicons/**` | `pnpm verify:lex` **and** `pnpm web:check` (catalog regeneration); add `mise run publish-lex` only if the PDS schema records must change |
+| `packages/worker/**` application code | `pnpm worker:test` |
+| `packages/worker/sql/**` or `packaging/worker/**` | `pnpm worker:test`; `mise run catalog-schema-check` when SQL changed |
+| `packages/web/**` or `packaging/web/**` | `pnpm web:check`, `pnpm web:test`, `pnpm web:build` |
+| root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, shared config | `pnpm install --frozen-lockfile`, then the web and worker checks |
+| `deploy.sh`, `.mise/tasks/**`, `mise.toml` | `mise run deploy -- --dry-run` |
+| docs/README/tests/.agents | none |
+
+Before a release or a full deploy, run the complete suite regardless of the
+matrix: `pnpm web:check`, `pnpm web:test`, `pnpm web:build`, `pnpm worker:test`,
+`pnpm verify:lex`, `mise run hv-test`, `mise run catalog-schema-check`.
 
 ## What `mise run deploy` does
 
