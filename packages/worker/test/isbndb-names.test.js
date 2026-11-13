@@ -7,8 +7,10 @@ import { parseIsbndbAuthor } from '../lib/isbndb-names.js';
 import { candidateFromIsbndb } from '../lib/providers/isbndb.js';
 import { createIngest } from '../lib/ingest.js';
 import {
+  chooseMergeTarget,
   describeDatabase,
   identityKey,
+  mergeIdentifiers,
   normalizeAuthors,
   parseArgs
 } from '../scripts/normalize-isbndb-author-names.mjs';
@@ -274,15 +276,20 @@ test('backfill arguments and connection descriptions are safe', () => {
   assert.deepEqual(parseArgs([]), {
     apply: false,
     includeIdentified: false,
+    mergeConflicts: false,
     limit: Infinity,
     sample: 8
   });
-  assert.deepEqual(parseArgs(['--apply', '--limit', '10', '--include-identified', '--sample=3']), {
-    apply: true,
-    includeIdentified: true,
-    limit: 10,
-    sample: 3
-  });
+  assert.deepEqual(
+    parseArgs(['--apply', '--limit', '10', '--include-identified', '--merge-conflicts', '--sample=3']),
+    {
+      apply: true,
+      includeIdentified: true,
+      mergeConflicts: true,
+      limit: 10,
+      sample: 3
+    }
+  );
   assert.throws(() => parseArgs(['--limit', '0']), /positive integer/);
   assert.throws(() => parseArgs(['--bogus']), /unknown option/);
 
@@ -306,6 +313,66 @@ test('backfill arguments and connection descriptions are safe', () => {
       { issuer: 'b', value: '2' }
     ])
   );
+});
+
+test('identifier union dedupes pairs and preserves url metadata', () => {
+  const merged = mergeIdentifiers(
+    [{ issuer: 'probe', value: 'shared' }],
+    [
+      { issuer: 'probe', value: 'shared', url: 'https://example.test/shared' },
+      { issuer: 'probe', value: 'only-source' }
+    ]
+  );
+  assert.deepEqual(merged, [
+    { issuer: 'probe', value: 'shared', url: 'https://example.test/shared' },
+    { issuer: 'probe', value: 'only-source' }
+  ]);
+  // The target's own metadata wins; invalid entries are ignored.
+  assert.deepEqual(
+    mergeIdentifiers(
+      [{ issuer: 'probe', value: 'x', url: 'https://target.test/x' }],
+      [{ issuer: 'probe', value: 'x', url: 'https://source.test/x' }, { issuer: '', value: '' }]
+    ),
+    [{ issuer: 'probe', value: 'x', url: 'https://target.test/x' }]
+  );
+});
+
+test('merge target selection prefers an exact identifier match', () => {
+  const source = {
+    id: '1',
+    parsedName: 'Octavia E. Butler',
+    identifiers: [{ issuer: 'probe', value: 'src' }],
+    atUri: 'at://source'
+  };
+  const exact = {
+    id: '30',
+    name: 'Octavia E. Butler',
+    identifiers: [{ issuer: 'probe', value: 'src' }],
+    at_uri: 'at://exact'
+  };
+  const other = {
+    id: '20',
+    name: 'Octavia E. Butler',
+    identifiers: [{ issuer: 'probe', value: 'other' }],
+    at_uri: 'at://other'
+  };
+  assert.deepEqual(chooseMergeTarget(source, [other, exact]), { target: exact, exact: true });
+
+  // Without an exact match a single display row is safe; two are ambiguous.
+  assert.equal(
+    chooseMergeTarget(source, [other]).target,
+    other,
+    'a lone candidate is a deterministic target'
+  );
+  assert.ok(chooseMergeTarget(source, [other, { ...exact, identifiers: [] }]).ambiguous);
+
+  // A target without a published URI cannot absorb a published source.
+  assert.ok(chooseMergeTarget(source, [{ ...other, at_uri: null }]).unsafe);
+  assert.ok(chooseMergeTarget(source, [{ ...exact, at_uri: null }]).unsafe);
+  // Inverted rows are never merge targets.
+  assert.deepEqual(chooseMergeTarget(source, [{ ...other, name: 'Butler, Octavia E.' }]), {
+    none: true
+  });
 });
 
 const SCRATCH_SCHEMA_URL = new URL('../sql/', import.meta.url);
@@ -341,7 +408,68 @@ async function applyScratchSchema(pool) {
 
 async function cleanupScratch(pool) {
   await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:plc:isbndbnamestest/%'");
+  await cleanupMerge(pool);
   await pool.query('DELETE FROM contributors WHERE name = ANY($1)', [SCRATCH_NAMES]);
+}
+
+const MERGE_AUTHORITY = 'at://did:plc:isbndbnamestest';
+const MERGE_EDITION_ONE = `${MERGE_AUTHORITY}/community.lexicon.media.book.edition/mergeed000001`;
+const MERGE_EDITION_TWO = `${MERGE_AUTHORITY}/community.lexicon.media.book.edition/mergeed000002`;
+const MERGE_SOURCE_URI = `${MERGE_AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/merge-src`;
+const MERGE_TARGET_URI = `${MERGE_AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/merge-tgt`;
+const MERGE_C_TARGET_URI = `${MERGE_AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/merge-tgt-c`;
+
+const MERGE_ROWS = [
+  // Exact identifier match; source and target both published.
+  { key: 'a1src', name: 'Whitehead, Colson', identifiers: [], atUri: MERGE_SOURCE_URI },
+  { key: 'a1tgt', name: 'Colson Whitehead', identifiers: [], atUri: MERGE_TARGET_URI },
+  // Exact identifier match with a curated inverted name on the target.
+  { key: 'a2src', name: 'Beatty, Paul', identifiers: [] },
+  { key: 'a2tgt', name: 'Paul Beatty', identifiers: [], nameInverted: 'Curated, Paul' },
+  // No exact match: a single target takes the identifier union.
+  {
+    key: 'bsrc',
+    name: 'Sève, Lucien',
+    identifiers: [
+      { issuer: 'probe', value: 'shared', url: 'https://example.test/shared' },
+      { issuer: 'probe', value: 'only-source' }
+    ]
+  },
+  { key: 'btgt', name: 'Lucien Sève', identifiers: [{ issuer: 'probe', value: 'shared' }] },
+  // Edition links: target already has one, the source contributes two more.
+  { key: 'csrc', name: 'Bambara, Toni Cade', identifiers: [] },
+  { key: 'ctgt', name: 'Toni Cade Bambara', identifiers: [], atUri: MERGE_C_TARGET_URI },
+  // Two display-order rows and no exact match: ambiguous, must be skipped.
+  { key: 'dsrc', name: 'Doe, Jane', identifiers: [{ issuer: 'probe', value: 'doe-src' }] },
+  { key: 'da', name: 'Jane Doe', identifiers: [{ issuer: 'probe', value: 'doe-a' }] },
+  { key: 'db', name: 'Jane Doe', identifiers: [{ issuer: 'probe', value: 'doe-b' }] },
+  // Merge that fails mid-transaction under a test trigger.
+  { key: 'esrc', name: 'Roe, Jane', identifiers: [{ issuer: 'probe', value: 'roe-src' }] },
+  { key: 'etgt', name: 'Jane Roe', identifiers: [{ issuer: 'probe', value: 'roe-target' }] },
+  // Exact match wins even when another display row exists.
+  { key: 'gsrc', name: 'Butler, Octavia E.', identifiers: [{ issuer: 'probe', value: 'butler-src' }] },
+  { key: 'gother', name: 'Octavia E. Butler', identifiers: [{ issuer: 'probe', value: 'butler-other' }] },
+  { key: 'gexact', name: 'Octavia E. Butler', identifiers: [{ issuer: 'probe', value: 'butler-src' }] }
+];
+
+const MERGE_NAMES = [
+  ...MERGE_ROWS.map((row) => row.name),
+  'Whitehead, Colson',
+  'Beatty, Paul',
+  'Sève, Lucien',
+  'Bambara, Toni Cade',
+  'Butler, Octavia E.',
+  'Roe, Jane'
+];
+
+async function cleanupMerge(db) {
+  await db.query('DROP TRIGGER IF EXISTS probe_merge_failure ON contributors');
+  await db.query('DROP FUNCTION IF EXISTS probe_merge_failure()');
+  await db.query('DELETE FROM editions WHERE uri LIKE $1', [
+    `${MERGE_AUTHORITY}/community.lexicon.media.book.edition/mergeed%`
+  ]);
+  await db.query('DELETE FROM contributors WHERE name = ANY($1)', [MERGE_NAMES]);
+  await db.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${MERGE_AUTHORITY}/%`]);
 }
 
 test(
@@ -431,6 +559,223 @@ test(
     } finally {
       if (client) {
         await cleanupScratch(client);
+        client.release();
+      }
+      await pool.end();
+    }
+  }
+);
+
+test(
+  'merge-conflicts unions identifiers, repoints editions and rolls back failures',
+  { skip: SCRATCH_SKIP },
+  async () => {
+    const pool = new pg.Pool({ connectionString: SCRATCH_URL, max: 2 });
+    let client;
+    try {
+      await applyScratchSchema(pool);
+      client = await pool.connect();
+      await cleanupScratch(client);
+
+      const ids = {};
+      for (const row of MERGE_ROWS) {
+        const inserted = await client.query(
+          `INSERT INTO contributors (name, name_inverted, identifiers, at_uri)
+           VALUES ($1, $2, $3::jsonb, $4) RETURNING id`,
+          [
+            row.name,
+            row.nameInverted ?? null,
+            JSON.stringify(row.identifiers ?? []),
+            row.atUri ?? null
+          ]
+        );
+        ids[row.key] = inserted.rows[0].id;
+      }
+      for (const [uri, rkey, title] of [
+        [MERGE_EDITION_ONE, 'mergeed000001', 'Merge Probe One'],
+        [MERGE_EDITION_TWO, 'mergeed000002', 'Merge Probe Two']
+      ]) {
+        await client.query(
+          'INSERT INTO editions (uri, rkey, title, created_at) VALUES ($1, $2, $3, now())',
+          [uri, rkey, title]
+        );
+      }
+      for (const link of [
+        [MERGE_EDITION_ONE, ids.csrc, 1, 'A01', 'src-ref'],
+        [MERGE_EDITION_TWO, ids.csrc, 1, 'B06', 'ed2-ref'],
+        [MERGE_EDITION_ONE, ids.ctgt, 3, 'A16', 'tgt-ref'],
+        [MERGE_EDITION_TWO, ids.esrc, 2, 'A12', 'roe-ref']
+      ]) {
+        await client.query(
+          `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role, ref)
+           VALUES ($1, $2, $3, $4, $5)`,
+          link
+        );
+      }
+      const cTargetBefore = (
+        await client.query('SELECT id, at_uri, created_at FROM contributors WHERE id = $1', [
+          ids.ctgt
+        ])
+      ).rows[0];
+
+      // Without `--merge-conflicts` the old skip behavior is unchanged.
+      const plain = await normalizeAuthors(client, { sample: 20 });
+      assert.equal(plain.merges.length, 0);
+      assert.equal(plain.candidates.length, 3, 'identifier-mismatch rows are plain renames');
+      assert.equal(plain.conflicts, 4, 'exact identifier collisions stay skipped');
+
+      const dry = await normalizeAuthors(client, { mergeConflicts: true, sample: 20 });
+      assert.equal(dry.candidates.length, 0);
+      assert.equal(dry.merges.length, 6);
+      assert.equal(dry.conflicts, 1, 'Jane Doe has two ambiguous targets');
+      assert.equal(dry.merged, 0);
+      const planned = new Map(dry.merges.map((merge) => [merge.name, merge]));
+      assert.equal(
+        planned.get('Butler, Octavia E.').targetId,
+        ids.gexact,
+        'an exact identifier match beats another display row'
+      );
+      assert.equal(planned.get('Sève, Lucien').identifiersAdded, 1);
+      assert.equal(planned.get('Bambara, Toni Cade').editionLinks, 2);
+
+      // A dry run writes nothing, even with merge mode on.
+      const untouched = await client.query(
+        'SELECT count(*)::int AS n FROM contributors WHERE name = ANY($1)',
+        [['Whitehead, Colson', 'Sève, Lucien', 'Bambara, Toni Cade', 'Butler, Octavia E.', 'Roe, Jane']]
+      );
+      assert.equal(untouched.rows[0].n, 5);
+
+      // Fail the Roe target's update after its links were repointed and the
+      // source was deleted, to prove the savepoint restores both.
+      await client.query(
+        `CREATE OR REPLACE FUNCTION probe_merge_failure() RETURNS trigger
+         LANGUAGE plpgsql AS $$
+         BEGIN
+           IF NEW.id = ${Number(ids.etgt)} THEN
+             RAISE EXCEPTION 'probe merge failure';
+           END IF;
+           RETURN NEW;
+         END
+         $$`
+      );
+      await client.query(
+        'CREATE TRIGGER probe_merge_failure BEFORE UPDATE ON contributors ' +
+          'FOR EACH ROW EXECUTE FUNCTION probe_merge_failure()'
+      );
+
+      const applied = await normalizeAuthors(client, { mergeConflicts: true, apply: true, sample: 20 });
+      assert.equal(applied.merged, 5);
+      assert.equal(applied.editionsRepointed, 2);
+      assert.equal(applied.failures.length, 1);
+      assert.equal(Number(applied.failures[0].id), Number(ids.esrc));
+      assert.equal(Number(applied.failures[0].targetId), Number(ids.etgt));
+
+      // The failed merge rolled back completely: row, identifiers and link.
+      assert.equal(
+        (await client.query('SELECT 1 FROM contributors WHERE id = $1', [ids.esrc])).rowCount,
+        1
+      );
+      assert.deepEqual(
+        (await client.query('SELECT identifiers FROM contributors WHERE id = $1', [ids.etgt]))
+          .rows[0].identifiers,
+        [{ issuer: 'probe', value: 'roe-target' }]
+      );
+      assert.equal(
+        (
+          await client.query(
+            'SELECT contributor_id FROM edition_contributors WHERE edition_uri = $1 AND position = 2',
+            [MERGE_EDITION_TWO]
+          )
+        ).rows[0].contributor_id,
+        ids.esrc
+      );
+
+      // Remove the fault injector and retry; the pending merge now commits.
+      await client.query('DROP TRIGGER probe_merge_failure ON contributors');
+      await client.query('DROP FUNCTION probe_merge_failure()');
+      const retry = await normalizeAuthors(client, { mergeConflicts: true, apply: true, sample: 20 });
+      assert.equal(retry.merged, 1);
+      assert.equal(retry.editionsRepointed, 1);
+      assert.equal(retry.failures.length, 0);
+
+      // Idempotent: only the ambiguous Jane Doe conflict remains, unwritten.
+      const rerun = await normalizeAuthors(client, { mergeConflicts: true, apply: true, sample: 20 });
+      assert.equal(rerun.merges.length, 0);
+      assert.equal(rerun.merged, 0);
+      assert.equal(rerun.conflicts, 1);
+
+      const contributor = async (id) =>
+        (
+          await client.query(
+            'SELECT id, name, name_inverted, identifiers, at_uri, created_at FROM contributors WHERE id = $1',
+            [id]
+          )
+        ).rows[0];
+
+      const a1 = await contributor(ids.a1tgt);
+      assert.equal(a1.name_inverted, 'Whitehead, Colson');
+      assert.equal(a1.at_uri, MERGE_TARGET_URI);
+      assert.equal((await client.query('SELECT 1 FROM contributors WHERE id = $1', [ids.a1src])).rowCount, 0);
+
+      // A curated target inverted name is never overwritten.
+      assert.equal((await contributor(ids.a2tgt)).name_inverted, 'Curated, Paul');
+
+      // Identifier union: target pair first, source-only pair added, url kept.
+      const union = await contributor(ids.btgt);
+      assert.deepEqual(union.identifiers, [
+        { issuer: 'probe', value: 'shared', url: 'https://example.test/shared' },
+        { issuer: 'probe', value: 'only-source' }
+      ]);
+      assert.equal(union.name_inverted, 'Sève, Lucien');
+
+      // Exported edition rows keep their positions, roles and refs.
+      const repointed = await client.query(
+        `SELECT edition_uri, position, role, ref FROM edition_contributors
+          WHERE contributor_id = $1 ORDER BY edition_uri, position`,
+        [ids.ctgt]
+      );
+      assert.deepEqual(repointed.rows, [
+        { edition_uri: MERGE_EDITION_ONE, position: 1, role: 'A01', ref: 'src-ref' },
+        { edition_uri: MERGE_EDITION_ONE, position: 3, role: 'A16', ref: 'tgt-ref' },
+        { edition_uri: MERGE_EDITION_TWO, position: 1, role: 'B06', ref: 'ed2-ref' }
+      ]);
+      const cTargetAfter = await contributor(ids.ctgt);
+      assert.equal(cTargetAfter.id, cTargetBefore.id);
+      assert.equal(cTargetAfter.at_uri, cTargetBefore.at_uri);
+      assert.equal(cTargetAfter.created_at.getTime(), cTargetBefore.created_at.getTime());
+
+      // Exact-match merge left the other Octavia E. Butler row alone.
+      assert.equal((await contributor(ids.gexact)).name_inverted, 'Butler, Octavia E.');
+      assert.deepEqual((await contributor(ids.gother)).identifiers, [
+        { issuer: 'probe', value: 'butler-other' }
+      ]);
+
+      // Ambiguous targets are untouched: source plus two display rows.
+      const ambiguous = await client.query('SELECT id FROM contributors WHERE name IN ($1, $2) ORDER BY id', [
+        'Doe, Jane',
+        'Jane Doe'
+      ]);
+      assert.equal(ambiguous.rowCount, 3);
+
+      // Triggers queued the source delete, target update and edition updates.
+      const outbox = await client.query('SELECT uri, collection, op FROM pds_outbox');
+      const queued = (uri, collection, op) =>
+        outbox.rows.some(
+          (row) =>
+            row.uri === uri && row.collection === collection && (op === undefined || row.op === op)
+        );
+      assert.ok(queued(MERGE_SOURCE_URI, 'net.olamaelcu.livtet.biblio.contributor', 'delete'));
+      assert.ok(
+        outbox.rows.some(
+          (row) => row.uri === MERGE_TARGET_URI && row.collection === 'net.olamaelcu.livtet.biblio.contributor'
+        )
+      );
+      // A pending `create` is never downgraded, so assert the collection only.
+      assert.ok(queued(MERGE_EDITION_ONE, 'community.lexicon.media.book.edition'));
+      assert.ok(queued(MERGE_EDITION_TWO, 'community.lexicon.media.book.edition'));
+    } finally {
+      if (client) {
+        await cleanupMerge(client);
         client.release();
       }
       await pool.end();
