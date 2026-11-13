@@ -117,6 +117,11 @@ function contributorList(value) {
       name,
       role: normalizeContributorRole(entry.role ?? DEFAULT_CONTRIBUTOR_ROLE)
     };
+    // Provider metadata: the admin UI round-trips an ISBNdb candidate, and
+    // dropping this field here would lose the inverted name at import time.
+    // It is not identity, so it never influences dedupe.
+    const nameInverted = stringValue(entry.nameInverted);
+    if (nameInverted) contributor.nameInverted = nameInverted;
     const identifiers = identifierList(entry.identifiers);
     if (identifiers.length > 0) contributor.identifiers = identifiers;
     const ref = stringValue(entry.ref);

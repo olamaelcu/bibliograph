@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "test": "node --test test/*.test.js",
-    "normalize:descriptions": "node scripts/normalize-isbndb-descriptions.mjs"
+    "normalize:descriptions": "node scripts/normalize-isbndb-descriptions.mjs",
+    "normalize:isbndb-authors": "node scripts/normalize-isbndb-author-names.mjs"
   },
   "dependencies": {
     "graphile-worker": "^0.18.0",

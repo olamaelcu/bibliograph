@@ -7,6 +7,8 @@ export type Identifier = { issuer: string; value: string };
 
 export type CandidateContributor = {
   name: string;
+  /** Provider-supplied inverted form ("Le Guin, Ursula K."), kept for the record. */
+  nameInverted?: string;
   role?: string;
   identifiers?: Identifier[];
   ref?: string;

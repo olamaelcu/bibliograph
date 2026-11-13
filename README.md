@@ -201,8 +201,10 @@ pnpm web:check && pnpm web:test && pnpm worker:test && pnpm verify:lex
 See [`architecture.md`](docs/architecture.md) for the seam, publication and
 lexicon provenance; [`xrpc.md`](docs/xrpc.md) for the endpoint contract;
 [`operations/fresh-database.md`](docs/operations/fresh-database.md) for the
-empty-database bootstrap; and [`dev-environment.md`](docs/dev-environment.md)
-for local accounts, fixtures and admin curation.
+empty-database bootstrap; [`operations/backfills.md`](docs/operations/backfills.md)
+for the dry-run/apply catalog rewrite scripts; and
+[`dev-environment.md`](docs/dev-environment.md) for local accounts, fixtures and
+admin curation.
 
 [appview]: https://atproto.com/guides/glossary#app-view
 [livtet]: https://livtet.olamaelcu.net

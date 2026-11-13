@@ -147,17 +147,25 @@ async function linkContributors(client, uri, contributors, authority) {
           ? contributor.name
           : undefined;
     if (!displayName) continue;
+    // `nameInverted` is provider metadata, not identity: an ISBNdb name owns
+    // it, but the manual editor also writes it. Fill it only when the row does
+    // not already have one so a curation edit is never overwritten.
+    const nameInverted =
+      typeof contributor?.nameInverted === 'string' && contributor.nameInverted.trim() !== ''
+        ? contributor.nameInverted
+        : null;
     const identifiers = JSON.stringify(
       Array.isArray(contributor.identifiers) ? contributor.identifiers : []
     );
     const inserted = await client.query(
-      `INSERT INTO contributors (name, identifiers, at_uri)
-       VALUES ($1, $2::jsonb, 'at://' || $3 || '/' || $4 || '/' || editions_next_tid())
+      `INSERT INTO contributors (name, name_inverted, identifiers, at_uri)
+       VALUES ($1, $2, $3::jsonb, 'at://' || $4 || '/' || $5 || '/' || editions_next_tid())
        ON CONFLICT (lower(name), identifiers) DO UPDATE SET
          name = EXCLUDED.name,
+         name_inverted = COALESCE(NULLIF(contributors.name_inverted, ''), EXCLUDED.name_inverted),
          at_uri = COALESCE(contributors.at_uri, EXCLUDED.at_uri)
        RETURNING id, at_uri`,
-      [displayName, identifiers, authority, CONTRIBUTOR_COLLECTION]
+      [displayName, nameInverted, identifiers, authority, CONTRIBUTOR_COLLECTION]
     );
     const contributorId = inserted.rows[0].id;
     await client.query(

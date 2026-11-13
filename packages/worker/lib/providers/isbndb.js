@@ -1,5 +1,6 @@
 import { createGate, isbn13 as normalizeIsbn13, cleanString, stripHtml } from '../util.js';
 import { DEFAULT_CONTRIBUTOR_ROLE } from '../contributor-roles.js';
+import { parseIsbndbAuthor } from '../isbndb-names.js';
 import { createJsonCache, fetchJsonResponse } from './http.js';
 import {
   DEFAULT_ISBNDB_DAILY_LIMIT,
@@ -77,6 +78,30 @@ export function cleanIsbndbSynopsis(value) {
   return body === '' ? text : body;
 }
 
+// ISBNdb may return the same person twice (display and inverted form). Keep
+// one credit per normalized display name instead of storing both spellings.
+function isbndbContributors(authors) {
+  const contributors = [];
+  const byName = new Map();
+  for (const raw of authors ?? []) {
+    const value = cleanString(raw);
+    if (!value) continue;
+    const parsed = parseIsbndbAuthor(value);
+    const name = parsed ? parsed.name : value;
+    const existing = byName.get(name);
+    if (existing) {
+      // Prefer the inverted form the parser produced.
+      if (!existing.nameInverted && parsed) existing.nameInverted = parsed.nameInverted;
+      continue;
+    }
+    const contributor = { name, role: DEFAULT_CONTRIBUTOR_ROLE };
+    if (parsed) contributor.nameInverted = parsed.nameInverted;
+    byName.set(name, contributor);
+    contributors.push(contributor);
+  }
+  return contributors;
+}
+
 export function candidateFromIsbndb(book) {
   if (!book || !cleanString(book.title)) return undefined;
 
@@ -88,10 +113,7 @@ export function candidateFromIsbndb(book) {
   const candidate = {
     identifiers,
     title: cleanString(book.title),
-    contributors: [...new Set((book.authors ?? []).map(cleanString).filter(Boolean))].map((name) => ({
-      name,
-      role: DEFAULT_CONTRIBUTOR_ROLE
-    }))
+    contributors: isbndbContributors(book.authors)
   };
 
   const subtitle = cleanString(book.title_long)?.replace(`${candidate.title}:`, '').trim();
