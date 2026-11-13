@@ -204,8 +204,8 @@ at upload, and a successful PDS write is indexed in the same request.
 | --- | --- |
 | Follow graph | `graph.follow`, `graph.unfollow` — the rkey is an opaque TID; `graph.follow` looks up the subject so a repeat is a no-op |
 | Shelves | `shelf.create`, `shelf.update`, `shelf.delete` — delete cascades `shelfItem` and `bookStatus` rows that name the shelf |
-| Membership | `shelf.addItem`, `shelf.removeItem`, `shelf.addBooks` — rkey `<shelf rkey>-<edition rkey>` |
-| Reading status | `status.set`, `status.clear` — rkey is the edition rkey, metadata merges |
+| Membership | `shelf.addItem`, `shelf.removeItem`, `shelf.addBooks` — the rkey is a fresh TID, so the edge is found by `record.shelf` + `record.book.uri` |
+| Reading status | `status.set`, `status.clear` — the rkey is a fresh TID, so the row is found by `record.book.uri`; metadata merges |
 | Reader | `readingGoal.set` (rkey `current`), `profile.set` (rkey `self`) |
 | Reviews | `review.create`, `review.update`, `review.delete` |
 
@@ -254,13 +254,14 @@ the local PLC (see Known limits).
 
 ### Record keys
 
-The rkeys are part of the contract — the queries resolve records by them, so a
-writer that invents its own scheme produces records nothing can read:
+The record key is an address, not an index — every association lives in the
+record body, so a writer that mints its own key scheme still produces records
+every query can read. Only the literal singleton keys are part of the contract:
 
 | Collection | rkey | Why |
 | --- | --- | --- |
-| `…biblio.bookStatus` | the edition record's rkey (last segment of the edition URI) | one status per edition per reader; a status change replaces the record. `getShelversOfBook` defaults to this derivation |
-| `…biblio.shelfItem` | `<shelf rkey>-<edition rkey>` | one membership edge per (shelf, book), so re-adding is idempotent |
+| `…biblio.bookStatus` | a fresh TID per (reader, edition); legacy rows may carry the edition rkey | one status per edition per reader, found by `record.book.uri`; a status change replaces the record |
+| `…biblio.shelfItem` | a fresh TID per (shelf, book); legacy rows may carry `<shelf rkey>-<edition rkey>` | one membership edge per (shelf, book), found by `record.shelf` + `record.book.uri`, so re-adding is idempotent |
 | `…biblio.readingGoal` | `current` | `getReadingGoal` reads `readingGoal/current` |
 | `…actor.profile` | `self` | `getActorProfile` reads `actor.profile/self` |
 
