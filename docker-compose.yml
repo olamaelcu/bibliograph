@@ -231,6 +231,32 @@ services:
       start_period: 30s
     init: true
 
+  # Re-indexes the PDS into HappyView every pass, because Jetstream is closed
+  # here and a record written straight to the repo is otherwise invisible to
+  # every index-backed page (a profile's shelves, for one). Only repos whose
+  # head moved are backfilled, so an idle pass costs one `listRepos`.
+  hv-backfill:
+    # curlimages/curl:latest, pinned by index digest.
+    image: curlimages/curl@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93
+    restart: unless-stopped
+    # The image's default user cannot write the root-owned state volume.
+    user: root
+    depends_on:
+      happyview:
+        condition: service_started
+      pds:
+        condition: service_started
+    environment:
+      HAPPYVIEW_URL: http://happyview:3000
+      # The `hv_…` key with backfill:create (`.env` ships the dev default).
+      HAPPYVIEW_ADMIN_KEY: ${HAPPYVIEW_ADMIN_KEY:-hv_dev_admin}
+      PDS_URL: http://pds:3000
+      BACKFILL_INTERVAL_SECONDS: "15"
+    volumes:
+      - ./docker/happyview-backfill.sh:/usr/local/bin/happyview-backfill.sh:ro
+      - hv_backfill_state:/state
+    entrypoint: ["/bin/sh", "/usr/local/bin/happyview-backfill.sh"]
+
   prometheus:
     image: prom/prometheus:latest
     restart: unless-stopped
@@ -252,3 +278,5 @@ volumes:
   mailtrapdata:
   caddy_data:
   promdata:
+  # Last-seen repo heads, so a pass backfills only what changed.
+  hv_backfill_state:

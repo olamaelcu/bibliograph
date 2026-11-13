@@ -196,6 +196,13 @@ account — one job per repo, because HappyView filters the walk to the
 collections it has lexicons for — then polls `happyview.happyview_records`
 until the expected counts land. Without that step every query answers empty.
 
+The compose stack also runs `hv-backfill`, which repeats that call on a 15 s
+cadence for any repo whose head moved, so records another client writes to the
+PDS (the desktop, a manual `putRecord`) reach the index within a pass instead
+of never. It keeps the last-seen head per repo in the `hv_backfill_state`
+volume; an idle pass is one `listRepos`. The profile pages still read through
+the app's five-minute actor cache, so a change can take that long to paint.
+
 ### Reset
 
 ```bash
