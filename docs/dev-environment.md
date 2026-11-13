@@ -96,6 +96,32 @@ Both commands are idempotent: a second run resolves the existing accounts and
 updates the same record keys in place. `mise run hv-fixtures` implies
 `hv-accounts`; run `hv-accounts` alone when you only want the identities.
 
+### The catalog comes first
+
+The catalog owns no data of its own: every edition arrives through the worker's
+ingest from a provider. `hv-fixtures` reads catalog editions and joins them to
+`pds_cids`, so on a fresh stack it fails with
+`the catalog has no editions with identifiers, contributors, a cover and a
+published CID`. Seed the catalog before the fixtures:
+
+```bash
+mise run catalog-schema       # containers, triggers, read views
+mise run catalog-seed 10      # the ten most-downloaded Project Gutenberg ebooks
+mise run hv-fixtures          # now there are editions to shelve
+```
+
+`catalog-seed` takes the count as its first argument (default 10) and reads
+each ebook's Dublin Core record from gutenberg.org: title, creator agents,
+language, summary, cover, and the publisher. Editions are ingested with the same
+path hydration uses, so the catalog trigger queues their records and the
+worker's `pds-publish` task publishes them within a minute — which is when
+`pds_cids` gains the rows the fixtures need. It is idempotent: identity is the
+ebook id (`gutenberg:<id>`), so a re-run updates the same editions in place
+rather than minting new ones.
+
+`GUTENBERG_BASE_URL` overrides the upstream. The provider tests inject their own
+`fetch`, so the suite never reaches the network.
+
 ### Accounts
 
 | | |

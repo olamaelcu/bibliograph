@@ -161,6 +161,7 @@ Caddy and HappyView, all from `docker compose`; the edge listens on
 ```bash
 docker compose up -d          # postgres, plc, pds, mailtrap, caddy, happyview, prometheus
 mise run catalog-schema       # apply packages/worker/sql/*.sql (idempotent)
+mise run catalog-seed 10      # ten public-domain editions from Project Gutenberg
 mise run hv-account && mise run hv-seed && mise run hv-ca  # account, keys, CA
 mise run hv-deploy            # upload HappyView lexicons/scripts, apply indexes
 mise run hv-fixtures          # seed accounts + activity, backfill, verify
@@ -168,6 +169,13 @@ mise run dev                  # edge (:5176) + catalog worker
 ```
 
 `mise run web` and `mise run worker` start one process each; `mise run sql` opens psql. HappyView creates its activity tables; `catalog-schema` creates the catalog/read views, and the feed-index SQL no-ops until `happyview_records` exists.
+
+`catalog-seed` comes before `hv-fixtures` because the catalog owns no data: every
+edition arrives through the worker's ingest from a provider, while `hv-fixtures`
+reads catalog editions and joins them to published CIDs. On a fresh stack the
+fixtures have nothing to shelve until the catalog has editions. Seeding ingests
+them from Project Gutenberg; the running worker's `pds-publish` publishes each
+record (and its contributors/publishers) within a minute.
 
 ```bash
 mise run catalog-schema-check # scratch-database schema + worker integration tests

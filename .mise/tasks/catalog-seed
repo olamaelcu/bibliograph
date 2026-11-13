@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#MISE description="Seed the catalog from Project Gutenberg (most-downloaded first) and queue the records for publishing"
+#
+# The catalog holds nothing of its own: every edition arrives through the
+# worker's ingest from a provider. On a fresh stack that leaves `hv-fixtures`
+# with nothing to reference (it reads catalog editions and joins `pds_cids`), so
+# this task fills the catalog first:
+#
+#   mise run catalog-schema          # containers, views, triggers
+#   mise run catalog-seed 10         # ten public-domain editions (default 10)
+#   mise run hv-fixtures             # the fixture network over them
+#
+# Seeding ingests the ebooks and stops there: the catalog trigger queues each
+# record in `pds_outbox` and `pds-publish` publishes it on its next tick, so a
+# newly seeded edition is resolvable over `com.atproto.repo.getRecord` within a
+# minute. Re-running is safe — identity is the ebook id, so editions are updated
+# in place.
+#
+# Configuration: DATABASE_URL, PDS_URL, PDS_ACCOUNT_DID and
+# PDS_ACCOUNT_PASSWORD (or PDS_ACCESS_TOKEN) from mise/.env. GUTENBERG_BASE_URL
+# overrides the upstream, which the worker tests point at a local server.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+count="${1:-10}"
+case "$count" in
+  ''|*[!0-9]*)
+    printf 'usage: mise run catalog-seed [count]\n' >&2
+    exit 1
+    ;;
+esac
+
+exec pnpm --filter worker start -- "--seed-gutenberg=$count"

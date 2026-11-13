@@ -208,6 +208,14 @@ and Goodreads. When `ISBNDB_API_KEY` is unset the chain starts at Google Books.
 `googlebooks`, `openlibrary` and `goodreads` identifiers still resolve directly
 against their own provider; OpenLibrary accepts edition (`OL…M`) and work
 (`OL…W`) keys and expands a work through its editions endpoint.
+Project Gutenberg (`packages/worker/lib/providers/gutenberg.js`) is deliberately
+outside that chain: it serves public-domain ebooks only, so folding it into a
+text search would answer a modern-title query with a namesake from 1850. It
+resolves an explicit `gutenberg` identifier against one ebook's Dublin Core RDF,
+and its `popular()` listing is what `mise run catalog-seed` walks to fill an
+empty catalog. A Gutenberg copy is its own edition — identity is the ebook id,
+never an invented ISBN — so its records are `<id>`-keyed and never merge with a
+modern reprint.
 `CANDIDATES_PER_TASK = 50` in `packages/worker/lib/tasks.js` bounds each task;
 Google Books asks for its maximum page (`maxResults=40`) and ISBNdb search asks
 for `pageSize=50` (the API's default is 20), so a single provider call can be

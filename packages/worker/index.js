@@ -9,6 +9,9 @@ import { startMetricsServer } from './lib/metrics.js';
 import { startAdminServer } from './lib/admin.js';
 import { parseDailyLimit } from './lib/providers/usage.js';
 import { prepareEntityRecords } from './lib/prepare-entities.js';
+import { createIngest } from './lib/ingest.js';
+import { createGutenberg } from './lib/providers/gutenberg.js';
+import { seedCatalogFromProvider } from './lib/seed.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -43,6 +46,36 @@ if (process.argv.includes('--prepare-entities')) {
     await pool.end();
   }
   process.exit(0);
+}
+
+// Operator entry point for filling an empty catalogue from Project Gutenberg:
+//
+//   node index.js --seed-gutenberg=10    # the ten most-downloaded ebooks
+//
+// Editions take the same path hydration uses; the catalog trigger queues each
+// record and `pds-publish` publishes it. Re-running is safe: identity is the
+// ebook's own identifier, so an existing edition is updated, never duplicated.
+if (process.argv.some((arg) => arg.startsWith('--seed-gutenberg'))) {
+  const countArg = process.argv.find((arg) => arg.startsWith('--seed-gutenberg='));
+  const count = countArg ? countArg.slice('--seed-gutenberg='.length) : '10';
+  let exitCode = 0;
+  try {
+    const summary = await seedCatalogFromProvider({
+      provider: createGutenberg({ baseUrl: process.env.GUTENBERG_BASE_URL || undefined }),
+      ingest: createIngest({ pool, publisherDid, publisherHost }),
+      count: Number(count)
+    });
+    console.log(
+      `worker: catalog.seed[gutenberg] created=${summary.created} updated=${summary.updated} ` +
+        `skipped=${summary.skipped} failed=${summary.failed}`
+    );
+  } catch (error) {
+    console.error(`worker: catalog.seed[gutenberg] failed — ${error.message}`);
+    exitCode = 1;
+  } finally {
+    await pool.end();
+  }
+  process.exit(exitCode);
 }
 
 const isbndbDailyLimit = parseDailyLimit(process.env.ISBNDB_DAILY_LIMIT);

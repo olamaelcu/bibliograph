@@ -3,6 +3,7 @@ import { createGoogleBooks } from './google-books.js';
 import { createIsbndb } from './isbndb.js';
 import { createOpenLibrary } from './openlibrary.js';
 import { createGoodreads } from './goodreads.js';
+import { createGutenberg } from './gutenberg.js';
 import { parseDailyLimit } from './usage.js';
 import { createProviderHttp, createProviderMetrics } from './resilience.js';
 
@@ -36,6 +37,12 @@ export function createProviders({
     fetchImpl,
     metrics
   });
+  const gutenbergHttp = createProviderHttp({
+    ...resilience,
+    provider: 'gutenberg',
+    fetchImpl,
+    metrics
+  });
   const goodreadsHttp = createProviderHttp({
     ...resilience,
     provider: 'goodreads',
@@ -66,6 +73,10 @@ export function createProviders({
   const openlibrary = createOpenLibrary({
     baseUrl: env.OPENLIBRARY_BASE_URL || 'https://openlibrary.org',
     fetchImpl: openlibraryHttp.fetch
+  });
+  const gutenberg = createGutenberg({
+    baseUrl: env.GUTENBERG_BASE_URL || 'https://www.gutenberg.org',
+    fetchImpl: gutenbergHttp.fetch
   });
   const goodreads = createGoodreads({
     baseUrl: env.GOODREADS_BASE_URL || 'https://www.goodreads.com',
@@ -109,6 +120,11 @@ export function createProviders({
     if (issuer === 'openlibrary') {
       return mergeCandidates(await openlibrary.byIdentifier(identifier.value));
     }
+    // Public-domain ebooks are their own editions, so this resolves one ebook
+    // by id rather than joining the ISBN chain above.
+    if (issuer === 'gutenberg' || issuer === 'pg' || issuer === 'project-gutenberg') {
+      return mergeCandidates(await gutenberg.byId(identifier.value));
+    }
     if (!ISBN_ISSUERS.has(issuer)) return [];
 
     const isbn = normalizeIsbn13(identifier.value);
@@ -147,13 +163,14 @@ export function createProviders({
   return {
     resolve,
     search,
-    providers: { google, isbndb, openlibrary, goodreads },
+    providers: { google, isbndb, openlibrary, goodreads, gutenberg },
     metrics,
     resilience: {
       googlebooks: googleHttp.breaker,
       isbndb: isbndbHttp.breaker,
       openlibrary: openlibraryHttp.breaker,
-      goodreads: goodreadsHttp.breaker
+      goodreads: goodreadsHttp.breaker,
+      gutenberg: gutenbergHttp.breaker
     }
   };
 }

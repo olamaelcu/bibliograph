@@ -92,6 +92,12 @@ export function candidateKey(candidate) {
     (identifier) => identifier.issuer === 'openlibrary'
   );
   if (openlibrary) return `ol:${openlibrary.value}`;
+  // A Gutenberg ebook is an edition of its own, so its id is the identity even
+  // when a public-domain title has no ISBN or provider id.
+  const gutenberg = candidate.identifiers.find(
+    (identifier) => identifier.issuer === 'gutenberg'
+  );
+  if (gutenberg) return `pg:${gutenberg.value}`;
   return `title:${candidate.title.toLowerCase()}|${(candidate.contributors[0]?.name ?? '').toLowerCase()}`;
 }
 
