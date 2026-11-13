@@ -1,3 +1,23 @@
+bibliograph-worker (0.2.10-1) unstable; urgency=medium
+
+  * 0.2.10 release: Goodreads WAF handling and the rebuilt HappyView payload.
+
+    - Treat AWS WAF/Cloudflare challenge pages as provider failures instead of
+      empty answers: detect x-amzn-waf-action, 202 responses and challenge body
+      markers, fail the logical request immediately, and trip the Goodreads
+      breaker (60s) on a block. Genuine 429/5xx keep retries with a 1s->8s
+      jittered ladder, and redirect loops map to a 502 provider error.
+    - Use coherent rotating browser header profiles, keep /search on a bare
+      */* Accept (any explicit Accept self-redirects), and cache successful HTML
+      for 24h in a bounded process-local LRU. resolve-format now reports a
+      challenge as ProviderUnavailable rather than FormatNotFound.
+    - Pairs with a rebuilt HappyView payload at the same image version
+      (2.17.4-2): shelf/status writes find rows by record fields and mint TIDs,
+      listFollowees uses the encoded cursor, and getShelversOfBook keys on the
+      book URI (see the bibliograph-happyview package files).
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 13 Nov 2026 05:20:00 +0000
+
 bibliograph-worker (0.2.9-1) unstable; urgency=medium
 
   * 0.2.9 release: fix the Goodreads ISBN lookup used by /resolve-format.

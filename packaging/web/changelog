@@ -1,3 +1,16 @@
+bibliograph-web (0.2.10-1) unstable; urgency=medium
+
+  * 0.2.10 release: lockstep version bump, no web payload changes.
+
+    - packages/web is unchanged since 0.2.9; this release pairs the existing
+      admin/editor edge with the worker's Goodreads WAF fix and a rebuilt
+      HappyView payload.
+    - HappyView payload (same 2.17.4-2 image): record-field keyed shelf and
+      status writes with TID minting, the encoded listFollowees cursor, and
+      getShelversOfBook keyed on the book URI.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 13 Nov 2026 05:22:00 +0000
+
 bibliograph-web (0.2.9-1) unstable; urgency=medium
 
   * 0.2.9 release: lockstep version bump, no web payload changes.
