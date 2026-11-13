@@ -1,3 +1,20 @@
+bibliograph-worker (0.2.8-1) unstable; urgency=medium
+
+  * 0.2.8 release: Goodreads-only edition format resolver.
+
+    - Add POST /resolve-format to the loopback admin API (lib/resolve-format.js):
+      it validates 1-10 ISBN-10/13 values, rejects empty/oversized lists and
+      checksum failures, normalises to ISBN-13 and dedupes while preserving
+      order.
+    - Ask only the Goodreads provider (byIdentifier, sequential) and return the
+      first non-empty candidate format as {isbn, format, source:"goodreads"};
+      the hydration fallback chain is never consulted. No result is a 404
+      FormatNotFound, a provider failure a 502 ProviderUnavailable.
+    - The resolver performs no database, outbox or PDS writes; applying the
+      value is the admin UI's decision.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 22:30:00 +0000
+
 bibliograph-worker (0.2.7-1) unstable; urgency=medium
 
   * 0.2.7 release: ISBNdb author normalization and the conflict backfill.

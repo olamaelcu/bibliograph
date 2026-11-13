@@ -1,3 +1,20 @@
+bibliograph-web (0.2.8-1) unstable; urgency=medium
+
+  * 0.2.8 release: resolve an edition's format from Goodreads in the editor.
+
+    - Add admin-only POST /admin/api/editions/<id>/resolve-format. It accepts
+      ISBNs from the current unsaved form or falls back to the edition's
+      persisted identifiers, filters them to checksum-valid ISBN-10/13 values,
+      dedupes and caps the list at 10, and proxies the worker's /resolve-format
+      response (including its 400/404/502) unchanged. No usable ISBN is a 400
+      NoIsbns and a missing edition a 404.
+    - Add a free-text Format field to the edition editor plus a Resolve from
+      Goodreads button. The lookup fills the field and reports the ISBN used,
+      with an explicit notice that the value is not saved until the operator
+      saves the edition; there is no autosave, and lookup errors render inline.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 12 Nov 2026 22:35:00 +0000
+
 bibliograph-web (0.2.7-1) unstable; urgency=medium
 
   * 0.2.7 release: entity editors and catalog reports in the admin UI.
