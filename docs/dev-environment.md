@@ -22,6 +22,7 @@ mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 | --- | --- |
 | `http://127.0.0.1:3000` | HappyView dashboard and admin API |
 | `https://pds.127-0-0-1.sslip.io` | the local PDS (HTTPS, Caddy's internal CA) |
+| `https://<handle>.pds.127-0-0-1.sslip.io` | handle resolution: `/.well-known/atproto-did` and `/xrpc/*`; every other path 301s to the canonical PDS host |
 | `http://127.0.0.1:2582` | the local PLC directory |
 | `postgres://bibliograph:bibliograph@127.0.0.1:5432/bibliograph` | the catalog + `happyview` schema |
 
@@ -186,6 +187,13 @@ provisional account:
 ```
 alice.pds.127-0-0-1.sslip.io / Dev-account-password1
 ```
+
+The PDS login page runs on the canonical host. Opening a handle host directly
+(for example `https://alice.pds.127-0-0-1.sslip.io/app/login`) redirects there,
+because the account-manager SPA's OAuth `client_id` is canonical-host-only; a
+tab that loaded the handle-host app before that redirect existed keeps the old
+origin and must be reloaded, or the PDS rejects the login with
+`client_id in metadata does not match request`.
 
 The redirect chain crosses to `https://pds.127-0-0-1.sslip.io/oauth/authorize`,
 so Caddy's root CA has to be trusted first: `mise run hv-ca` installs it into

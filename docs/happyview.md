@@ -28,7 +28,7 @@ flowchart LR
 | `happyview` | `http://127.0.0.1:3000` | dashboard at `/`, redirects to `/dashboard/`; `/xrpc/*`, `/admin/*` |
 | `pds` | `https://pds.127-0-0-1.sslip.io` | HTTPS only, via Caddy |
 | `plc` | `http://127.0.0.1:2582` | `<did>` path returns the DID document |
-| `caddy` | `:80`, `:443` | redirects 80→443; `*.pds.127-0-0-1.sslip.io` routes to the PDS |
+| `caddy` | `:80`, `:443` | redirects 80→443; `pds.127-0-0-1.sslip.io` proxies the whole PDS, `*.pds.127-0-0-1.sslip.io` proxies only `/.well-known/*` and `/xrpc/*` and 301s every other path to the canonical host |
 | `postgres` | `127.0.0.1:5432` | databases `bibliograph`, `plc`, `pds` |
 | `prometheus` | `127.0.0.1:9090` | unchanged from before HappyView |
 
@@ -108,6 +108,16 @@ building the stack.
   Every `*.127-0-0-1.sslip.io` name resolves to 127.0.0.1 through public DNS,
   so no `/etc/hosts` entry is needed, and Docker network aliases cover the
   container-to-container path.
+- **Handle hosts serve resolution and XRPC only; the app surface is canonical.**
+  `https://alice.pds.127-0-0-1.sslip.io/app/login` 301s to
+  `https://pds.127-0-0-1.sslip.io{uri}`, as does every other handle-host path
+  except `/.well-known/*` and `/xrpc/*`. The PDS account-manager SPA derives its
+  OAuth `client_id` from `window.location.origin`, but the PDS publishes client
+  metadata for one canonical origin, so a login started on a handle host fails
+  PAR with `client_id in metadata does not match request` — the PDS fetches the
+  handle host's copy of `/oauth-client-metadata.json`, which declares
+  `https://pds.127-0-0-1.sslip.io/oauth-client-metadata.json`. A handle-host tab
+  opened before the redirect existed still holds the old origin; reload it.
 - **`ALLOW_PRIVATE_FETCH=true` on the PDS.** The PLC is a compose-network
   address; without it the PDS's SSRF guard rejects its own DNS answer
   (`no resolved address for plc is inside the allowed host reach`) and account
