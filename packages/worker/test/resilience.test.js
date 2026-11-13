@@ -306,6 +306,22 @@ test('half-open probe failure reopens the breaker', async () => {
   assert.throws(() => breaker.acquire(), ProviderCircuitOpenError);
 });
 
+test('trip() opens the breaker immediately and honors its cooldown', () => {
+  let clock = 0;
+  const breaker = createCircuitBreaker({
+    provider: 'goodreads',
+    now: () => clock,
+    cooldownMs: 60_000
+  });
+
+  breaker.trip();
+  assert.equal(breaker.state, 'open');
+  assert.throws(() => breaker.acquire(), ProviderCircuitOpenError);
+
+  clock = 60_000;
+  assert.deepEqual(breaker.canAttempt(), { allowed: true, retryAfterMs: 0 });
+});
+
 test('breaker preflight is read-only and saves metered calls', () => {
   let clock = 0;
   const metrics = createProviderMetrics();

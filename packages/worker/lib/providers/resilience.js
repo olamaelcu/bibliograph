@@ -322,6 +322,17 @@ export function createCircuitBreaker({
         transition('open');
       }
     },
+    /**
+     * Open the breaker immediately. A provider that recognises an upstream
+     * anti-bot block above the HTTP layer uses this instead of waiting for
+     * three failed fetches: the next request short-circuits until cooldown.
+     */
+    trip() {
+      failures = Math.max(failures, failureThreshold);
+      probing = false;
+      openUntil = now() + cooldownMs;
+      transition('open');
+    },
     /** A hard 4xx proves the upstream is reachable; it is not an outage. */
     reachable(permit) {
       failures = 0;

@@ -40,7 +40,13 @@ export function createProviders({
     ...resilience,
     provider: 'goodreads',
     fetchImpl,
-    metrics
+    metrics,
+    // Goodreads' WAF is per-IP volume: a blocked publisher gets a longer
+    // cooldown than the shared default, and genuine 429/5xx/timeout retries
+    // use a slower ladder (3 attempts, ~1 s base, 8 s cap).
+    cooldownMs: resilience.cooldownMs ?? 60_000,
+    baseDelayMs: resilience.baseDelayMs ?? 1_000,
+    maxDelayMs: resilience.maxDelayMs ?? 8_000
   });
   const google = createGoogleBooks({
     pool,
@@ -64,7 +70,10 @@ export function createProviders({
   const goodreads = createGoodreads({
     baseUrl: env.GOODREADS_BASE_URL || 'https://www.goodreads.com',
     logger,
-    fetchImpl: goodreadsHttp.fetch
+    fetchImpl: goodreadsHttp.fetch,
+    // A recognized challenge/block opens the breaker so the next request
+    // short-circuits instead of hitting the WAF again.
+    onBlocked: () => goodreadsHttp.breaker.trip()
   });
 
   /**

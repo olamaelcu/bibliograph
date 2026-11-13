@@ -85,9 +85,17 @@ export async function resolveFormat(providers, isbns) {
     }
     return null;
   } catch (error) {
+    // An anti-bot challenge is a provider outage, never "no format": keep it
+    // distinct from the genuine 404 that means Goodreads has no format to give.
+    // The same is true for a redirect loop: it is a blocked fetch, not an
+    // empty result.
+    const blocked =
+      error?.code === 'GOODREADS_CHALLENGE' || error?.code === 'GOODREADS_REDIRECT_LOOP';
     throw new FormatResolveError(
       502,
-      'the Goodreads format lookup failed',
+      blocked
+        ? 'Goodreads blocked the request; try again later'
+        : 'the Goodreads format lookup failed',
       'ProviderUnavailable'
     );
   }

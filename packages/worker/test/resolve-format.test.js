@@ -93,6 +93,25 @@ test('maps Goodreads failures to a 502 without touching other providers', async 
   assert.deepEqual(fake.calls, [ISBN13]);
 });
 
+test('maps an exhausted anti-bot challenge to a clear 502 provider error', async () => {
+  const fake = fakeProviders(() => {
+    const error = new Error('goodreads answered an anti-bot challenge');
+    error.code = 'GOODREADS_CHALLENGE';
+    throw error;
+  });
+
+  await assert.rejects(
+    resolveFormat(fake, [ISBN13]),
+    (error) =>
+      error instanceof FormatResolveError &&
+      error.status === 502 &&
+      error.code === 'ProviderUnavailable' &&
+      /blocked the request/.test(error.message)
+  );
+  // A genuine "no format" answer stays a 404 upstream; only a block is 502.
+  assert.deepEqual(fake.calls, [ISBN13]);
+});
+
 async function withAdminApi(providers, run) {
   const handler = createAdminHandler({
     providers,

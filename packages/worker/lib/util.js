@@ -7,11 +7,17 @@ export function sleep(ms) {
  * quota- or politeness-limited, so concurrency across jobs must not translate
  * into concurrent requests.
  */
-export function createGate(intervalMs) {
+export function createGate(
+  intervalMs,
+  { jitterMs = 0, random = Math.random, sleepImpl = sleep } = {}
+) {
   let tail = Promise.resolve();
   return (task) => {
     const run = tail.then(task);
-    tail = run.catch(() => {}).then(() => sleep(intervalMs));
+    // Jitter keeps the gap between same-provider requests from looking like a
+    // fixed-rate bot; the caller can inject `random`/`sleepImpl` for tests.
+    const gap = jitterMs > 0 ? intervalMs + Math.round(random() * jitterMs) : intervalMs;
+    tail = run.catch(() => {}).then(() => sleepImpl(gap));
     return run;
   };
 }

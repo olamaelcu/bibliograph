@@ -58,8 +58,11 @@ export async function fetchJson(fetchImpl, url, options = {}, timeoutMs = 15_000
 }
 
 export async function fetchText(fetchImpl, url, options = {}, timeoutMs = 15_000) {
+  // `readErrorBody` is a caller option, not a fetch init field: anti-bot
+  // challenge pages often arrive as 403, so the body has to stay inspectable.
+  const { readErrorBody = false, ...init } = options;
   const response = await fetchImpl(url, {
-    ...options,
+    ...init,
     signal: AbortSignal.timeout(timeoutMs),
     redirect: 'follow'
   });
@@ -67,7 +70,20 @@ export async function fetchText(fetchImpl, url, options = {}, timeoutMs = 15_000
   if (!response.ok) {
     const error = new Error(`${url} answered ${response.status}`);
     error.status = response.status;
+    error.headers = response.headers;
+    if (readErrorBody) {
+      try {
+        error.body = await response.text();
+      } catch {
+        // A body we cannot read leaves the status-only error path intact.
+      }
+    }
     throw error;
   }
-  return { text: await response.text(), url: response.url || url };
+  return {
+    text: await response.text(),
+    url: response.url || url,
+    status: response.status,
+    headers: response.headers
+  };
 }

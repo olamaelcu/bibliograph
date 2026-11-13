@@ -227,6 +227,38 @@ semantics). `ISBNDB_DAILY_LIMIT` defaults to `5000` and must be a positive
 integer; `0`/negative is invalid and falls back to `5000` with a warning — it is
 not an "unlimited" switch.
 
+Goodreads is keyless and uses `GOODREADS_BASE_URL` (default
+`https://www.goodreads.com`). It sits behind an AWS WAF edge whose decision is
+per-IP volume: a production probe found no UA, Accept, `Sec-Fetch-*`, client
+hint, Referer or cookie combination changed it. The five coherent Chrome /
+Firefox / Safari desktop/mobile profiles therefore remain **cosmetic** (they
+look like real traffic and never mix families), but WAF avoidance does not rely
+on them. Book pages ask for `text/html` only and `/search` sends the bare
+`*/*`: any explicit Accept naming `text/html`, `text/*` or
+`application/xhtml+xml` makes Goodreads answer 302 to the same URL until the
+redirect limit trips (verified live). A redirect loop is caught from the fetch
+cause, retried at most once, then surfaced as `GOODREADS_REDIRECT_LOOP` (502).
+No cookies or credentials are sent. Requests stay serialized through the
+provider gate, whose 1 s gap carries up to 1.5 s of jitter.
+
+Anti-bot detection checks `x-amzn-waf-action: challenge|block`, HTTP 202, AWS
+WAF (`awswaf`, `challenge.js`, `gokuProps`) and Cloudflare markers; a 200 page
+carrying a challenge is never parsed as an empty success. A challenge fails the
+logical request immediately with `GOODREADS_CHALLENGE` (502) and trips the
+`goodreads` breaker (60 s cooldown), so later calls short-circuit instead of
+hammering the WAF; `/resolve-format` reports 502 `ProviderUnavailable`, never a
+misleading 404. Consent walls (401/403 without challenge markers) stay a
+non-retried empty answer. Genuine 429 (honoring `Retry-After`), 5xx and timeouts
+are retried by the shared provider HTTP layer: three attempts with jittered
+exponential backoff from ~1 s up to 8 s. Successfully fetched HTML is kept in a
+bounded, process-local LRU (default 100 pages, 24 h TTL matching Goodreads'
+`max-age=86400`; the `createGoodreads` cache options), keyed by URL plus page
+kind, so repeated ISBN/format lookups cost no request. Challenges, errors,
+empty bodies and redirect loops are never cached, and the cache is not shared
+across worker processes or restarts. The WAF caveat stands: once the edge
+escalates to a full browser challenge, a server-side fetch cannot pass it, so
+the resolver answers a retryable 502 rather than a misleading 404.
+
 OpenLibrary is keyless and uses `OPENLIBRARY_BASE_URL` (default
 `https://openlibrary.org`). Edition search requests 40 documents with an
 explicit `fields` list; `/isbn/<isbn>.json` and `/books/<key>.json` provide
