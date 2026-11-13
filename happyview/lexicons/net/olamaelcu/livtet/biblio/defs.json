@@ -404,10 +404,13 @@
         "books": {
           "type": "array",
           "items": {
-            "type": "ref",
-            "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfView"
+            "type": "union",
+            "refs": [
+              "net.olamaelcu.livtet.biblio.defs#bookShelfView",
+              "net.olamaelcu.livtet.biblio.defs#shelfItemView"
+            ]
           },
-          "description": "Books on the shelf, in order."
+          "description": "Books on the shelf — status rows and membership edges — lowest `metadata.position` first, then record URI."
         }
       }
     },

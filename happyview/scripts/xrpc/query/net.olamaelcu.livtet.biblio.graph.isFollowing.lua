@@ -3,7 +3,8 @@
 -- `followed`?
 --
 -- The follow lexicon types `subject` as a DID, but legacy records stored the
--- full `at://<did>` form. Match both spellings against the indexed full-subject
+-- full `at://<did>` form, and a follow of a specific record stored that record's
+-- own AT-URI. Match all three spellings against the indexed full-subject
 -- expression instead of normalizing the column in the predicate.
 
 function handle()
@@ -15,7 +16,8 @@ function handle()
     [[SELECT 1 AS found FROM happyview_records
        WHERE collection = $1 AND did = $2
          AND ((record::jsonb)->>'subject' = $3
-              OR (record::jsonb)->>'subject' = 'at://' || $3)
+              OR (record::jsonb)->>'subject' = 'at://' || $3
+              OR (record::jsonb)->>'subject' LIKE 'at://' || $3 || '/%')
        LIMIT 1]],
     { FOLLOW_COLLECTION, follower, followed }
   )

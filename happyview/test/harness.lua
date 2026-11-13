@@ -358,6 +358,7 @@ return {
   shelf_view_for_uri = shelf_view_for_uri,
   book_shelf_view = book_shelf_view,
   shelf_item_view = shelf_item_view,
+  shelf_entry_view = shelf_entry_view,
   review_view = review_view,
   shelf_ref = shelf_ref,
   owned_shelf = owned_shelf,
@@ -510,31 +511,83 @@ end)
 -- Tests: listBooksOnShelf keyset cursor (P0).
 -- ---------------------------------------------------------------------------
 
-test('listBooksOnShelf selects created_at and emits a {t,u} cursor', function()
+test('listBooksOnShelf reads both record types and emits a {t,u} cursor', function()
   local shelf = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelf/reading'
   local rows = {
-    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/a', did = 'did:plc:x', record = '{}', created_at = '2026-01-03T00:00:00.000Z' },
-    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/b', did = 'did:plc:x', record = '{}', created_at = '2026-01-02T00:00:00.000Z' },
-    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/c', did = 'did:plc:x', record = '{}', created_at = '2026-01-01T00:00:00.000Z' },
+    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/a', did = 'did:plc:x', collection = 'net.olamaelcu.livtet.biblio.bookStatus', record = '{}', created_at = '2026-01-03T00:00:00.000Z' },
+    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelfItem/b', did = 'did:plc:x', collection = 'net.olamaelcu.livtet.biblio.shelfItem', record = '{}', created_at = '2026-01-02T00:00:00.000Z' },
+    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/c', did = 'did:plc:x', collection = 'net.olamaelcu.livtet.biblio.bookStatus', record = '{}', created_at = '2026-01-01T00:00:00.000Z' },
   }
   local response, calls = run_endpoint('query', 'listBooksOnShelf', {
     params = { shelf = shelf, limit = '2' },
     responder = function() return rows end,
   })
 
-  assert_contains(calls[1].sql, 'SELECT uri, did, record, created_at', 'created_at must be selected')
-  assert_contains(calls[1].sql, '(created_at, uri) < ($4, $5)', 'keyset predicate')
+  assert_contains(calls[1].sql, 'SELECT r.uri, r.did, r.record, r.created_at, r.collection', 'created_at and collection must be selected')
+  assert_contains(calls[1].sql, 'r.collection IN ($1, $2)', 'both record types are read')
+  assert_contains(calls[1].sql, 'NOT EXISTS', 'an edge defers to a status row for the same book')
+  assert_contains(calls[1].sql, '(r.created_at, r.uri) < ($6, $7)', 'keyset predicate')
+  assert_equal(calls[1].args[5], 'reading', 'the fixed rkey matches a shelf-less status row')
   assert_true(response.cursor ~= nil, 'page with a probe row emits a cursor')
   local decoded = helpers.decode_cursor(response.cursor)
   assert_equal(decoded.t, '2026-01-02T00:00:00.000Z', 'cursor timestamp comes from the last scanned row')
-  assert_equal(decoded.u, 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/b')
+  assert_equal(decoded.u, 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelfItem/b')
 
   local _, next_calls = run_endpoint('query', 'listBooksOnShelf', {
     params = { shelf = shelf, limit = '2', cursor = response.cursor },
     responder = function() return { rows[3] } end,
   })
-  assert_equal(next_calls[1].args[4], '2026-01-02T00:00:00.000Z', 'cursor.t is bound')
-  assert_equal(next_calls[1].args[5], 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/b', 'cursor.u is bound')
+  assert_equal(next_calls[1].args[6], '2026-01-02T00:00:00.000Z', 'cursor.t is bound')
+  assert_equal(next_calls[1].args[7], 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelfItem/b', 'cursor.u is bound')
+end)
+
+test('listBooksOnShelf emits a status row and a membership edge in one page', function()
+  local shelf = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelf/autumn-stack'
+  local edition = 'at://did:plc:catalog/community.lexicon.media.book.edition/e1'
+  local rows = {
+    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/s1', did = 'did:plc:x', collection = 'net.olamaelcu.livtet.biblio.bookStatus',
+      record = '{"book":{"uri":"' .. edition .. '"},"shelf":"' .. shelf .. '","metadata":{"status":"read"}}' },
+    { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelfItem/i1', did = 'did:plc:x', collection = 'net.olamaelcu.livtet.biblio.shelfItem',
+      record = '{"book":{"uri":"' .. edition .. '"},"shelf":"' .. shelf .. '","metadata":{"position":1}}' },
+  }
+  local response = run_endpoint('query', 'listBooksOnShelf', {
+    params = { shelf = shelf },
+    responder = function(sql)
+      if sql:find('appview_book_lua', 1, true) then
+        return { { title = 'Title', identifiers = '[]', contributors = '[]', created_at = '2026-01-01T00:00:00.000Z' } }
+      end
+      if sql:find('SELECT record FROM happyview_records', 1, true) then
+        return { { record = '{"name":"Autumn stack"}' } }
+      end
+      return rows
+    end,
+  })
+
+  assert_equal(#response.bookShelves, 2, 'both records are on the page')
+  assert_equal(response.bookShelves[1]['$type'], 'net.olamaelcu.livtet.biblio.defs#bookShelfView')
+  assert_equal(response.bookShelves[2]['$type'], 'net.olamaelcu.livtet.biblio.defs#shelfItemView')
+  assert_equal(response.bookShelves[2].metadata.position, 1, 'the edge keeps its curation position')
+end)
+
+test('book_shelf_view derives the fixed shelf of a status-only row', function()
+  helpers_env.db = {
+    raw = function(sql)
+      if sql:find('appview_book_lua', 1, true) then
+        return { { title = 'Title', identifiers = '[]', contributors = '[]', created_at = '2026-01-01T00:00:00.000Z' } }
+      end
+      return { { record = '{"name":"Read"}' } }
+    end,
+  }
+
+  local view = helpers.book_shelf_view({
+    uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/3nread',
+    did = 'did:plc:x',
+    record = '{"book":{"uri":"at://did:plc:catalog/community.lexicon.media.book.edition/e1"},"metadata":{"status":"read"}}',
+  }, helpers.view_cache())
+
+  assert_true(view ~= nil, 'a row without `shelf` is still a bookShelfView')
+  assert_equal(view.shelf.uri, 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelf/read')
+  assert_equal(view.metadata.status, 'read')
 end)
 
 -- ---------------------------------------------------------------------------
@@ -661,6 +714,7 @@ end)
 test('listShelvesWithBooks reuses one edition lookup across shelves', function()
   local edition_uri = 'at://did:plc:x/community.lexicon.media.book.edition/e1'
   local counts = { edition = 0, entries = 0, shelf = 0 }
+  local entries_sql
   local shelf_rows = {
     { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelf/s1', did = 'did:plc:x', record = '{"name":"S1"}' },
     { uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelf/s2', did = 'did:plc:x', record = '{"name":"S2"}' },
@@ -674,12 +728,14 @@ test('listShelvesWithBooks reuses one edition lookup across shelves', function()
         counts.edition = counts.edition + 1
         return { { title = 'Title', identifiers = '[]', contributors = '[]', created_at = '2026-01-01T00:00:00.000Z' } }
       end
-      if sql:find("(record::jsonb)->>'shelf'", 1, true) and sql:find('collection = $1 AND did = $2', 1, true) then
+      if sql:find('r.collection IN ($1, $2)', 1, true) then
         counts.entries = counts.entries + 1
+        entries_sql = sql
         return { {
           uri = 'at://did:plc:x/net.olamaelcu.livtet.biblio.bookStatus/e1',
           did = 'did:plc:x',
-          record = '{"book":{"uri":"' .. edition_uri .. '"},"shelf":"' .. args[3] .. '","metadata":{"status":"read"}}',
+          collection = 'net.olamaelcu.livtet.biblio.bookStatus',
+          record = '{"book":{"uri":"' .. edition_uri .. '"},"shelf":"' .. args[4] .. '","metadata":{"status":"read"}}',
         } }
       end
       if sql:find('SELECT record FROM happyview_records', 1, true) then
@@ -694,6 +750,8 @@ test('listShelvesWithBooks reuses one edition lookup across shelves', function()
   assert_equal(counts.entries, 2)
   assert_equal(counts.shelf, 2)
   assert_equal(counts.edition, 1, 'edition is cached across both shelves')
+  assert_contains(entries_sql, 'NULLS LAST', 'unpositioned books sort after curated ones')
+  assert_contains(entries_sql, 'ORDER BY CASE WHEN', 'the cap is applied after the position order')
 end)
 
 -- ---------------------------------------------------------------------------
@@ -765,14 +823,14 @@ test('listFollowees derives did from subject and pages both cursor shapes', func
   assert_equal(empty_response.total, 0, 'empty page still has total')
 end)
 
-test('listFollowers always emits total and matches did:/at:// subjects', function()
+test('listFollowers pages one row per follower and emits a distinct total', function()
   local follow_rows = {
-    { uri = 'u1', did = 'did:plc:a', record = '{"createdAt":"2026-01-01T00:00:00.000Z"}', created_at = '2026-02-01T00:00:00.000Z' },
-    { uri = 'u2', did = 'did:plc:b', record = '{}', created_at = '2026-02-02T00:00:00.000Z' },
-    { uri = 'u3', did = 'did:plc:c', record = '{}', created_at = '2026-02-03T00:00:00.000Z' },
+    { did = 'did:plc:a', first_uri = 'u1', followed_at = '2026-01-01T00:00:00.000Z' },
+    { did = 'did:plc:b', first_uri = 'u2', followed_at = '2026-02-02T00:00:00.000Z' },
+    { did = 'did:plc:c', first_uri = 'u3', followed_at = '2026-02-03T00:00:00.000Z' },
   }
   local responder = function(sql)
-    if sql:find('count(*)', 1, true) then return { { n = 9 } } end
+    if sql:find('count(DISTINCT did)', 1, true) then return { { n = 9 } } end
     return follow_rows
   end
 
@@ -781,11 +839,13 @@ test('listFollowers always emits total and matches did:/at:// subjects', functio
     responder = responder,
   })
 
-  assert_equal(response.total, 9)
-  assert_equal(response.followers[2].followedAt, '2026-02-02T00:00:00.000Z')
+  assert_equal(response.total, 9, 'total is the distinct follower count')
+  assert_equal(response.followers[2].followedAt, '2026-02-02T00:00:00.000Z', 'followedAt comes from the selected column')
   assert_equal(response.cursor, 'did:plc:b')
-  assert_contains(calls[1].sql, 'created_at')
-  assert_contains(calls[1].sql, "'at://'")
+  assert_contains(calls[1].sql, 'GROUP BY did', 'one row per follower, however many rows name them')
+  assert_contains(calls[1].sql, 'followed_at')
+  assert_contains(calls[1].sql, "LIKE 'at://' || $2 || '/%'", 'a full at-uri subject matches too')
+  assert_contains(calls[2].sql, 'count(DISTINCT did)')
   assert_absent(calls[1].sql, 'split_part')
 
   local cursor_response = run_endpoint('query', 'graph.listFollowers', {
@@ -795,13 +855,14 @@ test('listFollowers always emits total and matches did:/at:// subjects', functio
   assert_equal(cursor_response.total, 9, 'total survives the cursor page')
 end)
 
-test('isFollowing matches both subject spellings without split_part', function()
+test('isFollowing matches every subject spelling without split_part', function()
   local response, calls = run_endpoint('query', 'graph.isFollowing', {
     params = { follower = 'did:plc:a', followed = 'did:plc:b' },
     responder = function() return { { found = 1 } } end,
   })
   assert_true(response.following)
   assert_contains(calls[1].sql, "'at://'")
+  assert_contains(calls[1].sql, "LIKE 'at://' || $3 || '/%'", 'a full at-uri subject matches too')
   assert_absent(calls[1].sql, 'split_part')
   assert_absent(calls[1].sql, 'regexp_replace')
 end)
@@ -1187,23 +1248,26 @@ test('getShelversOfBook finds edition-keyed and TID-keyed rows for one book', fu
     -- be found: the query is keyed by the book, not by the record's key.
     { did = 'did:plc:legacy', uri = 'at://did:plc:legacy/net.olamaelcu.livtet.biblio.bookStatus/3n23ab2mhlkgg' },
     { did = 'did:plc:reader', uri = 'at://did:plc:reader/net.olamaelcu.livtet.biblio.bookStatus/3n25povukncfu' },
+    { did = 'did:plc:shelfitem', uri = 'at://did:plc:shelfitem/net.olamaelcu.livtet.biblio.shelfItem/3n27giv4jq42r' },
   }
   local response, calls = run_endpoint('query', 'getShelversOfBook', {
     params = { bookUri = book, shelvingRkey = 'ignored' },
     responder = function(sql, args)
       assert_true(not string.find(sql, 'rkey', 1, true), 'the query must not filter on rkey')
       assert_equal(args[1], 'net.olamaelcu.livtet.biblio.bookStatus')
-      assert_equal(args[2], book, 'bookUri is bound at $2')
-      assert_equal(args[3], '', 'no cursor on the first page')
-      assert_equal(args[4], 51, 'limit + 1 probe row')
+      assert_equal(args[2], 'net.olamaelcu.livtet.biblio.shelfItem', 'a custom-shelf membership counts as shelving')
+      assert_equal(args[3], book, 'bookUri is bound at $3')
+      assert_equal(args[4], '', 'no cursor on the first page')
+      assert_equal(args[5], 51, 'limit + 1 probe row')
       return rows
     end,
   })
 
   assert_equal(#calls, 1)
-  assert_equal(#response.dids, 2)
+  assert_equal(#response.dids, 3)
   assert_equal(response.dids[1], 'did:plc:legacy')
   assert_equal(response.dids[2], 'did:plc:reader')
+  assert_equal(response.dids[3], 'did:plc:shelfitem', 'a shelfItem-backed reader is a shelver')
   assert_nil(response.cursor)
 end)
 

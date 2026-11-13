@@ -18,6 +18,13 @@ local FIXED_SHELVES = {
   ['dnf'] = 'Did Not Finish',
 }
 
+-- A fixed reading-status rkey, or nil. Mirrors the FIXED_SHELVES keys so a
+-- status can be turned back into the shelf URI it belongs to.
+local function fixed_status(value)
+  if type(value) == 'string' and FIXED_SHELVES[value] ~= nil then return value end
+  return nil
+end
+
 -- Upper bound for a decoded OFFSET and for any keyset page size. A cursor is
 -- client-controlled; without a cap, `{"o": 1e300}` would ask Postgres to walk
 -- an unbounded row count.

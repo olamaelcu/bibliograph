@@ -1,9 +1,13 @@
 -- @include lib/prelude.lua
 -- net.olamaelcu.livtet.biblio.graph.listFollowers — who follows `did`.
 --
--- Rows whose subject is either `did` or legacy `at://did` are matched through
--- the indexed full-subject expression. `total` is required by the lexicon, so
--- it is counted on every page.
+-- Rows whose subject is `did`, legacy `at://did`, or a full AT-URI under that
+-- DID are matched through the indexed full-subject expression. A reader follows
+-- a DID, so several rows can name one follower (a stale at-uri spelling next to
+-- the current one); the page is one row per follower and `total` counts
+-- followers, not rows.
+--
+-- `total` is required by the lexicon, so it is counted on every page.
 
 function handle()
   local did, err = required_did(params.did, 'did')
@@ -12,11 +16,15 @@ function handle()
   local cursor = string_field(params.cursor) or ''
 
   local rows = db.raw(
-    [[SELECT uri, did, record, created_at FROM happyview_records
+    [[SELECT did, min(uri) AS first_uri,
+             (array_agg(COALESCE((record::jsonb)->>'createdAt', created_at) ORDER BY uri))[1] AS followed_at
+        FROM happyview_records
        WHERE collection = $1
          AND ((record::jsonb)->>'subject' = $2
-              OR (record::jsonb)->>'subject' = 'at://' || $2)
-         AND ($3 = '' OR did > $3)
+              OR (record::jsonb)->>'subject' = 'at://' || $2
+              OR (record::jsonb)->>'subject' LIKE 'at://' || $2 || '/%')
+       GROUP BY did
+      HAVING ($3 = '' OR did > $3)
        ORDER BY did ASC
        LIMIT $4]],
     { FOLLOW_COLLECTION, did, cursor, limit + 1 }
@@ -25,18 +33,18 @@ function handle()
   local out = {}
   for i = 1, math.min(#rows, limit) do
     local row = rows[i]
-    local record = record_value(row.record)
     out[#out + 1] = {
       did = row.did,
-      followedAt = record.createdAt or row.created_at,
+      followedAt = row.followed_at,
     }
   end
 
   local counted = db.raw(
-    [[SELECT count(*)::int AS n FROM happyview_records
+    [[SELECT count(DISTINCT did)::int AS n FROM happyview_records
        WHERE collection = $1
          AND ((record::jsonb)->>'subject' = $2
-              OR (record::jsonb)->>'subject' = 'at://' || $2)]],
+              OR (record::jsonb)->>'subject' = 'at://' || $2
+              OR (record::jsonb)->>'subject' LIKE 'at://' || $2 || '/%')]],
     { FOLLOW_COLLECTION, did }
   )
 

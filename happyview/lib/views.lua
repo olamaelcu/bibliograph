@@ -158,6 +158,17 @@ local function status_for_shelf(shelf_uri)
   return nil
 end
 
+-- The shelf a bookStatus row is filed under. Current rows carry `shelf`; rows
+-- written while it was optional carry only a status, so the shelf is the fixed
+-- reading-status shelf that status names.
+local function shelf_uri_of(row, record)
+  local shelf = record.shelf
+  if type(shelf) == 'string' and shelf ~= '' then return shelf end
+  local status = fixed_status(record.metadata and record.metadata.status)
+  if status == nil or type(row.did) ~= 'string' then return nil end
+  return 'at://' .. row.did .. '/' .. SHELF_COLLECTION .. '/' .. status
+end
+
 -- `defs#bookShelfView` for one bookStatus row; nil when the book is unknown.
 local function book_shelf_view(row, cache)
   local record = record_value(row.record)
@@ -165,11 +176,12 @@ local function book_shelf_view(row, cache)
   local book = book_view(book_ref, cache)
   if book == nil then return nil end
 
+  local shelf_uri = shelf_uri_of(row, record)
   local metadata = record.metadata or {}
-  if metadata.status == nil then metadata.status = status_for_shelf(record.shelf) end
+  if metadata.status == nil then metadata.status = status_for_shelf(shelf_uri) end
   if metadata.status == nil then return nil end
 
-  local shelf = shelf_view_for_uri(record.shelf, cache)
+  local shelf = shelf_view_for_uri(shelf_uri, cache)
   if shelf == nil then return nil end
 
   local view = {
@@ -205,6 +217,14 @@ local function shelf_item_view(row, cache)
   if record.createdAt ~= nil then view.createdAt = record.createdAt end
   if record.updatedAt ~= nil then view.updatedAt = record.updatedAt end
   return view
+end
+
+-- Either shelf view, chosen by the row's collection. A `bookStatus` row and a
+-- `shelfItem` row both say "this book is on that shelf"; only the first also
+-- carries a reading status.
+local function shelf_entry_view(row, cache)
+  if row.collection == SHELF_ITEM then return shelf_item_view(row, cache) end
+  return book_shelf_view(row, cache)
 end
 
 local function review_view(row)

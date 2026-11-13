@@ -2,16 +2,18 @@
 -- net.olamaelcu.livtet.biblio.graph.follow — follow a DID.
 --
 -- The record key is an opaque TID, so uniqueness is not a property of the key.
--- Idempotence is enforced here: look the follow up by subject (matching both
--- the current `did:` and legacy `at://did` spellings) before writing. Legacy
--- rows keyed by the subject DID are also found through the old URI fallback.
+-- Idempotence is enforced here: look the follow up by subject before writing,
+-- across every spelling a stored subject has taken — the current `did:`, the
+-- legacy `at://did`, and a full AT-URI under that DID. Legacy rows keyed by the
+-- subject DID are also found through the old URI fallback.
 
 local function existing_follow_uri(subject)
   local rows = db.raw(
     [[SELECT uri FROM happyview_records
        WHERE collection = $1 AND did = $2
          AND ((record::jsonb)->>'subject' = $3
-              OR (record::jsonb)->>'subject' = 'at://' || $3)
+              OR (record::jsonb)->>'subject' = 'at://' || $3
+              OR (record::jsonb)->>'subject' LIKE 'at://' || $3 || '/%')
        ORDER BY uri ASC
        LIMIT 1]],
     { FOLLOW_COLLECTION, caller_did, subject }

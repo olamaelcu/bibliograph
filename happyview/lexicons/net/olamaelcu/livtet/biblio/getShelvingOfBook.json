@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.getShelvingOfBook",
-  "description": "List the shelves a given book is on.",
+  "description": "List the shelves a given book is on, as bookStatus rows and shelfItem memberships.",
   "defs": {
     "main": {
       "type": "query",
@@ -24,7 +24,7 @@
             "minimum": 1,
             "maximum": 100,
             "default": 50,
-            "description": "Maximum number of bookStatus records to return."
+            "description": "Maximum number of shelf entries to return."
           },
           "cursor": {
             "type": "string",
@@ -41,8 +41,11 @@
             "bookShelves": {
               "type": "array",
               "items": {
-                "type": "ref",
-                "ref": "net.olamaelcu.livtet.biblio.defs#bookShelfView"
+                "type": "union",
+                "refs": [
+                  "net.olamaelcu.livtet.biblio.defs#bookShelfView",
+                  "net.olamaelcu.livtet.biblio.defs#shelfItemView"
+                ]
               }
             },
             "cursor": {

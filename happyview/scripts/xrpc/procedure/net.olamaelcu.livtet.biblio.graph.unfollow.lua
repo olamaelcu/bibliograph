@@ -1,17 +1,19 @@
 -- @include lib/prelude.lua
 -- net.olamaelcu.livtet.biblio.graph.unfollow — delete a follow by subject DID.
 --
--- The rkey is opaque, so the records are found by subject (matching both the
--- current `did:` and legacy `at://did` spellings), plus the old subject-DID
--- URI fallback for legacy rows whose subject field is unusable. Every match is
--- deleted; a subject with no matching follow is a 404.
+-- The rkey is opaque, so the records are found by subject across every spelling
+-- a stored subject has taken — the current `did:`, the legacy `at://did`, and a
+-- full AT-URI under that DID — plus the old subject-DID URI fallback for legacy
+-- rows whose subject field is unusable. Every match is deleted; a subject with
+-- no matching follow is a 404.
 
 local function follow_uris(subject)
   local rows = db.raw(
     [[SELECT uri FROM happyview_records
        WHERE collection = $1 AND did = $2
          AND ((record::jsonb)->>'subject' = $3
-              OR (record::jsonb)->>'subject' = 'at://' || $3)
+              OR (record::jsonb)->>'subject' = 'at://' || $3
+              OR (record::jsonb)->>'subject' LIKE 'at://' || $3 || '/%')
        ORDER BY uri ASC]],
     { FOLLOW_COLLECTION, caller_did, subject }
   )

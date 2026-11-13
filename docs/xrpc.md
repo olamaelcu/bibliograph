@@ -291,21 +291,25 @@ decoded record object as `goal`, or `null`. `did` is required and may not be emp
 
 Follow rows are `net.olamaelcu.livtet.biblio.follow` records. The record key is an opaque TID;
 `graph.follow` enforces uniqueness by looking up `subject` before writing. The lexicon types
-`subject` as a DID, but legacy rows may store the full `at://<did>` form and may keep the subject DID
-as their rkey; the read queries match either spelling against the indexed full-subject expression.
-`listFollowees` pages on `rkey` but derives the followed DID from `subject`.
+`subject` as a DID, but a stored subject may instead be the legacy `at://<did>` form or a full
+AT-URI under that DID, and a legacy row may keep the subject DID as its rkey. Every read and every
+write matches all three spellings against the indexed full-subject expression. `listFollowees` pages
+on `rkey` but derives the followed DID from `subject`.
 
 #### `graph.isFollowing`
 
-One probe of the follower's follow collection filtered by either subject spelling returns
+One probe of the follower's follow collection, filtered by any of those three spellings, returns
 `{ following }`. Both DIDs are required and may not be empty. The graph is public data; `follower`
 and `followed` name whose edge to read, not the caller.
 
 #### `graph.listFollowers`
 
 Rows whose `subject` is `did` or `at://did`, ordered by the follower DID (`record.did`) ascending,
-keyset `did > cursor`. `total` is the full follower count and is emitted on every page, including
-pages with a cursor and empty pages; a full page emits the last follower DID as the cursor.
+keyset `did > cursor`. A reader follows a DID, so several rows can name one follower (a stale
+`at://did` spelling beside the current one): the page is one entry per follower and `total` counts
+distinct followers, not rows. `followedAt` is the `createdAt` of the follower's lowest-URI row,
+falling back to that row's indexed `created_at`. `total` is emitted on every page, including pages
+with a cursor and empty pages; a full page emits the last follower DID as the cursor.
 
 #### `graph.listFollowees`
 
@@ -336,10 +340,12 @@ fixed rkey; nothing is derived.
 #### `listShelvesWithBooks`
 
 Pages shelf records ordered by `uri` ascending (optionally scoped to `did`), then runs one query per
-shelf for its `bookStatus` rows ordered by `uri`, capped at `booksPerShelf`, and sorts each shelf's
-books by `metadata.position` ascending (positions absent sort last), then `uri` ascending. Returns
-`{ shelves: [{ shelf, books }], cursor? }`. Rows whose edition or shelf cannot be resolved are
-dropped.
+shelf for that shelf's entries, capped at `booksPerShelf` and ordered in SQL by `metadata.position`
+ascending (positions absent sort last), then `uri` ascending — so the cap keeps the lowest-positioned
+books. Each shelf's books are its `bookStatus` rows plus its `shelfItem` memberships; when both name
+the same book on the same shelf the status row is returned and the item suppressed. Returns
+`{ shelves: [{ shelf, books }], cursor? }`, where each book is a `bookShelfView` or a
+`shelfItemView`. Rows whose edition or shelf cannot be resolved are dropped.
 
 ### Shelf items
 
@@ -369,18 +375,26 @@ with the book URI in the message.
 #### `listBooksOnShelf`
 
 Pages the DID's `bookStatus` rows whose `record.shelf` equals `shelf` (the DID is parsed from the
-shelf URI), keyset `(created_at, uri)` descending, and returns `{ bookShelves, cursor? }`. The
-lexicon declares `NotFound`; the handler returns an empty page instead.
+shelf URI) together with its `shelfItem` memberships for that shelf, keyset `(created_at, uri)`
+descending. An item that duplicates a status row for the same book is suppressed. On a fixed shelf
+(`reading`, `read`, `to-read`, `dnf`), a `bookStatus` row written while `shelf` was optional is
+matched through its `metadata.status`, and its shelf URI is derived from the reader's DID and that
+status. Returns `{ bookShelves, cursor? }` of `bookShelfView | shelfItemView`. The lexicon declares
+`NotFound`; the handler returns an empty page instead.
 
 #### `getShelvingOfBook`
 
 Pages one reader's `bookStatus` rows where `record.book.uri` equals `book`, ordered `uri` ascending,
-offset cursor. Returns `{ bookShelves, cursor? }`.
+offset cursor, together with that reader's `shelfItem` rows for the same book. A status row and an
+item on the same shelf are the same membership, so the status row is returned and the item
+suppressed — an item's shelf is compared against the shelf a status-only row would derive. Returns
+`{ bookShelves, cursor? }` of `bookShelfView | shelfItemView`.
 
 #### `getShelversOfBook`
 
-Groups `bookStatus` rows by `did` where `record.book.uri` equals `bookUri` and pages the groups by
-`min(uri)` ascending, returning `{ bookUri, dids, cursor? }`. Every uri starts with
+Groups the book's rows by `did` where `record.book.uri` equals `bookUri` — a `bookStatus` and a
+`shelfItem` both count as shelving it — and pages the groups by `min(uri)` ascending, returning
+`{ bookUri, dids, cursor? }`. Every uri starts with
 `at://<did>/…`, so `min(uri)` order is lexicographic DID order, which is what makes the keyset
 cursor strict. The record rkey is not derivable from the book: the writer mints a TID per
 (reader, edition), so the book association is the record's `book.uri` and nothing else.

@@ -1,10 +1,12 @@
 -- @include lib/prelude.lua
--- net.olamaelcu.livtet.biblio.getShelversOfBook — distinct DIDs shelving a book.
+-- net.olamaelcu.livtet.biblio.getShelversOfBook — distinct DIDs holding a book.
 --
--- Groups bookStatus rows by `did` for one `book.uri` and pages the groups by
--- `min(uri)`; the cursor is that smallest URI. The record key is never derived
--- from the book: the writer mints a TID per (reader, edition), so the only
--- association a row carries is the `book.uri` it names.
+-- Groups the book's rows by `did` — a `bookStatus` counts, and so does a
+-- `shelfItem` membership, because a reader who filed the book on a custom shelf
+-- has shelved it just the same. Groups are paged by `min(uri)`; the cursor is
+-- that smallest URI. The record key is never derived from the book: the writer
+-- mints a TID per (reader, edition), so the only association a row carries is
+-- the `book.uri` it names.
 
 function handle()
   local bookUri, err = required_at_uri(params.bookUri, 'bookUri')
@@ -14,12 +16,12 @@ function handle()
 
   local rows = db.raw(
     [[SELECT did, min(uri) AS first_uri FROM happyview_records
-       WHERE collection = $1 AND (record::jsonb)->'book'->>'uri' = $2
+       WHERE collection IN ($1, $2) AND (record::jsonb)->'book'->>'uri' = $3
        GROUP BY did
-       HAVING ($3 = '' OR min(uri) > $3)
+       HAVING ($4 = '' OR min(uri) > $4)
        ORDER BY first_uri ASC
-       LIMIT $4]],
-    { BOOK_STATUS, bookUri, cursor, limit + 1 }
+       LIMIT $5]],
+    { BOOK_STATUS, SHELF_ITEM, bookUri, cursor, limit + 1 }
   )
 
   local dids = {}
