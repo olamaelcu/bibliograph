@@ -13,13 +13,13 @@ The stack is `docker-compose.yml`; the tasks are `.mise/tasks/hv-*`.
 flowchart LR
   browser -->|"http://127.0.0.1:3000"| hv["happyview<br/>2.17.4"]
   browser -->|"https://pds.127-0-0-1.sslip.io"| caddy["caddy<br/>internal CA"]
-  caddy --> pds["pds<br/>tranquil 0.7.1"]
+  caddy --> pds["pds<br/>rsky-pds 1.14.18<br/>(built from source)"]
   hv -->|"PLC_URL"| plc["plc<br/>did-method-plc"]
   hv -->|"DID doc → service endpoint"| caddy
   hv -->|"RELAY_URL listRepos"| pds
   pds -->|"registers did:plc"| plc
   plc --> pg[("postgres: plc")]
-  pds --> pg2[("postgres: pds")]
+  pds --> vol[("volume pdsdata<br/>SQLite + blobs")]
   hv --> pg3[("postgres: bibliograph<br/>schema happyview")]
 ```
 
@@ -29,27 +29,28 @@ flowchart LR
 | `pds` | `https://pds.127-0-0-1.sslip.io` | HTTPS only, via Caddy |
 | `plc` | `http://127.0.0.1:2582` | `<did>` path returns the DID document |
 | `caddy` | `:80`, `:443` | redirects 80→443; `pds.127-0-0-1.sslip.io` proxies the whole PDS, `*.pds.127-0-0-1.sslip.io` proxies only `/.well-known/*` and `/xrpc/*` and 301s every other path to the canonical host |
-| `postgres` | `127.0.0.1:5432` | databases `bibliograph`, `plc`, `pds` |
+| `postgres` | `127.0.0.1:5432` | databases `bibliograph`, `plc` |
 | `prometheus` | `127.0.0.1:9090` | unchanged from before HappyView |
 
 ## Pinned images
 
 Pinned by **index digest**, not tag. `2.17.4` never moves, but `latest` on the
-`pds-test` images does; a digest is the only pin that survives an upstream
-rebuild.
+`pds-test` image does; a digest is the only pin that survives an upstream
+rebuild. `rsky-pds` has no anonymously pullable image, so compose builds it
+from a pinned **source commit** (`80f41a3d…`, v1.14.18) instead.
 
 | Image | Digest |
 | --- | --- |
 | `ghcr.io/gamesgamesgamesgamesgames/happyview` | `sha256:a981c30cb2bdad83413aa3126fb0eab6782427d0565f35e8b7349c098de2c841` |
 | `ghcr.io/happyproto/pds-test/plc` | `sha256:6e61dc9c59d79cbc8b6cdcaac7464ae16258849ada92dd7cbbfc6d7979a81c3a` |
-| `ghcr.io/happyproto/pds-test/tranquil` | `sha256:96f4ce1f9eec42ca17e4f6d693f6ae842ffe1618f97c9f51c5604116fb9483ed` |
 | `mailtrap/mailtrap-local` | `sha256:6bada103dffdec9a86e6f2fcb7631f173f0ff3af65f8c5ec80f10becb1469316` |
 
 `plc` is did-method-plc's own server, so the DIDs the PDS mints are real
-`did:plc` DIDs that anything pointed at `PLC_URL` can resolve. `tranquil` is the
-PDS implementation HappyView's own e2e suite runs. `mailtrap-local` catches
-every notification the PDS sends, so account flows never reach the internet;
-`docs/dev-environment.md` covers its inbox and API.
+`did:plc` DIDs that anything pointed at `PLC_URL` can resolve. `rsky-pds` is
+the PDS implementation; `ghcr.io/blacksky-algorithms/rsky-pds` refuses
+anonymous pulls, so compose builds the same commit from source.
+`mailtrap-local` catches every notification the PDS sends, so account flows
+never reach the internet; `docs/dev-environment.md` covers its inbox and API.
 
 ## Bring-up
 
@@ -61,8 +62,9 @@ mise run hv-ca                      # trust Caddy's CA in Chrome and Firefox
 ```
 
 On a volume created before the local network existed, `mise run hv-dbs` adds the
-`plc` and `pds` databases. `docker/postgres-init.sql` does the same on a fresh
-volume.
+`plc` database and drops the `pds` database an older volume still carries.
+`docker/postgres-init.sql` creates `plc` on a fresh volume; it never creates
+`pds`.
 
 ## Provisional account
 
@@ -98,34 +100,30 @@ building the stack.
 
 - **`PUBLIC_URL` is `http://127.0.0.1:3000`, a loopback name.** `is_loopback_url`
   then makes HappyView the spec's localhost OAuth client
-  (`client_id=http://localhost?...`), so the PDS synthesises its client metadata
-  instead of fetching it — TLS trust only has to work one way. The scheme must
-  be `http`: with an `https` loopback URL HappyView panics at boot with
+  (`client_id=http://localhost?...`), so `rsky-pds` derives the client metadata
+  from the loopback rules instead of fetching it, and TLS trust only has to
+  work one way. The scheme must be `http`: with an `https` loopback URL
+  HappyView panics at boot with
   `ClientMetadata(LocalhostClient(NotHttpScheme))`.
   This is the local compose stack; the lescayes deployment switches to the
   tailnet origin with `BASE_PATH=/hv` — see
   [Production: tailnet-only dashboard at `/hv`](#production-tailnet-only-dashboard-at-hv).
-- **The PDS hostname is `pds.127-0-0-1.sslip.io`, not `pds.localhost`.** Handle
-  domains cannot be under a reserved TLD; `createAccount` answers *"This
-  server's handle domain has a reserved TLD"* for `.localhost` and `.test`.
-  Every `*.127-0-0-1.sslip.io` name resolves to 127.0.0.1 through public DNS,
-  so no `/etc/hosts` entry is needed, and Docker network aliases cover the
-  container-to-container path.
+- **The PDS hostname is `pds.127-0-0-1.sslip.io`, and it is also the handle
+  domain.** `PDS_SERVICE_HANDLE_DOMAINS=.pds.127-0-0-1.sslip.io` is what makes
+  accounts `alice.pds.127-0-0-1.sslip.io`. Every `*.127-0-0-1.sslip.io` name
+  resolves to 127.0.0.1 through public DNS, so no `/etc/hosts` entry is needed,
+  and Docker network aliases cover the container-to-container path.
 - **Handle hosts serve resolution and XRPC only; the app surface is canonical.**
-  `https://alice.pds.127-0-0-1.sslip.io/app/login` 301s to
+  `https://alice.pds.127-0-0-1.sslip.io/account` 301s to
   `https://pds.127-0-0-1.sslip.io{uri}`, as does every other handle-host path
-  except `/.well-known/*` and `/xrpc/*`. The PDS account-manager SPA derives its
-  OAuth `client_id` from `window.location.origin`, but the PDS publishes client
-  metadata for one canonical origin, so a login started on a handle host fails
-  PAR with `client_id in metadata does not match request` — the PDS fetches the
-  handle host's copy of `/oauth-client-metadata.json`, which declares
-  `https://pds.127-0-0-1.sslip.io/oauth-client-metadata.json`. A handle-host tab
-  opened before the redirect existed still holds the old origin; reload it.
-- **`ALLOW_PRIVATE_FETCH=true` on the PDS.** The PLC is a compose-network
-  address; without it the PDS's SSRF guard rejects its own DNS answer
-  (`no resolved address for plc is inside the allowed host reach`) and account
-  creation cannot register a `did:plc`.
-- **`CRAWLERS=""` on the PDS.** Unset, it announces every new repo to eight
+  except `/.well-known/*` and `/xrpc/*`. rsky's account pages are
+  server-rendered, so this is a plain canonical-host rule rather than an OAuth
+  client-identity fix: the account pages and the authorization screens belong
+  on the one origin the PDS publishes metadata for.
+- **`PDS_DEV_MODE=true` on the PDS.** The PLC is a compose-network address over
+  plain HTTP; development mode relaxes the outbound policy to private and
+  plain-http destinations, so account creation can register a `did:plc`.
+- **`PDS_CRAWLERS=""` on the PDS.** Unset, it announces every new repo to eight
   public relays, which then try to crawl a hostname that resolves to their own
   loopback. Empty disables the service.
 - **`ALLOW_PRIVATE_DESTINATIONS=true` on HappyView.** The PDS named in a DID
@@ -145,13 +143,15 @@ building the stack.
 - **`happyview_app` has its own `search_path` (`happyview,public`)**, so
   HappyView's unqualified migrations and `db.raw` calls land in the `happyview`
   schema instead of colliding with the catalog's `public` tables.
-- **The PDS cannot reach its lexicon authority** (`extra_hosts` maps
-  `biblio.livtet.olamaelcu.net` to the container's own loopback). These NSIDs
-  resolve through DNS TXT to that host, and its published `follow` schema types
-  `subject` as an at-uri — so every local follow write was rejected with
-  `Invalid field 'subject': invalid format: AtUri`. With the fetch failing, the
-  PDS records `validationStatus: unknown` and accepts the record. The cost is
-  that no record in this network is validated against the deployed schemas.
+- **The PDS keeps compose-network port 3000 and stores its state on disk.**
+  `PDS_PORT=3000` preserves the address Caddy, `RELAY_URL` and `PDS_URL`
+  already use. State is SQLite plus a disk blobstore under
+  `PDS_DATA_DIRECTORY=/data` (the `pdsdata` volume), so the Postgres `pds`
+  database is gone: `mise run hv-dbs` drops it on a volume that still has one.
+  `rsky-pds` does not resolve lexicons to validate
+  writes — it checks only that a record's `$type` equals its collection — so
+  the network needs no lexicon-authority host mapping and cannot reject a local
+  write against a deployed schema.
 
 ## Calling it from the SvelteKit edge
 
@@ -527,10 +527,17 @@ public`.
   database or a fresh compose volume works after that command; no old service
   is required. Without the view, book-rendering queries answer 404 "catalog
   edition is missing" instead of rendering books.
-- **Local records bypass schema validation.** The PDS resolves lexicons from the
-  public authority, so compose blocks that host (see above) and every write
-  answers `validationStatus: "unknown"`. A typo in a record shape will not be
-  caught locally the way it would against a published schema.
+- **Local records are barely validated.** `rsky-pds` does not resolve lexicons
+  from a public authority; it checks only that a record's `$type` equals its
+  collection. A typo in a record body — a wrong field type, an unparseable
+  at-uri — will not be caught locally the way it would against a published
+  schema.
+- **Space records stay outside the index.** HappyView walks the account repos it
+  enumerates with `com.atproto.sync.listRepos`, so a record written into a
+  permissioned-data space (`com.atproto.space.putRecord`) never reaches
+  `happyview_records` or any `/xrpc` query. The space surface belongs to the
+  PDS alone; `docs/dev-environment.md#spaces-permissioned-data` has the client
+  flow.
 - **The edge holds no user session.** `packages/web` injects its XRPC client
   key/secret and relays `Authorization`/`DPoP`; it never runs an OAuth flow or
   stores tokens. A caller that wants procedures must bring a DPoP session

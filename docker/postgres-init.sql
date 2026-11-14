@@ -18,8 +18,8 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO happyview_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE bibliograph IN SCHEMA public
   GRANT SELECT ON TABLES TO happyview_app;
 
--- The local atproto network shares this server: the PLC directory and the PDS
--- each own a database. Created here so a fresh `pgdata` comes up complete;
--- `mise run hv-dbs` applies the same two to an existing volume.
+-- The local atproto network shares this server: the PLC directory is the only
+-- local atproto service that owns a Postgres database. Created here so a fresh
+-- `pgdata` comes up complete; `mise run hv-dbs` applies the same statement to
+-- an existing volume.
 SELECT 'CREATE DATABASE plc' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'plc')\gexec
-SELECT 'CREATE DATABASE pds' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'pds')\gexec

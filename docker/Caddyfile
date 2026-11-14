@@ -11,20 +11,17 @@ http://pds.127-0-0-1.sslip.io, http://*.pds.127-0-0-1.sslip.io {
 	redir https://{host}{uri} permanent
 }
 
-# The canonical PDS origin: XRPC, the account-manager SPA, and the OAuth client
+# The canonical PDS origin: XRPC, the account pages, and the OAuth client
 # metadata document (whose `client_id` names this host).
 https://pds.127-0-0-1.sslip.io {
 	tls internal
 	reverse_proxy pds:3000
 }
 
-# Handle hosts exist for resolution and XRPC, not for the account-manager SPA.
-# That SPA derives its OAuth client_id from `window.location.origin`, while the
-# PDS publishes client metadata for the canonical host only, so a login started
-# on a handle host fails with "client_id in metadata does not match request"
-# (the PDS fetches the handle host's copy, which declares the canonical host).
-# Redirect everything else — including `/` and `/app*` — to the canonical host
-# so the SPA always runs on the origin its metadata names.
+# Handle hosts exist for resolution and XRPC, not for the account pages.
+# Those pages and the authorization screens belong on the one origin the PDS
+# publishes its client metadata for, so redirect everything else — including
+# `/` and `/account*` — to the canonical host.
 https://*.pds.127-0-0-1.sslip.io {
 	tls internal
 

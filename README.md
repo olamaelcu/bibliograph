@@ -190,22 +190,23 @@ Mailtrap Local is a loopback-only SMTP sink, inbox and JSON API. Compose pins
 the `mailtrap/mailtrap-local` image and publishes SMTP on
 `127.0.0.1:3535` and the UI/API on `127.0.0.1:3550`; there is no account,
 credential or external mail service. The PDS relays every notification through
-`[email.smarthost]` in `docker/pds-config.toml` (`host = "mailtrap"`,
-`port = 3535`, `tls = "none"`), sends from
+`PDS_EMAIL_SMTP_URL` in `docker-compose.yml`
+(`smtp://mailtrap:3535?ignoreTLS=true`, no credentials), sends from
 `noreply@pds.127-0-0-1.sslip.io`, and persists captured messages in the
 `mailtrapdata` volume. The sandbox accepts `@example.invalid` recipients and
 nothing leaves the machine.
 
 Open `http://127.0.0.1:3550` for the inbox, or use
 `http://127.0.0.1:3550/api/v1/messages` and
-`http://127.0.0.1:3550/api/v1/message/{id}`. The seed fixtures start
-unverified, so trigger verification rather than password reset; the PDS only
-sends password-reset mail to a verified address.
+`http://127.0.0.1:3550/api/v1/message/{id}`. `rsky-pds` has no
+`resendVerification`; request the confirmation email with a session:
 
 ```bash
-DID=$(curl -sk 'https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.identity.resolveHandle?handle=seed-01.pds.127-0-0-1.sslip.io' | jq -r .did)
-curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.resendVerification \
-  -H 'content-type: application/json' -d "{\"did\":\"$DID\"}"
+JWT=$(curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.createSession \
+  -H 'content-type: application/json' \
+  -d '{"identifier":"seed-01.pds.127-0-0-1.sslip.io","password":"Dev-account-password1"}' | jq -r .accessJwt)
+curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.requestEmailConfirmation \
+  -H "authorization: Bearer $JWT"
 curl -s 'http://127.0.0.1:3550/api/v1/messages' |
   jq '.messages[] | {id, subject, to: [.to[].address]}'
 ```

@@ -351,8 +351,8 @@ runs the hydration tasks, and leaves rows queued; the task itself fails loudly
 if invoked. It never no-ops or reports fake success.
 
 Local development runs the worker against the local Postgres with `mise run
-worker` (or `pnpm worker:dev`). The local tranquil PDS issues `did:plc`
-accounts and has `selfHostedDidWebEnabled: false`, so set `ATP_SERVICE_DID` to
+worker` (or `pnpm worker:dev`). The local rsky PDS mints `did:plc` accounts only
+(its `createAccount` always registers a `did:plc`), so set `ATP_SERVICE_DID` to
 that account to mint edition URIs under it; the default `did:web` authority
 cannot be hosted there. Hydration works without publisher credentials, while a
 live `pds-publish` also needs the publisher account provisioned on the PDS.

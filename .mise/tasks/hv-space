@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#MISE description="Smoke-test permissioned-data spaces on the local PDS: space, records, delegation token and DPoP-bound credential"
+# Runs scripts/space-smoke.mjs, the one implementation of the space client, so
+# the task and any manual run cannot drift.
+#
+# Creates (idempotently) a `community.lexicon.test.space/main` space anchored on
+# the provisional account, writes a `community.lexicon.test.post` record into
+# it, then repeats the reads the way a third-party app must: delegation token ->
+# DPoP issuance proof -> space credential -> `getSpace`/`listRecords` under the
+# DPoP scheme with an `ath`-bound proof. Fails on the first step that does not
+# hold, including the two negative cases (no proof, proof from another key).
+#
+# TLS verifies against `.cache/caddy-root.crt` (written by `mise run hv-ca`).
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec node scripts/space-smoke.mjs "$@"

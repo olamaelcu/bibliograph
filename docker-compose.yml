@@ -61,68 +61,75 @@ services:
     ports:
       - "2582:2582"
 
-  # tranquil-pds, the implementation HappyView's own e2e suite runs.
+  # rsky-pds (rsky 1.14.18), built from the workspace at a pinned commit:
+  # upstream publishes this image only as a private GHCR package. State is
+  # SQLite plus a disk blobstore under PDS_DATA_DIRECTORY, so there is no
+  # Postgres database for the PDS (`mise run hv-dbs` drops the one an older
+  # volume still carries).
   pds:
-    # ghcr.io/happyproto/pds-test/tranquil:latest, pinned by index digest.
-    image: ghcr.io/happyproto/pds-test/tranquil@sha256:96f4ce1f9eec42ca17e4f6d693f6ae842ffe1618f97c9f51c5604116fb9483ed
+    build:
+      # BuildKit clones the commit and builds rsky-pds/Dockerfile from the
+      # workspace root; the Dockerfile's cache mounts make rebuilds cheap.
+      context: https://github.com/blacksky-algorithms/rsky.git#80f41a3d98a22a3ba2563d461460ef9a35adbc68
+      dockerfile: rsky-pds/Dockerfile
+    image: bibliograph/pds:rsky-1.14.18
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       plc:
         condition: service_started
-      # The PDS starts sending as soon as an account flow enqueues a message;
-      # mail is queued and retried if the sandbox is not listening yet.
+      # The PDS sends account mail as soon as a flow enqueues it; delivery is
+      # retried if the sandbox is not listening yet.
       mailtrap:
         condition: service_started
     environment:
-      DATABASE_URL: postgres://bibliograph:bibliograph@postgres:5432/pds
-      PLC_DIRECTORY_URL: http://plc:2582
-      TRANQUIL_PDS_ALLOW_INSECURE_SECRETS: "1"
-      DISABLE_RATE_LIMITING: "true"
-      DISABLE_ACCOUNT_VERIFICATION_GATE: "true"
-      # The PLC is a compose-network address. Without this, the PDS's SSRF guard
-      # rejects the DNS answer ("no resolved address for plc is inside the
-      # allowed host reach") and account creation cannot register a did:plc.
-      ALLOW_PRIVATE_FETCH: "true"
-      # Empty on purpose: unset, the PDS announces every new repo to eight public
-      # relays (bsky.network, firehose.network, …) on account creation. Those
-      # relays would then try to crawl https://pds.127-0-0-1.sslip.io, which
-      # resolves to 127.0.0.1 on their own machines. Set to a comma-separated
-      # list of relay URLs to announce to a reachable one instead.
-      CRAWLERS: ""
-    # The public lexicon authority this network's NSIDs resolve to. Pointing it
-    # at the container's own loopback makes the fetch fail, and the PDS then
-    # records `validationStatus: unknown` instead of validating against schemas
-    # this repo has diverged from (the published `follow` types `subject` as an
-    # at-uri). Keeps the local network hermetic: no record here is checked
-    # against the deployed lexicons.
-    extra_hosts:
-      - "biblio.livtet.olamaelcu.net:127.0.0.1"
+      # Keep the compose-network port the rest of the stack already speaks:
+      # Caddy's reverse_proxy, HappyView's RELAY_URL and hv-backfill's PDS_URL
+      # all say pds:3000.
+      PDS_PORT: "3000"
+      PDS_HOSTNAME: pds.127-0-0-1.sslip.io
+      PDS_SERVICE_DID: did:web:pds.127-0-0-1.sslip.io
+      # Accounts are <name>.pds.127-0-0-1.sslip.io. Spelled out instead of
+      # relying on rsky's ".{PDS_HOSTNAME}" default so the handle suffix and
+      # the fixture scripts cannot drift apart.
+      PDS_SERVICE_HANDLE_DOMAINS: .pds.127-0-0-1.sslip.io
+      PDS_DATA_DIRECTORY: /data
+      # Without this the blobstore config falls back to S3 with no bucket;
+      # this stack stores blobs on disk.
+      PDS_BLOBSTORE_DISK_LOCATION: /data/blobs
+      # The PLC is a plain-http compose-network address. Development mode
+      # relaxes the outbound policy to private and plain-http destinations,
+      # which is what the previous PDS's ALLOW_PRIVATE_FETCH did.
+      PDS_DEV_MODE: "true"
+      PDS_DID_PLC_URL: http://plc:2582
+      PDS_INVITE_REQUIRED: "false"
+      PDS_RATE_LIMITS_ENABLED: "false"
+      # Empty on purpose: unset, the PDS announces every new repo to eight
+      # public relays, which then try to crawl a name that resolves to their
+      # own loopback. Set to a comma-separated list to announce to a
+      # reachable relay instead.
+      PDS_CRAWLERS: ""
+      # Local-dev credentials and keys. These are throwaway literals pinned so
+      # sessions survive `docker compose up` recreations; nothing outside this
+      # machine ever sees them.
+      PDS_ADMIN_PASS: "local-dev-rsky-admin-password"
+      PDS_JWT_SECRET: "local-dev-rsky-jwt-secret-0123456789abcdefghijklmnop"
+      PDS_DPOP_SECRET: "beee1b38d242c50c763113bb985c216344ac99ce098a7f3bbf8d2c7e515ed292"
+      PDS_REPO_SIGNING_KEY_K256_PRIVATE_KEY_HEX: "1b4cb7f3bfb8f1522694433b0c18c91f6008992e6dd27436e6b5a8909934af3a"
+      PDS_PLC_ROTATION_KEY_K256_PRIVATE_KEY_HEX: "8f228315807ff339628931ab07ffa21cc8ee897c83f69a440be27a2c2d87af59"
+      # Mailtrap Local: plain SMTP, no credentials, no TLS.
+      PDS_EMAIL_SMTP_URL: "smtp://mailtrap:3535?ignoreTLS=true"
+      PDS_EMAIL_FROM_ADDRESS: noreply@pds.127-0-0-1.sslip.io
+      PDS_EMAIL_FROM_NAME: Bibliograph PDS
     volumes:
-      - ./docker/pds-config.toml:/etc/tranquil-pds/config.toml:ro
-      - pdsdata:/var/lib/tranquil-pds/blobs
+      # rsky's SQLite stores (account, sequencer, did cache), the per-actor
+      # repos under `actors/`, and blobs under `blobs/` on first upload.
+      - pdsdata:/data
     ports:
       - "2583:3000"
 
-  # Serves the desktop dev build's OAuth client document on the PDS's own
-  # loopback. The PDS fetches `client_id http://localhost:6010/...` from its own
-  # namespace, where nothing listens; this shares that namespace and forwards
-  # to the host's platform dev server, so the document keeps one source and no
-  # TLS trust or host name has to be arranged for the fetch.
-  pds-client-doc:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on:
-      - pds
-    network_mode: "service:pds"
-    volumes:
-      - ./docker/pds-client-doc.Caddyfile:/etc/caddy/Caddyfile:ro
-
   # Mailtrap Local: a self-contained SMTP sink, web inbox and JSON API with no
   # account, credentials or external service. The PDS relays every notification
-  # it sends here instead of the internet (see `[email]` in
-  # `docker/pds-config.toml`).
+  # it sends here instead of the internet (see `PDS_EMAIL_SMTP_URL` on `pds`).
   mailtrap:
     # mailtrap/mailtrap-local:0.5.0, pinned by index digest.
     image: mailtrap/mailtrap-local@sha256:6bada103dffdec9a86e6f2fcb7631f173f0ff3af65f8c5ec80f10becb1469316

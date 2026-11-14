@@ -9,8 +9,8 @@ Two subcommands share one account path:
 
 The network is hermetic: the PDS is `https://pds.127-0-0-1.sslip.io` (Caddy's
 internal CA), DIDs are registered in the local PLC, and nothing is announced to
-public relays (`CRAWLERS=""` in the compose file). The script never talks to
-plc.directory or the public network.
+public relays (`PDS_CRAWLERS=""` in the compose file). The script never talks to
+public plc.directory or the public network.
 
 Determinism: the fixture list is code, timestamps are fixed offsets from
 `FIXTURE_EPOCH`, and record keys are derived from the account index, so two
@@ -240,7 +240,13 @@ def resolve_handle(handle: str) -> str | None:
     try:
         return http("GET", url).get("did") or None
     except ApiError as err:
-        if err.status in (400, 404):
+        # 400/404 is the reference PDS's "unknown handle". rsky-pds answers 500
+        # InternalServerError for a handle on one of its own domains with no
+        # account (its handler maps the resolver failure to RuntimeError), so a
+        # fresh store looks like a server fault. A connection failure is status
+        # 0 and still raises; a genuinely broken PDS then fails in
+        # createAccount, not here.
+        if err.status in (400, 404, 500):
             return None
         raise
 

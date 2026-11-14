@@ -1,10 +1,10 @@
 # Local development
 
-The local stack is Postgres, a local PLC directory, a local PDS, Mailtrap Local,
-Caddy, and HappyView. Identity resolution, dashboard sign-in and email happen
-entirely against that local network — no `plc.directory`, no public relay, no
-real ATProto account, and no outbound mail. `docs/happyview.md` has the
-reasoning behind each setting; this page is the day-to-day loop.
+The local stack is Postgres, a local PLC directory, an rsky PDS, Mailtrap Local,
+Caddy, and HappyView. Identity resolution, dashboard sign-in and email all
+resolve inside it: no `plc.directory`, no public relay, no account on the public
+network, no outbound mail. `docs/happyview.md` has the reasoning behind each
+setting; this page is the day-to-day loop.
 
 ## Bringing it up
 
@@ -15,6 +15,7 @@ mise run hv-seed              # make it superuser, write the admin key + XRPC cl
 mise run hv-ca                # trust Caddy's CA in Chrome and Firefox
 mise run hv-deploy            # upload the lexicons, query scripts and indexes
 mise run hv-fixtures          # seed-01 … seed-08 plus activity, then verify
+mise run hv-space             # permissioned-data space for the provisional account
 mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 ```
 
@@ -33,33 +34,33 @@ mise run web                  # SvelteKit edge on http://127.0.0.1:5176
 ## Local email
 
 The PDS relays every notification it sends — password reset, email
-verification, welcome — to the pinned Mailtrap Local container rather than
-resolving recipient MX records. Nothing leaves the machine, so fixture
-addresses such as `seed-01@example.invalid` are fine: the sandbox accepts every
-sender and recipient. `docker/pds-config.toml` sets `[email]` and
-`[email.smarthost]` with `tls = "none"` and no credentials, which is exactly
-what Mailtrap Local requires. Captured mail lives in the `mailtrapdata` volume
-across restarts.
+verification, welcome — to the pinned Mailtrap Local container instead of
+resolving recipient MX records. Nothing leaves the machine: the sandbox accepts
+every sender and recipient, so fixture addresses such as
+`seed-01@example.invalid` are fine. `docker-compose.yml` sets
+`PDS_EMAIL_SMTP_URL=smtp://mailtrap:3535?ignoreTLS=true` plus
+`PDS_EMAIL_FROM_ADDRESS`, a plain SMTP session with no credentials and no TLS.
+Captured mail lives in the `mailtrapdata` volume across restarts.
 
 Open `http://127.0.0.1:3550` for the inbox, or drive it over the JSON API. The
-seeded fixture accounts start unverified, and the PDS only sends *secret*
-notices (password reset, 2FA) to a verified channel — an unverified account is
-skipped with `doesn't have a valid recipient`. So the end-to-end check for an
-existing fixture is the verification email, which needs no authentication:
+end-to-end check is the confirmation email. `requestEmailConfirmation` is scoped
+to the caller's own account email, so it takes a session:
 
 ```bash
-DID=$(curl -sk 'https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.identity.resolveHandle?handle=seed-01.pds.127-0-0-1.sslip.io' |
-  jq -r .did)
-curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.resendVerification \
+JWT=$(curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.createSession \
   -H 'content-type: application/json' \
-  -d "{\"did\":\"$DID\"}"
+  -d '{"identifier":"seed-01.pds.127-0-0-1.sslip.io","password":"Dev-account-password1"}' |
+  jq -r .accessJwt)
+curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.requestEmailConfirmation \
+  -H "authorization: Bearer $JWT"
 
 curl -s 'http://127.0.0.1:3550/api/v1/messages' |
   jq '.messages[] | {id, from: .from.address, to: [.to[].address], subject}'
 ```
 
-The code is in the message body, so refetch by `id` only when you need it.
-Once an account's email is verified, `requestPasswordReset` delivers too:
+The code is in the message body, so refetch by `id` when you need it.
+`requestPasswordReset` delivers for any account that has an email address, and
+takes no session:
 
 ```bash
 curl -sk -X POST https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.requestPasswordReset \
@@ -73,18 +74,17 @@ Fetch one message in full by the `id` above (its `text` carries the code):
 curl -s http://127.0.0.1:3550/api/v1/message/<id> | jq '{subject, text}'
 ```
 
-The UI and API have no authentication and are published on loopback only.
+The inbox is unauthenticated and published on loopback only.
 `curl -s -X DELETE http://127.0.0.1:3550/api/v1/messages -d '{"all":true}'`
-wipes the inbox when stale messages get in the way.
+wipes it when stale messages get in the way.
 
 ## Seeding test accounts and activity
 
-`hv-account` mints one account (`alice`, the dashboard superuser) and nothing
-else, so a fresh stack has no activity to render. `hv-fixtures` seeds a small
-lived-in network: eight accounts, their social records, and the Livtet records
-the activity queries read. It runs the whole loop — accounts, records,
-backfill, verify — and fails if the seeded data does not come back through
-`/xrpc`.
+`hv-account` mints one account (`alice`, the dashboard superuser) and leaves the
+network at that. `hv-fixtures` seeds a small lived-in network: eight accounts,
+their social records, and the Livtet records the activity queries read. It runs
+the whole loop — accounts, records, backfill, verify — and fails unless the
+seeded data comes back through `/xrpc`.
 
 ```bash
 mise run hv-accounts          # create seed-01 … seed-08 on the PDS
@@ -100,9 +100,9 @@ updates the same record keys in place. `mise run hv-fixtures` implies
 
 The catalog owns no data of its own: every edition arrives through the worker's
 ingest from a provider. `hv-fixtures` reads catalog editions and joins them to
-`pds_cids`, so on a fresh stack it fails with
-`the catalog has no editions with identifiers, contributors, a cover and a
-published CID`. Seed the catalog before the fixtures:
+`pds_cids`, so the catalog seed runs first; against an empty catalog it stops
+with `the catalog has no editions with identifiers, contributors, a cover and a
+published CID`.
 
 ```bash
 mise run catalog-schema       # containers, triggers, read views
@@ -131,24 +131,21 @@ rather than minting new ones.
 | password | `Dev-account-password1` (`HV_SEED_PASSWORD` overrides it) |
 | count | 8 (`HV_SEED_ACCOUNTS` overrides it) |
 
-The suffix is the PDS's `hostname` (`docker/pds-config.toml`), not a free
-choice: `createAccount` derives the handle domain from it, and a reserved TLD
-such as `.localhost` is rejected outright. Every account's DID is a real
-`did:plc` registered with the local PLC, minted with
-`POST /xrpc/com.atproto.server.createAccount`; no `plc.directory` call is
-involved. Emails and handles are fixed so re-runs converge instead of piling
-up identities.
+The suffix is `PDS_SERVICE_HANDLE_DOMAINS` (`.pds.127-0-0-1.sslip.io`) in
+`docker-compose.yml`: `createAccount` derives the handle domain from the PDS
+hostname. Every account's DID is a real `did:plc` registered with the local PLC
+by `POST /xrpc/com.atproto.server.createAccount`. Emails and handles are fixed
+so re-runs converge on the same identities.
 
 Both commands print the handle/DID table and the password at the end; copy a
-handle from there. A client pointed at this PLC has no handle suggestions: the
-accounts exist only in the local directory, so Livtet's typeahead is disabled
-by design (`onPublicNetwork()` is false when `plcDirectoryBase()` is not
-`https://plc.directory`).
+handle from there. Livtet disables handle typeahead against this PLC
+(`onPublicNetwork()` is false when `plcDirectoryBase()` is not
+`https://plc.directory`), because the accounts live only in the local
+directory.
 
 Existence checks use `com.atproto.identity.resolveHandle` per fixed handle.
-The PDS also exposes `com.atproto.admin.searchAccounts`, but it answers `401
-AuthenticationRequired` here: this stack provisions no admin credential, so
-there is nothing to authenticate with.
+`com.atproto.admin.searchAccounts` answers HTTP Basic auth as
+`admin:<PDS_ADMIN_PASS>` (the dev literal is in `docker-compose.yml`).
 
 ### Records
 
@@ -162,7 +159,7 @@ from Postgres. Per account:
 | `net.olamaelcu.livtet.actor.profile` | 1 (`self`) |
 | `app.bsky.actor.profile` | 1 (`self`) |
 | `net.olamaelcu.livtet.biblio.shelf` | 5 (the four fixed shelves + one custom) |
-| `net.olamaelcu.livtet.biblio.bookStatus` | 6 (the fixture keeps the legacy edition-rkey shape; the app writes TIDs) |
+| `net.olamaelcu.livtet.biblio.bookStatus` | 6 (edition rkeys from the fixture, TIDs from the app) |
 | `net.olamaelcu.livtet.biblio.shelfItem` | 3 on the custom shelf |
 | `community.lexicon.media.book.review` | 2 |
 | `net.olamaelcu.livtet.biblio.follow` | 2 (TID rkeys) |
@@ -177,31 +174,29 @@ from a fixture epoch and rkeys are derived from the account index, so the same
 fixture list always produces the same records. The editions come from
 `public.appview_book_lua` joined to `public.pds_cids` — real catalog URIs with
 a published CID, read with `psql` from `DATABASE_URL` — because the read views
-drop activity whose edition is not in the catalog. On a database without the
-read model, run `mise run catalog-schema` first.
+drop activity whose edition is not in the catalog. Run `mise run
+catalog-schema` first on a database without the read model.
 
 Follow records use TID rkeys. Before writing them, the seed reconciles the
-account's existing follows by subject, deleting a legacy subject-DID-rkey row
-or duplicate for the same target so a rerun converges on one record. Rows left
-over from an earlier seed are not rewritten in place: a fixture run deletes the
-legacy/duplicate row and writes the TID-keyed record. Until then they remain
-readable through `graph.listFollowees` and deletable through `graph.unfollow`.
+account's existing follows by subject: a subject-DID-rkey row or a duplicate
+for the same target is deleted and the TID-keyed record written, so a rerun
+converges on one record.
 
 ### Backfill is mandatory
 
-Jetstream is deliberately closed (`ws://127.0.0.1:1`), so records written
-straight to the PDS are invisible to HappyView until a backfill indexes them.
-`hv-fixtures` calls `POST /admin/backfill` with `{"did": …}` for every seed
-account — one job per repo, because HappyView filters the walk to the
-collections it has lexicons for — then polls `happyview.happyview_records`
-until the expected counts land. Without that step every query answers empty.
+Jetstream is closed (`ws://127.0.0.1:1`), so records written straight to the PDS
+stay invisible to HappyView until a backfill indexes them. `hv-fixtures` calls
+`POST /admin/backfill` with `{"did": …}` for every seed account — one job per
+repo, because HappyView filters the walk to the collections it has lexicons for
+— then polls `happyview.happyview_records` until the expected counts land.
+Without that step every query answers empty.
 
 The compose stack also runs `hv-backfill`, which repeats that call on a 15 s
 cadence for any repo whose head moved, so records another client writes to the
-PDS (the desktop, a manual `putRecord`) reach the index within a pass instead
-of never. It keeps the last-seen head per repo in the `hv_backfill_state`
-volume; an idle pass is one `listRepos`. The profile pages still read through
-the app's five-minute actor cache, so a change can take that long to paint.
+PDS (the desktop, a manual `putRecord`) reach the index within a pass. It keeps
+the last-seen head per repo in the `hv_backfill_state` volume; an idle pass is
+one `listRepos`. The profile pages read through the app's five-minute actor
+cache, so a change can take that long to paint.
 
 ### Reset
 
@@ -215,21 +210,69 @@ mise run hv-fixtures --reset
 and backfills again. The accounts themselves are kept, so their DIDs stay
 stable. Plain `hv-fixtures` never deletes anything.
 
+## Spaces (permissioned data)
+
+The PDS serves both halves of the permissioned-data proposal:
+`com.atproto.simplespace.*` manages spaces anchored on the caller's DID, and
+`com.atproto.space.*` is the host surface for their records. Space records live
+under the space URI, not in the account's repo:
+
+```text
+at://did:plc:…/space/community.lexicon.test.space/main
+at://did:plc:…/space/community.lexicon.test.space/main/did:plc:…/community.lexicon.test.post/smoke
+```
+
+```bash
+mise run hv-space                                        # create, write, then read through a credential
+mise run hv-space --type community.example.feed --skey main --handle alice.pds.127-0-0-1.sslip.io
+```
+
+`hv-space` runs `scripts/space-smoke.mjs` and is idempotent: the space
+(`community.lexicon.test.space/main`, policy `public`, app access `open`) and
+its `community.lexicon.test.post/smoke` record keep their URIs across runs. It
+walks both access paths and fails on the first step that does not hold:
+
+| Step | Call | Who |
+| --- | --- | --- |
+| manage | `simplespace.createSpace`, `listSpaces` | account session |
+| write | `space.putRecord`, `listRecords`, `getLatestCommit` | account session (owner) |
+| grant | `space.getDelegationToken` | account session covering `read` |
+| exchange | `space.getSpaceCredential` | grant + DPoP issuance proof |
+| read | `space.getSpace`, `space.listRecords` | `Authorization: DPoP <credential>` + `ath`-bound proof |
+
+A space credential is a grant over every repo in the space, so the PDS accepts
+it only under the `DPoP` scheme, next to a proof from the key it was minted
+for; the delegation token it is exchanged from is single-use, and proofs carry
+`htu` as origin + path with no query. `hv-space` asserts all three: a request
+without a proof and a request with a proof from a fresh key are both refused.
+
+Configuration: `PDS_URL` / `HV_CA` for the endpoint and Caddy's root
+certificate, `--handle` / `--password` / `--type` / `--skey` for the account and
+space. `PDS_SPACE_OPLOG_WINDOW` bounds how many repo ops each space keeps for
+`space.listRepoOps` (default 10000 rows); the compose file leaves the default.
+
+Space records stay outside the AppView: HappyView indexes the account repos it
+walks through `com.atproto.sync.listRepos`, so a space write does not appear in
+the dashboard or in any `/xrpc` query. A space anchored on a community DID
+rather than an account is served by the workspace's `rsky-space-host` binary
+(`SPACEHOST_*` configuration, one typed space per authority); the local stack
+exercises the account-anchored `simplespace` path.
+
 ## Admin curation
 
-`/admin` is an operator-only area: provider search + ingest, edition merge, and
-the dedicated edition, contributor and publisher editors. It is not linked from
-the public navigation. Set the same `ADMIN_TOKEN` on the
-worker and the edge (`.env` or the packaged `worker.env`/`web.env`):
+`/admin` is an operator-only area reachable by URL only: provider search +
+ingest, edition merge, and the dedicated edition, contributor and publisher
+editors. Set the same `ADMIN_TOKEN` on the worker and the edge (`.env` or the
+packaged `worker.env`/`web.env`):
 
 ```bash
 export ADMIN_TOKEN=dev-admin-token
 export WORKER_ADMIN_URL=http://127.0.0.1:9465
 ```
 
-The worker starts a loopback admin API on `WORKER_ADMIN_HOST`:`WORKER_ADMIN_PORT`
-(default `127.0.0.1:9465`). Without `ADMIN_TOKEN` it logs that the admin API is
-disabled, and the edge answers every `/admin` path with 404. Sign in at
+The worker serves a loopback admin API on `WORKER_ADMIN_HOST`:`WORKER_ADMIN_PORT`
+(default `127.0.0.1:9465`). Without `ADMIN_TOKEN` the worker logs that the admin
+API is disabled and the edge answers every `/admin` path with 404. Sign in at
 `http://127.0.0.1:5176/admin/login`; the token becomes an HttpOnly,
 SameSite=Strict cookie and is never rendered into the page.
 
@@ -239,22 +282,22 @@ revalidates the candidate server-side in the worker before minting an edition.
 The merge workbench unions identifiers, copies the chosen scalar fields from the
 chosen records, applies the contributor/publisher source or union, deletes the
 duplicate editions (their outbox rows become `delete`) and keeps the base URI.
-Reader activity records that referenced deleted URIs are intentionally left
-untouched.
+Reader activity records that referenced deleted URIs stay untouched by design.
 
 ## Database schemas
 
-HappyView creates unqualified tables, including a `labels` table. It therefore
-runs in its own schema so those tables stay out of the catalog's `public`
-schema:
+HappyView creates unqualified tables, including a `labels` table, so it runs in
+its own schema and those tables stay out of the catalog's `public` schema:
 
 - App: `DATABASE_URL=…/bibliograph` (public only).
 - HappyView: `HAPPYVIEW_DATABASE_URL=postgres://happyview_app:happyview@…/bibliograph`.
 
 `happyview_app` is a login role whose default `search_path` is
 `happyview,public`; sqlx ignores `?options=…` in the URL, so the role is what
-keeps the two apart. `docker/postgres-init.sql` creates the role, the schema and
-the `plc`/`pds` databases for the compose Postgres.
+keeps the two apart. `docker/postgres-init.sql` provisions the role, the schema
+and the `plc` database. The PDS holds its state in SQLite plus a disk blobstore
+under `PDS_DATA_DIRECTORY` (the `pdsdata` volume), so Postgres carries the PLC,
+the catalog and HappyView only.
 
 HappyView stores `record` as **text JSON** and `created_at` as text, and its
 `db.raw` cannot decode jsonb or timestamptz columns. Lua scripts that join
@@ -270,22 +313,18 @@ provisional account:
 alice.pds.127-0-0-1.sslip.io / Dev-account-password1
 ```
 
-The PDS login page runs on the canonical host. Opening a handle host directly
-(for example `https://alice.pds.127-0-0-1.sslip.io/app/login`) redirects there,
-because the account-manager SPA's OAuth `client_id` is canonical-host-only; a
-tab that loaded the handle-host app before that redirect existed keeps the old
-origin and must be reloaded, or the PDS rejects the login with
-`client_id in metadata does not match request`.
+The PDS account pages run on the canonical host; a handle host redirects there,
+so `https://alice.pds.127-0-0-1.sslip.io/account` lands on
+`https://pds.127-0-0-1.sslip.io/account`.
 
 The redirect chain crosses to `https://pds.127-0-0-1.sslip.io/oauth/authorize`,
-so Caddy's root CA has to be trusted first: `mise run hv-ca` installs it into
-Chrome's and Firefox's user stores, and `mise run hv-ca --system` adds it to the
-system store for curl and friends. Until it is trusted the authorize page fails
-TLS.
+so trust Caddy's root CA first: `mise run hv-ca` installs it into Chrome's and
+Firefox's user stores, and `mise run hv-ca --system` adds it to the system store
+for curl and friends. Until it is trusted the authorize page fails TLS.
 
 `mise run hv-seed` has already inserted the account into `happyview_users` as a
-superuser, so no post-login bootstrap is involved. An account that is *not*
-seeded is refused, and the refusal names its DID.
+superuser, so there is no post-login bootstrap. An account that is not seeded is
+refused, and the refusal names its DID.
 
 ## Deploying lexicons/scripts
 
@@ -293,9 +332,9 @@ seeded is refused, and the refusal names its DID.
 mise run hv-deploy
 ```
 
-Uploads the 24 lexicons in `happyview/lexicons/` and the 17 Lua queries in
-`happyview/scripts/xrpc/query/`, each with the `target_collection` from the
-original deploy script, then applies `happyview/sql/indexes.sql` through the
+Uploads the lexicons under `happyview/lexicons/` and the Lua query and procedure
+scripts under `happyview/scripts/xrpc/`, each with the `target_collection` from
+the original deploy script, then applies `happyview/sql/indexes.sql` through the
 compose Postgres. Re-running is safe: HappyView bumps the revision instead of
 erroring, and the index SQL is `IF NOT EXISTS`.
 
@@ -309,6 +348,6 @@ inlines into each script.
 `/xrpc/*` is served by HappyView, not by the SvelteKit app, and it is not the
 public origin: `packages/web` proxies it server-side with
 `HAPPYVIEW_CLIENT_KEY` and `HAPPYVIEW_CLIENT_SECRET`, and strips those headers
-from anything a caller sends. Queries answer anonymous callers; procedures need
+from anything a caller sends. Queries answer anonymous callers; procedures take
 a DPoP session. `docs/happyview.md` has the header contract, the DPoP
 provisioning flow and the error mapping.
