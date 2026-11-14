@@ -9,12 +9,16 @@
  */
 
 import {
+  EDGE_PROCEDURES,
   ENTITY_PROCEDURES,
-  ENTITY_QUERIES
+  ENTITY_QUERIES,
+  RESOLVE_EDITIONS,
+  SEARCH_EDITIONS
 } from '../catalog/entity-methods.ts';
 import { DESCRIBE_FEED_GENERATOR, GET_FEED_SKELETON } from '../feeds/methods.ts';
 import { isPdsRead } from '../pds-methods.ts';
 import { xrpcPreflight } from './cors.ts';
+import { SERVICE_DESCRIBE } from './surface.ts';
 
 /**
  * An NSID is at least three labels: the reversed-domain authority (one or more
@@ -26,14 +30,9 @@ export function isNsid(method: string): boolean {
   return typeof method === 'string' && NSID.test(method);
 }
 
-const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
-const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
-
-/** The books-wg procedures answered here; both are POST-only by lexicon. */
-const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
-
 /** The edge-served handlers, injected so this module stays dependency-free. */
 export type XrpcDependencies = {
+  serviceDescribe: () => Response | Promise<Response>;
   describeFeedGenerator: () => Response | Promise<Response>;
   getFeedSkeleton: (request: Request) => Response | Promise<Response>;
   entityGet: (request: Request, method: string) => Response | Promise<Response>;
@@ -65,6 +64,9 @@ export function dispatchGet(
   dependencies: XrpcDependencies
 ): Response | Promise<Response> {
   if (!isNsid(method)) return invalidRequest();
+  // The surface description is static, so it answers before any handler that
+  // might need a setting (`FEED_GENERATOR_DID`, `DATABASE_URL`) or a PDS.
+  if (method === SERVICE_DESCRIBE) return dependencies.serviceDescribe();
   // The feed generator is served at the edge from the activity index; it is a
   // GET-only pair, and `public` is the only anonymous feed.
   if (method === DESCRIBE_FEED_GENERATOR) return dependencies.describeFeedGenerator();
@@ -84,6 +86,7 @@ export function dispatchPost(
   dependencies: XrpcDependencies
 ): Response | Promise<Response> {
   if (!isNsid(method)) return invalidRequest();
+  if (method === SERVICE_DESCRIBE) return methodNotAllowed();
   if (method === DESCRIBE_FEED_GENERATOR || method === GET_FEED_SKELETON) {
     return methodNotAllowed();
   }

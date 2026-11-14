@@ -34,6 +34,7 @@ const CATALOG_SEARCH = 'community.lexicon.media.book.searchEditions';
 const ENTITY_RESOLVE = 'net.olamaelcu.livtet.biblio.resolvePublishers';
 const FORWARDED = 'app.bsky.feed.getTimeline';
 const PDS_READ = 'com.atproto.repo.getRecord';
+const SERVICE_DESCRIBE = 'community.lexicon.service.describe';
 
 type Call = { handler: string; method: string };
 
@@ -56,6 +57,10 @@ function respond(label: string, status = 200): Response {
 function mocked(): Mocked {
   const calls: Call[] = [];
   const dependencies: XrpcDependencies = {
+    serviceDescribe: () => {
+      calls.push({ handler: 'serviceDescribe', method: SERVICE_DESCRIBE });
+      return respond('serviceDescribe');
+    },
     describeFeedGenerator: () => {
       calls.push({ handler: 'describe', method: DESCRIBE_FEED_GENERATOR });
       return respond('describe');

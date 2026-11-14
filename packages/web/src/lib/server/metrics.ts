@@ -273,6 +273,7 @@ const XRPC_METHODS: Record<string, true> = {
   'com.atproto.sync.listRepos': true,
   'community.lexicon.media.book.resolveEditions': true,
   'community.lexicon.media.book.searchEditions': true,
+  'community.lexicon.service.describe': true,
   'net.olamaelcu.livtet.biblio.getContributor': true,
   'net.olamaelcu.livtet.biblio.getPublisher': true,
   'net.olamaelcu.livtet.biblio.graph.isFollowing': true,

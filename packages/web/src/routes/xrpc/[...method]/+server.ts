@@ -14,6 +14,7 @@ import {
   dispatchPost,
   type XrpcDependencies,
 } from "$lib/server/xrpc/dispatch";
+import { describeService } from "$lib/server/xrpc/surface";
 import {
   EntityQueryError,
   EntityUriError,
@@ -327,6 +328,8 @@ async function handleEntityResolve(request: Request, method: string): Promise<Re
  * own client identity, and callers may present their own credentials.
  */
 const dependencies: XrpcDependencies = {
+  // Static: no database, no auth, no FEED_GENERATOR_DID, so it never 503s.
+  serviceDescribe: () => json(describeService()),
   describeFeedGenerator,
   getFeedSkeleton,
   entityGet: handleEntityGet,

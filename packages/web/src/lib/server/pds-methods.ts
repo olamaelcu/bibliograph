@@ -10,6 +10,12 @@
  * tests can classify a method without loading the proxy.
  */
 
+export const PDS_GET_RECORD = 'com.atproto.repo.getRecord';
+export const PDS_LIST_RECORDS = 'com.atproto.repo.listRecords';
+
+/** Both are GET-only reads served by the publisher PDS. */
+export const PDS_READS = [PDS_GET_RECORD, PDS_LIST_RECORDS] as const;
+
 export function isPdsRead(method: string): boolean {
-  return method === 'com.atproto.repo.getRecord' || method === 'com.atproto.repo.listRecords';
+  return method === PDS_GET_RECORD || method === PDS_LIST_RECORDS;
 }

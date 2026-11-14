@@ -1,11 +1,17 @@
 /**
- * The contributor/publisher XRPC methods the edge answers itself.
+ * The catalog XRPC methods the edge answers itself.
  *
  * They are anonymous catalog reads over the deployment's own tables, exactly
  * like `resolveEditions` / `searchEditions`, so they never reach HappyView and
  * are not part of `hv-deploy`'s uploaded surface. Keeping the NSIDs in a module
  * without SvelteKit imports makes the dispatch classification testable.
  */
+
+/** The books-wg procedures: `POST`-only by lexicon, answered here. */
+export const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
+export const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
+
+export const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
 
 export const GET_CONTRIBUTOR = 'net.olamaelcu.livtet.biblio.getContributor';
 export const GET_PUBLISHER = 'net.olamaelcu.livtet.biblio.getPublisher';

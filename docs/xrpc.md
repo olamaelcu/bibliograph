@@ -21,6 +21,10 @@ edition record types lives under
 surface — they proxy to an authority DID that the local network does not resolve. The edge proxies
 exactly two read-only `com.atproto` methods, `repo.getRecord` and `repo.listRecords`, to the PDS.
 
+One more method is served at the edge and belongs to no lexicon here:
+`community.lexicon.service.describe`, which names every NSID this deployment answers (see
+**Discovery** under **Conventions**).
+
 ## Conventions
 
 **Transport.** Queries are `GET /xrpc/<nsid>`; procedures are `POST /xrpc/<nsid>` with a JSON body.
@@ -46,6 +50,17 @@ com.atproto.repo.getRecord` and `GET com.atproto.repo.listRecords` are proxied t
 `content-type` upstream and returning the PDS's status, body and content type. A network failure or
 timeout is `502 UpstreamUnavailable`; an unset `PDS_URL` is `503 ServiceUnavailable` with a message
 naming the missing setting. Every other `com.atproto.*` method still goes to HappyView.
+
+**Discovery.** `GET community.lexicon.service.describe` is anonymous and takes no parameters. It
+returns `{ roles, methods: [{ $type, value }] }` — `roles` is `["appview", "feedgen"]`, and every
+entry names one NSID this deployment answers, including the edge's own feed methods under the
+`com.atproto.feed.*` NSIDs they are served as. It is answered at the edge, so it needs neither
+`DATABASE_URL` nor `FEED_GENERATOR_DID` and never answers `503`; `POST` on it is `405
+MethodNotAllowed`. The list is held to the dispatch registries and to the scripts in
+`happyview/scripts/xrpc/` by `packages/web/test/xrpc-surface.test.ts`, so a described method exists
+and an NSID absent from the list is not served here. HappyView's built-in `com.atproto.*` proxy
+routes are deliberately not listed — they proxy to an authority DID the local network does not
+resolve, so listing them would claim methods that do not work.
 
 **CORS.** CORS covers the entire gateway, not only the edge-served catalog methods: a browser
 preflights a forwarded HappyView procedure too, because the call sends `Authorization` and `DPoP`.
@@ -172,8 +187,9 @@ back to the default. The feed generator defaults to 20 and clamps to 1–100; a 
 | 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable, or when a PDS-proxied read fails or times out |
 | 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (the two books-wg procedures, the seven entity methods, `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
 
-Queries, the nine catalog methods and the `public` feed never answer `401`. Missing optional
-records are not errors: `getActorProfile` and `getReadingGoal` answer `200` with `null`.
+Queries, the nine catalog methods, `community.lexicon.service.describe` and the `public` feed never
+answer `401`. Missing optional records are not errors: `getActorProfile` and `getReadingGoal`
+answer `200` with `null`.
 
 **Views.** Responses embed the lexicon's view types from `net.olamaelcu.livtet.biblio.defs`:
 `shelfView` (`uri`, `name`, optional `description`/timestamps), `bookView` (`uri`, `edition`),
@@ -219,6 +235,7 @@ signal. Queued work is not a promise that anything will be found.
 
 | NSID | Params | Returns |
 | --- | --- | --- |
+| `community.lexicon.service.describe` | — | `{ roles, methods }` — every NSID this deployment answers, shaped `{ $type, value }` |
 | `getActorProfile` | `did` | `{ profile }` — raw `net.olamaelcu.livtet.actor.profile` record or `null` |
 | `getReadingGoal` | `did` | `{ goal }` — raw `readingGoal` record or `null` |
 | `getShelf` | `uri` | `{ shelf }` |
