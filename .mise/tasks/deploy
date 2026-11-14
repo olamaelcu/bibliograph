@@ -47,9 +47,16 @@ cd "$ROOT"
 
 # Sequential, and web first: the worker payload's `pnpm deploy --prod` removes
 # the workspace dev links the web build needs.
-if [ ! -x "$ROOT/packages/web/node_modules/.bin/vite" ]; then
+# The check runs `vite`, not `test -x` on its shim: a pruned workspace leaves a
+# bin entry that can exist and not resolve, and `-x` then passes while the build
+# falls through to whatever `vite` is on PATH (a Ruby gem, in this environment).
+vite_usable() {
+  ( cd "$ROOT/packages/web" && ./node_modules/.bin/vite --version >/dev/null 2>&1 )
+}
+if ! vite_usable; then
   printf '==> Restoring workspace dev links pruned by a previous worker payload\n'
   pnpm install --frozen-lockfile
+  vite_usable || { printf 'ERROR: vite is still unusable after pnpm install\n' >&2; exit 1; }
 fi
 printf '==> Building bibliograph-web (before the worker payload prunes dev links)\n'
 mise run package-web-deb
