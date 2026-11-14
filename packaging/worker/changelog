@@ -1,3 +1,12 @@
+bibliograph-worker (0.2.11-1) unstable; urgency=medium
+
+  * 0.2.11 release: lockstep version bump, no worker payload changes.
+
+    - The XRPC discovery method added in this release is served by the edge;
+      packages/worker is unchanged since 0.2.10.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 04:14:21 +0000
+
 bibliograph-worker (0.2.10-1) unstable; urgency=medium
 
   * 0.2.10 release: Goodreads WAF handling and the rebuilt HappyView payload.

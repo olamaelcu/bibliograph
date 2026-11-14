@@ -1,3 +1,22 @@
+bibliograph-web (0.2.11-1) unstable; urgency=medium
+
+  * 0.2.11 release: publish the XRPC surface the deployment serves.
+
+    - Add GET community.lexicon.service.describe, answered at the edge with no
+      database, auth or FEED_GENERATOR_DID: it returns
+      { roles: ["appview","feedgen"], methods: [{ $type, value }] } naming all
+      46 NSIDs this deployment answers. It is held to the dispatch registries
+      and to happyview/scripts/xrpc/ by test/xrpc-surface.test.ts, so the list
+      cannot describe a method that is not served.
+    - Move the two books-wg NSIDs into the shared catalog/entity-methods
+      registry and name the two PDS reads in pds-methods, so the dispatch and
+      the description read one list instead of duplicating literals.
+    - Attribute the new method in normalizeXrpcMethod instead of `other`.
+    - No lexicon, HappyView script or deploy entry changed; the surface is the
+      same 22 queries, 19 procedures and 10 record types.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 04:14:21 +0000
+
 bibliograph-web (0.2.10-1) unstable; urgency=medium
 
   * 0.2.10 release: lockstep version bump, no web payload changes.
