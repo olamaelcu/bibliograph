@@ -28,6 +28,12 @@
               "description": "Author relevance hint, interpreted by the provider.",
               "minLength": 1
             },
+            "language": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 35,
+              "description": "Local extension (not in the upstream books-wg PR): return only editions whose language claim matches this value. Matching is case-insensitive on the primary subtag, so `en` also matches `en-US`. Omit it for no language filter."
+            },
             "identifiers": {
               "type": "array",
               "description": "Structured identifier relevance hints; search matching and ranking are provider-defined.",
@@ -49,6 +55,18 @@
               "maximum": 100,
               "default": 25,
               "description": "Maximum number of editions to return in this page."
+            },
+            "sort": {
+              "type": "string",
+              "knownValues": ["relevance", "title", "publishedYear"],
+              "default": "relevance",
+              "description": "Local extension (not in the upstream books-wg PR): ordering of the result page. `title` is alphabetical by edition title; `publishedYear` orders by the edition's published date, and an edition with no usable year sorts last. `relevance` keeps the provider-defined ranking."
+            },
+            "order": {
+              "type": "string",
+              "knownValues": ["asc", "desc"],
+              "default": "asc",
+              "description": "Local extension (not in the upstream books-wg PR): direction for a `title` or `publishedYear` sort. Ignored when `sort` is `relevance`, whose ranking is provider-defined."
             }
           }
         }

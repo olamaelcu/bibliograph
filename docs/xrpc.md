@@ -176,7 +176,7 @@ back to the default. The feed generator defaults to 20 and clamps to 1–100; a 
 | Status | Error | Origin |
 | --- | --- | --- |
 | 400 | `InvalidRequest` | a required parameter is missing, or a value violates its contract: non-DID `subject`, self-follow, non-AT-URI shelf/review URI, wrong collection, bad enum (`status`, `period`), out-of-range integer, empty update, invalid `editionRef`, non-strongRef `book` |
-| 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author` or identifier; `searchContributors` / `searchPublishers` without a nonblank `q` |
+| 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author`, `language` or identifier; `searchContributors` / `searchPublishers` without a nonblank `q` |
 | 401 | `XRPC procedures require DPoP authentication` | the 15 HappyView procedures, until a DPoP session is presented |
 | 401 | `AuthRequired` | a personalized feed (`following`/`extended`/`dynamic`) without a valid service JWT |
 | 403 | `Forbidden` | the named review or shelf belongs to another DID |
@@ -268,7 +268,7 @@ the same request.
 | NSID | Input | Returns |
 | --- | --- | --- |
 | `community.lexicon.media.book.resolveEditions` | `identifiers[]` (required), `offset` 0, `limit` 25 (≤100) | `editionResults` |
-| `community.lexicon.media.book.searchEditions` | `q?`, `title?`, `author?`, `identifiers[]?`, `offset` 0, `limit` 25 (≤100) | `editionResults` |
+| `community.lexicon.media.book.searchEditions` | `q?`, `title?`, `author?`, `identifiers[]?`, `language?` (≤35), `offset` 0, `limit` 25 (≤100), `sort` `relevance`\|`title`\|`publishedYear`, `order` `asc`\|`desc` | `editionResults` |
 | `resolveContributors` | `identifiers[]` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
 | `resolvePublishers` | `identifiers[]` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
 | `graph.follow` | `subject` (DID) | `{ uri, created }` |
@@ -546,6 +546,27 @@ then `indexed_at DESC, uri ASC`. Provider search and ingestion happen asynchrono
 gap-fill, stopping at the first provider that returns candidates and ingesting at most 50 of them);
 newly ingested editions appear in later calls. The ranking above is this catalog's relevance
 order, which the lexicon allows providers to define.
+
+**Sorting (local extension).** `sort` reorders the page and is not part of the upstream books-wg
+lexicon, which leaves ordering to the provider; this deployment declares them in its local
+`searchEditions` copy, which `mise run publish-lex` records on the PDS — the service description
+lists method NSIDs only, so that schema record is where a consumer reads them. `sort: "title"`
+orders by `lower(title)` — case-insensitive, on the database's `en_US.utf8` collation — and
+`sort: "publishedYear"` by the first four digits of the edition's union `published_date` (a
+`YYYY[-MM[-DD]]` value). `order` is `asc` (default) or `desc` and applies to both; an edition whose
+`published_date` is missing or not a year sorts last in either direction, and `uri` breaks every
+tie so pages cannot shuffle between calls. `sort: "relevance"` (the default) keeps the ranking
+above and ignores `order`. An unknown `sort` or `order` value is `400 InvalidRequest` rather than a
+silent fallback.
+
+**Language filter (local extension).** `language` (at most 35 characters) restricts the page to editions
+whose union `language` claim matches it; omit it for no filter. Unlike the hints above it is **ANDed** with
+them, and a body carrying only `language` is a valid browse rather than `InvalidQuery`. Matching is
+case-insensitive on the primary subtag, so `en` also matches `en-US`. Stored claims are canonical:
+`0011-language-normalization.sql` keeps the two-letter ISO 639-1 code on write, so a provider's `eng` is stored
+as `en` and `fre`/`fra` as `fr`, with any region suffix preserved. A caller therefore sends `en`, `es`, `fr` —
+a three-letter code matches nothing unless the language has no two-letter form. An edition with no language
+claim never matches a filter.
 
 Text/identifier hydration (`catalog.search`) is queued only when the local result is empty
 (`items.length === 0`), and a repeated query is deduplicated by its TTL mark. The response carries

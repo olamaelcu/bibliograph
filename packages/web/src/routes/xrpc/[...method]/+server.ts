@@ -5,7 +5,13 @@ import { forward } from "$lib/server/happyview";
 import { proxyPdsRead } from "$lib/server/pds";
 import { catalogPool } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
-import { resolveEditions, searchEditions, type Identifier } from "$lib/server/catalog/editions";
+import {
+  resolveEditions,
+  searchEditions,
+  type EditionSort,
+  type EditionSortOrder,
+  type Identifier,
+} from "$lib/server/catalog/editions";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
 import {
   dispatchGet,
@@ -48,14 +54,30 @@ import {
 } from "$lib/server/catalog/jobs";
 import { isbn13sFromIdentifiers } from "$lib/server/catalog/isbn";
 import { describeFeedGenerator, getFeedSkeleton } from "$lib/server/feeds";
+import { coversBaseUrl } from "$lib/server/covers/config";
 
 // Catalog discovery is anonymous, so bound the work a body can request.
 const MAX_IDENTIFIERS = 100;
+
+// The editor's own bound on a language value (`EDITION_EDIT_LIMITS.language`).
+const MAX_LANGUAGE_LENGTH = 35;
 
 // A queued hydration job spends up to CANDIDATES_PER_TASK (50) paid provider
 // lookups in the worker, and these procedures are anonymous, so one body must
 // not be able to queue the whole identifier list. The cap is per request; the
 // TTL marks dedupe repeats across calls, they are not a global quota.
+
+// `searchEditions` ordering is a local extension over the lexicon's
+// provider-defined ranking; these tables are what the handler accepts.
+const EDITION_SORTS: Readonly<Record<EditionSort, true>> = {
+  relevance: true,
+  title: true,
+  publishedYear: true,
+};
+const EDITION_SORT_ORDERS: Readonly<Record<EditionSortOrder, true>> = {
+  asc: true,
+  desc: true,
+};
 const MAX_HYDRATION_JOBS_PER_REQUEST = 10;
 
 function fail(status: number, error: string, message: string): Response {
@@ -127,7 +149,12 @@ async function handleResolve(request: Request): Promise<Response> {
 
   const started = performance.now();
   try {
-    const results = await resolveEditions({ identifiers, offset, limit });
+    const results = await resolveEditions({
+      identifiers,
+      offset,
+      limit,
+      coversBaseUrl: coversBaseUrl(),
+    }, catalogPool());
     recordCatalogQuery(metrics, "resolveEditions", "ok", (performance.now() - started) / 1000);
 
     const matched = new Set<string>();
@@ -171,6 +198,17 @@ async function handleSearch(request: Request): Promise<Response> {
     return fail(400, "InvalidRequest", "q, title and author must be strings");
   }
 
+  // `language` is a local extension: the upstream lexicon declares no filter.
+  const language = optionalString(body.language);
+  if (language === null) return fail(400, "InvalidRequest", "language must be a string");
+  if (language !== undefined && language.length > MAX_LANGUAGE_LENGTH) {
+    return fail(
+      400,
+      "InvalidRequest",
+      `language must be at most ${MAX_LANGUAGE_LENGTH} characters`,
+    );
+  }
+
   const identifiers = body.identifiers === undefined ? [] : parseIdentifiers(body.identifiers);
   if (identifiers === null) {
     return fail(400, "InvalidRequest", "identifiers must be an array of issuer/value pairs");
@@ -179,8 +217,12 @@ async function handleSearch(request: Request): Promise<Response> {
     return fail(400, "InvalidRequest", `at most ${MAX_IDENTIFIERS} identifiers per request`);
   }
 
-  if (!q && !title && !author && identifiers.length === 0) {
-    return fail(400, "InvalidQuery", "supply q, title, author, or at least one identifier");
+  if (!q && !title && !author && !language && identifiers.length === 0) {
+    return fail(
+      400,
+      "InvalidQuery",
+      "supply q, title, author, language, or at least one identifier",
+    );
   }
 
   const offset = boundedInteger(body.offset, 0, 0, Number.MAX_SAFE_INTEGER);
@@ -188,9 +230,43 @@ async function handleSearch(request: Request): Promise<Response> {
   if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
   if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
 
+  // `sort` and `order` are a local extension: the upstream lexicon leaves
+  // ranking to the provider, so it only declares the relevance order.
+  const sort = optionalString(body.sort);
+  const order = optionalString(body.order);
+  if (sort === null) return fail(400, "InvalidRequest", "sort must be a string");
+  if (order === null) return fail(400, "InvalidRequest", "order must be a string");
+  const sortValue = (sort ?? "relevance") as EditionSort;
+  const orderValue = (order ?? "asc") as EditionSortOrder;
+  if (EDITION_SORTS[sortValue] !== true) {
+    return fail(
+      400,
+      "InvalidRequest",
+      `sort must be one of ${Object.keys(EDITION_SORTS).join(", ")}`,
+    );
+  }
+  if (EDITION_SORT_ORDERS[orderValue] !== true) {
+    return fail(
+      400,
+      "InvalidRequest",
+      `order must be one of ${Object.keys(EDITION_SORT_ORDERS).join(", ")}`,
+    );
+  }
+
   const started = performance.now();
   try {
-    const results = await searchEditions({ q, title, author, identifiers, offset, limit });
+    const results = await searchEditions({
+      q,
+      title,
+      author,
+      identifiers,
+      offset,
+      limit,
+      sort: sortValue,
+      order: orderValue,
+      language,
+      coversBaseUrl: coversBaseUrl(),
+    }, catalogPool());
     recordCatalogQuery(metrics, "searchEditions", "ok", (performance.now() - started) / 1000);
     // An ISBN is worth a direct ISBNdb lookup even when the local catalog
     // answered: the job enriches/ingests the edition from the provider.
@@ -305,6 +381,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
         contributor,
         offset: decodeOffsetCursor(params.get("cursor")),
         limit,
+        coversBaseUrl: coversBaseUrl(),
       });
       if (page === null) return fail(404, "RecordNotFound", "no contributor has that URI");
       return json(page);
