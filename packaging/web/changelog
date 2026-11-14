@@ -1,3 +1,21 @@
+bibliograph-web (0.2.16-1) unstable; urgency=medium
+
+  * 0.2.16 release: duration is an identifier claim.
+
+    - The edition editor drops its edition-level `Duration (seconds)` input.
+      Each identifier's `Shape` disclosure now carries a duration field beside
+      Pages, so an abridged and an unabridged ISBN keep their own value, and
+      the admin read model hashes the claim through the identifier bag instead
+      of an edition column.
+    - Edition saves and merges write
+      `edition_identifier_info.duration_seconds` per identifier, and catalog
+      reads take `durationSeconds` from `edition_identifier_shape`, so the
+      published record and the XRPC edition view keep the field.
+    - `durationSeconds` is no longer a merge field: duration travels with the
+      identifier it belongs to.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 16:52:20 +0000
+
 bibliograph-web (0.2.15-1) unstable; urgency=medium
 
   * 0.2.15 release: edit shape claims and publisher links per identifier.

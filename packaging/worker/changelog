@@ -1,3 +1,31 @@
+bibliograph-worker (0.2.16-1) unstable; urgency=medium
+
+  * 0.2.16 release: duration is an identifier claim, and covers are backfilled.
+
+    - 0010-edition-identifier-duration.sql moves `duration_seconds` off
+      `editions` onto `edition_identifier_info`, backfilling every identifier
+      with its edition's value and appending `duration_seconds` to
+      `edition_identifier_shape`; the drop is guarded, so re-applying the file
+      is a no-op. Ingest writes the claim and publishing reads the shape view,
+      so the record's `durationSeconds` is the rank union of the identifiers
+      (an abridged and an unabridged ISBN keep their own value).
+    - 0007/0008 stay replay-safe against that drop: the claim table gains the
+      column with `ADD COLUMN IF NOT EXISTS`, and `appview_book` reads
+      `duration_seconds` from the shape view instead of `editions`.
+    - 0009-edition-cover-fetches.sql adds the `edition_cover_fetches` ledger, a
+      partial index over coverless editions and
+      `catalog_enqueue_cover_fetch`, the claim-and-enqueue entry point shared by
+      the edge and the sweep.
+    - `catalog.covers` backfills one edition's cover from OpenLibrary
+      (`coverForEdition`: the ISBN record, an `OL…M` edition document, or the
+      work's edition list) and then Google Books for an ISBN. A "no cover"
+      answer is recorded, a provider outage rethrows so the job retries, and the
+      edition update only fires while `cover_url` is still empty.
+    - `catalog.covers.sweep` runs every five minutes in batches of 100 (500 at
+      most): never-attempted editions first, then the seven-day retry pass.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 16:52:20 +0000
+
 bibliograph-worker (0.2.15-1) unstable; urgency=medium
 
   * 0.2.15 release: edition shape claims and publisher links move onto the
