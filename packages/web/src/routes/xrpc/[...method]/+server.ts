@@ -1,6 +1,12 @@
 import { json } from "@sveltejs/kit";
 import type { RequestHandler } from "./$types";
-import { metrics, recordCatalogQuery } from "$lib/server/metrics";
+import { env } from "$env/dynamic/private";
+import {
+  metrics,
+  recordCatalogQuery,
+  recordCatalogSearchDecision,
+  recordCatalogSearchMatches,
+} from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
 import { proxyPdsRead } from "$lib/server/pds";
 import { catalogPool } from "$lib/server/catalog/db";
@@ -13,6 +19,10 @@ import {
   type Identifier,
 } from "$lib/server/catalog/editions";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
+import {
+  searchHydrationDecision,
+  searchHydrationThreshold,
+} from "$lib/server/catalog/search-hydration";
 import {
   dispatchGet,
   dispatchMethodNotAllowed,
@@ -276,8 +286,19 @@ async function handleSearch(request: Request): Promise<Response> {
         .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
         .map((isbn13) => enqueueIsbnHydration(isbn13)),
     );
-    // Discovery only hydrates when the local catalog has nothing for the query.
-    if (results.items.length === 0) {
+    // A thin first page means the catalog likely lacks the work, not that the
+    // caller paged deep. `total` exists only on the first page, so paging never
+    // re-fires; an identifier-only body is covered by the catalog.isbn jobs
+    // above, and a language-only browse has no provider text query to run.
+    const hydration = searchHydrationDecision({
+      hasText: Boolean(q || title || author),
+      offset,
+      total: results.total,
+      threshold: searchHydrationThreshold(env.SEARCH_HYDRATION_THRESHOLD),
+    });
+    recordCatalogSearchDecision(metrics, hydration);
+    if (results.total !== undefined) recordCatalogSearchMatches(metrics, results.total);
+    if (hydration === "thin") {
       await enqueueSearchHydration({ q, title, author, identifiers });
     }
     return json(results);

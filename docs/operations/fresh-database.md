@@ -141,6 +141,10 @@ What is created:
   (FK to `publishers`, cascading from `edition_identifiers`) and the
   `edition_publishers_shape` view, backfills each edition's publisher links onto
   every identifier, drops `edition_publishers`, and recreates the read models;
+- `0013-edition-identifier-extent.sql` folds the identifier's `format`, `pages`
+  and `duration_seconds` into one `extent` claim (all three become generated
+  projections, so a writer sets `extent` and never the columns) and
+  prunes the unit the row's format does not use;
 - `editions_tid_seq`, `editions_tid_encode()` and `editions_next_tid()` (new
   editions get a 13-character TID rkey, never an ISBN);
 - `pds_outbox` (+ the ready index) and `pds_cids`;

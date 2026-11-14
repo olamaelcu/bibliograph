@@ -79,8 +79,15 @@ function createdAt(value) {
  * @param {object[]} input.identifiers  rows from `edition_identifiers` (ordered)
  * @param {object[]} input.contributors rows joined to `contributors` (position order)
  * @param {object} [input.publisher]    row joined to `publishers` (lowest position)
+ * @param {string} [input.coversBaseUrl] public origin of the cover endpoint
  */
-export function buildEditionRecord({ edition, identifiers = [], contributors = [], publisher }) {
+export function buildEditionRecord({
+  edition,
+  identifiers = [],
+  contributors = [],
+  publisher,
+  coversBaseUrl = ''
+}) {
   if (!edition) throw new EditionRecordError('edition row is missing');
 
   const title = nonEmptyString(edition.title);
@@ -137,7 +144,15 @@ export function buildEditionRecord({ edition, identifiers = [], contributors = [
   if (bookEdition) record.bookEdition = bookEdition;
   const description = nonEmptyString(edition.description);
   if (description) record.description = description;
-  const coverUrl = httpUrl(edition.cover_url);
+  // A cached cover is served from this deployment's own edge; the path shape
+  // must match `coverFileUrl` in packages/web/src/lib/server/catalog/edition-view.ts
+  // and the `/api/covers` route. Until the bytes are cached the provider URL is
+  // what the record advertises, so a reader never gets a dead link.
+  const base = coversBaseUrl.trim().replace(/\/+$/, '');
+  const coverUrl =
+    edition.cover_cached === true && base !== ''
+      ? `${base}/api/covers/${encodeURIComponent(edition.uri)}`
+      : httpUrl(edition.cover_url);
   if (coverUrl) record.coverUrl = coverUrl;
 
   return record;

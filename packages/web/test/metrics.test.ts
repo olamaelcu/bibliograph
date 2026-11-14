@@ -13,7 +13,10 @@ import {
   normalizeRoute,
   normalizeStatus,
   normalizeXrpcMethod,
+  recordCatalogHydration,
   recordCatalogQuery,
+  recordCatalogSearchDecision,
+  recordCatalogSearchMatches,
   recordFeedAuthFailure,
   recordFeedFollowDids,
   recordFeedPage,
@@ -191,6 +194,41 @@ test('catalog operations and feed kinds are fixed label sets', () => {
   assert.equal(normalizeFeedKind('dynamic'), 'dynamic');
   assert.equal(normalizeFeedKind('private'), 'other');
   assert.equal(feedOutcomeForStatus(503), 'unavailable');
+});
+
+test('catalog hydration, decision and first-page metrics stay bounded', () => {
+  const metrics = createWebMetrics();
+  recordCatalogHydration(metrics, 'catalog.search', 'over_budget');
+  recordCatalogHydration(metrics, 'catalog.isbn', 'queued');
+  recordCatalogHydration(metrics, 'catalog.sweep', 'queued');
+  recordCatalogHydration(metrics, 'catalog.search', 'exploded');
+  recordCatalogSearchDecision(metrics, 'thin');
+  recordCatalogSearchDecision(metrics, 'bogus');
+  recordCatalogSearchMatches(metrics, 3);
+
+  const text = renderWebMetrics(metrics);
+  assert.match(
+    text,
+    /^bibliograph_catalog_hydration_total\{task="catalog.search",outcome="over_budget"\} 1$/m
+  );
+  assert.match(
+    text,
+    /^bibliograph_catalog_hydration_total\{task="catalog.isbn",outcome="queued"\} 1$/m
+  );
+  assert.match(
+    text,
+    /^bibliograph_catalog_hydration_total\{task="other",outcome="queued"\} 1$/m
+  );
+  assert.match(
+    text,
+    /^bibliograph_catalog_hydration_total\{task="catalog.search",outcome="other"\} 1$/m
+  );
+  assert.match(text, /^bibliograph_catalog_search_decision_total\{decision="thin"\} 1$/m);
+  assert.match(text, /^bibliograph_catalog_search_decision_total\{decision="other"\} 1$/m);
+  assert.match(text, /^bibliograph_catalog_search_first_page_matches_count 1$/m);
+  assert.match(text, /^bibliograph_catalog_search_first_page_matches_sum 3$/m);
+  assert.match(text, /^bibliograph_catalog_search_first_page_matches_bucket\{le="5"\} 1$/m);
+  assert.match(text, /^bibliograph_catalog_search_first_page_matches_bucket\{le="2"\} 0$/m);
 });
 
 test('feed latency, page size, follow-set and auth-failure metrics are bounded', () => {

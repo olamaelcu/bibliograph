@@ -357,6 +357,60 @@ const FEED_PAGE_ITEM_BUCKETS = [0, 1, 5, 10, 20, 50, 100] as const;
 /** Follow-set sizes, including the 500-DID cap (`MAX_FEED_DIDS`). */
 const FEED_DID_BUCKETS = [0, 1, 5, 10, 25, 50, 100, 250, 500] as const;
 
+/** First-page totals of a catalog search: how thin a local query was. */
+const SEARCH_MATCH_BUCKETS = [0, 1, 2, 3, 5, 10, 25, 50, 100, 250] as const;
+
+/**
+ * Hydration bookkeeping for the catalog, mirrored from the catalog modules on
+ * purpose (like `XRPC_METHODS` mirrors NSIDs): this file must not import them.
+ */
+const CATALOG_HYDRATION_TASKS: Record<string, true> = {
+  'catalog.resolve': true,
+  'catalog.search': true,
+  'catalog.isbn': true
+};
+
+export function normalizeCatalogHydrationTask(task: string): string {
+  return CATALOG_HYDRATION_TASKS[task] === true ? task : 'other';
+}
+
+const CATALOG_HYDRATION_OUTCOMES: Record<string, true> = {
+  queued: true,
+  deduped: true,
+  unavailable: true,
+  over_budget: true,
+  error: true
+};
+
+export function normalizeCatalogHydrationOutcome(outcome: string): string {
+  return CATALOG_HYDRATION_OUTCOMES[outcome] === true ? outcome : 'other';
+}
+
+/** Values of `searchHydrationDecision`, duplicated from the pure policy module. */
+const SEARCH_HYDRATION_DECISIONS: Record<string, true> = {
+  thin: true,
+  enough: true,
+  paged: true,
+  no_text: true
+};
+
+export function normalizeSearchHydrationDecision(decision: string): string {
+  return SEARCH_HYDRATION_DECISIONS[decision] === true ? decision : 'other';
+}
+
+/** Outcomes the `/api/covers` route can report; anything else is `other`. */
+const COVER_RESULTS: Record<string, true> = {
+  hit: true,
+  redirect: true,
+  not_found: true,
+  rate_limited: true,
+  error: true
+};
+
+export function normalizeCoverResult(result: string): string {
+  return COVER_RESULTS[result] === true ? result : 'other';
+}
+
 // ---------------------------------------------------------------------------
 // Families
 // ---------------------------------------------------------------------------
@@ -373,6 +427,9 @@ export interface WebMetrics {
   readonly pdsProxyRequests: Counter;
   readonly catalogQueries: Counter;
   readonly catalogQueryDuration: Histogram;
+  readonly catalogHydration: Counter;
+  readonly catalogSearchDecisions: Counter;
+  readonly catalogSearchMatches: Histogram;
   readonly feedRequests: Counter;
   readonly feedRequestDuration: Histogram;
   readonly feedPageItems: Histogram;
@@ -380,6 +437,8 @@ export interface WebMetrics {
   readonly feedFollowDids: Histogram;
   readonly feedQueryDuration: Histogram;
   readonly feedAuthFailures: Counter;
+  readonly coverRequests: Counter;
+  readonly coverBytesServed: Counter;
   readonly processResidentMemory: Gauge;
   readonly processCpuSeconds: Gauge;
   readonly processUptime: Gauge;
@@ -414,6 +473,19 @@ export function createWebMetrics(): WebMetrics {
       'bibliograph_catalog_query_duration_seconds',
       'Time spent querying the catalog database, by operation.'
     ),
+    catalogHydration: registry.counter(
+      'bibliograph_catalog_hydration_total',
+      'Catalog hydration enqueues the edge attempted, by task and outcome.'
+    ),
+    catalogSearchDecisions: registry.counter(
+      'bibliograph_catalog_search_decision_total',
+      'searchEditions requests by provider-hydration decision.'
+    ),
+    catalogSearchMatches: registry.histogram(
+      'bibliograph_catalog_search_first_page_matches',
+      'First-page total of each searchEditions call, to size the hydration threshold.',
+      SEARCH_MATCH_BUCKETS
+    ),
     feedRequests: registry.counter(
       'bibliograph_feed_requests_total',
       'Feed generator requests, by kind and outcome.'
@@ -443,6 +515,14 @@ export function createWebMetrics(): WebMetrics {
     feedAuthFailures: registry.counter(
       'bibliograph_feed_auth_failures_total',
       'Personalized feed requests rejected by service-token verification, by reason.'
+    ),
+    coverRequests: registry.counter(
+      'bibliograph_cover_requests_total',
+      'Cover endpoint requests, by result.'
+    ),
+    coverBytesServed: registry.counter(
+      'bibliograph_cover_bytes_served_total',
+      'Cover image bytes served from the disk cache.'
     ),
     processResidentMemory: registry.gauge(
       'bibliograph_process_resident_memory_bytes',
@@ -541,6 +621,26 @@ export function recordCatalogQuery(
   m.catalogQueryDuration.observe({ operation: normalized }, durationSeconds);
 }
 
+export function recordCatalogHydration(
+  m: WebMetrics,
+  task: string,
+  outcome: string
+): void {
+  m.catalogHydration.inc({
+    task: normalizeCatalogHydrationTask(task),
+    outcome: normalizeCatalogHydrationOutcome(outcome)
+  });
+}
+
+export function recordCatalogSearchDecision(m: WebMetrics, decision: string): void {
+  m.catalogSearchDecisions.inc({ decision: normalizeSearchHydrationDecision(decision) });
+}
+
+/** The observed value is the first-page total, so the series carries no label. */
+export function recordCatalogSearchMatches(m: WebMetrics, total: number): void {
+  m.catalogSearchMatches.observe({}, total);
+}
+
 export function recordFeedRequest(m: WebMetrics, kind: string, status: number): void {
   m.feedRequests.inc({ kind: normalizeFeedKind(kind), outcome: feedOutcomeForStatus(status) });
 }
@@ -577,4 +677,14 @@ export function recordFeedQueryDuration(
 
 export function recordFeedAuthFailure(m: WebMetrics, reason: string): void {
   m.feedAuthFailures.inc({ reason: normalizeFeedAuthReason(reason) });
+}
+
+export function recordCoverRequest(m: WebMetrics, result: string): void {
+  m.coverRequests.inc({ result: normalizeCoverResult(result) });
+}
+
+/** Bytes only ever leave on a `GET`; a `HEAD` answers headers from a `stat`. */
+export function recordCoverBytes(m: WebMetrics, bytes: number): void {
+  if (!Number.isFinite(bytes) || bytes <= 0) return;
+  m.coverBytesServed.inc({}, bytes);
 }

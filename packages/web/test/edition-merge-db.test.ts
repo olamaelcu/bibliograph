@@ -195,8 +195,9 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
   // Duration is a per-identifier claim: the base's own isbn13 value must
   // survive, and the source's isbn10 value must travel with its identifier.
   await db.query(
-    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, duration_seconds)
-     VALUES ($1, 'isbn13', '9780000009001', 7200), ($2, 'isbn10', '0000000002', 3600)`,
+    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, extent)
+     VALUES ($1, 'isbn13', '9780000009001', '{"durationSeconds":7200}'),
+            ($2, 'isbn10', '0000000002', '{"durationSeconds":3600}')`,
     [base.uri, other.uri]
   );
 
@@ -239,13 +240,23 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
     value: string;
     duration_seconds: number;
   }>(
-    `SELECT issuer, value, duration_seconds FROM edition_identifier_info
+    `SELECT issuer, value, duration_seconds, extent FROM edition_identifier_info
       WHERE edition_uri = $1 ORDER BY issuer`,
     [base.uri]
   );
   assert.deepEqual(durations.rows, [
-    { issuer: 'isbn10', value: '0000000002', duration_seconds: 3600 },
-    { issuer: 'isbn13', value: '9780000009001', duration_seconds: 7200 }
+    {
+      issuer: 'isbn10',
+      value: '0000000002',
+      duration_seconds: 3600,
+      extent: { durationSeconds: 3600 }
+    },
+    {
+      issuer: 'isbn13',
+      value: '9780000009001',
+      duration_seconds: 7200,
+      extent: { durationSeconds: 7200 }
+    }
   ]);
 
   // Base-first, position-renumbered, never overwritten.

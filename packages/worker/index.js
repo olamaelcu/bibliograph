@@ -12,6 +12,7 @@ import { prepareEntityRecords } from './lib/prepare-entities.js';
 import { createIngest } from './lib/ingest.js';
 import { createGutenberg } from './lib/providers/gutenberg.js';
 import { seedCatalogFromProvider } from './lib/seed.js';
+import { coversBaseUrlFromEnv } from './lib/cover-cache.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -20,6 +21,21 @@ if (!databaseUrl) {
 }
 
 const publisherHost = process.env.ATP_SERVICE_HOST || 'biblio.livtet.olamaelcu.net';
+// Where the cached covers are stored and advertised. Both units run on one host
+// as one user, so the edge reads the same directory the worker writes.
+// The directory comes from configuration, never from a baked-in path: the unit's
+// conffile names it (`/var/cache/bibliograph-covers` in production, the unit's
+// CacheDirectory), and mise's [env] names the repo-local one in development.
+// Unset disables the cover cache instead of guessing a path.
+const coversCacheDir = (process.env.COVERS_CACHE_DIR ?? '').trim();
+const coversBaseUrl = coversBaseUrlFromEnv(process.env, publisherHost);
+if (coversCacheDir === '') {
+  console.error(
+    'worker: cover caching is DISABLED — COVERS_CACHE_DIR is not set. ' +
+      'catalog.covers becomes a no-op, so no cover bytes are downloaded or served; ' +
+      'set it (e.g. /var/cache/bibliograph-covers) and restart.'
+  );
+}
 // The repo authority is independent of publisher credentials: hydration mints
 // the same URIs even while pds-publish is disabled.
 const publisherDid = resolvePublisherAuthority() || `did:web:${publisherHost}`;
@@ -111,7 +127,7 @@ try {
 const publisherConfig = resolvePublisherConfig();
 let publisher;
 if (publisherConfig.configured) {
-  publisher = createOutboxPublisher({ pool, config: publisherConfig });
+  publisher = createOutboxPublisher({ pool, config: publisherConfig, coversBaseUrl });
 } else {
   console.error(
     'worker: pds-publish is DISABLED — missing/invalid configuration: ' +
@@ -121,7 +137,15 @@ if (publisherConfig.configured) {
   );
 }
 
-const taskList = createTasks({ pool, providers, publisherDid, publisherHost, publisher });
+const taskList = createTasks({
+  pool,
+  providers,
+  publisherDid,
+  publisherHost,
+  publisher,
+  coversCacheDir,
+  coversBaseUrl
+});
 
 // One publisher at a time: the task queue serializes the jobs, so two batches
 // never race for the same rows (claiming is safe anyway, this just avoids noise).

@@ -62,5 +62,28 @@ export const variables = defineEnvVars({
     schema: (value) => value?.trim() || 'https://livtet.olamaelcu.net',
     description:
       'Service endpoint published as #livtet_space_manager; the base URL a PDS calls to mint and check club spaces.'
+  },
+  COVERS_CACHE_DIR: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'Directory bibliograph-worker writes cached cover images to and /api/covers reads. No code default: unset means no cover caching, and the endpoint answers the provider redirect instead of a cached image.'
+  },
+  COVERS_PUBLIC_BASE_URL: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'Public origin the /api/covers URLs advertise. Unset keeps the provider URL in edition views and records, so caching still works but the hotlink is not replaced.'
+  },
+  COVERS_RATE_LIMIT_PER_MINUTE: {
+    schema: (value) => {
+      const parsed = Number.parseInt(value ?? '', 10);
+      return Number.isFinite(parsed) && parsed >= 1 ? parsed : 600;
+    },
+    description:
+      'Per-client-IP allowance on /api/covers, also the burst size. Raise it for a busy shared egress; lower it to bound a scraper.'
+  },
+  SEARCH_HYDRATION_THRESHOLD: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'First-page total below which a text search queues a provider search. Blank or invalid falls back to 10 in code; 0 disables provider hydration.'
   }
 });

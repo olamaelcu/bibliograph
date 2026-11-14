@@ -7,6 +7,10 @@ _.file = ".env"
 DATABASE_URL = "postgres://bibliograph:bibliograph@localhost:5432/bibliograph"
 # HappyView tables live in their own schema; keep DATABASE_URL public-only.
 HAPPYVIEW_DATABASE_URL = "postgres://happyview_app:happyview@localhost:5432/bibliograph"
+# Where the worker caches cover images and the edge serves them from. The
+# packaged units get this from their conffiles (/var/cache/bibliograph-covers);
+# local development keeps it inside the repo so nothing writes to /var/cache.
+COVERS_CACHE_DIR = "{{config_root}}/.cache/covers"
 
 [tasks.sql]
 description = "Open a psql shell against the local bibliograph database"

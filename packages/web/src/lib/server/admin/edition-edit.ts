@@ -305,29 +305,29 @@ export async function updateAdminEdition(
     if (claims.length > 0) {
       await client.query(
         `INSERT INTO edition_identifier_info (
-           edition_uri, issuer, value, format, language,
-           published_date, pages, description, duration_seconds
+           edition_uri, issuer, value, language, published_date, description, extent
          )
-         SELECT $1, t.issuer, t.value, t.format, t.language,
-                t.published_date, t.pages::int, t.description, t.duration_seconds::int
+         SELECT $1, t.issuer, t.value, t.language, t.published_date, t.description,
+                NULLIF(jsonb_strip_nulls(jsonb_build_object(
+                  'format', t.format,
+                  'pages', t.pages::int,
+                  'durationSeconds', t.duration_seconds::int
+                )), '{}'::jsonb)
            FROM unnest($2::text[], $3::text[], $4::text[], $5::text[],
                        $6::text[], $7::text[], $8::text[], $9::text[])
                 AS t(issuer, value, format, language, published_date,
                      pages, description, duration_seconds)
          ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
-           format = EXCLUDED.format,
            language = EXCLUDED.language,
            published_date = EXCLUDED.published_date,
-           pages = EXCLUDED.pages,
            description = EXCLUDED.description,
-           duration_seconds = EXCLUDED.duration_seconds,
-          updated_at = now()
-         WHERE edition_identifier_info.format IS DISTINCT FROM EXCLUDED.format
-            OR edition_identifier_info.language IS DISTINCT FROM EXCLUDED.language
+           extent = normalize_identifier_extent(EXCLUDED.extent),
+           updated_at = now()
+         WHERE edition_identifier_info.language IS DISTINCT FROM EXCLUDED.language
             OR edition_identifier_info.published_date IS DISTINCT FROM EXCLUDED.published_date
-            OR edition_identifier_info.pages IS DISTINCT FROM EXCLUDED.pages
             OR edition_identifier_info.description IS DISTINCT FROM EXCLUDED.description
-            OR edition_identifier_info.duration_seconds IS DISTINCT FROM EXCLUDED.duration_seconds`,
+            OR normalize_identifier_extent(EXCLUDED.extent)
+               IS DISTINCT FROM edition_identifier_info.extent`,
         [
           uri,
           claims.map((claim) => claim.issuer),

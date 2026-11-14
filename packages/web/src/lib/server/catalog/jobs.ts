@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
+import type { Pool } from 'pg';
 import { catalogPool } from './db';
 import type { Identifier } from './editions';
+import { metrics, recordCatalogHydration } from '$lib/server/metrics';
+import { SEARCH_HYDRATION_MARK_PREFIX, SEARCH_HYDRATION_PER_HOUR } from './search-hydration';
 
 const RESOLVE_TTL_MS = 24 * 60 * 60 * 1000;
 const SEARCH_TTL_MS = 60 * 60 * 1000;
@@ -54,15 +57,47 @@ function searchKey(input: {
   return `search:${createHash('sha256').update(material).digest('hex')}`;
 }
 
+/**
+ * Rolling-hour spend cap: the marks with `prefix` claimed in the last hour.
+ * Counting before claiming is not atomic, so concurrent callers at the boundary
+ * can overshoot by the number in flight; this is a soft cap on provider spend,
+ * not a quota. `catalog_enqueue_marks_enqueued_at_idx` keeps the scan to the
+ * window.
+ */
+async function withinBudget(
+  pool: Pool,
+  budget: { prefix: string; limit: number }
+): Promise<boolean> {
+  const result = await pool.query<{ n: number }>(
+    `SELECT count(*)::int AS n
+       FROM catalog_enqueue_marks
+      WHERE key LIKE $1
+        AND enqueued_at > now() - interval '1 hour'`,
+    [`${budget.prefix}%`]
+  );
+  return (result.rows[0]?.n ?? 0) < budget.limit;
+}
+
 async function enqueue(
   key: string,
   task: 'catalog.resolve' | 'catalog.search' | 'catalog.isbn',
   payload: unknown,
-  ttlMs: number
+  ttlMs: number,
+  budget?: { prefix: string; limit: number }
 ): Promise<boolean> {
   try {
-    if (!(await workerReady())) return false;
+    if (!(await workerReady())) {
+      recordCatalogHydration(metrics, task, 'unavailable');
+      return false;
+    }
     const pool = catalogPool();
+
+    // An over-budget call must not claim the mark: the query would then stay
+    // suppressed for a whole TTL after the budget frees up again.
+    if (budget && !(await withinBudget(pool, budget))) {
+      recordCatalogHydration(metrics, task, 'over_budget');
+      return false;
+    }
 
     const claim = await pool.query(
       `INSERT INTO catalog_enqueue_marks (key, enqueued_at)
@@ -72,7 +107,10 @@ async function enqueue(
        RETURNING key`,
       [key, ttlMs]
     );
-    if (claim.rowCount === 0) return false;
+    if (claim.rowCount === 0) {
+      recordCatalogHydration(metrics, task, 'deduped');
+      return false;
+    }
 
     try {
       await pool.query(
@@ -88,8 +126,10 @@ async function enqueue(
       await pool.query('DELETE FROM catalog_enqueue_marks WHERE key = $1', [key]);
       throw error;
     }
+    recordCatalogHydration(metrics, task, 'queued');
     return true;
   } catch (error) {
+    recordCatalogHydration(metrics, task, 'error');
     console.warn('[xrpc] could not enqueue catalog hydration', error);
     return false;
   }
@@ -110,7 +150,10 @@ export function enqueueSearchHydration(input: {
   author?: string;
   identifiers: Identifier[];
 }): Promise<boolean> {
-  return enqueue(searchKey(input), 'catalog.search', input, SEARCH_TTL_MS);
+  return enqueue(searchKey(input), 'catalog.search', input, SEARCH_TTL_MS, {
+    prefix: SEARCH_HYDRATION_MARK_PREFIX,
+    limit: SEARCH_HYDRATION_PER_HOUR
+  });
 }
 
 /**

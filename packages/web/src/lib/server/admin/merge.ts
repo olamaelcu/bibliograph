@@ -201,6 +201,10 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
       [base, ...values]
     );
 
+    // The merge may have chosen a different cover URL, so the ledger's outcome
+    // no longer describes this edition's source; clearing it re-arms the sweep.
+    await client.query('DELETE FROM edition_cover_fetches WHERE edition_uri = $1', [base]);
+
     const identifierBag = new Map<string, { issuer: string; value: string }>();
     for (const record of ordered) {
       for (const identifier of record.identifiers) {
@@ -224,11 +228,9 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
     if (others.length > 0) {
       await client.query(
         `INSERT INTO edition_identifier_info (
-           edition_uri, issuer, value, format, language,
-           published_date, pages, description, duration_seconds
+           edition_uri, issuer, value, language, published_date, description, extent
          )
-         SELECT $1, s.issuer, s.value, s.format, s.language,
-                s.published_date, s.pages, s.description, s.duration_seconds
+         SELECT $1, s.issuer, s.value, s.language, s.published_date, s.description, s.extent
            FROM edition_identifier_info s
           WHERE s.edition_uri = ANY($2::text[])
           ORDER BY s.updated_at DESC

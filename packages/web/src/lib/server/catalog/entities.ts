@@ -16,6 +16,7 @@ import type { Pool } from 'pg';
 // (the rest of the app resolves extensionless imports through Vite).
 import {
   EDITION_COLUMNS,
+  EDITION_COVERS_JOIN,
   EDITION_SHAPE_JOIN,
   hydrate,
   type EditionRow,
@@ -400,7 +401,13 @@ export type BookResults = { items: BookView[]; cursor?: string; total?: number }
  */
 export async function listEditionsByContributor(
   pool: EntityQueryable,
-  input: { contributor: string; offset: number; limit: number }
+  input: {
+    contributor: string;
+    offset: number;
+    limit: number;
+    /** Public origin for `/api/covers` URLs; absent keeps provider URLs. */
+    coversBaseUrl?: string;
+  }
 ): Promise<BookResults | null> {
   const found = (
     await pool.query('SELECT id FROM contributors WHERE at_uri = $1', [input.contributor])
@@ -412,6 +419,7 @@ export async function listEditionsByContributor(
     `SELECT ${EDITION_COLUMNS}
        FROM editions e
        ${EDITION_SHAPE_JOIN}
+       ${EDITION_COVERS_JOIN}
       WHERE EXISTS (
               SELECT 1 FROM edition_contributors ec
                WHERE ec.edition_uri = e.uri AND ec.contributor_id = $1
@@ -421,7 +429,7 @@ export async function listEditionsByContributor(
     [contributorId, input.limit + 1, input.offset]
   );
   const rows = (page.rows as EditionRow[]).slice(0, input.limit);
-  const views = await hydrate(pool, rows);
+  const views = await hydrate(pool, rows, input.coversBaseUrl ?? '');
   const items = rows.flatMap((row, index) => {
     const edition = views[index];
     return edition === undefined ? [] : [{ uri: row.uri, edition }];

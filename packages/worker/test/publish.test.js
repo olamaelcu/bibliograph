@@ -131,6 +131,7 @@ let sequence = 0;
 
 async function makeEdition({
   title = 'A Test Edition',
+  format = 'physical',
   identifiers = [
     { issuer: 'googlebooks', value: `gb-${sequence}` },
     { issuer: 'isbn13', value: `978000000${String(sequence).padStart(4, '0')}` }
@@ -170,10 +171,10 @@ async function makeEdition({
     // claim has to live on the identifier.
     await pool.query(
       `INSERT INTO edition_identifier_info
-         (edition_uri, issuer, value, format, language, published_date, pages,
-          description, duration_seconds)
-       VALUES ($1,$2,$3,'physical','en','2020-01',320,'A test description.',3600)`,
-      [uri, identifier.issuer, identifier.value]
+         (edition_uri, issuer, value, language, published_date, description, extent)
+       VALUES ($1,$2,$3,'en','2020-01','A test description.',
+               jsonb_build_object('format', $4::text, 'pages', 320, 'durationSeconds', 3600))`,
+      [uri, identifier.issuer, identifier.value, format]
     );
   }
 
@@ -357,7 +358,6 @@ test('publishes a create, stores the returned CID and drains the outbox row', as
         publisher: fixture.publisher,
         format: 'physical',
         pages: 320,
-        durationSeconds: 3600,
         chapters: 12,
         series: { name: 'Test Series', position: '1' },
         bookEdition: 'First',
@@ -373,6 +373,49 @@ test('publishes a create, stores the returned CID and drains the outbox row', as
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
   assert.equal(cids.rowCount, 1);
   assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].result.cid);
+});
+
+test('an audio edition publishes its duration instead of a page count', async () => {
+  const fixture = await makeEdition({ title: 'An Audio Edition', format: 'Audiobook' });
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  const [write] = applyWriteRequests();
+  assert.ok(write, 'applyWrites must be called');
+  const [create] = write.body.writes;
+  assert.equal(create.rkey, fixture.rkey);
+  assert.equal(create.value.format, 'Audiobook');
+  assert.equal(create.value.durationSeconds, 3600);
+  assert.equal('pages' in create.value, false, 'an audio edition publishes no page count');
+});
+
+test('a cached cover puts the edge URL in the published record', async () => {
+  const fixture = await makeEdition({ title: 'A Cached Cover Edition' });
+  const coverUrl = 'https://covers.example/test.jpg';
+  await pool.query(
+    `INSERT INTO edition_cover_files (edition_uri, source_url, content_type, byte_size)
+     VALUES ($1, $2, 'image/jpeg', 74000)`,
+    [fixture.uri, coverUrl]
+  );
+  const publisher = createOutboxPublisher({
+    pool,
+    config: validConfig(stub.url),
+    coversBaseUrl: 'https://edge.test/'
+  });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  const write = applyWriteRequests()
+    .flatMap((request) => request.body.writes)
+    .find((entry) => entry.rkey === fixture.rkey);
+  assert.ok(write, 'the edition was published');
+  assert.equal(
+    write.value.coverUrl,
+    `https://edge.test/api/covers/${encodeURIComponent(fixture.uri)}`
+  );
 });
 
 test('a did:plc publisher authority mints and drains an edition', async () => {

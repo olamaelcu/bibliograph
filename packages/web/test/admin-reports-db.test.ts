@@ -33,7 +33,8 @@ const SCHEMA_FILES = [
   '0001-catalog-schema.sql',
   '0004-entity-records.sql',
   '0007-edition-identifier-info.sql',
-  '0008-edition-identifier-publishers.sql'
+  '0008-edition-identifier-publishers.sql',
+  '0013-edition-identifier-extent.sql'
 ];
 
 async function applySchema(db: pg.PoolClient): Promise<void> {
@@ -94,19 +95,23 @@ async function addIdentifier(
   // `edition_identifier_info` holds the shape claims (0007); the reports read
   // only these rows, never the edition.
   if (Object.keys(claim).length === 0) return;
+  // 0013 keeps the format and its matching unit in one `extent` claim; the
+  // reports still read the generated `format` / `pages` projections.
+  const extent: { format?: string; pages?: number } = {};
+  if (claim.format !== null && claim.format !== undefined) extent.format = claim.format;
+  if (claim.pages !== null && claim.pages !== undefined) extent.pages = claim.pages;
   await db.query(
     `INSERT INTO edition_identifier_info
-       (edition_uri, issuer, value, format, language, published_date, pages, description)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       (edition_uri, issuer, value, language, published_date, description, extent)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
     [
       uri(rkey),
       issuer,
       value,
-      claim.format ?? null,
       claim.language ?? null,
       claim.publishedDate ?? null,
-      claim.pages ?? null,
-      claim.description ?? null
+      claim.description ?? null,
+      Object.keys(extent).length === 0 ? null : JSON.stringify(extent)
     ]
   );
 }

@@ -68,6 +68,8 @@ export type EditionRow = {
   book_edition: string | null;
   shape_description: string | null;
   cover_url: string | null;
+  /** True when `cover_url`'s bytes are on disk and the edge can serve them. */
+  cover_cached: boolean;
   created_at: Date;
 };
 
@@ -90,11 +92,32 @@ export const EDITION_COLUMNS = `
   e.uri, e.title, e.subtitle, s.duration_seconds, e.chapters, e.series,
   e.book_edition, e.cover_url, e.created_at, s.language AS shape_language,
   s.published_date AS shape_published_date, s.format AS shape_format,
-  s.pages AS shape_pages, s.description AS shape_description`;
+  s.pages AS shape_pages, s.description AS shape_description,
+  (cf.edition_uri IS NOT NULL) AS cover_cached`;
 
 /** The shape claim union; every `EDITION_COLUMNS` query needs it. */
 export const EDITION_SHAPE_JOIN =
   'LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri';
+
+/**
+ * The cover cache claim; every `EDITION_COLUMNS` query needs it. Paired on
+ * `source_url` so a cache row for a previous provider URL does not count: the
+ * edge would be serving bytes the edition no longer points at.
+ */
+export const EDITION_COVERS_JOIN =
+  'LEFT JOIN edition_cover_files cf ON cf.edition_uri = e.uri AND cf.source_url = e.cover_url';
+
+/**
+ * The `/api/covers` URL for one edition, or `''` when no public origin is
+ * configured (records and views then keep the provider URL). The path shape must
+ * match `buildEditionRecord` in packages/worker/lib/edition-record.js and the
+ * route at `src/routes/api/covers/[...atUri]`.
+ */
+export function coverFileUrl(base: string, editionUri: string): string {
+  const origin = base.trim().replace(/\/+$/, '');
+  if (origin === '') return '';
+  return `${origin}/api/covers/${encodeURIComponent(editionUri)}`;
+}
 
 function atUriIdentifier(uri: string): Identifier {
   return { issuer: AT_URI_ISSUER, value: uri };
@@ -108,7 +131,8 @@ export function editionView(
   row: EditionRow,
   identifiers: IdentifierRow[],
   contributors: ContributorRow[],
-  publisher: PublisherRow | undefined
+  publisher: PublisherRow | undefined,
+  coversBaseUrl = ''
 ): EditionView {
   // The edition view has no `uri` field, so the record URI travels as an
   // identifier: clients rebuild links such as /book/<did>/<rkey> from it.
@@ -139,8 +163,15 @@ export function editionView(
     createdAt: new Date(row.created_at).toISOString()
   };
 
-  const coverUrl = optional(row.cover_url);
-  if (coverUrl) view.coverUrl = coverUrl;
+  // A cached cover is served from this deployment's own edge (long-lived
+  // caching, no hotlink); until then the provider URL is what a reader gets.
+  const edgeCover = row.cover_cached === true ? coverFileUrl(coversBaseUrl, row.uri) : '';
+  if (edgeCover !== '') {
+    view.coverUrl = edgeCover;
+  } else {
+    const providerCover = optional(row.cover_url);
+    if (providerCover) view.coverUrl = providerCover;
+  }
   const subtitle = optional(row.subtitle);
   if (subtitle) view.subtitle = subtitle;
   const language = optional(row.shape_language);
@@ -177,7 +208,11 @@ export function editionView(
   return view;
 }
 
-export async function hydrate(pool: EditionQueryable, rows: EditionRow[]): Promise<EditionView[]> {
+export async function hydrate(
+  pool: EditionQueryable,
+  rows: EditionRow[],
+  coversBaseUrl = ''
+): Promise<EditionView[]> {
   if (rows.length === 0) return [];
   const uris = rows.map((row) => row.uri);
 
@@ -225,7 +260,8 @@ export async function hydrate(pool: EditionQueryable, rows: EditionRow[]): Promi
       row,
       identifiers.get(row.uri) ?? [],
       contributors.get(row.uri) ?? [],
-      publishers.get(row.uri)
+      publishers.get(row.uri),
+      coversBaseUrl
     )
   );
 }

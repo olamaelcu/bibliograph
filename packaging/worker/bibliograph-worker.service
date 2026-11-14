@@ -31,6 +31,13 @@ StateDirectoryMode=0750
 LogsDirectory=bibliograph
 LogsDirectoryMode=0750
 
+# Cached cover images. systemd creates and owns this directory, so the worker
+# can write it under ProtectSystem=strict; bibliograph-web reads the same path
+# (its own unit is read-only and only ever stats/reads here). The cache is
+# unbounded by design — growth is reported as textfile metrics, not evicted.
+CacheDirectory=bibliograph-covers
+CacheDirectoryMode=0750
+
 NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes

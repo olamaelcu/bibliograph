@@ -105,41 +105,67 @@ async function fillMissingFields(client, uri, candidate) {
       values.coverUrl
     ]
   );
+
+  // A rejected URL is terminal for that URL alone: when a provider offers a new
+  // cover, the ledger has to let the next sweep claim the edition again. An
+  // outstanding claim (`outcome IS NULL`) is left alone — it is in flight.
+  if (values.coverUrl !== null) {
+    await client.query(
+      `DELETE FROM edition_cover_fetches
+        WHERE edition_uri = $1 AND outcome = 'rejected'`,
+      [uri]
+    );
+  }
 }
 
 // Provider data fills gaps only: an existing claim field is a curator edit or a
 // more specific record, and the `WHERE` keeps a re-ingest from rewriting the row
 // (which would re-queue the edition for no change).
+/** Bundle the row's shape claim into the format-sensitive `extent` object. */
+function claimExtent(claims) {
+  const extent = {};
+  if (claims.format !== null && claims.format !== undefined) {
+    const format = String(claims.format).trim();
+    if (format !== '') extent.format = format;
+  }
+  const pages = claims.pages === null || claims.pages === undefined ? NaN : Number(claims.pages);
+  if (Number.isInteger(pages) && pages >= 0) extent.pages = pages;
+  const duration =
+    claims.durationSeconds === null || claims.durationSeconds === undefined
+      ? NaN
+      : Number(claims.durationSeconds);
+  if (Number.isInteger(duration) && duration >= 0) extent.durationSeconds = duration;
+  return Object.keys(extent).length === 0 ? null : extent;
+}
+
 async function fillIdentifierClaims(client, uri, identifier, claims) {
+  const extent = claimExtent(claims);
   await client.query(
     `INSERT INTO edition_identifier_info
-           (edition_uri, issuer, value, format, language, published_date, pages,
-            description, duration_seconds)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           (edition_uri, issuer, value, language, published_date, description, extent)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
      ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
-       format = COALESCE(edition_identifier_info.format, EXCLUDED.format),
        language = COALESCE(edition_identifier_info.language, EXCLUDED.language),
        published_date = COALESCE(edition_identifier_info.published_date, EXCLUDED.published_date),
-       pages = COALESCE(edition_identifier_info.pages, EXCLUDED.pages),
        description = COALESCE(edition_identifier_info.description, EXCLUDED.description),
-       duration_seconds = COALESCE(edition_identifier_info.duration_seconds, EXCLUDED.duration_seconds),
+       extent = normalize_identifier_extent(
+         COALESCE(EXCLUDED.extent, '{}'::jsonb) || COALESCE(edition_identifier_info.extent, '{}'::jsonb)
+       ),
        updated_at = now()
-     WHERE (edition_identifier_info.format IS NULL AND EXCLUDED.format IS NOT NULL)
-        OR (edition_identifier_info.language IS NULL AND EXCLUDED.language IS NOT NULL)
+     WHERE (edition_identifier_info.language IS NULL AND EXCLUDED.language IS NOT NULL)
         OR (edition_identifier_info.published_date IS NULL AND EXCLUDED.published_date IS NOT NULL)
-        OR (edition_identifier_info.pages IS NULL AND EXCLUDED.pages IS NOT NULL)
         OR (edition_identifier_info.description IS NULL AND EXCLUDED.description IS NOT NULL)
-        OR (edition_identifier_info.duration_seconds IS NULL AND EXCLUDED.duration_seconds IS NOT NULL)`,
+        OR normalize_identifier_extent(
+             COALESCE(EXCLUDED.extent, '{}'::jsonb) || COALESCE(edition_identifier_info.extent, '{}'::jsonb)
+           ) IS DISTINCT FROM edition_identifier_info.extent`,
     [
       uri,
       identifier.issuer,
       identifier.value,
-      claims.format,
       claims.language,
       claims.publishedDate,
-      claims.pages,
       claims.description,
-      claims.durationSeconds
+      extent === null ? null : JSON.stringify(extent)
     ]
   );
 }

@@ -220,7 +220,8 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     publishedDate: '2024-02-29',
     pages: 320,
     description: 'Edited description',
-    durationSeconds: 3600
+    // 0013: an ebook is not audio, so the submitted duration is pruned.
+    durationSeconds: null
   });
   assert.deepEqual(
     claimed?.publishers.map((publisher) => publisher.id),
@@ -259,7 +260,7 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
 
   const claims = await db.query(
     `SELECT issuer, value, format, language, published_date, pages, description,
-            duration_seconds
+            duration_seconds, extent
        FROM edition_identifier_info WHERE edition_uri = $1`,
     [seeded.uri]
   );
@@ -267,12 +268,13 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     {
       issuer: 'isbn13',
       value: '9780000000002',
+      extent: { format: 'ebook', pages: 320 },
       format: 'ebook',
       language: 'en',
       published_date: '2024-02-29',
       pages: 320,
       description: 'Edited description',
-      duration_seconds: 3600
+      duration_seconds: null
     }
   ]);
 
@@ -294,7 +296,7 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     format: 'ebook',
     language: 'en',
     pages: 320,
-    duration_seconds: 3600
+    duration_seconds: null
   });
 
   const publisher = await db.query<{ publisher: { name: string } }>(
@@ -447,6 +449,31 @@ test('accepts the current revision with no changes', async (t) => {
   assert.equal(saved.revision, second.revision);
 });
 
+test('editing the cover URL clears the cover ledger, so the sweep refetches at once', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await seedEdition('Cover source change');
+  // A terminal rejection would otherwise keep the sweep away for a whole week:
+  // the outcome describes the URL, not the edition.
+  await db.query(
+    `INSERT INTO edition_cover_fetches (edition_uri, outcome, source_url)
+     VALUES ($1, 'rejected', 'https://covers.example/placeholder.jpg')`,
+    [seeded.uri]
+  );
+  const original = await loaded(seeded.rkey);
+
+  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+    coverUrl: 'https://covers.example/real.jpg'
+  }));
+
+  assert.equal(saved.coverUrl, 'https://covers.example/real.jpg');
+  const claims = await db.query<{ n: string }>(
+    'SELECT count(*)::int AS n FROM edition_cover_fetches WHERE edition_uri = $1',
+    [seeded.uri]
+  );
+  assert.equal(Number(claims.rows[0]?.n), 0, 'the ledger row is gone');
+});
+
 test('rejects invalid bodies before opening a transaction', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
@@ -477,27 +504,36 @@ test('claims are kept when omitted, cleared with null and written per identifier
       language: string | null;
       pages: number | null;
       duration_seconds: number | null;
+      extent: Record<string, unknown> | null;
       updated_at: Date;
     }>(
-      `SELECT format, language, pages, duration_seconds, updated_at FROM edition_identifier_info WHERE edition_uri = $1 AND issuer = 'isbn13'`,
+      `SELECT format, language, pages, duration_seconds, extent, updated_at FROM edition_identifier_info WHERE edition_uri = $1 AND issuer = 'isbn13'`,
       [seeded.uri]
     );
     return result.rows[0];
   };
 
   await db.query(
-    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, format, language, pages, duration_seconds) VALUES ($1, 'isbn13', '9780000000001', 'hardcover', 'en-GB', 320, 5400)`,
+    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, language, extent) VALUES ($1, 'isbn13', '9780000000001', 'en-GB', '{"format":"hardcover","pages":320,"durationSeconds":5400}')`,
     [seeded.uri]
   );
   const seededClaim = await claimRow();
   assert.deepEqual(
     {
+      // 0013: the trigger pruned the audio duration from a print claim.
+      extent: seededClaim?.extent,
       format: seededClaim?.format,
       language: seededClaim?.language,
       pages: seededClaim?.pages,
       duration_seconds: seededClaim?.duration_seconds
     },
-    { format: 'hardcover', language: 'en-GB', pages: 320, duration_seconds: 5400 }
+    {
+      extent: { format: 'hardcover', pages: 320 },
+      format: 'hardcover',
+      language: 'en-GB',
+      pages: 320,
+      duration_seconds: null
+    }
   );
 
   // Invalid claim field: rejected before the transaction, nothing changes.
@@ -566,7 +602,7 @@ test('claims are kept when omitted, cleared with null and written per identifier
     'SELECT format, pages, duration_seconds FROM edition_identifier_shape WHERE edition_uri = $1',
     [seeded.uri]
   );
-  assert.deepEqual(shape.rows[0], { format: 'hardcover', pages: 320, duration_seconds: 5400 });
+  assert.deepEqual(shape.rows[0], { format: 'hardcover', pages: 320, duration_seconds: null });
 
   // Null clears the row; the isbn13 claim still wins the union.
   const cleared = await updateAdminEdition(db, seeded.rkey, bodyFrom(added, {
@@ -664,8 +700,8 @@ test('deletes an edition with its children and queues the record deletion', asyn
   if (!db) return;
   const seeded = await seedEdition('Delete me');
   await db.query(
-    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, pages, duration_seconds)
-     VALUES ($1, 'isbn13', '9780000000001', 320, 3600)`,
+    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, extent)
+     VALUES ($1, 'isbn13', '9780000000001', '{"pages":320}')`,
     [seeded.uri]
   );
   await db.query('INSERT INTO edition_cover_fetches (edition_uri) VALUES ($1)', [seeded.uri]);

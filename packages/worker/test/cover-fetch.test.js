@@ -1,16 +1,21 @@
 /**
- * `catalog.covers`: which provider answers, what the ledger records, and when an
- * outage is allowed to fail the job instead of being read as "no cover".
+ * `catalog.covers`: which provider answers, what lands on disk, and what the
+ * ledger records.
  *
- * The pool is scripted, so these tests assert the statements themselves:
- * OpenLibrary is asked first, Google Books only for an ISBN and only when
- * OpenLibrary had nothing, and a provider failure never writes "no cover".
+ * The pool is scripted and the download is injected, so these tests assert the
+ * behaviour itself: a cover URL is not evidence of a cover, a placeholder-sized
+ * response is rejected for good, and an outage never writes a terminal outcome.
  */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { createTasks } from '../lib/tasks.js';
+import { coverCachePath, writeCachedCover } from '../lib/cover-cache.js';
 
 const EDITION = 'at://did:plc:publisher/community.lexicon.media.book.edition/3abc';
 const ISBN = '9780441478125';
@@ -18,7 +23,36 @@ const COVER = 'https://covers.openlibrary.org/b/id/12345-L.jpg';
 const GOOGLE_COVER = 'https://books.google.test/cover.jpg';
 const log = { info() {}, warn() {}, error() {} };
 
-function coverPool({ coverUrl = null, exists = true } = {}) {
+/** A JPEG-shaped buffer: the three-byte signature is all the sniff looks at. */
+function jpegBytes(size = 74_000) {
+  const bytes = Buffer.alloc(size, 0x20);
+  bytes[0] = 0xff;
+  bytes[1] = 0xd8;
+  bytes[2] = 0xff;
+  return bytes;
+}
+
+/** The OpenLibrary "no cover" answer: a 43-byte 1×1 transparent GIF. */
+function placeholderGif() {
+  const bytes = Buffer.alloc(43, 0x00);
+  bytes.write('GIF89a', 0, 'latin1');
+  return bytes;
+}
+
+function cacheDirFor(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'bibliograph-covers-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+/**
+ * A scripted catalog.
+ *
+ * `cached` answers the single edition/ledger/cache join; `exists: false` is the
+ * vanished-edition case. Every statement is recorded so a test can assert the
+ * writes instead of a database.
+ */
+function coverPool({ coverUrl = null, cached = null, exists = true } = {}) {
   const statements = [];
   const record = (sql, values) => {
     statements.push({ sql: sql.replace(/\s+/g, ' ').trim(), values });
@@ -35,9 +69,19 @@ function coverPool({ coverUrl = null, exists = true } = {}) {
     connect: async () => client,
     query: async (sql, values) => {
       record(sql, values);
-      if (sql.includes('SELECT cover_url FROM editions')) {
+      if (sql.includes('LEFT JOIN edition_cover_files')) {
         return exists
-          ? { rows: [{ cover_url: coverUrl }], rowCount: 1 }
+          ? {
+              rows: [
+                {
+                  cover_url: coverUrl,
+                  cached_source: cached?.sourceUrl ?? null,
+                  content_type: cached?.contentType ?? null,
+                  byte_size: cached?.byteSize ?? null
+                }
+              ],
+              rowCount: 1
+            }
           : { rows: [], rowCount: 0 };
       }
       if (sql.includes('FROM edition_identifiers')) {
@@ -78,89 +122,264 @@ function coverProviders({ openlibrary = undefined, google = undefined } = {}) {
   return { calls, providers };
 }
 
+/** A `fetch` stand-in: the value is a Buffer (200), an Error, or a status. */
+function coverFetch(answer) {
+  const calls = [];
+  const impl = async (url) => {
+    calls.push(url);
+    const result = typeof answer === 'function' ? answer(url) : answer;
+    if (result instanceof Error) throw result;
+    if (typeof result === 'number') {
+      return new Response('nope', { status: result });
+    }
+    return new Response(result, {
+      status: 200,
+      headers: { 'content-length': String(result.length) }
+    });
+  };
+  return { calls, impl };
+}
+
 function ledger(statements) {
-  return statements.find((statement) => statement.sql.includes('SET requested_at'));
+  return statements
+    .filter((statement) => statement.sql.includes('UPDATE edition_cover_fetches'))
+    .at(-1);
 }
 
-function coverWrite(statements) {
-  return statements.find((statement) => statement.sql.includes('UPDATE editions SET cover_url'));
+function statementsLike(statements, fragment) {
+  return statements.filter((statement) => statement.sql.includes(fragment));
 }
 
-test('an OpenLibrary cover is written and the ledger records it', async () => {
-  const { pool, statements } = coverPool();
-  const providers = coverProviders({ openlibrary: COVER });
-  const tasks = createTasks({ pool, providers, publisherHost: 'covers.example' });
+async function fileExists(path) {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test('a cached edition is never downloaded again', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const bytes = jpegBytes();
+  await writeCachedCover(cacheDir, EDITION, bytes);
+  const { pool, statements } = coverPool({
+    coverUrl: COVER,
+    cached: { sourceUrl: COVER, contentType: 'image/jpeg', byteSize: bytes.length }
+  });
+  const download = coverFetch(bytes);
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders(),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: download.impl
+  });
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.deepEqual(coverWrite(statements)?.values, [EDITION, COVER]);
-  assert.equal(providers.calls.google, 0, 'Google Books is only the fallback');
+  assert.deepEqual(download.calls, [], 'the cached bytes are reused');
   assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
+  assert.deepEqual(statementsLike(statements, 'UPDATE editions'), [], 'no edition write');
 });
 
-test('Google Books answers when OpenLibrary has no cover', async () => {
+test('a downloaded cover is cached, recorded, and the record is republished', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const bytes = jpegBytes();
+  const { pool, statements } = coverPool({ coverUrl: COVER });
+  const download = coverFetch(bytes);
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders(),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: download.impl
+  });
+
+  await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
+
+  assert.equal(await fileExists(coverCachePath(cacheDir, EDITION)), true, 'the bytes are on disk');
+  const upsert = statementsLike(statements, 'INSERT INTO edition_cover_files');
+  assert.equal(upsert.length, 1);
+  assert.deepEqual(upsert[0].values, [EDITION, COVER, 'image/jpeg', bytes.length]);
+  assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
+  assert.equal(statementsLike(statements, 'INSERT INTO pds_outbox').length, 1);
+  assert.deepEqual(
+    statementsLike(statements, 'UPDATE editions'),
+    [],
+    'an existing provider URL is left alone'
+  );
+});
+
+test('a placeholder-sized image is rejected, and the URL is cleared', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const { pool, statements } = coverPool({ coverUrl: COVER });
+  const download = coverFetch(placeholderGif());
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders(),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: download.impl
+  });
+
+  await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
+
+  const cleared = statementsLike(statements, 'UPDATE editions SET cover_url = NULL');
+  assert.deepEqual(cleared[0]?.values, [EDITION, COVER]);
+  const rejected = ledger(statements);
+  assert.match(rejected?.sql ?? '', /outcome = 'rejected'/);
+  assert.match(rejected?.sql ?? '', /source_url = \$2/);
+  assert.deepEqual(rejected?.values, [EDITION, COVER]);
+  assert.equal(await fileExists(coverCachePath(cacheDir, EDITION)), false, 'nothing was cached');
+});
+
+test('a transport failure rejects the job and writes no terminal outcome', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const { pool, statements } = coverPool({ coverUrl: COVER });
+  const download = coverFetch(new Error('socket hang up'));
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders(),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: download.impl
+  });
+
+  await assert.rejects(
+    () => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log }),
+    /socket hang up/
+  );
+
+  assert.equal(ledger(statements), undefined, 'the claim is kept so the retry does not wait');
+  assert.deepEqual(statementsLike(statements, 'UPDATE editions'), []);
+});
+
+test('a provider 5xx is retried rather than treated as a missing cover', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const { pool, statements } = coverPool({ coverUrl: COVER });
+  const download = coverFetch(503);
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders(),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: download.impl
+  });
+
+  await assert.rejects(
+    () => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log }),
+    /answered 503/
+  );
+  assert.equal(ledger(statements), undefined);
+});
+
+test('an edition without a cover URL discovers one, then caches it', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const bytes = jpegBytes();
+  const { pool, statements } = coverPool();
+  const providers = coverProviders({ openlibrary: COVER });
+  const download = coverFetch(bytes);
+  const tasks = createTasks({
+    pool,
+    providers,
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: download.impl
+  });
+
+  await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
+
+  assert.deepEqual(download.calls, [COVER], 'the discovered URL is what gets downloaded');
+  assert.equal(providers.calls.google, 0, 'Google Books is only the fallback');
+  // The guarded write is what keeps a concurrent curator edit winning.
+  const discovered = statementsLike(statements, 'UPDATE editions SET cover_url = $2');
+  assert.deepEqual(discovered[0]?.values, [EDITION, COVER]);
+  assert.match(discovered[0]?.sql ?? '', /cover_url IS NULL OR btrim\(cover_url\) = ''/);
+  assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
+  assert.equal(await fileExists(coverCachePath(cacheDir, EDITION)), true);
+});
+
+test('Google Books answers when OpenLibrary has no cover', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const bytes = jpegBytes();
   const { pool, statements } = coverPool();
   const providers = coverProviders({
     openlibrary: undefined,
     google: [{ coverUrl: '' }, { coverUrl: GOOGLE_COVER }]
   });
-  const tasks = createTasks({ pool, providers, publisherHost: 'covers.example' });
+  const tasks = createTasks({
+    pool,
+    providers,
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: coverFetch(bytes).impl
+  });
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
   assert.equal(providers.calls.isbn, ISBN, 'the ISBN is what Google is asked for');
-  assert.deepEqual(coverWrite(statements)?.values, [EDITION, GOOGLE_COVER]);
-  assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
+  assert.deepEqual(
+    statementsLike(statements, 'INSERT INTO edition_cover_files')[0]?.values.slice(0, 2),
+    [EDITION, GOOGLE_COVER]
+  );
 });
 
-test('a "no cover" answer is recorded and no edition is touched', async () => {
+test('a "no cover" answer is recorded and no edition is touched', async (t) => {
+  const cacheDir = cacheDirFor(t);
   const { pool, statements } = coverPool();
-  const providers = coverProviders({ openlibrary: undefined, google: [] });
-  const tasks = createTasks({ pool, providers, publisherHost: 'covers.example' });
+  const download = coverFetch(jpegBytes());
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders({ openlibrary: undefined, google: [] }),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: download.impl
+  });
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.equal(coverWrite(statements), undefined, 'a missing cover writes no URL');
+  assert.deepEqual(download.calls, [], 'nothing to download');
   assert.match(ledger(statements)?.sql ?? '', /outcome = 'none'/);
+  assert.deepEqual(statementsLike(statements, 'UPDATE editions'), []);
 });
 
-test('an outage fails the job instead of being recorded as no cover', async () => {
+test('an outage during discovery fails the job instead of recording no cover', async (t) => {
+  const cacheDir = cacheDirFor(t);
   const { pool, statements } = coverPool();
-  const providers = coverProviders({
-    openlibrary: new Error('openlibrary 503'),
-    google: new Error('google 500')
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders({
+      openlibrary: new Error('openlibrary 503'),
+      google: new Error('google 500')
+    }),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverFetch: coverFetch(jpegBytes()).impl
   });
-  const tasks = createTasks({ pool, providers, publisherHost: 'covers.example' });
 
   await assert.rejects(
     () => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log }),
     /openlibrary 503/
   );
-
-  assert.equal(ledger(statements), undefined, 'the claim is kept so the retry does not wait');
-  assert.equal(coverWrite(statements), undefined);
+  assert.equal(ledger(statements), undefined);
 });
 
-test('Google Books still answers when only OpenLibrary failed', async () => {
-  const { pool, statements } = coverPool();
-  const providers = coverProviders({
-    openlibrary: new Error('openlibrary 503'),
-    google: [{ coverUrl: GOOGLE_COVER }]
-  });
-  const tasks = createTasks({ pool, providers, publisherHost: 'covers.example' });
-
-  await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
-
-  assert.deepEqual(coverWrite(statements)?.values, [EDITION, GOOGLE_COVER]);
-});
-
-test('an edition that already has a cover is never asked again', async () => {
+test('an unset COVERS_CACHE_DIR downloads nothing and records nothing', async () => {
   const { pool, statements } = coverPool({ coverUrl: COVER });
-  const providers = coverProviders({ openlibrary: COVER, google: [] });
-  const tasks = createTasks({ pool, providers, publisherHost: 'covers.example' });
+  const download = coverFetch(jpegBytes());
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders(),
+    publisherHost: 'covers.example',
+    coversCacheDir: '',
+    coverFetch: download.impl
+  });
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.deepEqual(providers.calls, { openlibrary: 0, google: 0, isbn: null });
-  assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
+  assert.deepEqual(download.calls, []);
+  // No query at all: the guard runs before the edition lookup, so a disabled
+  // cache cannot half-apply a ledger outcome to an edition it never examined.
+  assert.deepEqual(statements, []);
 });

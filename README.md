@@ -147,8 +147,10 @@ reserves a call in `provider_daily_usage` for the UTC day, and
 `ISBNDB_DAILY_LIMIT` (default `5000`) is a hard cap; exhaustion skips the
 network call and falls through. Tasks are `catalog.resolve`, `catalog.search`
 and `catalog.isbn`; the edge caps request-triggered hydration at 10 jobs per
-call. Operator curation is at `/admin` (gated by `ADMIN_TOKEN`) and calls the
-worker's loopback admin API.
+call, and queues `catalog.search` only when a text search's first page holds
+fewer than `SEARCH_HYDRATION_THRESHOLD` editions (default `10`, `0` disables),
+at most 120 such jobs per rolling hour. Operator curation is at `/admin` (gated
+by `ADMIN_TOKEN`) and calls the worker's loopback admin API.
 
 ## Development
 

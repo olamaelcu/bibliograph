@@ -114,7 +114,11 @@ async function loadEditionSnapshot(pool, uri) {
     const edition = await client.query(
       `SELECT e.uri, e.rkey, e.title, e.subtitle, s.language, s.published_date,
               s.format, s.pages, s.duration_seconds, e.chapters, e.series,
-              e.book_edition, s.description, e.cover_url, e.created_at
+              e.book_edition, s.description, e.cover_url, e.created_at,
+              EXISTS (
+                SELECT 1 FROM edition_cover_files f
+                 WHERE f.edition_uri = e.uri AND f.source_url = e.cover_url
+              ) AS cover_cached
          FROM editions e
          LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri
         WHERE e.uri = $1`,
@@ -188,10 +192,10 @@ async function loadSnapshot(pool, uri, collection) {
   return loadEntitySnapshot(pool, uri, collection);
 }
 
-function writeRecordValue(entry, snapshot) {
+function writeRecordValue(entry, snapshot, coversBaseUrl) {
   try {
     return entry.collection === EDITION_COLLECTION
-      ? buildEditionRecord(snapshot)
+      ? buildEditionRecord({ ...snapshot, coversBaseUrl })
       : buildEntityRecord(entry.collection, snapshot.row);
   } catch (error) {
     if (error instanceof EditionRecordError || error instanceof EntityRecordError) throw error;
@@ -206,7 +210,14 @@ function writeRecordValue(entry, snapshot) {
  * Publish one claimed row. Returns the atproto result (`{ uri, cid }` for
  * create/update; `{ uri }`, or nothing for an already-absent record, on delete).
  */
-export async function publishEntry({ pds, publisherDid, pool, entry, logger = console }) {
+export async function publishEntry({
+  pds,
+  publisherDid,
+  pool,
+  entry,
+  logger = console,
+  coversBaseUrl = ''
+}) {
   if (!OUTBOX_COLLECTIONS.includes(entry.collection)) {
     throw new Error(
       `outbox row ${entry.uri} names an unpublished collection ${entry.collection}; ` +
@@ -245,7 +256,7 @@ export async function publishEntry({ pds, publisherDid, pool, entry, logger = co
       ? new EditionRecordError(message)
       : new EntityRecordError(message);
   }
-  const value = writeRecordValue(entry, snapshot);
+  const value = writeRecordValue(entry, snapshot, coversBaseUrl);
   const operation = snapshot.cid ? 'update' : 'create';
 
   logger.info?.(
@@ -362,7 +373,7 @@ export async function failEntry(pool, entry, error) {
  * Build the publisher from configuration and expose `drain`, which the graphile
  * task calls. Construction fails fast (and loudly) on incomplete credentials.
  */
-export function createOutboxPublisher({ pool, config, fetchImpl } = {}) {
+export function createOutboxPublisher({ pool, config, fetchImpl, coversBaseUrl = '' } = {}) {
   const resolved = config ?? resolvePublisherConfig();
   if (!resolved.configured) throw publisherConfigError(resolved);
   const pds = createPdsPublisher({ config: resolved, fetchImpl });
@@ -384,7 +395,8 @@ export function createOutboxPublisher({ pool, config, fetchImpl } = {}) {
             publisherDid: resolved.publisherDid,
             pool,
             entry,
-            logger
+            logger,
+            coversBaseUrl
           });
           const completed = await completeEntry(pool, entry, result);
           published += 1;

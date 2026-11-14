@@ -17,6 +17,8 @@ const edition = {
   book_edition: '2nd revised',
   description: 'A novel of the Ekumen.',
   cover_url: 'https://covers.example/9780441478125.jpg',
+  // Set by the publish snapshot: true when the bytes are in the disk cache.
+  cover_cached: false,
   created_at: new Date('2026-01-02T03:04:05.000Z')
 };
 
@@ -75,6 +77,30 @@ test('builds the lexicon record from catalog rows', () => {
   // coverUrl is URL-only; the record must never carry a blob field.
   assert.equal('cover' in record, false);
   assert.equal('durationSeconds' in record, false);
+});
+
+test('a cached cover advertises the edge URL instead of the provider hotlink', () => {
+  const record = buildEditionRecord({
+    edition: { ...edition, cover_cached: true },
+    identifiers,
+    contributors: [],
+    coversBaseUrl: 'https://edge.test/'
+  });
+
+  assert.equal(
+    record.coverUrl,
+    `https://edge.test/api/covers/${encodeURIComponent(edition.uri)}`
+  );
+
+  // Without a public origin the provider URL is what a reader gets, because a
+  // relative `/api/covers/...` is not a usable record field.
+  const fallback = buildEditionRecord({
+    edition: { ...edition, cover_cached: true },
+    identifiers,
+    contributors: [],
+    coversBaseUrl: ''
+  });
+  assert.equal(fallback.coverUrl, edition.cover_url);
 });
 
 test('omits empty optional fields and deduplicates identifiers', () => {

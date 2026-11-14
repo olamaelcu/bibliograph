@@ -4,6 +4,14 @@ import { createIngest } from './ingest.js';
 import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
 import { prepareEntityRecords } from './prepare-entities.js';
 import { mergeGenres } from './genres.js';
+import {
+  CoverRejectedError,
+  cachedCoverSize,
+  coversBaseUrlFromEnv,
+  downloadCover,
+  removeCachedCover,
+  writeCachedCover
+} from './cover-cache.js';
 
 /** Upper bound on editions one catalog task ingests; providers may return fewer. */
 export const CANDIDATES_PER_TASK = 50;
@@ -14,9 +22,11 @@ export const GENRE_SWEEP_BATCH = 25;
 export const GENRE_SWEEP_BATCH_MAX = 200;
 
 /** Editions one cover sweep claims when the payload names no limit. */
-export const COVER_SWEEP_BATCH = 100;
+export const COVER_SWEEP_BATCH = 500;
 /** Upper bound on one cover sweep, whatever the payload asks for. */
-export const COVER_SWEEP_BATCH_MAX = 500;
+// The sweep only enqueues; download politeness is the gate inside
+// `downloadCover`, so a wide sweep is what lets a ~300k-edition backfill finish.
+export const COVER_SWEEP_BATCH_MAX = 5000;
 
 function validIdentifier(identifier) {
   return (
@@ -29,8 +39,111 @@ function validIdentifier(identifier) {
   );
 }
 
-export function createTasks({ pool, providers, publisherDid, publisherHost, publisher }) {
+/**
+ * Ask the free providers for a cover URL when the edition has none of its own.
+ * OpenLibrary answers first (one request, no key); Google Books only for an ISBN
+ * and only when OpenLibrary had nothing.
+ *
+ * Returns the URL, or `null` after recording the attempt as `none`. A total
+ * outage throws, so the caller's job retries instead of filing an absence.
+ */
+async function discoverCoverUrl({ pool, providers, uri, logger }) {
+  const identifiers = (
+    await pool.query(
+      `SELECT issuer, value
+         FROM edition_identifiers
+        WHERE edition_uri = $1
+        ORDER BY issuer, value`,
+      [uri]
+    )
+  ).rows;
+  if (identifiers.length === 0) {
+    await pool.query(
+      `UPDATE edition_cover_fetches
+          SET requested_at = now(), outcome = 'none'
+        WHERE edition_uri = $1`,
+      [uri]
+    );
+    logger.warn(`catalog.covers ${uri}: no identifiers`);
+    return null;
+  }
+
+  let attempted = 0;
+  let failed = 0;
+  let firstFailure;
+  const noteFailure = (label, error) => {
+    failed += 1;
+    firstFailure ??= error;
+    logger.warn(`catalog.covers ${uri}: ${label} failed — ${error?.message ?? error}`);
+  };
+
+  let cover;
+  const openlibrary = providers?.providers?.openlibrary;
+  if (openlibrary) {
+    attempted += 1;
+    try {
+      cover = cleanString(await openlibrary.coverForEdition(identifiers));
+    } catch (error) {
+      noteFailure('OpenLibrary', error);
+    }
+  }
+
+  if (!cover) {
+    const isbn = normalizeIsbn13(
+      cleanString(
+        identifiers.find((identifier) =>
+          ['isbn13', 'isbn10', 'isbn'].includes(cleanString(identifier?.issuer)?.toLowerCase())
+        )?.value
+      )
+    );
+    const google = providers?.providers?.google;
+    if (isbn && google) {
+      attempted += 1;
+      try {
+        const candidates = await google.byIsbn(isbn);
+        cover = candidates.map((candidate) => cleanString(candidate?.coverUrl)).find(Boolean);
+      } catch (error) {
+        noteFailure('Google Books', error);
+      }
+    }
+  }
+
+  if (cover) return cover;
+
+  if (attempted > 0 && failed === attempted) {
+    // Nothing answered, so this is an outage rather than an absence. Rethrow so
+    // the job retries; the claim is still held, so the retry does not wait out
+    // the seven-day window.
+    throw firstFailure;
+  }
+  await pool.query(
+    `UPDATE edition_cover_fetches
+        SET requested_at = now(), outcome = 'none'
+      WHERE edition_uri = $1`,
+    [uri]
+  );
+  logger.info(`catalog.covers ${uri}: no cover`);
+  return null;
+}
+
+export function createTasks({
+  pool,
+  providers,
+  publisherDid,
+  publisherHost,
+  publisher,
+  // Deployment configuration, never a baked-in path: without it the cover cache
+  // is disabled rather than guessing a directory the process cannot write.
+  coversCacheDir = '',
+  coversBaseUrl = '',
+  coverFetch = fetch
+}) {
   const ingest = createIngest({ pool, publisherDid, publisherHost });
+  const coversDir = coversCacheDir.trim();
+  const coverCacheEnabled = coversDir !== '';
+  // `coversBaseUrl` may arrive unset (tests, older callers); derive it from the
+  // publisher host so a record never advertises a bare path.
+  const coversBase = coversBaseUrl || coversBaseUrlFromEnv({}, publisherHost);
 
   // Without configured credentials the task still exists and fails with the
   // exact missing settings; it must never quietly drop outbox rows.
@@ -39,7 +152,7 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
     (() => {
       const config = resolvePublisherConfig();
       if (!config.configured) return undefined;
-      return createOutboxPublisher({ pool, config });
+      return createOutboxPublisher({ pool, config, coversBaseUrl: coversBase });
     })();
 
   async function ingestCandidates(candidates, limit) {
@@ -370,17 +483,20 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
       );
     },
 
-    // Backfills one edition's cover from the free providers.
+    // Caches one edition's cover image on disk.
     //
-    // A cover otherwise arrives only with an ingested candidate, so an edition
-    // whose first provider had none would stay coverless forever. OpenLibrary
-    // is asked first (one request, no key); Google Books only for an ISBN and
-    // only when OpenLibrary had nothing.
+    // A cover URL is not evidence of a cover: OpenLibrary answers a missing
+    // ISBN with a 43-byte placeholder that a browser renders as nothing. So the
+    // bytes are downloaded once, sniffed, and written to the shared cache the
+    // edge serves from; `edition_cover_files` records what is there. Anything
+    // under `MIN_COVER_BYTES` (or not an image) nulls `cover_url` and is
+    // recorded as a terminal `rejected`, because retrying that URL only spends
+    // provider requests.
     //
-    // A "no cover" answer is final and recorded; an outage throws so graphile
-    // retries, because a transient failure must not be mistaken for an
-    // absence. The ledger is the retry clock, and the edition update is
-    // guarded so a concurrent curator edit wins.
+    // A provider outage is different: it throws so graphile retries, because a
+    // transient failure must not be mistaken for an absence. The ledger is the
+    // retry clock, and every edition update is guarded so a concurrent curator
+    // edit wins.
     'catalog.covers': async (payload, helpers) => {
       const uri =
         typeof payload?.editionUri === 'string' && payload.editionUri !== ''
@@ -390,118 +506,147 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         helpers.logger.warn('catalog.covers: invalid payload');
         return;
       }
+      if (!coverCacheEnabled) {
+        // Nothing is downloaded and no ledger outcome is written: the edition's
+        // provider URL stays as it is, and the job is a no-op until an operator
+        // sets COVERS_CACHE_DIR.
+        helpers.logger.warn(`catalog.covers ${uri}: COVERS_CACHE_DIR is not set, skipping`);
+        return;
+      }
 
-      const edition = await pool.query('SELECT cover_url FROM editions WHERE uri = $1', [uri]);
+      const edition = await pool.query(
+        `SELECT e.cover_url, f.source_url AS cached_source, f.content_type, f.byte_size
+           FROM editions e
+           LEFT JOIN edition_cover_files f
+                  ON f.edition_uri = e.uri AND f.source_url = e.cover_url
+          WHERE e.uri = $1`,
+        [uri]
+      );
       if (edition.rowCount === 0) {
         // The ledger row cascaded away with the edition.
         helpers.logger.warn(`catalog.covers ${uri}: edition not found`);
         return;
       }
-      if (cleanString(edition.rows[0]?.cover_url)) {
+      const row = edition.rows[0];
+
+      // The cache row only matches when it was written for the *current*
+      // `cover_url` (the join pairs them), so a curated URL change falls through
+      // to a fresh download instead of serving the old provider's bytes.
+      if (row.content_type !== null && (await cachedCoverSize(coversDir, uri)) !== null) {
         await pool.query(
           `UPDATE edition_cover_fetches
-              SET requested_at = now(), outcome = 'found'
+              SET requested_at = now(), outcome = 'found', source_url = $2
             WHERE edition_uri = $1`,
-          [uri]
+          [uri, cleanString(row.cover_url)]
         );
-        helpers.logger.info(`catalog.covers ${uri}: already has a cover`);
+        helpers.logger.info(`catalog.covers ${uri}: already cached`);
         return;
       }
 
-      const identifiers = (
-        await pool.query(
-          `SELECT issuer, value
-             FROM edition_identifiers
-            WHERE edition_uri = $1
-            ORDER BY issuer, value`,
-          [uri]
-        )
-      ).rows;
-      if (identifiers.length === 0) {
-        await pool.query(
-          `UPDATE edition_cover_fetches
-              SET requested_at = now(), outcome = 'none'
-            WHERE edition_uri = $1`,
-          [uri]
-        );
-        helpers.logger.warn(`catalog.covers ${uri}: no identifiers`);
-        return;
+      // No usable image for this source: either the cache row is stale or the
+      // file it names is gone. The path is keyed by URI alone, so leftover bytes
+      // from another source have to be removed before a new download lands.
+      await removeCachedCover(coversDir, uri);
+      await pool.query('DELETE FROM edition_cover_files WHERE edition_uri = $1', [uri]);
+      let source = cleanString(row.cover_url);
+      let discovered = false;
+
+      if (!source) {
+        source = await discoverCoverUrl({ pool, providers, uri, logger: helpers.logger });
+        if (source === null) return;
+        discovered = true;
       }
 
-      let attempted = 0;
-      let failed = 0;
-      let firstFailure;
-      const noteFailure = (label, error) => {
-        failed += 1;
-        firstFailure ??= error;
-        helpers.logger.warn(
-          `catalog.covers ${uri}: ${label} failed — ${error?.message ?? error}`
-        );
-      };
-
-      let cover;
-      const openlibrary = providers?.providers?.openlibrary;
-      if (openlibrary) {
-        attempted += 1;
+      let image;
+      try {
+        image = await downloadCover(source, { fetchImpl: coverFetch });
+      } catch (error) {
+        // A bad URL is terminal: the ledger records `rejected` against this
+        // source, and the edition loses a URL that never had a cover behind it.
+        // Anything else (transport, a 5xx, a truncated response) is a provider
+        // problem, so it propagates and graphile retries with a fresh claim.
+        if (!(error instanceof CoverRejectedError)) throw error;
+        const client = await pool.connect();
         try {
-          cover = cleanString(await openlibrary.coverForEdition(identifiers));
-        } catch (error) {
-          noteFailure('OpenLibrary', error);
+          await client.query('BEGIN');
+          await client.query('DELETE FROM edition_cover_files WHERE edition_uri = $1', [uri]);
+          await client.query(
+            `UPDATE editions SET cover_url = NULL
+              WHERE uri = $1 AND cover_url = $2`,
+            [uri, source]
+          );
+          await client.query(
+            `UPDATE edition_cover_fetches
+                SET requested_at = now(), outcome = 'rejected', source_url = $2
+              WHERE edition_uri = $1`,
+            [uri, source]
+          );
+          await client.query('COMMIT');
+        } catch (rejection) {
+          await client.query('ROLLBACK');
+          throw rejection;
+        } finally {
+          client.release();
         }
-      }
-
-      if (!cover) {
-        const isbn = normalizeIsbn13(
-          cleanString(
-            identifiers.find((identifier) =>
-              ['isbn13', 'isbn10', 'isbn'].includes(
-                cleanString(identifier?.issuer)?.toLowerCase()
-              )
-            )?.value
-          )
+        helpers.logger.warn(
+          `catalog.covers ${uri}: rejected ${error.byteSize ?? 0} bytes from ${source} ` +
+            `(${error.message})`
         );
-        const google = providers?.providers?.google;
-        if (isbn && google) {
-          attempted += 1;
-          try {
-            const candidates = await google.byIsbn(isbn);
-            cover = candidates.map((candidate) => cleanString(candidate?.coverUrl)).find(Boolean);
-          } catch (error) {
-            noteFailure('Google Books', error);
-          }
-        }
-      }
-
-      if (!cover) {
-        if (attempted > 0 && failed === attempted) {
-          // Nothing answered, so this is an outage rather than an absence.
-          // Rethrow so the job retries; the claim is still held, so the retry
-          // does not wait out the seven-day window.
-          throw firstFailure;
-        }
-        await pool.query(
-          `UPDATE edition_cover_fetches
-              SET requested_at = now(), outcome = 'none'
-            WHERE edition_uri = $1`,
-          [uri]
-        );
-        helpers.logger.info(`catalog.covers ${uri}: no cover`);
         return;
       }
+
+      await writeCachedCover(coversDir, uri, image.bytes);
 
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query(
-          `UPDATE editions SET cover_url = $2
-            WHERE uri = $1 AND (cover_url IS NULL OR btrim(cover_url) = '')`,
-          [uri, cover]
+        // The previous source is read inside the transaction: the record has to
+        // be republished whenever what it advertises changes, and that is
+        // exactly when this differs (first cache, or a different provider URL).
+        const previous = await client.query(
+          'SELECT source_url FROM edition_cover_files WHERE edition_uri = $1',
+          [uri]
         );
         await client.query(
+          `INSERT INTO edition_cover_files
+                  (edition_uri, source_url, content_type, byte_size, cached_at)
+           VALUES ($1, $2, $3, $4, now())
+           ON CONFLICT (edition_uri) DO UPDATE SET
+             source_url = EXCLUDED.source_url,
+             content_type = EXCLUDED.content_type,
+             byte_size = EXCLUDED.byte_size,
+             cached_at = now()`,
+          [uri, source, image.contentType, image.byteSize]
+        );
+        if (discovered) {
+          // The same guard as ingest: a curator edit that landed meanwhile wins.
+          await client.query(
+            `UPDATE editions SET cover_url = $2
+              WHERE uri = $1 AND (cover_url IS NULL OR btrim(cover_url) = '')`,
+            [uri, source]
+          );
+        }
+        if (previous.rows[0]?.source_url !== source) {
+          // What the record advertises just changed, so it is stale until
+          // republished. A discovered source also fires the edition trigger;
+          // this upsert coalesces with it.
+          await client.query(
+            `INSERT INTO pds_outbox (uri, collection, rkey, op)
+             SELECT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
+               FROM editions e
+              WHERE e.uri = $1
+             ON CONFLICT (uri) DO UPDATE SET
+               op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
+               value = NULL,
+               updated_at = now()`,
+            [uri]
+          );
+        }
+        await client.query(
           `UPDATE edition_cover_fetches
-              SET requested_at = now(), outcome = 'found'
+              SET requested_at = now(), outcome = 'found', source_url = $2
             WHERE edition_uri = $1`,
-          [uri]
+          [uri, source]
         );
         await client.query('COMMIT');
       } catch (error) {
@@ -511,59 +656,110 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         client.release();
       }
 
-      helpers.logger.info(`catalog.covers ${uri}: found ${cover}`);
+      helpers.logger.info(
+        `catalog.covers ${uri}: cached ${image.byteSize} bytes from ${source}`
+      );
     },
 
-    // Files coverless editions into the queue.
+    // Files editions that still need a cached cover into the queue.
     //
-    // Two passes, like the genre sweep: editions that were never attempted come
-    // first, and a retry only fills the capacity left over — a population of
-    // genuinely coverless editions, re-armed every seven days, could otherwise
-    // occupy every sweep and starve new arrivals.
+    // Three passes, in priority order: a known source URL that is not cached yet
+    // (the backfill — these are cheap and always progress), then editions that
+    // were never attempted, then retries on the seven-day clock. Each pass only
+    // gets the capacity the earlier ones left over, so a population of
+    // genuinely coverless editions, re-armed every seven days, cannot occupy
+    // every sweep and starve the backfill.
+    //
+    // A `rejected` outcome is terminal for the source it names: the first pass
+    // and the retry pass both skip that pair, since re-downloading a placeholder
+    // only costs a provider request. A curated URL change makes it a new pair.
     //
     // No count precheck: the partial `editions_missing_cover_idx` makes the
-    // first walk index-only-sized when nothing is coverless, so proving there is
-    // nothing to do is already cheap, and a stale precheck could only hide new
-    // arrivals.
+    // never-attempted walk index-only-sized when nothing is coverless, so
+    // proving there is nothing to do is already cheap, and a stale precheck
+    // could only hide new arrivals.
     //
     // The claim lives in `catalog_enqueue_cover_fetch`, so a sweep racing the
     // edge never queues the same edition twice.
     'catalog.covers.sweep': async (payload, helpers) => {
+      if (!coverCacheEnabled) {
+        // Queuing jobs that can only no-op would just churn the ledger, so the
+        // sweep stays silent-but-loud until an operator configures the cache.
+        helpers.logger.warn('catalog.covers.sweep: COVERS_CACHE_DIR is not set, skipping');
+        return;
+      }
       const limit = Number.isInteger(payload?.limit)
         ? Math.min(Math.max(payload.limit, 1), COVER_SWEEP_BATCH_MAX)
         : COVER_SWEEP_BATCH;
 
       const candidates = [];
-      const fresh = await pool.query(
+
+      const uncached = await pool.query(
+        // Has a source URL, no cached file for it, and that URL has not already
+        // been rejected. Ordered by `indexed_at` so the LIMIT ends the walk
+        // (`editions_cover_url_idx`). Every queued edition leaves this pass, so
+        // it always makes progress through the catalog.
         `SELECT e.uri
            FROM editions e
-          WHERE (e.cover_url IS NULL OR btrim(e.cover_url) = '')
+           LEFT JOIN edition_cover_files f
+                  ON f.edition_uri = e.uri AND f.source_url = e.cover_url
+          WHERE e.cover_url IS NOT NULL AND btrim(e.cover_url) <> ''
+            AND f.edition_uri IS NULL
             AND NOT EXISTS (
-                  SELECT 1 FROM edition_cover_fetches f WHERE f.edition_uri = e.uri
+                  SELECT 1 FROM edition_cover_fetches l
+                   WHERE l.edition_uri = e.uri
+                     AND l.outcome = 'rejected'
+                     AND l.source_url = e.cover_url
                 )
           ORDER BY e.indexed_at ASC, e.uri ASC
           LIMIT $1`,
         [limit]
       );
-      candidates.push(...fresh.rows);
+      candidates.push(...uncached.rows);
 
-      if (candidates.length < limit) {
-        const retries = await pool.query(
-          // Driven by the ledger, so it can only return editions the fresh pass
-          // already excluded, oldest attempt first; the partial
-          // `edition_cover_fetches_retry_idx` serves that order.
-          `SELECT f.edition_uri AS uri
-             FROM edition_cover_fetches f
-             JOIN editions e ON e.uri = f.edition_uri
-            WHERE f.requested_at < now() - interval '7 days'
-              AND f.outcome IS DISTINCT FROM 'found'
-              AND (e.cover_url IS NULL OR btrim(e.cover_url) = '')
-            ORDER BY f.requested_at ASC
-            LIMIT $1`,
-          [limit - candidates.length]
-        );
-        candidates.push(...retries.rows);
-      }
+      // An exhausted budget skips the remaining passes instead of asking the
+      // database for a `LIMIT 0` it already knows the answer to.
+      const fresh =
+        candidates.length < limit
+          ? await pool.query(
+              // Never attempted: no usable URL and no ledger row. The claim
+              // function is what discovers a URL for these.
+              `SELECT e.uri
+                 FROM editions e
+                WHERE (e.cover_url IS NULL OR btrim(e.cover_url) = '')
+                  AND NOT EXISTS (
+                        SELECT 1 FROM edition_cover_fetches f WHERE f.edition_uri = e.uri
+                      )
+                ORDER BY e.indexed_at ASC, e.uri ASC
+                LIMIT $1`,
+              [limit - candidates.length]
+            )
+          : { rows: [] };
+      if (fresh.rows.length > 0) candidates.push(...fresh.rows);
+
+      const retries =
+        candidates.length < limit
+          ? await pool.query(
+              // Driven by the ledger, so it can only return editions the earlier
+              // passes already excluded, oldest attempt first; the partial
+              // `edition_cover_fetches_retry_idx` serves that order. `rejected`
+              // is skipped: it is terminal for the URL it names, and
+              // `fillMissingFields` clears it when a provider offers a new one.
+              `SELECT l.edition_uri AS uri
+                 FROM edition_cover_fetches l
+                 JOIN editions e ON e.uri = l.edition_uri
+                 LEFT JOIN edition_cover_files f
+                        ON f.edition_uri = e.uri AND f.source_url = e.cover_url
+                WHERE l.requested_at < now() - interval '7 days'
+                  AND l.outcome IS DISTINCT FROM 'found'
+                  AND l.outcome IS DISTINCT FROM 'rejected'
+                  AND f.edition_uri IS NULL
+                ORDER BY l.requested_at ASC
+                LIMIT $1`,
+              [limit - candidates.length]
+            )
+          : { rows: [] };
+      if (retries.rows.length > 0) candidates.push(...retries.rows);
 
       let enqueued = 0;
       for (const row of candidates) {
@@ -574,7 +770,9 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         if (claimed.rows[0]?.enqueued === true) enqueued += 1;
       }
       helpers.logger.info(
-        `catalog.covers.sweep: ${candidates.length} candidate(s), ${enqueued} enqueued`
+        `catalog.covers.sweep: ${candidates.length} candidate(s) ` +
+          `(${uncached.rows.length} uncached, ${fresh.rows.length} new, ` +
+          `${retries.rows.length} retry), ${enqueued} enqueued`
       );
     },
 

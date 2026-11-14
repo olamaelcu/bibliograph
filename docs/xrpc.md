@@ -514,10 +514,11 @@ rows; the response does not report whether that work is outstanding (see above).
 **Enqueue cap.** Both procedures cap each hydration enqueue list at 10 jobs per request
 (`MAX_HYDRATION_JOBS_PER_REQUEST` in the edge route): `resolveEditions` queues at most 10 unmatched
 identifiers, and `searchEditions` at most 10 ISBN hydration jobs, plus its single `catalog.search`
-job when the local page is empty. A body may still name 100 identifiers; those beyond the cap are
+job when the first page is thin. A body may still name 100 identifiers; those beyond the cap are
 validated and matched normally, they are just not queued on this call, and a later call that
-repeats the miss can queue them. The cap is per request, not a global quota: the TTL marks only
-dedupe repeats across calls. Each queued job can spend up to 50 paid provider lookups in the
+repeats the miss can queue them. The cap is per request: the TTL marks dedupe repeats across
+calls, and `catalog.search` additionally carries a global budget of 120 enqueues per rolling hour
+(`SEARCH_HYDRATION_PER_HOUR`). Each queued job can spend up to 50 paid provider lookups in the
 worker, so operators should also rate-limit this anonymous surface at the reverse proxy.
 
 #### `community.lexicon.media.book.resolveEditions`
@@ -568,11 +569,16 @@ as `en` and `fre`/`fra` as `fr`, with any region suffix preserved. A caller ther
 a three-letter code matches nothing unless the language has no two-letter form. An edition with no language
 claim never matches a filter.
 
-Text/identifier hydration (`catalog.search`) is queued only when the local result is empty
-(`items.length === 0`), and a repeated query is deduplicated by its TTL mark. The response carries
-no flag for it, so a client can only re-call with the same body later; an empty page may stay
-empty on every later call. As with `resolveEditions`, there is no signal for worker liveness or
-for a stopped worker.
+Text/identifier hydration (`catalog.search`) is queued only on a **thin first page**: `offset` is
+`0`, the body names `q`/`title`/`author` (an identifiers-only or `language`-only body has no
+provider text query to run), and the reported `total` is below `SEARCH_HYDRATION_THRESHOLD`
+(default `10`; blank or invalid falls back to the default, `0` disables the trigger). Page length is
+never consulted, so a caller's small `limit` does not spend provider quota, and `total` exists only
+on the first page, so paging never re-fires. A repeated query is deduplicated by its TTL mark, and
+the edge additionally caps `catalog.search` at `120` enqueues per rolling hour across all queries
+(`SEARCH_HYDRATION_PER_HOUR`), so hydration is a bounded background trickle and not a per-call
+multiplier. The response carries no flag for it, so a client only sees the new editions by re-calling
+later. As with `resolveEditions`, there is no signal for worker liveness or for a stopped worker.
 
 ISBN identifiers (`isbn13`, `isbn10`, `isbn`, case-insensitive, normalized to a checksum-valid
 ISBN-13) follow a separate rule: they queue a direct ISBNdb lookup (`catalog.isbn`)

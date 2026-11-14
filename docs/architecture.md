@@ -33,7 +33,16 @@ issuer, with ties broken by `(issuer, value)`. Providers fill only empty claim
 fields and curation edits them per identifier, so two ISBNs may disagree and
 both keep their own evidence.
 
-`language` is the one claim that is canonicalised rather than kept verbatim:
+`format` and the size that goes with it are one claim, not two. `0013-edition-
+identifier-extent.sql` stores `extent` (`{"format":"Hardcover","pages":320}` or
+`{"format":"Audiobook","durationSeconds":36000}`), makes `format`, `pages` and
+`duration_seconds` generated projections of it, and prunes the unit the format
+does not use in a `BEFORE` trigger. The shape view therefore publishes exactly
+one of `pages` / `durationSeconds`, taken from the winning identifier's format:
+an audio format (`audio`, `audible`, `mp3`) carries a duration, any other format
+a page count, and a claim with no format keeps both.
+
+`language` is canonicalised rather than kept verbatim:
 `0011-language-normalization.sql` stores the two-letter ISO 639-1 code and keeps
 any region suffix, so a provider's `eng` becomes `en` and `fre`/`fra` become
 `fr`. It is a `BEFORE` trigger on the claim table, not a step each writer has to
@@ -201,6 +210,10 @@ jobs per request (`MAX_HYDRATION_JOBS_PER_REQUEST`). The 100-identifier input
 cap is unchanged and every identifier is still matched; only the first 10
 misses are queued per call. The cap is per request, not a global quota, so it
 bounds the provider cost of a single body but does not rate-limit the caller.
+`catalog.search` is the exception: it also carries a rolling-hour budget of 120
+enqueues across all queries (`SEARCH_HYDRATION_PER_HOUR` in
+`lib/server/catalog/search-hydration.ts`), so an anonymous text search cannot
+turn the catalog's thin spots into unbounded provider spend.
 
 ## Feed generator
 
@@ -240,7 +253,7 @@ one anonymous call cannot turn its full identifier list into paid provider work.
 | Task | Trigger | Work |
 | --- | --- | --- |
 | `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest up to 50 candidates into the identifier bag |
-| `catalog.search` | edge on a catalog search (`job_key` deduped, 1 h TTL) | provider search → ingest up to 50 candidates |
+| `catalog.search` | edge on a search whose first-page `total` is below `SEARCH_HYDRATION_THRESHOLD` (`job_key` deduped, 1 h TTL, ≤120 enqueues per rolling hour) | provider search → ingest up to 50 candidates |
 | `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to 50 candidates; falls back to the resolve chain when ISBNdb is unconfigured or returns nothing |
 | `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
 
@@ -409,6 +422,11 @@ whose nginx config denies an exact-match `/metrics` `location`. The SvelteKit
 status; the XRPC surface records `bibliograph_happyview_requests_total`,
 `bibliograph_pds_proxy_requests_total`, `bibliograph_catalog_queries_total`,
 `bibliograph_catalog_query_duration_seconds` and
+`bibliograph_catalog_search_decision_total` (one label, the hydration decision
+`thin`/`enough`/`paged`/`no_text`), `bibliograph_catalog_search_first_page_matches`
+(histogram of the first-page `total`, the distribution the env threshold is
+tuned against), `bibliograph_catalog_hydration_total` (task × outcome:
+`queued`/`deduped`/`unavailable`/`over_budget`/`error`) and
 `bibliograph_feed_requests_total`. The feed generator adds
 `bibliograph_feed_request_duration_seconds`,
 `bibliograph_feed_page_items`, `bibliograph_feed_pages_total`,

@@ -175,6 +175,9 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'catalog_enqueue_genre_fetch',
       'editions_next_tid',
       'editions_tid_encode',
+      'identifier_format_is_audio',
+      'normalize_identifier_extent',
+      'normalize_identifier_extent_row',
       'normalize_identifier_language',
       'normalize_language',
       'pds_enqueue_contributor_editions',
@@ -184,7 +187,22 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_publisher_editions'
     ]]
   );
-  assert.equal(functions.rows.length, 11);
+  assert.equal(functions.rows.length, 14);
+
+  // 0013 makes the three claim columns projections of `extent`, so no writer
+  // can set them directly and the shape view reads a single consistent claim.
+  const claimColumns = await pool.query(
+    `SELECT column_name, is_generated FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'edition_identifier_info'
+        AND column_name = ANY($1)
+      ORDER BY column_name`,
+    [['duration_seconds', 'format', 'pages']]
+  );
+  assert.deepEqual(claimColumns.rows, [
+    { column_name: 'duration_seconds', is_generated: 'ALWAYS' },
+    { column_name: 'format', is_generated: 'ALWAYS' },
+    { column_name: 'pages', is_generated: 'ALWAYS' }
+  ]);
 
   const triggers = await pool.query(
     `SELECT tgname FROM pg_trigger t
@@ -196,6 +214,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
   assert.deepEqual(
     triggers.rows.map((row) => row.tgname),
     [
+      'normalize_identifier_extent',
       'normalize_identifier_language',
       'pds_enqueue_contributor_edits',
       'pds_enqueue_contributor_record',
@@ -263,18 +282,21 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   // written for every identifier it supplied, and the edition reads the union.
   const claims = await pool.query(
     `SELECT issuer, value, format, language, published_date, pages, description,
-            duration_seconds
+            duration_seconds, extent
        FROM edition_identifier_info
       WHERE edition_uri = $1 ORDER BY issuer, value`,
     [editionUri]
   );
+  // 0013: `paperback` is a print format, so the candidate's 11_400-second
+  // duration is pruned and only the page count survives the claim.
   const claim = {
+    extent: { format: 'paperback', pages: 321 },
     format: 'paperback',
     language: 'en',
     published_date: '2026-11-11',
     pages: 321,
     description: 'A probe edition.',
-    duration_seconds: 11_400
+    duration_seconds: null
   };
   assert.deepEqual(claims.rows, [
     { issuer: 'googlebooks', value: 'schema-probe-volume', ...claim },
@@ -292,7 +314,7 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
     format: 'paperback',
     pages: 321,
     description: 'A probe edition.',
-    duration_seconds: 11_400
+    duration_seconds: null
   });
 
   // 0010 moved the duration onto the identifier; no edition keeps one.
@@ -379,6 +401,86 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
     value: null,
     attempts: 0
   }]);
+});
+
+test('an extent keeps only the unit its format uses, and the shape publishes one', { skip: SKIP }, async () => {
+  // A print claim and an audio claim on the same book, plus a second edition
+  // that is audio-only. The BEFORE trigger prunes the unit the row's format
+  // does not use, and the shape view publishes the winner's unit only.
+  const audioOnly = `at://${AUTHORITY}/${COLLECTION}/extent-audio`;
+  const mixed = `at://${AUTHORITY}/${COLLECTION}/extent-mixed`;
+
+  // Rolled back: the outbox tests later in this file assume the probe edition
+  // is the only queued record.
+  const client = await pool.connect();
+  let claims;
+  let shape;
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO editions (uri, title, created_at)
+       VALUES ($1, 'Audio Only Probe', now()), ($2, 'Mixed Format Probe', now())`,
+      [audioOnly, mixed]
+    );
+    await client.query(
+      `INSERT INTO edition_identifiers (edition_uri, issuer, value) VALUES
+         ($1, 'isbn13', '9780306406159'),
+         ($2, 'isbn13', '9780306406158'),
+         ($2, 'isbn10', '0306406152')`,
+      [audioOnly, mixed]
+    );
+    await client.query(
+      `INSERT INTO edition_identifier_info (edition_uri, issuer, value, extent) VALUES
+         ($1, 'isbn13', '9780306406159',
+          '{"format":"Audiobook","durationSeconds":36000}'),
+         ($2, 'isbn13', '9780306406158',
+          '{"format":"hardcover","pages":300,"durationSeconds":99999}'),
+         ($2, 'isbn10', '0306406152',
+          '{"format":"Audiobook","durationSeconds":36000}')`,
+      [audioOnly, mixed]
+    );
+
+    claims = await client.query(
+      `SELECT edition_uri, issuer, extent, format, pages, duration_seconds
+         FROM edition_identifier_info
+        WHERE edition_uri = ANY($1::text[])
+        ORDER BY edition_uri, issuer`,
+      [[audioOnly, mixed]]
+    );
+    shape = await client.query(
+      `SELECT edition_uri, format, pages, duration_seconds
+         FROM edition_identifier_shape
+        WHERE edition_uri = ANY($1::text[])
+        ORDER BY edition_uri`,
+      [[audioOnly, mixed]]
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+
+  const audioClaim = {
+    extent: { format: 'Audiobook', durationSeconds: 36000 },
+    format: 'Audiobook',
+    pages: null,
+    duration_seconds: 36000
+  };
+  assert.deepEqual(claims.rows, [
+    { edition_uri: audioOnly, issuer: 'isbn13', ...audioClaim },
+    { edition_uri: mixed, issuer: 'isbn10', ...audioClaim },
+    {
+      edition_uri: mixed,
+      issuer: 'isbn13',
+      extent: { format: 'hardcover', pages: 300 },
+      format: 'hardcover',
+      pages: 300,
+      duration_seconds: null
+    }
+  ]);
+  assert.deepEqual(shape.rows, [
+    { edition_uri: audioOnly, format: 'Audiobook', pages: null, duration_seconds: 36000 },
+    { edition_uri: mixed, format: 'hardcover', pages: 300, duration_seconds: null }
+  ]);
 });
 
 test('re-ingesting the same identifier bag updates in place without downgrading the create', { skip: SKIP }, async () => {
