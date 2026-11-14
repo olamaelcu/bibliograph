@@ -206,6 +206,11 @@ a blob the publishing repo owns (the catalog emits `imageUrl` only).
 
 `listEditionsByContributor` items use `defs#bookView` (`uri` plus the edition's `editionView`), the
 same shape the activity queries embed, so the client can render and link the edition directly.
+Its `sort`, `order` and `language` parameters are the same extensions `searchEditions` accepts, built
+from one shared clause pair: `title` sorts alphabetically, `publishedYear` by the shape claim's year
+with unknown years last, and `relevance` keeps the listing's own order (newest catalog creation
+first). `language` matches the union claim's primary subtag, and `total` counts what the filters
+returned.
 
 Every `editionView` in `resolveEditions` / `searchEditions` carries the edition's atproto URI as an
 identifier: `{ "issuer": "atproto", "value": "at://<did>/community.lexicon.media.book.edition/<rkey>" }`,
@@ -255,7 +260,7 @@ signal. Queued work is not a promise that anything will be found.
 | `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total, cursor? }` |
 | `getContributor` | `uri` (at-uri) | `{ contributor }` |
 | `getPublisher` | `uri` (at-uri) | `{ publisher }` |
-| `listEditionsByContributor` | `contributor` (at-uri), `limit` 25 (≤100), `cursor` | `{ items, cursor?, total? }` |
+| `listEditionsByContributor` | `contributor` (at-uri), `limit` 25 (≤100), `cursor`, `sort`, `order`, `language` | `{ items, cursor?, total? }` |
 | `searchContributors` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |
 | `searchPublishers` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |
 
@@ -566,8 +571,14 @@ them, and a body carrying only `language` is a valid browse rather than `Invalid
 case-insensitive on the primary subtag, so `en` also matches `en-US`. Stored claims are canonical:
 `0011-language-normalization.sql` keeps the two-letter ISO 639-1 code on write, so a provider's `eng` is stored
 as `en` and `fre`/`fra` as `fr`, with any region suffix preserved. A caller therefore sends `en`, `es`, `fr` —
-a three-letter code matches nothing unless the language has no two-letter form. An edition with no language
-claim never matches a filter.
+a three-letter code matches nothing unless the language has no two-letter form. An edition with no language claim never matches a filter.
+
+**Shared with the contributor listing.** `listEditionsByContributor` accepts the same `sort`,
+`order` and `language`, built from the same clauses (`editionOrderBy` /
+`editionLanguageClause` in `packages/web/src/lib/server/catalog/editions.ts`), so one page behaves
+identically on both surfaces. The only difference is the default: `relevance` there is the
+listing's own newest-first order (`created_at DESC, uri ASC`) rather than a text ranking, because
+the method takes no query to rank against. Its `total` counts what the filters returned.
 
 Text/identifier hydration (`catalog.search`) is queued only on a **thin first page**: `offset` is
 `0`, the body names `q`/`title`/`author` (an identifiers-only or `language`-only body has no

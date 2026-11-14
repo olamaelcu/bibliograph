@@ -13,9 +13,8 @@ import { catalogPool } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import {
   resolveEditions,
+  parseEditionOrder,
   searchEditions,
-  type EditionSort,
-  type EditionSortOrder,
   type Identifier,
 } from "$lib/server/catalog/editions";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
@@ -76,18 +75,6 @@ const MAX_LANGUAGE_LENGTH = 35;
 // lookups in the worker, and these procedures are anonymous, so one body must
 // not be able to queue the whole identifier list. The cap is per request; the
 // TTL marks dedupe repeats across calls, they are not a global quota.
-
-// `searchEditions` ordering is a local extension over the lexicon's
-// provider-defined ranking; these tables are what the handler accepts.
-const EDITION_SORTS: Readonly<Record<EditionSort, true>> = {
-  relevance: true,
-  title: true,
-  publishedYear: true,
-};
-const EDITION_SORT_ORDERS: Readonly<Record<EditionSortOrder, true>> = {
-  asc: true,
-  desc: true,
-};
 const MAX_HYDRATION_JOBS_PER_REQUEST = 10;
 
 function fail(status: number, error: string, message: string): Response {
@@ -246,22 +233,9 @@ async function handleSearch(request: Request): Promise<Response> {
   const order = optionalString(body.order);
   if (sort === null) return fail(400, "InvalidRequest", "sort must be a string");
   if (order === null) return fail(400, "InvalidRequest", "order must be a string");
-  const sortValue = (sort ?? "relevance") as EditionSort;
-  const orderValue = (order ?? "asc") as EditionSortOrder;
-  if (EDITION_SORTS[sortValue] !== true) {
-    return fail(
-      400,
-      "InvalidRequest",
-      `sort must be one of ${Object.keys(EDITION_SORTS).join(", ")}`,
-    );
-  }
-  if (EDITION_SORT_ORDERS[orderValue] !== true) {
-    return fail(
-      400,
-      "InvalidRequest",
-      `order must be one of ${Object.keys(EDITION_SORT_ORDERS).join(", ")}`,
-    );
-  }
+
+  const parsedOrder = parseEditionOrder({ sort, order });
+  if ("error" in parsedOrder) return fail(400, "InvalidRequest", parsedOrder.error);
 
   const started = performance.now();
   try {
@@ -272,8 +246,8 @@ async function handleSearch(request: Request): Promise<Response> {
       identifiers,
       offset,
       limit,
-      sort: sortValue,
-      order: orderValue,
+      sort: parsedOrder.sort,
+      order: parsedOrder.order,
       language,
       coversBaseUrl: coversBaseUrl(),
     }, catalogPool());
@@ -398,8 +372,26 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       }
       const limit = queryInteger(params.get("limit"), 25, 1, 100);
       if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+      // The same local extensions `searchEditions` accepts, so one contributor's
+      // page can be narrowed and ordered identically.
+      const language = (params.get("language") ?? "").trim();
+      if (language.length > MAX_LANGUAGE_LENGTH) {
+        return fail(
+          400,
+          "InvalidRequest",
+          `language must be at most ${MAX_LANGUAGE_LENGTH} characters`,
+        );
+      }
+      const parsedOrder = parseEditionOrder({
+        sort: params.get("sort"),
+        order: params.get("order"),
+      });
+      if ("error" in parsedOrder) return fail(400, "InvalidRequest", parsedOrder.error);
       const page = await listEditionsByContributor(pool, {
         contributor,
+        ...(language === "" ? {} : { language }),
+        sort: parsedOrder.sort,
+        order: parsedOrder.order,
         offset: decodeOffsetCursor(params.get("cursor")),
         limit,
         coversBaseUrl: coversBaseUrl(),

@@ -22,6 +22,12 @@ import {
   type EditionRow,
   type EditionView
 } from './edition-view.ts';
+import {
+  editionLanguageClause,
+  editionOrderBy,
+  type EditionSort,
+  type EditionSortOrder
+} from './editions.ts';
 import { decodeOffsetCursor, encodeOffsetCursor, likePattern, likePrefix } from './sql.ts';
 
 export const CONTRIBUTOR_COLLECTION = 'net.olamaelcu.livtet.biblio.contributor';
@@ -396,13 +402,20 @@ export type BookResults = { items: BookView[]; cursor?: string; total?: number }
  * The contributor is resolved by its exact `at_uri` (the caller has already
  * validated the collection); no row is `null`, which the route maps to 404. The
  * join is `EXISTS`, so a person credited twice on one edition appears once.
- * Order is `editions.created_at DESC, uri ASC` — stable for offset paging and
- * newest-first for display. `total` is only counted on the first page.
+ * Default order is `editions.created_at DESC, uri ASC` — stable for offset
+ * paging and newest-first for display. `sort`/`order` and `language` are the
+ * same ones `searchEditions` accepts (`editionOrderBy` /
+ * `editionLanguageClause`), and `total` counts what the filters returned. Only
+ * the first page carries a total.
  */
 export async function listEditionsByContributor(
   pool: EntityQueryable,
   input: {
     contributor: string;
+    /** Union language claim, matched on the primary subtag; absent means no filter. */
+    language?: string;
+    sort?: EditionSort;
+    order?: EditionSortOrder;
     offset: number;
     limit: number;
     /** Public origin for `/api/covers` URLs; absent keeps provider URLs. */
@@ -415,35 +428,63 @@ export async function listEditionsByContributor(
   const contributorId = found[0]?.id;
   if (contributorId === undefined) return null;
 
-  const page = await pool.query(
+  const params: Array<string | number> = [];
+  const push = (value: string | number): string => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  // The credit is the listing's own predicate; the language filter and the
+  // order are the shared ones, so this page filters and sorts exactly like
+  // `searchEditions`.
+  const where = [
+    `EXISTS (
+              SELECT 1 FROM edition_contributors ec
+               WHERE ec.edition_uri = e.uri AND ec.contributor_id = ${push(contributorId)}
+            )`,
+    ...(input.language ? [editionLanguageClause(input.language, push)] : [])
+  ].join(' AND ');
+
+  const limit = push(input.limit + 1);
+  const offset = push(input.offset);
+  const ordering = editionOrderBy({
+    sort: input.sort,
+    order: input.order,
+    // `created_at DESC` is this method's own order, which is what `relevance`
+    // means for a listing with no query to rank against.
+    fallback: 'e.created_at DESC, e.uri ASC'
+  });
+
+  const pagePromise = pool.query(
     `SELECT ${EDITION_COLUMNS}
        FROM editions e
        ${EDITION_SHAPE_JOIN}
        ${EDITION_COVERS_JOIN}
-      WHERE EXISTS (
-              SELECT 1 FROM edition_contributors ec
-               WHERE ec.edition_uri = e.uri AND ec.contributor_id = $1
-            )
-      ORDER BY e.created_at DESC, e.uri ASC
-      LIMIT $2 OFFSET $3`,
-    [contributorId, input.limit + 1, input.offset]
+      WHERE ${where}
+      ORDER BY ${ordering}
+      LIMIT ${limit} OFFSET ${offset}`,
+    params
   );
+
+  // The same predicate as the page, so a language filter narrows the total too.
+  const countedPromise =
+    input.offset === 0
+      ? pool.query(
+          `SELECT count(*)::int AS n
+       FROM editions e
+       ${EDITION_SHAPE_JOIN}
+            WHERE ${where}`,
+          params.slice(0, params.length - 2)
+        )
+      : Promise.resolve(null);
+
+  const [page, counted] = await Promise.all([pagePromise, countedPromise]);
   const rows = (page.rows as EditionRow[]).slice(0, input.limit);
   const views = await hydrate(pool, rows, input.coversBaseUrl ?? '');
   const items = rows.flatMap((row, index) => {
     const edition = views[index];
     return edition === undefined ? [] : [{ uri: row.uri, edition }];
   });
-
-  const counted =
-    input.offset === 0
-      ? await pool.query(
-          `SELECT count(DISTINCT ec.edition_uri)::int AS n
-             FROM edition_contributors ec
-            WHERE ec.contributor_id = $1`,
-          [contributorId]
-        )
-      : null;
 
   return {
     items,

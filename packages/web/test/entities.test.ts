@@ -271,7 +271,7 @@ test('listEditionsByContributor returns bookViews for every credited edition', a
   const rows = [editionRow(`${EDITION_PREFIX}1`), editionRow(`${EDITION_PREFIX}2`)];
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
-    if (sql.includes('count(DISTINCT')) return [{ n: 2 }];
+    if (sql.includes('count(*)::int AS n')) return [{ n: 2 }];
     if (sql.includes('FROM editions e')) return rows;
     return [];
   });
@@ -298,6 +298,43 @@ test('listEditionsByContributor returns bookViews for every credited edition', a
   // A contributor credited twice on one edition must not duplicate the row.
   assert.doesNotMatch(pageCall.sql, /JOIN edition_contributors/);
   assert.deepEqual(pageCall.values, [42, 2, 0]);
+});
+
+test('listEditionsByContributor uses the shared order and language clauses', async () => {
+  const rows = [editionRow(`${EDITION_PREFIX}1`)];
+  const { pool, calls } = fakePool((sql) => {
+    if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
+    if (sql.includes('count(*)::int AS n')) return [{ n: 1 }];
+    if (sql.includes('FROM editions e')) return rows;
+    return [];
+  });
+
+  await listEditionsByContributor(pool, {
+    contributor: CONTRIBUTOR_URI,
+    language: 'EN-us',
+    sort: 'publishedYear',
+    order: 'desc',
+    offset: 0,
+    limit: 10
+  });
+
+  const pageCall = calls.find((call) => call.sql.includes('ORDER BY'));
+  assert.ok(pageCall);
+  // The clauses `searchEditions` builds, from the shared helpers: the union
+  // claim's primary subtag, and the year-then-date ordering with unknown last.
+  assert.match(
+    pageCall.sql,
+    /split_part\(lower\(s\.language\), '-', 1\) = split_part\(\$2, '-', 1\)/
+  );
+  assert.match(pageCall.sql, /ORDER BY \(CASE WHEN s\.published_date/);
+  assert.match(pageCall.sql, /DESC NULLS LAST/);
+  // contributor, language, limit + 1, offset; the count reuses the first two.
+  assert.deepEqual(pageCall.values, [42, 'en-us', 11, 0]);
+
+  const countCall = calls.find((call) => call.sql.includes('count(*)::int AS n'));
+  assert.ok(countCall);
+  assert.match(countCall.sql, /split_part\(lower\(s\.language\)/);
+  assert.deepEqual(countCall.values, [42, 'en-us']);
 });
 
 test('listEditionsByContributor returns null for an unknown contributor', async () => {
@@ -331,7 +368,7 @@ test('listEditionsByContributor pages by offset and omits the total after page o
   assert.equal(page.items.length, 1);
   assert.equal(page.cursor, undefined);
   assert.equal(page.total, undefined);
-  assert.equal(calls.some((call) => call.sql.includes('count(DISTINCT')), false);
+  assert.equal(calls.some((call) => call.sql.includes('count(*)::int AS n')), false);
   const pageCall = calls.find((call) => call.sql.includes('FROM editions e'));
   assert.ok(pageCall);
   assert.deepEqual(pageCall.values, [42, 26, 1]);

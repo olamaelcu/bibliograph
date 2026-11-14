@@ -25,6 +25,23 @@
             "type": "string",
             "maxLength": 512,
             "description": "Opaque pagination cursor from a previous response. A malformed cursor restarts at the beginning rather than erroring."
+          },
+          "sort": {
+            "type": "string",
+            "knownValues": ["relevance", "title", "publishedYear"],
+            "default": "relevance",
+            "description": "Ordering of the page. `title` is alphabetical by edition title; `publishedYear` orders by the edition's published date, and an edition with no usable year sorts last. `relevance` keeps this method's own order: newest catalog creation first."
+          },
+          "order": {
+            "type": "string",
+            "knownValues": ["asc", "desc"],
+            "default": "asc",
+            "description": "Direction for a `title` or `publishedYear` sort. Ignored when `sort` is `relevance`, whose order is newest-first."
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 35,
+            "description": "Only editions whose published shape claims this language. Matched on the primary subtag, case-insensitively, so `en` matches `en` and `en-US`."
           }
         }
       },
@@ -36,7 +53,7 @@
           "properties": {
             "items": {
               "type": "array",
-              "description": "Editions credited to the contributor, newest catalog creation first. An edition in which the contributor holds several roles appears once.",
+              "description": "Editions credited to the contributor, newest catalog creation first unless `sort` says otherwise. An edition in which the contributor holds several roles appears once.",
               "items": {
                 "type": "ref",
                 "ref": "net.olamaelcu.livtet.biblio.defs#bookView"
@@ -48,7 +65,7 @@
             },
             "total": {
               "type": "integer",
-              "description": "Total distinct credited editions. Present on the first page only."
+              "description": "Total credited editions matching the request's filters. Present on the first page only."
             }
           }
         }
@@ -56,7 +73,7 @@
       "errors": [
         {
           "name": "InvalidRequest",
-          "description": "contributor is missing, malformed, or not a contributor record URI."
+          "description": "contributor is missing, malformed, or not a contributor record URI; or sort, order, limit or language is outside the accepted range."
         },
         {
           "name": "RecordNotFound",

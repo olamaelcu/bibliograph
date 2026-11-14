@@ -12,6 +12,7 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 
+import { listEditionsByContributor } from '../src/lib/server/catalog/entities.ts';
 import { searchEditions } from '../src/lib/server/catalog/editions.ts';
 
 const DATABASE_URL =
@@ -19,6 +20,7 @@ const DATABASE_URL =
 const RUN = `${process.pid}-${Date.now()}`;
 const AUTHORITY = `did:plc:searchsort${process.pid}`;
 const EDITION_COLLECTION = 'community.lexicon.media.book.edition';
+const CONTRIBUTOR_URI = `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/author`;
 const TOKEN = `SortProbe${process.pid}`;
 
 let pool: pg.Pool | undefined;
@@ -110,6 +112,24 @@ before(async () => {
     console.error('[test] search sort fixture failed', error);
   }
 });
+// Every fixture is credited to one contributor, so the same rows drive the
+// search and the contributor listing. Idempotent, so a helper can call it.
+async function creditFixtures(): Promise<void> {
+  const db = pool as pg.Pool;
+  const contributor = await db.query(
+    `INSERT INTO contributors (name, identifiers, at_uri)
+     VALUES ($1, '[]'::jsonb, $2)
+     ON CONFLICT (lower(name), identifiers) DO UPDATE SET at_uri = EXCLUDED.at_uri
+     RETURNING id`,
+    [`${TOKEN} Author`, CONTRIBUTOR_URI]
+  );
+  await db.query(
+    `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role)
+     SELECT e.uri, $1, 1, 'A01' FROM editions e WHERE e.uri LIKE $2
+     ON CONFLICT DO NOTHING`,
+    [Number(contributor.rows[0]?.id), `at://${AUTHORITY}/%`]
+  );
+}
 
 after(async () => {
   if (pool) {
@@ -184,4 +204,83 @@ test('filters by language on the primary subtag and needs no other hint', async 
   // With no hint at all, a language is still a valid browse.
   const browse = await titles({ identifiers: [], offset: 0, limit: 25, language: 'es' });
   assert.ok(browse.includes(`${TOKEN} Gamma`), 'a language-only query returns catalog rows');
+});
+
+/** Titles of the contributor listing for one set of params. */
+async function creditedTitles(input: {
+  language?: string;
+  sort?: 'relevance' | 'title' | 'publishedYear';
+  order?: 'asc' | 'desc';
+}): Promise<string[]> {
+  await creditFixtures();
+  const page = await listEditionsByContributor(pool as pg.Pool, {
+    contributor: CONTRIBUTOR_URI,
+    offset: 0,
+    limit: 25,
+    ...input
+  });
+  return (page?.items ?? []).map((item) => item.edition.title);
+}
+
+test('the contributor listing sorts exactly like a search', async (t) => {
+  if (!requiredPool(t)) return;
+
+  // Same fixtures, same expectations: the ordering is one shared clause.
+  for (const params of [
+    { sort: 'title' as const },
+    { sort: 'title' as const, order: 'desc' as const },
+    { sort: 'publishedYear' as const },
+    { sort: 'publishedYear' as const, order: 'desc' as const }
+  ]) {
+    assert.deepEqual(
+      await creditedTitles(params),
+      await titles({ ...base, ...params }),
+      `contributor listing matches searchEditions for ${JSON.stringify(params)}`
+    );
+  }
+
+  // `relevance` is the listing's own order (newest first), not the search's.
+  const newestFirst = await creditedTitles({ sort: 'relevance' });
+  assert.equal(newestFirst.length, 4);
+  assert.deepEqual(await creditedTitles({}), newestFirst);
+});
+
+test('the contributor listing filters by language and counts what it returns', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  await creditFixtures();
+
+  const english = await listEditionsByContributor(db, {
+    contributor: CONTRIBUTOR_URI,
+    language: 'en',
+    offset: 0,
+    limit: 25
+  });
+  assert.deepEqual(
+    (english?.items ?? []).map((item) => item.edition.title).sort(),
+    [`${TOKEN} Beta`, `${TOKEN} alpha`]
+  );
+  // The total counts what the filter returned, not every credited edition.
+  assert.equal(english?.total, 2);
+  assert.equal(english?.cursor, undefined);
+
+  const spanish = await listEditionsByContributor(db, {
+    contributor: CONTRIBUTOR_URI,
+    language: 'ES',
+    offset: 0,
+    limit: 25
+  });
+  assert.deepEqual(
+    (spanish?.items ?? []).map((item) => item.edition.title).sort(),
+    [`${TOKEN} Delta`, `${TOKEN} Gamma`]
+  );
+  assert.equal(spanish?.total, 2);
+
+  const all = await listEditionsByContributor(db, {
+    contributor: CONTRIBUTOR_URI,
+    offset: 0,
+    limit: 25
+  });
+  assert.equal(all?.items.length, 4);
+  assert.equal(all?.total, 4);
 });
