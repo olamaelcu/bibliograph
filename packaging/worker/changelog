@@ -1,3 +1,37 @@
+bibliograph-worker (0.2.17-1) unstable; urgency=medium
+
+  * 0.2.17 release: covers are cached on disk, and a format carries its unit.
+
+    - 0012-edition-cover-files.sql adds `edition_cover_files` (the cached image
+      per edition, keyed with the provider URL it came from) and gives
+      `edition_cover_fetches` the same `source_url` plus a terminal `rejected`
+      outcome, so a bad URL is not retried for a week.
+    - `catalog.covers` downloads the bytes, sniffs the image type, rejects
+      anything under 4 KiB or not an image (nulling `cover_url` and recording
+      the rejection) and writes through a temp file plus rename. A transport or
+      provider failure still throws, so graphile retries instead of filing an
+      absence. OpenLibrary's 43-byte transparent GIF is what this fixes.
+    - `catalog.covers.sweep` gains a backfill pass (source URL present, bytes
+      not cached) ahead of the never-attempted and retry passes and batches
+      500/5000: it only enqueues, while `downloadCover`'s gate paces the
+      fetches.
+    - Published records advertise `<COVERS_PUBLIC_BASE_URL>/api/covers/<uri>`
+      once the bytes are cached, and the provider URL until then.
+    - `COVERS_CACHE_DIR` is configuration only: unset disables the cache with a
+      boot log instead of guessing a writable path. The unit's
+      `CacheDirectory=bibliograph-covers` creates and owns the directory.
+    - 0013-edition-identifier-extent.sql makes the identifier's format and its
+      size one `extent` claim (`{"format":"Hardcover","pages":320}`,
+      `{"format":"Audiobook","durationSeconds":36000}`). `format` becomes a
+      STORED generated column and `pages` / `duration_seconds` generated ones, so
+      a row can no longer claim a paperback and an audio duration at once. A
+      BEFORE trigger prunes the unit the format does not use, and
+      `edition_identifier_shape` publishes only the winning identifier's unit.
+    - Ingest writes `extent`, merged over the stored claim, so providers keep
+      filling gaps only.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 19:04:07 +0000
+
 bibliograph-worker (0.2.16-1) unstable; urgency=medium
 
   * 0.2.16 release: duration is an identifier claim, and covers are backfilled.

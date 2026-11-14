@@ -1,3 +1,31 @@
+bibliograph-web (0.2.17-1) unstable; urgency=medium
+
+  * 0.2.17 release: the edge serves cached covers, and thin searches hydrate.
+
+    - `GET|HEAD /api/covers/<encodeURIComponent(at-uri)>` serves the cached
+      image with immutable caching, an etag derived from the URI and byte size,
+      and `nosniff`; 304 on a matching If-None-Match, 302 to the provider while
+      uncached, 404 for an unknown URI and 400 for a malformed one. A per-IP
+      token bucket answers 429 with `retry-after` (`COVERS_RATE_LIMIT_PER_MINUTE`,
+      `ADDRESS_HEADER` / `XFF_DEPTH`).
+    - `editionView` and the contributor listing advertise the edge URL when the
+      cache row matches the edition's current source URL.
+    - A first page whose provider total is below `SEARCH_HYDRATION_THRESHOLD`
+      queues the worker's `catalog.search`, capped at 120 jobs per rolling
+      hour; an over-budget call does not claim the dedupe mark, so the query is
+      not suppressed for a whole TTL.
+    - New counters `bibliograph_cover_requests_total{result}`,
+      `bibliograph_cover_bytes_served_total`,
+      `bibliograph_catalog_hydration_total{task,result}`,
+      `bibliograph_catalog_search_decision_total` and
+      `bibliograph_catalog_search_first_page_matches`.
+    - The edition editor, merge and reports write the identifier's `extent`
+      claim instead of `format` / `pages` / `duration_seconds`, which are now
+      generated columns; the form, the wire format and the read model keep
+      those three fields.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 19:04:07 +0000
+
 bibliograph-web (0.2.16-1) unstable; urgency=medium
 
   * 0.2.16 release: duration is an identifier claim.

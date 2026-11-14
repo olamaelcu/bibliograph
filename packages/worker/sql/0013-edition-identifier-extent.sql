@@ -83,12 +83,12 @@ BEGIN
     ADD COLUMN pages integer
       GENERATED ALWAYS AS (
         CASE WHEN (extent->>'pages') ~ '^[0-9]{1,10}$' THEN (extent->>'pages')::integer END
-      ) VIRTUAL,
+      ) STORED,
     ADD COLUMN duration_seconds integer
       GENERATED ALWAYS AS (
         CASE WHEN (extent->>'durationSeconds') ~ '^[0-9]{1,10}$'
              THEN (extent->>'durationSeconds')::integer END
-      ) VIRTUAL;
+      ) STORED;
 
   -- The published shape changes for editions with mixed-format identifiers,
   -- so republish every edition once. The backfill already queued rows it
