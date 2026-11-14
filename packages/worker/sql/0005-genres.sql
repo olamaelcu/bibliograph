@@ -70,8 +70,15 @@ CREATE TABLE IF NOT EXISTS edition_genre_fetches (
 
 -- Ordered by the retry pass of `catalog.genres.sweep` (oldest attempt first),
 -- so it must stay a plain column index.
-CREATE INDEX IF NOT EXISTS edition_genre_fetches_requested_at_idx
-  ON edition_genre_fetches (requested_at);
+-- Serves the retry pass of `catalog.genres.sweep` exactly: it walks this index
+-- oldest attempt first and stops at its LIMIT. Partial, because `outcome =
+-- 'found'` rows already have their genres and must not be walked at all — as a
+-- plain column index the eligible population could be most of the table and the
+-- sweep would probe `edition_genres` once per row to discover nothing to do.
+-- The retry query carries the same predicate so the planner can use it.
+CREATE INDEX IF NOT EXISTS edition_genre_fetches_retry_idx
+  ON edition_genre_fetches (requested_at)
+  WHERE outcome IS DISTINCT FROM 'found';
 
 -- ---------------------------------------------------------------------------
 -- Sweep index

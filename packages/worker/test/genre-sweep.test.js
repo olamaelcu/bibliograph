@@ -6,6 +6,9 @@ import { createTasks, GENRE_SWEEP_BATCH, GENRE_SWEEP_BATCH_MAX } from '../lib/ta
 const PASS_ONE = 'catalog.genres.sweep';
 const log = { info() {}, warn() {}, error() {} };
 
+/** A catalogue size the scripted precheck can be consistent with. */
+const ALL_EDITIONS = 100;
+
 /**
  * A sweep-only task registry over a scripted `pool.query`.
  *
@@ -21,6 +24,13 @@ function sweepPool({ fresh = [], retries = [], claimed = true } = {}) {
         const uri = values[0];
         calls.claims.push(uri);
         return { rows: [{ enqueued: typeof claimed === 'function' ? claimed(uri) : claimed }] };
+      }
+      // The precheck compares both counts; `editions` is always the larger side
+      // unless every edition has a ledger row.
+      if (sql.includes('AS attempts')) {
+        return {
+          rows: [{ editions: String(ALL_EDITIONS), attempts: String(ALL_EDITIONS - fresh.length) }]
+        };
       }
       // The retry pass is driven by the ledger and ordered by its clock; the
       // first pass is an `indexed_at` walk over `editions`.
@@ -68,6 +78,22 @@ test('a saturated first pass never runs the retry query', async () => {
   assert.deepEqual(calls.claims, ['at://new/1', 'at://new/2']);
 });
 
+test('a catalogue with no never-attempted edition skips the fresh pass entirely', async () => {
+  // `fresh: []` makes the precheck report equal counts, which is the steady
+  // state once every edition has a ledger row. Walking `editions` to prove it
+  // would cost the whole catalogue, so the pass must not run at all.
+  const { tasks, calls } = sweepPool({
+    fresh: [],
+    retries: ['at://old/1', 'at://old/2']
+  });
+
+  await tasks.sweep({ limit: 5 }, { logger: log });
+
+  assert.deepEqual(calls.fresh, [], 'no never-attempted walk when there cannot be one');
+  assert.deepEqual(calls.retries, [5], 'retries get the full limit instead');
+  assert.deepEqual(calls.claims, ['at://old/1', 'at://old/2']);
+});
+
 test('the sweep bounds its limit whatever the payload asks for', async () => {
   const cases = [
     [{ limit: 5000 }, GENRE_SWEEP_BATCH_MAX],
@@ -79,7 +105,9 @@ test('the sweep bounds its limit whatever the payload asks for', async () => {
   ];
 
   for (const [payload, expected] of cases) {
-    const { tasks, calls } = sweepPool();
+    // One scripted fresh edition keeps the precheck saying "there is a pass to
+    // run", so the clamped limit is observable.
+    const { tasks, calls } = sweepPool({ fresh: ['at://new/1'] });
     await tasks.sweep(payload, { logger: log });
     assert.deepEqual(calls.fresh, [expected], `payload ${JSON.stringify(payload)}`);
   }

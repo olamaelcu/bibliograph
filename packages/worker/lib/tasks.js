@@ -264,42 +264,57 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         ? Math.min(Math.max(payload.limit, 1), GENRE_SWEEP_BATCH_MAX)
         : GENRE_SWEEP_BATCH;
 
-      // Backed by `editions_indexed_at_idx`, so the LIMIT ends the walk instead
-      // of scanning `editions` and sorting it.
-      const fresh = await pool.query(
-        `SELECT e.uri
-           FROM editions e
-          WHERE NOT EXISTS (
-                  SELECT 1 FROM edition_genres g WHERE g.edition_uri = e.uri
-                )
-            AND NOT EXISTS (
-                  SELECT 1 FROM edition_genre_fetches f WHERE f.edition_uri = e.uri
-                )
-          ORDER BY e.indexed_at ASC, e.uri ASC
-          LIMIT $1`,
-        [limit]
+      // A fresh candidate is an edition with no ledger row at all, which is a set
+      // difference no index can answer cheaply: when the set is empty the walk
+      // has to cover every edition to prove it (3.6 s at 300k). Ledger rows are
+      // a subset of editions, so equal counts prove the set is empty for the
+      // price of two index-only counts.
+      const counts = await pool.query(
+        `SELECT (SELECT count(*) FROM editions) AS editions,
+                (SELECT count(*) FROM edition_genre_fetches) AS attempts`
       );
-      const candidates = [...fresh.rows];
+      const hasFresh =
+        Number(counts.rows[0]?.attempts ?? 0) < Number(counts.rows[0]?.editions ?? 0);
+      const candidates = [];
+      let freshCount = 0;
 
-      if (candidates.length < limit) {
-        // `EXISTS` restricts this pass to editions that already have a ledger
-        // row, so it can never hand back a row the first pass already returned.
-        const retries = await pool.query(
-          // Driven by the ledger, ordered by the ledger clock: the editions that
-          // have waited longest for a retry come first, and
-          // `edition_genre_fetches_requested_at_idx` serves that order, so the
-          // scan starts at the eligible end of the table and stops at the
-          // limit. Ordering this pass by `indexed_at` instead made the planner
-          // walk the whole catalog before reaching its first aged row (4.5 s for
-          // 25 rows at 300k editions) — the exact cost the first pass no longer
-          // pays.
+      if (hasFresh) {
+        // Backed by `editions_indexed_at_idx`, so the LIMIT ends the walk
+        // instead of scanning `editions` and sorting it.
+        const fresh = await pool.query(
           `SELECT e.uri
-             FROM edition_genre_fetches f
-             JOIN editions e ON e.uri = f.edition_uri
-            WHERE f.requested_at < now() - interval '7 days'
-              AND NOT EXISTS (
+             FROM editions e
+            WHERE NOT EXISTS (
                     SELECT 1 FROM edition_genres g WHERE g.edition_uri = e.uri
                   )
+              AND NOT EXISTS (
+                    SELECT 1 FROM edition_genre_fetches f WHERE f.edition_uri = e.uri
+                  )
+            ORDER BY e.indexed_at ASC, e.uri ASC
+            LIMIT $1`,
+          [limit]
+        );
+        freshCount = fresh.rows.length;
+        candidates.push(...fresh.rows);
+      }
+
+      if (candidates.length < limit) {
+        const retries = await pool.query(
+          // Driven by the ledger itself, so this pass can only return editions
+          // the fresh pass has already excluded. Ordered by the ledger clock, so
+          // the edition that has waited longest for a retry comes first, and
+          // `edition_genre_fetches_retry_idx` serves that order: the scan starts
+          // at the eligible end of the table and stops at the limit.
+          //
+          // `outcome` replaces a join back to `edition_genres` here: the task
+          // writes the genre rows and this `found` mark in one transaction, so
+          // the mark is the cheap, indexable form of the same question. Probing
+          // `edition_genres` per row instead made an eligible-heavy ledger
+          // seq-scan the whole table (4.5 s for 25 rows at 300k).
+          `SELECT f.edition_uri AS uri
+             FROM edition_genre_fetches f
+            WHERE f.requested_at < now() - interval '7 days'
+              AND f.outcome IS DISTINCT FROM 'found'
             ORDER BY f.requested_at ASC
             LIMIT $1`,
           [limit - candidates.length]
@@ -317,7 +332,7 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
       }
       helpers.logger.info(
         `catalog.genres.sweep: ${candidates.length} candidate(s) ` +
-          `(${fresh.rows.length} new, ${candidates.length - fresh.rows.length} retry), ` +
+          `(${freshCount} new, ${candidates.length - freshCount} retry), ` +
           `${enqueued} enqueued`
       );
     },
