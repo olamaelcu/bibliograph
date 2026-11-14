@@ -40,7 +40,7 @@
                   },
                   "source": {
                     "type": "string",
-                    "knownValues": ["openlibrary", "goodreads"],
+                    "knownValues": ["openlibrary", "goodreads", "isbndb"],
                     "description": "Provider that supplied the genre."
                   }
                 }

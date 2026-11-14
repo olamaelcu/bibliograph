@@ -42,7 +42,9 @@ test('renders worker liveness and outbox gauges with the existing families', () 
     ['bibliograph_nodejs_heap_used_bytes', 'gauge'],
     ['bibliograph_isbndb_calls_today', 'gauge'],
     ['bibliograph_isbndb_daily_limit', 'gauge'],
+    ['bibliograph_isbndb_daily_soft_limit', 'gauge'],
     ['bibliograph_isbndb_calls_remaining', 'gauge'],
+    ['bibliograph_isbndb_calls_remaining_soft', 'gauge'],
     ['bibliograph_pds_outbox_ready', 'gauge'],
     ['bibliograph_pds_outbox_parked', 'gauge'],
     ['bibliograph_pds_outbox_oldest_age_seconds', 'gauge'],
@@ -65,6 +67,23 @@ test('renders worker liveness and outbox gauges with the existing families', () 
   assert.match(text, /^bibliograph_pds_outbox_ready 4$/m);
   assert.match(text, /^bibliograph_pds_outbox_parked 2$/m);
   assert.match(text, /^bibliograph_pds_outbox_oldest_age_seconds 90\.5$/m);
+});
+
+test('the soft ISBNdb limit sits 5% below the hard limit and neither goes negative', () => {
+  const defaults = renderMetrics({});
+  assert.match(defaults, /^bibliograph_isbndb_daily_limit 5000$/m);
+  assert.match(defaults, /^bibliograph_isbndb_daily_soft_limit 4750$/m);
+  assert.match(defaults, /^bibliograph_isbndb_calls_remaining 5000$/m);
+  assert.match(defaults, /^bibliograph_isbndb_calls_remaining_soft 4750$/m);
+
+  // At the soft limit there are still 250 calls before the provider stops.
+  const atSoft = renderMetrics({ calls: 4750, limit: 5000 });
+  assert.match(atSoft, /^bibliograph_isbndb_calls_remaining_soft 0$/m);
+  assert.match(atSoft, /^bibliograph_isbndb_calls_remaining 250$/m);
+
+  const pastSoft = renderMetrics({ calls: 4800, limit: 5000 });
+  assert.match(pastSoft, /^bibliograph_isbndb_calls_remaining_soft 0$/m);
+  assert.match(pastSoft, /^bibliograph_isbndb_calls_remaining 200$/m);
 });
 
 test('missing outbox stats render as zero rather than NaN', () => {

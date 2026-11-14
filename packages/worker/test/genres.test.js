@@ -67,6 +67,21 @@ test('mergeGenres keeps Goodreads order, appends OpenLibrary alphabetically and 
   ]);
 });
 
+test('mergeGenres appends ISBNdb subjects last, alphabetically, deduped', () => {
+  const merged = mergeGenres({
+    goodreads: ['Science Fiction'],
+    openlibrary: ['Fiction'],
+    isbndb: ['Poetry', 'classics', 'Fiction', 'Textbooks']
+  });
+
+  assert.deepEqual(merged, [
+    { name: 'Science Fiction', source: 'goodreads' },
+    { name: 'Fiction', source: 'openlibrary' },
+    { name: 'Classics', source: 'isbndb' },
+    { name: 'Poetry', source: 'isbndb' }
+  ]);
+});
+
 test('mergeGenres caps the list and tolerates missing inputs', () => {
   const many = [
     'fiction',

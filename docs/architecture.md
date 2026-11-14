@@ -300,12 +300,38 @@ UI. Search documents may therefore omit bio, photos and `remote_ids`. Partial
 or ambiguous dates are omitted, and contributor candidates never carry edition
 roles.
 
+### Genres
+
+Genres are catalog rows (`genres`, plus `edition_genres` with the provider that
+supplied each one), never part of the published edition record: they are
+edge-served by `getGenresOfBook` and are deliberately absent from
+`appview_book`, so a genre edit never republishes a book.
+
+The `catalog.genres` task resolves one edition's list. Goodreads book-page
+genres and OpenLibrary work subjects are free, so they are asked concurrently
+and merged (Goodreads relevance order first, then the alphabetical subject
+sources). ISBNdb's `subjects` list is a metered last resort: it is only asked
+when both free providers answered nothing, because ISBNdb bills one call per
+request and the field is deprecated upstream. Its answers ride the same
+`isbndb_cache` row as hydration — keyed by the request URL, seven-day TTL — so
+an ISBN an earlier ingest already fetched costs no daily call; a miss reserves
+one from `provider_daily_usage` and stops at `ISBNDB_DAILY_LIMIT`. Goodreads
+HTML is cached in a process-local LRU (24 h, keyed by URL and page kind), so a
+restart re-fetches it. `edition_genre_fetches` is the durable half: an edition
+that already has genres is never re-asked, a genreless one is retried after
+seven days, and an ISBNdb quota refusal leaves the row unmarked rather than
+recording "no genres". The sweep's 25-edition batch (every ten minutes) also
+bounds the metered spend to well under the default daily limit.
+
 The worker starts a dependency-free Prometheus endpoint on
 `WORKER_METRICS_HOST:WORKER_METRICS_PORT` (default `127.0.0.1:9464`) serving
 `/metrics`. `bibliograph_worker_up` is `1` while the process answers. Each
 scrape reads the database and exposes the ISBNdb quota gauges
-`bibliograph_isbndb_calls_today`, `bibliograph_isbndb_daily_limit` and
-`bibliograph_isbndb_calls_remaining` (`max(0, limit - calls)`), plus the outbox
+`bibliograph_isbndb_calls_today`, `bibliograph_isbndb_daily_limit` (the hard
+cap `reserveDailyCall` enforces), `bibliograph_isbndb_daily_soft_limit` (95% of
+it — 4750 at the default 5000 — where an alert should fire),
+`bibliograph_isbndb_calls_remaining` (`max(0, limit - calls)`) and
+`bibliograph_isbndb_calls_remaining_soft` (`max(0, soft - calls)`), plus the outbox
 backlog for the configured publisher DID: `bibliograph_pds_outbox_ready`
 (claimable now: same collection, `attempts < 10`, due and unleased),
 `bibliograph_pds_outbox_parked` (`attempts >= 10`) and

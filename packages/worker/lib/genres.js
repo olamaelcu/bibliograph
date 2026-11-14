@@ -178,13 +178,13 @@ export function canonicalGenre(label) {
  * Merge provider labels into one ordered, deduped, canonical list.
  *
  * Goodreads order is kept because it is the provider's own relevance order;
- * OpenLibrary subjects are alphabetical already but are sorted here so the
- * stored `position` never depends on the provider's key order. A canonical name
- * is emitted once, from whichever provider named it first.
+ * OpenLibrary and ISBNdb subject labels are alphabetical already but are sorted
+ * here so the stored `position` never depends on a provider's key order. A
+ * canonical name is emitted once, from whichever provider named it first.
  *
- * Both inputs may be undefined: the result is always an array.
+ * Every input may be undefined: the result is always an array.
  */
-export function mergeGenres({ goodreads, openlibrary } = {}) {
+export function mergeGenres({ goodreads, openlibrary, isbndb } = {}) {
   const merged = [];
   const seen = new Set();
 
@@ -197,15 +197,23 @@ export function mergeGenres({ goodreads, openlibrary } = {}) {
 
   for (const label of Array.isArray(goodreads) ? goodreads : []) push(label, 'goodreads');
 
-  const openlibraryGenres = [];
-  for (const label of Array.isArray(openlibrary) ? openlibrary : []) {
-    const name = canonicalGenre(label);
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    openlibraryGenres.push(name);
-  }
-  openlibraryGenres.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  for (const name of openlibraryGenres) merged.push({ name, source: 'openlibrary' });
+  // Subject-based sources carry no relevance order, so they are appended
+  // alphabetically after the ordered one and their own key order never reaches
+  // the stored `position`.
+  const pushSorted = (labels, source) => {
+    const names = [];
+    for (const label of Array.isArray(labels) ? labels : []) {
+      const name = canonicalGenre(label);
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
+    }
+    names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const name of names) merged.push({ name, source });
+  };
+
+  pushSorted(openlibrary, 'openlibrary');
+  pushSorted(isbndb, 'isbndb');
 
   return merged.slice(0, MAX_GENRES_PER_EDITION);
 }

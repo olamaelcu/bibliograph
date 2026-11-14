@@ -9,9 +9,13 @@
 
 import http from 'node:http';
 
-import { DEFAULT_ISBNDB_DAILY_LIMIT, readDailyCalls } from './providers/usage.js';
 import { renderProviderMetrics } from './providers/resilience.js';
 import { DEFAULT_LEASE_MS, MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from './publish.js';
+import {
+  DEFAULT_ISBNDB_DAILY_LIMIT,
+  ISBNDB_SOFT_LIMIT_RATIO,
+  readDailyCalls
+} from './providers/usage.js';
 
 const CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
 const DEFAULT_HOST = '127.0.0.1';
@@ -85,7 +89,7 @@ export function readProcessMetrics(source = process) {
 /** Render the Prometheus text exposition for quota, outbox and provider telemetry. */
 export function renderMetrics({
   calls,
-  limit,
+  limit = DEFAULT_ISBNDB_DAILY_LIMIT,
   providerMetrics,
   outbox = { ready: 0, parked: 0, oldestAgeSeconds: 0 },
   runtime = readProcessMetrics()
@@ -93,6 +97,10 @@ export function renderMetrics({
   const used = Number.isFinite(calls) && calls > 0 ? Math.trunc(calls) : 0;
   const cap = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : 0;
   const remaining = Math.max(0, cap - used);
+  // Soft limit: where an alert should fire, 95% of the hard limit (4750 at the
+  // default 5000). The hard limit stays what `reserveDailyCall` enforces.
+  const softCap = Math.max(1, Math.floor(cap * ISBNDB_SOFT_LIMIT_RATIO));
+  const softRemaining = Math.max(0, softCap - used);
 
   return [
     '# HELP bibliograph_worker_up Whether this worker process is answering scrapes.',
@@ -116,9 +124,15 @@ export function renderMetrics({
     '# HELP bibliograph_isbndb_daily_limit Configured ISBNdb calls allowed per UTC day.',
     '# TYPE bibliograph_isbndb_daily_limit gauge',
     `bibliograph_isbndb_daily_limit ${cap}`,
+    '# HELP bibliograph_isbndb_daily_soft_limit ISBNdb calls after which alerts should fire, below the hard daily limit.',
+    '# TYPE bibliograph_isbndb_daily_soft_limit gauge',
+    `bibliograph_isbndb_daily_soft_limit ${softCap}`,
     '# HELP bibliograph_isbndb_calls_remaining ISBNdb calls still available today (never negative).',
     '# TYPE bibliograph_isbndb_calls_remaining gauge',
     `bibliograph_isbndb_calls_remaining ${remaining}`,
+    '# HELP bibliograph_isbndb_calls_remaining_soft ISBNdb calls available before the soft limit (never negative).',
+    '# TYPE bibliograph_isbndb_calls_remaining_soft gauge',
+    `bibliograph_isbndb_calls_remaining_soft ${softRemaining}`,
     '# HELP bibliograph_pds_outbox_ready Outbox rows claimable now (attempts < 10, due, unleased).',
     '# TYPE bibliograph_pds_outbox_ready gauge',
     `bibliograph_pds_outbox_ready ${Math.trunc(nonNegative(outbox.ready))}`,

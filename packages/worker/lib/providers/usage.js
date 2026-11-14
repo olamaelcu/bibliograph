@@ -9,6 +9,16 @@
 export const DEFAULT_ISBNDB_DAILY_LIMIT = 5000;
 
 /**
+ * Fraction of the hard daily limit that the soft limit sits at.
+ *
+ * `reserveDailyCall` enforces the hard limit; the soft limit is what the
+ * metrics expose so an alert can fire while calls are still allowed. At the
+ * default 5000 that is 4750, leaving 250 calls of headroom to investigate
+ * before the provider stops answering.
+ */
+export const ISBNDB_SOFT_LIMIT_RATIO = 0.95;
+
+/**
  * Parse a positive-integer daily limit. Zero and negatives are invalid (they
  * are not "unlimited"); invalid values warn and fall back to the default.
  */

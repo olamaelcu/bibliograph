@@ -134,6 +134,21 @@ export function candidateFromIsbndb(book) {
   return candidate;
 }
 
+/**
+ * The subject labels ISBNdb lists for a book, in provider order.
+ *
+ * ISBNdb marks `subjects` deprecated ("will be removed in a future version"),
+ * so this is a best-effort signal consulted only when OpenLibrary and
+ * Goodreads supplied no genre. The labels are raw category headings; deciding
+ * what counts as a genre is the vocabulary's job, not this parser's.
+ */
+export function subjectsFromBook(book) {
+  if (!Array.isArray(book?.subjects)) return [];
+  return book.subjects
+    .map((subject) => cleanString(subject))
+    .filter((subject) => subject !== undefined);
+}
+
 export function createIsbndb({
   pool,
   apiKey,
@@ -199,6 +214,33 @@ export function createIsbndb({
     async byIsbn(isbn) {
       const body = await query(`${baseUrl}/book/${encodeURIComponent(isbn)}`);
       return [candidateFromIsbndb(body?.book)].filter(Boolean);
+    },
+
+    /**
+     * Genre labels for one edition, from its ISBN's book record.
+     *
+     * Metered, so it goes through `queryResult`: a cached `/book/{isbn}` answer
+     * — an earlier hydration of the same ISBN — costs nothing, and a miss
+     * reserves one call from the shared daily quota. Answers `undefined` when
+     * the quota refused the call, which means "not asked", never "no genres":
+     * the caller must not record the edition as genreless on that basis.
+     */
+    async genresForEdition(identifiers = []) {
+      const bag = Array.isArray(identifiers) ? identifiers : [];
+      const isbn = normalizeIsbn13(
+        cleanString(
+          bag.find((identifier) =>
+            ['isbn13', 'isbn10', 'isbn'].includes(
+              cleanString(identifier?.issuer)?.toLowerCase()
+            )
+          )?.value
+        )
+      );
+      if (!isbn) return [];
+
+      const result = await queryResult(`${baseUrl}/book/${encodeURIComponent(isbn)}`);
+      if (result.quotaExhausted) return undefined;
+      return subjectsFromBook(result.body?.book);
     },
 
     async search(text) {

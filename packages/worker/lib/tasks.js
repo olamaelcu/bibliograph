@@ -123,7 +123,10 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
     },
 
     // Hydrates one edition's genres from the providers that actually have
-    // them: OpenLibrary subjects and Goodreads book-page genres.
+    // them: Goodreads book-page genres and OpenLibrary subjects, both free and
+    // asked together, then ISBNdb's deprecated `subjects` list as a metered
+    // last resort — only when the other two produced nothing, and through its
+    // seven-day response cache, so a repeat costs no daily call.
     //
     // Idempotent by construction. An edition that already has genres is never
     // re-fetched, and `edition_genre_fetches` records when an edition was last
@@ -177,6 +180,8 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
 
       // Both providers are asked at once; they are gated independently, and a
       // Goodreads challenge must not cost the OpenLibrary answer.
+      // ISBNdb stays out of this batch: it is metered, and one call per edition
+      // must only be spent when the free pair answered nothing.
       const [goodreads, openlibrary] = await Promise.allSettled([
         providers.providers.goodreads.genresForEdition(identifiers),
         providers.providers.openlibrary.genresForEdition(identifiers)
@@ -189,17 +194,40 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
           );
         }
       }
-      if (goodreads.status === 'rejected' && openlibrary.status === 'rejected') {
+      const freeLabels = {
+        goodreads: goodreads.status === 'fulfilled' ? goodreads.value : [],
+        openlibrary: openlibrary.status === 'fulfilled' ? openlibrary.value : []
+      };
+      let merged = mergeGenres(freeLabels);
+
+      if (merged.length === 0) {
+        const isbndb = providers.providers.isbndb;
+        if (isbndb) {
+          try {
+            const subjects = await isbndb.genresForEdition(identifiers);
+            if (subjects === undefined) {
+              // The daily quota refused the call: this edition was not asked, so
+              // its ledger row must not claim it was looked at.
+              helpers.logger.info(
+                `catalog.genres ${uri}: ISBNdb daily quota exhausted; skipped`
+              );
+              return;
+            }
+            merged = mergeGenres({ ...freeLabels, isbndb: subjects });
+          } catch (error) {
+            helpers.logger.warn(
+              `catalog.genres ${uri}: ISBNdb failed — ${error?.message ?? error}`
+            );
+          }
+        }
+      }
+
+      if (merged.length === 0 && goodreads.status === 'rejected' && openlibrary.status === 'rejected') {
         // Nothing answered, so this is an outage rather than an absence. Rethrow
         // so the job retries; the ledger keeps the claim, so the retry does not
         // wait out the seven-day window.
         throw goodreads.reason;
       }
-
-      const merged = mergeGenres({
-        goodreads: goodreads.status === 'fulfilled' ? goodreads.value : [],
-        openlibrary: openlibrary.status === 'fulfilled' ? openlibrary.value : []
-      });
       if (merged.length === 0) {
         await pool.query(
           `UPDATE edition_genre_fetches
