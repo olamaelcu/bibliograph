@@ -110,13 +110,19 @@ async function seedEdition(contributorId: number, publisherId: number): Promise<
     [uri, rkey]
   );
   await (pool as pg.Pool).query(
+    `INSERT INTO edition_identifiers (edition_uri, issuer, value)
+     VALUES ($1, 'isbn13', '9780000000001')`,
+    [uri]
+  );
+  await (pool as pg.Pool).query(
     `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role)
      VALUES ($1, $2, 1, 'A01')`,
     [uri, contributorId]
   );
   await (pool as pg.Pool).query(
-    `INSERT INTO edition_publishers (edition_uri, publisher_id, position)
-     VALUES ($1, $2, 1)`,
+    `INSERT INTO edition_identifier_publishers
+       (edition_uri, issuer, value, publisher_id, position)
+     VALUES ($1, 'isbn13', '9780000000001', $2, 1)`,
     [uri, publisherId]
   );
   return uri;

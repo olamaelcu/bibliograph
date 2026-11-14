@@ -191,7 +191,7 @@ async function cleanupHydrationRows(pool, host) {
     `DELETE FROM publishers p
       WHERE p.name IN ('Isbn Direct Press', 'Ace', 'Isbn Order Press')
         AND NOT EXISTS (
-          SELECT 1 FROM edition_publishers ep WHERE ep.publisher_id = p.id
+          SELECT 1 FROM edition_identifier_publishers ep WHERE ep.publisher_id = p.id
         )`
   );
   await releaseTestEntityUris(pool, `did:web:${host}`);
@@ -435,7 +435,7 @@ test('resolve hydrates the catalog from provider results', async () => {
     );
 
     const edition = await pool.query(
-      "SELECT uri, rkey, title, pages, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
+      "SELECT uri, rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
     assert.equal(edition.rowCount, 1);
     assertTid(edition.rows[0].rkey);
@@ -444,8 +444,18 @@ test('resolve hydrates the catalog from provider results', async () => {
       `at://did:web:test.example/community.lexicon.media.book.edition/${edition.rows[0].rkey}`
     );
     assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
-    assert.equal(edition.rows[0].pages, 304);
     assert.equal(edition.rows[0].cover_url, 'https://books.example/cover.jpg');
+
+    // The shape claim belongs to the identifier (0007), not the edition row.
+    const claims = await pool.query(
+      `SELECT issuer, pages, language FROM edition_identifier_info
+        WHERE edition_uri = $1 ORDER BY issuer`,
+      [edition.rows[0].uri]
+    );
+    assert.deepEqual(claims.rows, [
+      { issuer: 'googlebooks', pages: 304, language: 'en' },
+      { issuer: 'isbn13', pages: 304, language: 'en' }
+    ]);
 
     const identifiers = await pool.query(
       'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',
@@ -498,7 +508,7 @@ test('resolve hydrates the catalog from provider results', async () => {
       `DELETE FROM publishers p
         WHERE p.name = 'Ace'
           AND NOT EXISTS (
-            SELECT 1 FROM edition_publishers ep WHERE ep.publisher_id = p.id
+            SELECT 1 FROM edition_identifier_publishers ep WHERE ep.publisher_id = p.id
           )`
     );
     await releaseTestEntityUris(pool, 'did:web:test.example');
@@ -569,7 +579,7 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
       `DELETE FROM publishers p
         WHERE p.name = 'Ace'
           AND NOT EXISTS (
-            SELECT 1 FROM edition_publishers ep WHERE ep.publisher_id = p.id
+            SELECT 1 FROM edition_identifier_publishers ep WHERE ep.publisher_id = p.id
           )`
     );
     await releaseTestEntityUris(pool, publisherDid);
@@ -646,13 +656,19 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
     await tasks['catalog.isbn']({ isbn: '9780306406164' }, helpers);
 
     const edition = await pool.query(
-      "SELECT uri, rkey, title, pages, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
+      "SELECT uri, rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
     );
     assert.equal(edition.rowCount, 1);
     assertTid(edition.rows[0].rkey);
     assert.equal(edition.rows[0].title, 'Direct Hydration Volume');
-    assert.equal(edition.rows[0].pages, 200);
     assert.equal(edition.rows[0].cover_url, 'https://img.example/direct.jpg');
+
+    const claims = await pool.query(
+      `SELECT issuer, pages, language FROM edition_identifier_info
+        WHERE edition_uri = $1 ORDER BY issuer`,
+      [edition.rows[0].uri]
+    );
+    assert.deepEqual(claims.rows, [{ issuer: 'isbn13', pages: 200, language: 'en' }]);
 
     const identifiers = await pool.query(
       'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',

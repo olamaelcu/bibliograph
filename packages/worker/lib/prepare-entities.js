@@ -97,7 +97,7 @@ async function queueEditionsForIds(client, contributorIds, publisherIds) {
                  AND ec.contributor_id = ANY($1::bigint[])
             )
          OR EXISTS (
-              SELECT 1 FROM edition_publishers ep
+              SELECT 1 FROM edition_identifier_publishers ep
                WHERE ep.edition_uri = e.uri
                  AND ep.publisher_id = ANY($2::bigint[])
             )
@@ -122,7 +122,7 @@ async function queueEditionsForMintedEntities(client) {
                WHERE ec.edition_uri = e.uri AND c.at_uri IS NOT NULL
             )
          OR EXISTS (
-              SELECT 1 FROM edition_publishers ep
+              SELECT 1 FROM edition_identifier_publishers ep
                 JOIN publishers p ON p.id = ep.publisher_id
                WHERE ep.edition_uri = e.uri AND p.at_uri IS NOT NULL
             )

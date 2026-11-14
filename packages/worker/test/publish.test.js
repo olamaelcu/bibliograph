@@ -146,24 +146,18 @@ async function makeEdition({
 
   await pool.query(
     `INSERT INTO editions (
-       uri, rkey, title, subtitle, language, published_date, format, pages,
-       duration_seconds, chapters, series, book_edition, description, cover_url,
-       created_at, indexed_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,now())`,
+       uri, rkey, title, subtitle, duration_seconds, chapters, series,
+       book_edition, cover_url, created_at, indexed_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,now())`,
     [
       uri,
       rkey,
       title,
       'A Subtitle',
-      'en',
-      '2020-01',
-      'physical',
-      320,
       3600,
       12,
       JSON.stringify({ name: 'Test Series', position: '1' }),
       'First',
-      'A test description.',
       coverUrl,
       createdAt
     ]
@@ -172,6 +166,14 @@ async function makeEdition({
   for (const identifier of identifiers) {
     await pool.query(
       `INSERT INTO edition_identifiers (edition_uri, issuer, value) VALUES ($1,$2,$3)`,
+      [uri, identifier.issuer, identifier.value]
+    );
+    // The published shape is the identifier union (0007), so the fixture's
+    // claim has to live on the identifier.
+    await pool.query(
+      `INSERT INTO edition_identifier_info
+         (edition_uri, issuer, value, format, language, published_date, pages, description)
+       VALUES ($1,$2,$3,'physical','en','2020-01',320,'A test description.')`,
       [uri, identifier.issuer, identifier.value]
     );
   }
@@ -199,8 +201,16 @@ async function makeEdition({
     [publisherName, JSON.stringify([{ issuer: 'wikidata', value: `Q${sequence}` }])]
   );
   await pool.query(
-    `INSERT INTO edition_publishers (edition_uri, publisher_id, position) VALUES ($1,$2,1)`,
-    [uri, publisher.rows[0].id]
+    `INSERT INTO edition_identifier_publishers
+       (edition_uri, issuer, value, publisher_id, position)
+     SELECT $1, t.issuer, t.value, $2, 1
+       FROM unnest($3::text[], $4::text[]) AS t(issuer, value)`,
+    [
+      uri,
+      publisher.rows[0].id,
+      identifiers.map((identifier) => identifier.issuer),
+      identifiers.map((identifier) => identifier.value)
+    ]
   );
 
   const storedIdentifiers = await pool.query(
@@ -216,8 +226,10 @@ async function makeEdition({
   );
   const storedPublisher = await pool.query(
     `SELECT p.name, p.identifiers
-       FROM edition_publishers ep JOIN publishers p ON p.id = ep.publisher_id
-      WHERE ep.edition_uri = $1 ORDER BY ep.position LIMIT 1`,
+       FROM edition_publishers_shape ps
+       CROSS JOIN LATERAL unnest(ps.publisher_ids) WITH ORDINALITY AS ord(id, idx)
+       JOIN publishers p ON p.id = ord.id
+      WHERE ps.edition_uri = $1 ORDER BY ord.idx LIMIT 1`,
     [uri]
   );
 

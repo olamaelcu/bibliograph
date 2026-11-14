@@ -60,13 +60,18 @@ The `bibliograph-worker` package ships the same files at
 worker package and before restarting the units (see
 [`../deploy/debian.md`](../deploy/debian.md)).
 
-The files are **idempotent and additive**:
+Most files are **idempotent and additive**:
 
 - `CREATE TABLE / SEQUENCE / INDEX IF NOT EXISTS`;
-- `CREATE OR REPLACE FUNCTION / VIEW / TRIGGER`;
-- no `DROP`, `TRUNCATE` or `DELETE`.
+- `CREATE OR REPLACE FUNCTION / VIEW / TRIGGER`.
 
-Re-running them on a live catalog is safe; they never wipe data. They do not
+Re-running them on a live catalog is safe. They are **forward-only**, though, not
+purely additive: a migration file may backfill rows and then drop a column or
+table behind a guard — `0007`/`0008` moved the edition shape claims and publisher
+links onto `edition_identifiers` and dropped the five `editions` columns and
+`edition_publishers`. Each file is one transaction, so a failing file rolls back
+on its own while earlier files stay applied; those drops are not reversible, so
+take a `pg_dump` before a release that adds one. Files do not
 alter a table that already exists — a new column belongs in a new numbered SQL
 file.
 
@@ -126,7 +131,16 @@ Watch `bibliograph_pds_outbox_parked` while it drains.
 What is created:
 
 - `editions`, `edition_identifiers`, `contributors`, `edition_contributors`,
-  `publishers`, `edition_publishers`;
+  `publishers`;
+- `0007-edition-identifier-info.sql` adds `edition_identifier_info` (one shape
+  claim row per identifier, cascading from `edition_identifiers`) and the
+  `edition_identifier_shape` view, backfills each edition's language,
+  publication date, format, pages and description onto its identifiers, and
+  then drops those five columns from `editions`;
+- `0008-edition-identifier-publishers.sql` adds `edition_identifier_publishers`
+  (FK to `publishers`, cascading from `edition_identifiers`) and the
+  `edition_publishers_shape` view, backfills each edition's publisher links onto
+  every identifier, drops `edition_publishers`, and recreates the read models;
 - `editions_tid_seq`, `editions_tid_encode()` and `editions_next_tid()` (new
   editions get a 13-character TID rkey, never an ISBN);
 - `pds_outbox` (+ the ready index) and `pds_cids`;

@@ -5,9 +5,20 @@ import { parseEditionEdit } from '../src/lib/admin/edition-edit.ts';
 
 const valid = () => ({
   title: 'Dune',
-  language: 'en',
   identifiers: [{ issuer: 'isbn13', value: '9780441013593' }],
   contributors: [{ name: 'Frank Herbert', role: 'author' }]
+});
+
+/** `valid()` with a shape claim on its single identifier. */
+const withInfo = (info: unknown) => ({
+  ...valid(),
+  identifiers: [{ issuer: 'isbn13', value: '9780441013593', info }]
+});
+
+/** `valid()` with extra fields on its single identifier. */
+const withIdentifier = (extra: Record<string, unknown>) => ({
+  ...valid(),
+  identifiers: [{ issuer: 'isbn13', value: '9780441013593', ...extra }]
 });
 
 function paths(body: unknown): string[] {
@@ -21,9 +32,10 @@ test('accepts a minimal edition and normalises defaults', () => {
   assert.equal(parsed.value.title, 'Dune');
   assert.equal(parsed.value.contributors[0]?.role, 'A01');
   assert.equal(parsed.value.contributors[0]?.id, null);
-  assert.deepEqual(parsed.value.publishers, []);
   assert.equal(parsed.value.subtitle, null);
   assert.equal(parsed.value.expectedRevision, null);
+  // No `info` key at all: an omitted claim leaves the stored row untouched.
+  assert.equal('info' in (parsed.value.identifiers[0] as object), false);
 });
 
 test('requires a non-empty title and at least one identifier and contributor', () => {
@@ -35,8 +47,13 @@ test('requires a non-empty title and at least one identifier and contributor', (
 
 test('bounds string lengths', () => {
   assert.ok(paths({ ...valid(), title: 'x'.repeat(501) }).includes('title'));
-  assert.ok(paths({ ...valid(), description: 'x'.repeat(20_001) }).includes('description'));
-  assert.ok(paths({ ...valid(), language: 'x'.repeat(36) }).includes('language'));
+  assert.ok(
+    paths(withInfo({ description: 'x'.repeat(20_001) })).includes(
+      'identifiers.0.info.description'
+    )
+  );
+  assert.ok(paths(withInfo({ format: 'x'.repeat(101) })).includes('identifiers.0.info.format'));
+  assert.ok(paths(withInfo({ language: 'x'.repeat(36) })).includes('identifiers.0.info.language'));
 });
 
 test('canonicalises valid BCP 47 language tags', () => {
@@ -50,44 +67,64 @@ test('canonicalises valid BCP 47 language tags', () => {
     ['ja-Latn-hepburn-heploc', 'ja-Latn-alalc97'],
     ['English', 'english']
   ]) {
-    const parsed = parseEditionEdit({ ...valid(), language: input });
+    const parsed = parseEditionEdit(withInfo({ language: input }));
     assert.deepEqual(parsed.errors, [], input);
-    assert.equal(parsed.value?.language, expected, input);
+    assert.equal(parsed.value?.identifiers[0]?.info?.language, expected, input);
   }
 });
 
 test('treats empty or missing language as null', () => {
   for (const value of [undefined, null, '', '   ']) {
-    const parsed = parseEditionEdit({ ...valid(), language: value });
+    const parsed = parseEditionEdit(withInfo({ language: value }));
     assert.deepEqual(parsed.errors, []);
-    assert.equal(parsed.value?.language, null);
+    assert.equal(parsed.value?.identifiers[0]?.info?.language, null);
   }
 });
 
 test('rejects invalid BCP 47 language tags', () => {
   for (const value of ['en_US', 'en-', 'en--US', '123', 'not a tag']) {
-    const errors = parseEditionEdit({ ...valid(), language: value }).errors;
+    const errors = parseEditionEdit(withInfo({ language: value })).errors;
     assert.ok(
-      errors.some((issue) => issue.path === 'language'),
+      errors.some((issue) => issue.path === 'identifiers.0.info.language'),
       `expected a language error for ${JSON.stringify(value)}`
     );
   }
 });
 
 test('rejects negative, fractional and oversized integers', () => {
-  assert.ok(paths({ ...valid(), pages: -1 }).includes('pages'));
+  assert.ok(paths(withInfo({ pages: -1 })).includes('identifiers.0.info.pages'));
   assert.ok(paths({ ...valid(), durationSeconds: 1.5 }).includes('durationSeconds'));
   assert.ok(paths({ ...valid(), chapters: 2_147_483_648 }).includes('chapters'));
-  assert.deepEqual(paths({ ...valid(), pages: '0', chapters: null }), []);
+  assert.deepEqual(paths({ ...valid(), chapters: null }), []);
 });
 
 test('validates published dates, including calendar days', () => {
-  assert.deepEqual(paths({ ...valid(), publishedDate: '2024' }), []);
-  assert.deepEqual(paths({ ...valid(), publishedDate: '2024-02' }), []);
-  assert.deepEqual(paths({ ...valid(), publishedDate: '2024-02-29' }), []);
-  assert.ok(paths({ ...valid(), publishedDate: '2024-02-30' }).includes('publishedDate'));
-  assert.ok(paths({ ...valid(), publishedDate: '24' }).includes('publishedDate'));
-  assert.ok(paths({ ...valid(), publishedDate: '2024-13' }).includes('publishedDate'));
+  const path = 'identifiers.0.info.publishedDate';
+  assert.deepEqual(paths(withInfo({ publishedDate: '2024' })), []);
+  assert.deepEqual(paths(withInfo({ publishedDate: '2024-02' })), []);
+  assert.deepEqual(paths(withInfo({ publishedDate: '2024-02-29' })), []);
+  assert.ok(paths(withInfo({ publishedDate: '2024-02-30' })).includes(path));
+  assert.ok(paths(withInfo({ publishedDate: '24' })).includes(path));
+  assert.ok(paths(withInfo({ publishedDate: '2024-13' })).includes(path));
+});
+
+test('identifier claims are optional, nullable and typed', () => {
+  const parsed = parseEditionEdit(withInfo({ pages: '12', format: 'hardcover' }));
+  assert.deepEqual(parsed.errors, []);
+  assert.deepEqual(parsed.value?.identifiers[0]?.info, {
+    format: 'hardcover',
+    language: null,
+    publishedDate: null,
+    pages: 12,
+    description: null
+  });
+
+  const cleared = parseEditionEdit(withInfo(null));
+  assert.deepEqual(cleared.errors, []);
+  assert.equal(cleared.value?.identifiers[0]?.info, null);
+
+  assert.ok(paths(withInfo('hardcover')).includes('identifiers.0.info'));
+  assert.ok(paths(withInfo([1])).includes('identifiers.0.info'));
 });
 
 test('requires an http(s) cover URL', () => {
@@ -178,11 +215,18 @@ test('series is optional but needs a name when a position or display is present'
   assert.ok(paths({ ...valid(), series: 'Saga' }).includes('series'));
 });
 
-test('publishers are optional and support existing ids or new names', () => {
-  assert.deepEqual(paths({ ...valid(), publishers: [{ id: 3 }] }), []);
-  assert.deepEqual(paths({ ...valid(), publishers: [{ name: 'Ace' }] }), []);
-  assert.ok(paths({ ...valid(), publishers: [{ role: 'x' }] }).includes('publishers.0.name'));
-  assert.ok(paths({ ...valid(), publishers: 'Ace' }).includes('publishers'));
+test('publisher links hang off the identifier and accept ids or new names', () => {
+  assert.deepEqual(paths(withIdentifier({ publishers: [{ id: 3 }] })), []);
+  assert.deepEqual(paths(withIdentifier({ publishers: [{ name: 'Ace' }] })), []);
+  assert.ok(
+    paths(withIdentifier({ publishers: [{ role: 'x' }] })).includes(
+      'identifiers.0.publishers.0.name'
+    )
+  );
+  assert.ok(paths(withIdentifier({ publishers: 'Ace' })).includes('identifiers.0.publishers'));
+  // Omitted links are not resent, so a partial client cannot clear them.
+  const parsed = parseEditionEdit(valid());
+  assert.equal('publishers' in (parsed.value?.identifiers[0] as object), false);
 });
 
 test('non-object bodies are rejected', () => {

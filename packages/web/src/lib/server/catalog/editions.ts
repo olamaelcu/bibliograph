@@ -2,6 +2,7 @@ import { catalogPool } from './db';
 import { likePattern } from './sql';
 import {
   EDITION_COLUMNS,
+  EDITION_SHAPE_JOIN,
   hydrate,
   type EditionResults,
   type EditionRow,
@@ -53,6 +54,7 @@ export async function resolveEditions(input: {
      )
      SELECT ${EDITION_COLUMNS}
      FROM editions e JOIN matches m ON m.edition_uri = e.uri
+     ${EDITION_SHAPE_JOIN}
      ORDER BY e.indexed_at ASC, e.uri ASC
      LIMIT ${limit} OFFSET ${offset}`,
     params
@@ -128,7 +130,7 @@ export async function searchEditions(input: {
     const pattern = push(likePattern(input.q));
     textClause = `(
       e.title ILIKE ${pattern}
-      OR coalesce(e.description, '') ILIKE ${pattern}
+      OR coalesce(s.description, '') ILIKE ${pattern}
       OR EXISTS (
         SELECT 1 FROM edition_contributors ecq
         JOIN contributors cq ON cq.id = ecq.contributor_id
@@ -159,6 +161,7 @@ export async function searchEditions(input: {
   const pagePromise = pool.query<EditionRow>(
     `SELECT ${EDITION_COLUMNS}
      FROM editions e
+     ${EDITION_SHAPE_JOIN}
      ${where}
      ORDER BY ${rankCase}, e.indexed_at DESC, e.uri ASC
      LIMIT ${limit} OFFSET ${offset}`,
@@ -168,7 +171,9 @@ export async function searchEditions(input: {
   const totalPromise =
     input.offset === 0
       ? pool.query<{ n: number }>(
-          `SELECT count(*)::int AS n FROM editions e ${where}`,
+          `SELECT count(*)::int AS n FROM editions e
+             ${EDITION_SHAPE_JOIN}
+             ${where}`,
           params.slice(0, params.length - 2)
         )
       : null;

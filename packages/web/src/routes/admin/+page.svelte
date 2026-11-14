@@ -578,20 +578,35 @@
     );
   });
 
+  /** Publisher names credited by a record, in identifier order, deduped. */
+  function creditedPublisherNames(record: AdminEdition | undefined): string[] {
+    if (!record) return [];
+    const seen = new Set<string>();
+    const names: string[] = [];
+    for (const identifier of record.identifiers) {
+      for (const publisher of identifier.publishers) {
+        if (seen.has(publisher.name)) continue;
+        seen.add(publisher.name);
+        names.push(publisher.name);
+      }
+    }
+    return names;
+  }
+
   const previewPublishers = $derived.by(() => {
     if (publishersMode === 'union') {
       const seen = new Set<string>();
       const names: string[] = [];
       for (const record of selected) {
-        for (const publisher of record.publishers) {
-          if (seen.has(publisher.name)) continue;
-          seen.add(publisher.name);
-          names.push(publisher.name);
+        for (const name of creditedPublisherNames(record)) {
+          if (seen.has(name)) continue;
+          seen.add(name);
+          names.push(name);
         }
       }
       return names;
     }
-    return (selectedRecords[publishersSource]?.publishers ?? []).map((publisher) => publisher.name);
+    return creditedPublisherNames(selectedRecords[publishersSource]);
   });
 
   async function runEditionSearch() {
@@ -1633,9 +1648,6 @@
                   <div class="wa-stack wa-gap-2xs admin-result-body">
                     <div class="wa-cluster wa-gap-s wa-align-items-baseline">
                       <strong>{record.title}</strong>
-                      {#if record.publishedDate}
-                        <span class="muted">{record.publishedDate}</span>
-                      {/if}
                     </div>
                     <span class="muted">
                       {record.contributors.map((contributor) => contributor.name).join(', ') ||

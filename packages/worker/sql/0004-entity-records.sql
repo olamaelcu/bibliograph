@@ -117,9 +117,31 @@ CREATE OR REPLACE TRIGGER pds_enqueue_publisher_record
 --
 -- Same columns and order as 0001. Only the two jsonb expressions change, so
 -- HappyView's `edition_view` (views.lua) picks the ref up with no Lua change.
+--
+-- 0007 moved the shape claims and 0008 the publisher links onto the edition's
+-- identifiers, so this definition only applies while `edition_publishers` still
+-- exists: 0008 owns both views from then on. Skipping it keeps this file
+-- re-appliable.
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE VIEW appview_book AS
+DO $views$
+DECLARE
+  had_shape boolean;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = 'editions'
+       AND column_name = 'format'
+  ) INTO had_shape;
+
+  -- Both conditions are historical: 0007 drops the shape columns, 0008 the
+  -- publisher table, and this body names both.
+  IF NOT had_shape OR to_regclass(current_schema() || '.edition_publishers') IS NULL THEN
+    RETURN;
+  END IF;
+
+  EXECUTE $book$CREATE OR REPLACE VIEW appview_book AS
 SELECT
   e.uri,
   e.rkey,
@@ -183,9 +205,9 @@ SELECT
       FROM edition_identifiers i
      WHERE i.edition_uri = e.uri
   ), '[]'::jsonb) AS identifiers
-FROM editions e;
+FROM editions e$book$;
 
-CREATE OR REPLACE VIEW appview_book_lua AS
+  EXECUTE $lua$CREATE OR REPLACE VIEW appview_book_lua AS
 SELECT
   uri,
   rkey,
@@ -209,6 +231,8 @@ SELECT
   publisher::text AS publisher,
   publishers::text AS publishers,
   identifiers::text AS identifiers
-FROM appview_book;
+FROM appview_book$lua$;
+END
+$views$;
 
 COMMIT;

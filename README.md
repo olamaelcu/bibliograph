@@ -55,7 +55,7 @@ records written straight to a PDS arrive through Jetstream or a backfill.
 | --- | --- | --- | --- |
 | `community.lexicon.media.book.edition` | `tid` (minted by `editions_next_tid()`) | publisher worker | `editions` + identifier/contributor/publisher tables |
 | `net.olamaelcu.livtet.biblio.contributor` | `tid` | publisher worker | `contributors` + `edition_contributors` |
-| `net.olamaelcu.livtet.biblio.publisher` | `tid` | publisher worker | `publishers` + `edition_publishers` |
+| `net.olamaelcu.livtet.biblio.publisher` | `tid` | publisher worker | `publishers` + `edition_identifier_publishers` |
 | `net.olamaelcu.livtet.biblio.shelf` | `any`; custom shelves use TID, fixed status shelves are virtual rkeys | reader / `shelf.create` | reader PDS |
 | `net.olamaelcu.livtet.biblio.shelfItem` | `tid`; one edge per (shelf, book), found by `record.shelf` + `record.book.uri` | reader / `shelf.addItem` | reader PDS |
 | `net.olamaelcu.livtet.biblio.bookStatus` | `tid`; one status per (reader, edition), found by `record.book.uri` | reader / `status.set` | reader PDS |

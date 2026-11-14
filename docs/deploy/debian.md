@@ -212,9 +212,15 @@ sudo -u postgres psql -v db=bibliograph -f /usr/share/bibliograph-happyview/db-i
 Re-run `mise run deploy`. It installs the worker, applies every file in
 `/usr/lib/bibliograph-worker/sql/` in lexical order, installs the web package,
 and then restarts the units. The schema SQL is **idempotent and additive**: it
-creates missing tables/sequences/indexes/functions/views and never drops or
-truncates data. Running it on an existing database is safe. It does not alter an
-existing table — a new column belongs in a new numbered file.
+creates missing tables/sequences/indexes/functions/views, and re-running it on
+an existing database is safe. It is **forward-only**, not purely additive: each
+numbered file is one transaction, and a migration file may backfill data and
+drop a column or table behind a guard (`0007`/`0008` moved the edition shape and
+publisher links onto `edition_identifiers`, dropping the five edition columns
+and `edition_publishers`). Those drops are not reversible: take a `pg_dump`
+before a release that adds such a file, and never run an older package against a
+database a newer one has migrated. A new column still belongs in a new numbered
+file.
 
 `0003-feed-read.sql` is re-applied after `happyview.service` (and its deploy
 oneshot) has migrated, because the first catalog pass runs before

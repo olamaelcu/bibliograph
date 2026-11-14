@@ -414,6 +414,121 @@ const duplicateIdentifierReport: ReportDefinition = {
   }
 };
 
+// ── Identifier shape-claim report ───────────────────────────────────────────
+
+const identifierInfoReport: ReportDefinition = {
+  summary: {
+    id: 'edition-identifier-info',
+    title: 'Identifier claims and publishers',
+    description:
+      "One row per edition identifier: what that identifier's own record says about format, " +
+      'language, publication date, pages and description, plus the publisher entities it is ' +
+      'linked to, with the edition it is attached to. Issuer, format and language compare ' +
+      'exactly (format and language case-insensitively); value and publisher are escaped ' +
+      'case-insensitive substrings. An identifier without a claim row still appears.',
+    kind: 'editions',
+    columns: editionColumns(
+      { key: 'issuer', label: 'Issuer', format: 'text' },
+      { key: 'value', label: 'Value', format: 'text' },
+      { key: 'format', label: 'Format', format: 'text' },
+      { key: 'language', label: 'Language', format: 'text' },
+      { key: 'published_date', label: 'Published', format: 'text' },
+      { key: 'pages', label: 'Pages', format: 'number' },
+      { key: 'publisher', label: 'Publishers', format: 'text' },
+      { key: 'description', label: 'Description (first 160)', format: 'text' }
+    ),
+    params: [
+      {
+        key: 'issuer',
+        label: 'Issuer (exact)',
+        kind: 'text',
+        defaultValue: '',
+        placeholder: 'isbn13'
+      },
+      {
+        key: 'value',
+        label: 'Value contains',
+        kind: 'text',
+        defaultValue: '',
+        placeholder: '978'
+      },
+      {
+        key: 'format',
+        label: 'Format (exact)',
+        kind: 'text',
+        defaultValue: '',
+        placeholder: 'hardcover'
+      },
+      {
+        key: 'language',
+        label: 'Language (exact)',
+        kind: 'text',
+        defaultValue: '',
+        placeholder: 'en'
+      },
+      {
+        key: 'publisher',
+        label: 'Publisher contains',
+        kind: 'text',
+        defaultValue: '',
+        placeholder: 'Penguin'
+      }
+    ]
+  },
+  build(raw) {
+    assertOnly(raw, ['issuer', 'value', 'format', 'language', 'publisher']);
+    const issuer = optionalText(raw, 'issuer', 100) ?? null;
+    const value = optionalText(raw, 'value', 200) ?? null;
+    const format = optionalText(raw, 'format', 100) ?? null;
+    const language = optionalText(raw, 'language', 35) ?? null;
+    const publisher = optionalText(raw, 'publisher', 300) ?? null;
+    return {
+      text: `SELECT e.uri, e.rkey, e.title, i.issuer, i.value,
+       c.format, c.language, c.published_date, c.pages,
+       COALESCE((
+         SELECT string_agg(p.name, ' · ' ORDER BY ip.position)
+           FROM edition_identifier_publishers ip
+           JOIN publishers p ON p.id = ip.publisher_id
+          WHERE ip.edition_uri = i.edition_uri
+            AND ip.issuer = i.issuer
+            AND ip.value = i.value
+       ), '') AS publisher,
+       left(c.description, 160) AS description
+       FROM edition_identifiers i
+       JOIN editions e ON e.uri = i.edition_uri
+       LEFT JOIN edition_identifier_info c
+         ON c.edition_uri = i.edition_uri AND c.issuer = i.issuer AND c.value = i.value
+      WHERE ($1::text IS NULL OR i.issuer = $1)
+        AND ($2::text IS NULL OR i.value ILIKE $2 ESCAPE '\\')
+        AND ($3::text IS NULL OR lower(c.format) = lower($3))
+        AND ($4::text IS NULL OR lower(c.language) = lower($4))
+        AND ($5::text IS NULL OR EXISTS (
+              SELECT 1 FROM edition_identifier_publishers ip
+                JOIN publishers p ON p.id = ip.publisher_id
+               WHERE ip.edition_uri = i.edition_uri
+                 AND ip.issuer = i.issuer
+                 AND ip.value = i.value
+                 AND p.name ILIKE $5 ESCAPE '\\'
+            ))
+      ORDER BY e.indexed_at DESC, e.uri, i.issuer, i.value`,
+      values: [
+        issuer,
+        value === null ? null : likePattern(value),
+        format,
+        language,
+        publisher === null ? null : likePattern(publisher)
+      ],
+      applied: {
+        issuer: issuer ?? '',
+        value: value ?? '',
+        format: format ?? '',
+        language: language ?? '',
+        publisher: publisher ?? ''
+      }
+    };
+  }
+};
+
 // ── Outbox reports ──────────────────────────────────────────────────────────
 
 const OUTBOX_COLUMNS: ReportColumn[] = [
@@ -498,26 +613,43 @@ export const REPORTS: readonly ReportDefinition[] = [
   editionReport({
     id: 'editions-missing-description',
     title: 'Editions missing a description',
-    description: 'Editions whose description is NULL, empty or whitespace only.',
-    where: "e.description IS NULL OR btrim(e.description) = ''"
+    description:
+      'Editions where no identifier records a description: no edition_identifier_info row of ' +
+      'the edition has a non-blank description.',
+    where:
+      'NOT EXISTS (SELECT 1 FROM edition_identifier_info i ' +
+      'WHERE i.edition_uri = e.uri ' +
+      "AND i.description IS NOT NULL AND btrim(i.description) <> '')"
   }),
   editionReport({
     id: 'editions-missing-language',
     title: 'Editions missing a language',
-    description: 'Editions whose language is NULL, empty or whitespace only.',
-    where: "e.language IS NULL OR btrim(e.language) = ''"
+    description:
+      'Editions where no identifier records a language: no edition_identifier_info row of the ' +
+      'edition has a non-blank language.',
+    where:
+      'NOT EXISTS (SELECT 1 FROM edition_identifier_info i ' +
+      'WHERE i.edition_uri = e.uri ' +
+      "AND i.language IS NOT NULL AND btrim(i.language) <> '')"
   }),
   editionReport({
     id: 'editions-missing-pages',
     title: 'Editions missing a page count',
-    description: 'Editions whose pages value is NULL or not a positive integer.',
-    where: 'e.pages IS NULL OR e.pages <= 0'
+    description: 'Editions where no identifier records a page count.',
+    where:
+      'NOT EXISTS (SELECT 1 FROM edition_identifier_info i ' +
+      'WHERE i.edition_uri = e.uri AND i.pages IS NOT NULL)'
   }),
   editionReport({
     id: 'editions-missing-published-date',
     title: 'Editions missing a published date',
-    description: 'Editions whose published_date is NULL, empty or whitespace only.',
-    where: "e.published_date IS NULL OR btrim(e.published_date) = ''"
+    description:
+      'Editions where no identifier records a publication date: no edition_identifier_info ' +
+      'row of the edition has a non-blank published_date.',
+    where:
+      'NOT EXISTS (SELECT 1 FROM edition_identifier_info i ' +
+      'WHERE i.edition_uri = e.uri ' +
+      "AND i.published_date IS NOT NULL AND btrim(i.published_date) <> '')"
   }),
   editionReport({
     id: 'editions-without-contributors',
@@ -528,8 +660,9 @@ export const REPORTS: readonly ReportDefinition[] = [
   editionReport({
     id: 'editions-without-publishers',
     title: 'Editions with no publishers',
-    description: 'Editions that have no edition_publishers row.',
-    where: 'NOT EXISTS (SELECT 1 FROM edition_publishers ep WHERE ep.edition_uri = e.uri)'
+    description: 'Editions where no identifier is linked to a publisher.',
+    where:
+      'NOT EXISTS (SELECT 1 FROM edition_identifier_publishers ip WHERE ip.edition_uri = e.uri)'
   }),
   editionReport({
     id: 'editions-without-cid',
@@ -541,6 +674,7 @@ export const REPORTS: readonly ReportDefinition[] = [
     where: 'p.uri IS NULL'
   }),
   duplicateIdentifierReport,
+  identifierInfoReport,
   outboxReport({
     id: 'outbox-pending-editions',
     title: 'Editions in the publish outbox',

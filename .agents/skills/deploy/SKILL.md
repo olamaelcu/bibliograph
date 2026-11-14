@@ -276,9 +276,15 @@ keeps local edits to the env conffiles and the nginx vhost.
 3. **Worker** install → stop the worker (so a fresh database is not hit before
    its tables exist) → `verify_version`. Then, unless `--skip-db`, apply every
    `/usr/lib/bibliograph-worker/sql/*.sql` in lexical order with `psql`, from
-   `worker.env`'s `DATABASE_URL`. The files are idempotent and additive
-   (`IF NOT EXISTS`, `CREATE OR REPLACE`, no DROP/TRUNCATE); `0003-feed-read.sql`
-   skips itself when `happyview.happyview_records` does not exist yet.
+   `worker.env`'s `DATABASE_URL`. The files are forward-only: each is one
+   transaction and re-runnable, most are additive (`IF NOT EXISTS`,
+   `CREATE OR REPLACE`), but a migration file may backfill data and drop a
+   column or table behind a guard — `0007`/`0008` moved the edition shape and
+   publisher links onto `edition_identifiers`. Those drops are not reversible:
+   take a `pg_dump` before a release that adds one, and never run an older
+   package against a database a newer one has migrated.
+   `0003-feed-read.sql` skips itself when `happyview.happyview_records` does not
+   exist yet.
 4. **Web** install last → `verify_version`.
 
 ### 5. Ordered restarts and the 0003 re-apply

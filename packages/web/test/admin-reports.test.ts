@@ -56,6 +56,7 @@ test('registry exposes every curated report with unique ids', () => {
       'contributors-missing-identifiers',
       'duplicate-identifier-pairs',
       'edition-identifier-count',
+      'edition-identifier-info',
       'editions-missing-cover',
       'editions-missing-description',
       'editions-missing-language',

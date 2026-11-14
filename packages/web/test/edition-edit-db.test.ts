@@ -76,8 +76,8 @@ async function seedEdition(
   const rkey = label();
   const uri = `at://${AUTHORITY}/${EDITION_COLLECTION}/${rkey}`;
   await (pool as pg.Pool).query(
-    `INSERT INTO editions (uri, rkey, title, language, created_at, indexed_at)
-     VALUES ($1, $2, $3, 'en', '2020-01-02T03:04:05.000Z', '2020-01-02T03:04:05.000Z')`,
+    `INSERT INTO editions (uri, rkey, title, created_at, indexed_at)
+     VALUES ($1, $2, $3, '2020-01-02T03:04:05.000Z', '2020-01-02T03:04:05.000Z')`,
     [uri, rkey, title]
   );
   await (pool as pg.Pool).query(
@@ -93,8 +93,11 @@ async function seedEdition(
     [uri, contributorId]
   );
   await (pool as pg.Pool).query(
-    `INSERT INTO edition_publishers (edition_uri, publisher_id, position)
-     VALUES ($1, $2, 1)`,
+    `INSERT INTO edition_identifier_publishers
+       (edition_uri, issuer, value, publisher_id, position)
+     SELECT $1, i.issuer, i.value, $2, 1
+       FROM edition_identifiers i
+      WHERE i.edition_uri = $1`,
     [uri, publisherId]
   );
   return { uri, rkey, contributorId, publisherId };
@@ -104,15 +107,10 @@ function bodyFrom(edition: AdminEdition, overrides: Record<string, unknown> = {}
   return {
     title: edition.title,
     subtitle: edition.subtitle,
-    language: edition.language,
-    publishedDate: edition.publishedDate,
-    format: edition.format,
-    pages: edition.pages,
     durationSeconds: edition.durationSeconds,
     chapters: edition.chapters,
     series: edition.series,
     bookEdition: edition.bookEdition,
-    description: edition.description,
     coverUrl: edition.coverUrl,
     identifiers: edition.identifiers,
     contributors: edition.contributors.map((contributor) => ({
@@ -120,7 +118,6 @@ function bodyFrom(edition: AdminEdition, overrides: Record<string, unknown> = {}
       role: contributor.role,
       ref: contributor.ref
     })),
-    publishers: edition.publishers.map((publisher) => ({ id: publisher.id })),
     expectedRevision: edition.revision,
     ...overrides
   };
@@ -160,7 +157,7 @@ test('loads an edition by rkey and by a URL-encoded at-uri', async (t) => {
   assert.equal(byRkey.uri, seeded.uri);
   assert.equal(byRkey.title, 'Loadable');
   assert.equal(byRkey.contributors.length, 1);
-  assert.equal(byRkey.publishers.length, 1);
+  assert.equal(byRkey.identifiers[0]?.publishers.length, 1);
   assert.equal(byRkey.identifiers[0]?.value, '9780000000001');
   assert.match(byRkey.revision, /^[a-f0-9]{64}$/);
 
@@ -181,46 +178,67 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
   const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
     title: 'Edited title',
     subtitle: 'An edited subtitle',
-    language: 'en',
-    publishedDate: '2024-02-29',
-    format: 'ebook',
-    pages: 320,
     durationSeconds: 3600,
     chapters: 12,
     series: { name: 'Saga', position: '2', display: 'Vol. II' },
     bookEdition: '2nd revised',
-    description: 'Edited description',
     coverUrl: 'https://example.org/edited.jpg',
     identifiers: [
-      { issuer: 'isbn13', value: '9780000000002' },
+      {
+        issuer: 'isbn13',
+        value: '9780000000002',
+        info: {
+          format: 'ebook',
+          language: 'en',
+          publishedDate: '2024-02-29',
+          pages: 320,
+          description: 'Edited description'
+        },
+        publishers: [{ id: secondPublisher }]
+      },
       { issuer: 'oclc', value: '12345' }
     ],
     contributors: [
       { id: secondContributor, role: 'B01', ref },
       { id: seeded.contributorId, role: 'A01', ref: null }
     ],
-    publishers: [{ id: secondPublisher }, { id: seeded.publisherId }]
   }));
 
   assert.equal(saved.uri, original.uri);
   assert.equal(saved.rkey, original.rkey);
   assert.equal(saved.createdAt, original.createdAt);
   assert.equal(saved.title, 'Edited title');
-  assert.equal(saved.pages, 320);
   assert.deepEqual(saved.series, { name: 'Saga', position: '2', display: 'Vol. II' });
   assert.deepEqual(saved.identifiers.map((identifier) => identifier.value).sort(), [
     '12345',
     '9780000000002'
   ]);
+  const claimed = saved.identifiers.find((identifier) => identifier.issuer === 'isbn13');
+  assert.deepEqual(claimed?.info, {
+    format: 'ebook',
+    language: 'en',
+    publishedDate: '2024-02-29',
+    pages: 320,
+    description: 'Edited description'
+  });
+  assert.deepEqual(
+    claimed?.publishers.map((publisher) => publisher.id),
+    [secondPublisher]
+  );
+  assert.deepEqual(
+    saved.identifiers.find((identifier) => identifier.issuer === 'oclc')?.publishers,
+    [],
+    'an identifier without links reads back an empty list'
+  );
+  assert.equal(
+    saved.identifiers.find((identifier) => identifier.issuer === 'oclc')?.info,
+    null,
+    'an identifier without a claim reads back null'
+  );
   assert.equal(saved.contributors[0]?.id, secondContributor);
   assert.equal(saved.contributors[0]?.role, 'B01');
   assert.equal(saved.contributors[0]?.ref, ref);
   assert.equal(saved.contributors[1]?.id, seeded.contributorId);
-  assert.deepEqual(saved.publishers.map((publisher) => publisher.id), [
-    secondPublisher,
-    seeded.publisherId
-  ]);
-
   const row = await db.query<{ title: string; created_at: Date; rkey: string }>(
     'SELECT title, created_at, rkey FROM editions WHERE uri = $1',
     [seeded.uri]
@@ -237,6 +255,39 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     { issuer: 'isbn13', value: '9780000000002' },
     { issuer: 'oclc', value: '12345' }
   ]);
+
+  const claims = await db.query(
+    `SELECT issuer, value, format, language, published_date, pages, description
+       FROM edition_identifier_info WHERE edition_uri = $1`,
+    [seeded.uri]
+  );
+  assert.deepEqual(claims.rows, [
+    {
+      issuer: 'isbn13',
+      value: '9780000000002',
+      format: 'ebook',
+      language: 'en',
+      published_date: '2024-02-29',
+      pages: 320,
+      description: 'Edited description'
+    }
+  ]);
+
+  const links = await db.query<{ issuer: string; value: string; publisher_id: string }>(
+    `SELECT issuer, value, publisher_id FROM edition_identifier_publishers
+      WHERE edition_uri = $1`,
+    [seeded.uri]
+  );
+  assert.deepEqual(
+    links.rows.map((row) => [row.issuer, row.value, Number(row.publisher_id)]),
+    [['isbn13', '9780000000002', secondPublisher]]
+  );
+
+  const shape = await db.query(
+    'SELECT format, language, pages FROM edition_identifier_shape WHERE edition_uri = $1',
+    [seeded.uri]
+  );
+  assert.deepEqual(shape.rows[0], { format: 'ebook', language: 'en', pages: 320 });
 
   const publisher = await db.query<{ publisher: { name: string } }>(
     'SELECT publisher FROM appview_book WHERE uri = $1',
@@ -300,17 +351,28 @@ test('removes a credit without deleting the shared contributor or publisher', as
       { id: seeded.contributorId, role: 'A01', ref: null },
       { id: secondContributor, role: 'B01', ref: null }
     ],
-    publishers: [{ id: seeded.publisherId }, { id: secondPublisher }]
+    identifiers: [
+      {
+        issuer: 'isbn13',
+        value: '9780000000001',
+        publishers: [{ id: seeded.publisherId }, { id: secondPublisher }]
+      }
+    ]
   }));
 
   const mid = await loaded(seeded.rkey);
   const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(mid, {
     contributors: [{ id: seeded.contributorId, role: 'A01', ref: null }],
-    publishers: [{ id: seeded.publisherId }]
+    identifiers: [
+      { issuer: 'isbn13', value: '9780000000001', publishers: [{ id: seeded.publisherId }] }
+    ]
   }));
 
   assert.equal(saved.contributors.length, 1);
-  assert.equal(saved.publishers.length, 1);
+  assert.deepEqual(
+    saved.identifiers[0]?.publishers.map((entry) => entry.id),
+    [seeded.publisherId]
+  );
   const contributor = await db.query('SELECT id FROM contributors WHERE id = $1', [
     secondContributor
   ]);
@@ -396,56 +458,125 @@ test('rejects invalid bodies before opening a transaction', async (t) => {
   );
 });
 
-test('server rejects invalid language/roles, saves null language and canonicalises tags', async (t) => {
+test('claims are kept when omitted, cleared with null and written per identifier', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
-  const seeded = await seedEdition('Strict validation');
-  const original = await loaded(seeded.rkey);
+  const seeded = await seedEdition('Claim editing');
+  const isbn = { issuer: 'isbn13', value: '9780000000001' };
+  const claimRow = async () => {
+    const result = await db.query<{
+      format: string | null;
+      language: string | null;
+      pages: number | null;
+      updated_at: Date;
+    }>(
+      `SELECT format, language, pages, updated_at FROM edition_identifier_info
+        WHERE edition_uri = $1 AND issuer = 'isbn13'`,
+      [seeded.uri]
+    );
+    return result.rows[0];
+  };
 
+  await db.query(
+    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, format, language, pages)
+     VALUES ($1, 'isbn13', '9780000000001', 'hardcover', 'en-GB', 320)`,
+    [seeded.uri]
+  );
+  const seededClaim = await claimRow();
+  assert.deepEqual(
+    { format: seededClaim?.format, language: seededClaim?.language, pages: seededClaim?.pages },
+    { format: 'hardcover', language: 'en-GB', pages: 320 }
+  );
+
+  // Invalid claim field: rejected before the transaction, nothing changes.
   await assert.rejects(
-    updateAdminEdition(db, seeded.rkey, bodyFrom(original, { language: 'en_US' })),
+    updateAdminEdition(
+      db,
+      seeded.rkey,
+      bodyFrom(await loaded(seeded.rkey), {
+        identifiers: [{ ...isbn, info: { language: 'en_US' } }]
+      })
+    ),
     (error: unknown) =>
       error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
   );
   await assert.rejects(
-    updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
-      contributors: [{ id: seeded.contributorId, role: 'A55', ref: null }]
-    })),
+    updateAdminEdition(
+      db,
+      seeded.rkey,
+      bodyFrom(await loaded(seeded.rkey), {
+        contributors: [{ id: seeded.contributorId, role: 'A55', ref: null }]
+      })
+    ),
     (error: unknown) =>
       error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
   );
+  assert.equal((await claimRow())?.format, 'hardcover');
 
-  const unchanged = await db.query<{ title: string; language: string | null }>(
-    'SELECT title, language FROM editions WHERE uri = $1',
-    [seeded.uri]
-  );
-  assert.equal(unchanged.rows[0]?.title, 'Strict validation');
-  assert.equal(unchanged.rows[0]?.language, 'en');
-  const credit = await db.query<{ role: string }>(
-    'SELECT role FROM edition_contributors WHERE edition_uri = $1',
-    [seeded.uri]
-  );
-  assert.equal(credit.rows[0]?.role, 'A01');
-
-  const cleared = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
-    language: null
+  // An unchanged claim is not rewritten: `updated_at` survives a plain save.
+  const reloaded = await loaded(seeded.rkey);
+  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(reloaded, {
+    title: 'Claim editing 2'
   }));
-  assert.equal(cleared.language, null);
-  const clearedRow = await db.query<{ language: string | null }>(
-    'SELECT language FROM editions WHERE uri = $1',
-    [seeded.uri]
-  );
-  assert.equal(clearedRow.rows[0]?.language, null);
+  assert.equal(saved.title, 'Claim editing 2');
+  assert.equal((await claimRow())?.updated_at.toISOString(), seededClaim?.updated_at.toISOString());
 
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(cleared, {
-    language: 'EN-us'
+  // An identifier with no `info` key keeps the stored claim untouched.
+  const omitted = await updateAdminEdition(db, seeded.rkey, bodyFrom(saved, {
+    identifiers: [isbn]
   }));
-  assert.equal(saved.language, 'en-US');
-  const stored = await db.query<{ language: string | null }>(
-    'SELECT language FROM editions WHERE uri = $1',
+  assert.equal(omitted.identifiers[0]?.info?.format, 'hardcover');
+  assert.equal((await claimRow())?.pages, 320);
+
+  // A new identifier carries its own claim.
+  const added = await updateAdminEdition(db, seeded.rkey, bodyFrom(omitted, {
+    identifiers: [
+      isbn,
+      {
+        issuer: 'isbn10',
+        value: '0441013597',
+        info: { format: 'paperback', pages: 288, publishedDate: '2024-02' }
+      }
+    ]
+  }));
+  assert.deepEqual(
+    added.identifiers.find((identifier) => identifier.issuer === 'isbn10')?.info,
+    {
+      format: 'paperback',
+      language: null,
+      publishedDate: '2024-02',
+      pages: 288,
+      description: null
+    }
+  );
+  const shape = await db.query<{ format: string; pages: number }>(
+    'SELECT format, pages FROM edition_identifier_shape WHERE edition_uri = $1',
     [seeded.uri]
   );
-  assert.equal(stored.rows[0]?.language, 'en-US');
+  assert.deepEqual(shape.rows[0], { format: 'hardcover', pages: 320 });
+
+  // Null clears the row; the isbn13 claim still wins the union.
+  const cleared = await updateAdminEdition(db, seeded.rkey, bodyFrom(added, {
+    identifiers: [
+      { ...isbn, info: null },
+      { issuer: 'isbn10', value: '0441013597' }
+    ]
+  }));
+  assert.equal(
+    cleared.identifiers.find((identifier) => identifier.issuer === 'isbn13')?.info,
+    null
+  );
+  assert.equal(await claimRow(), undefined);
+
+  // Canonicalisation happens on the claim, exactly as it did on the edition.
+  const canonical = await updateAdminEdition(db, seeded.rkey, bodyFrom(cleared, {
+    identifiers: [{ ...isbn, info: { language: 'EN-us' } }]
+  }));
+  assert.equal(
+    canonical.identifiers.find((identifier) => identifier.issuer === 'isbn13')?.info?.language,
+    'en-US'
+  );
+  assert.equal((await claimRow())?.language, 'en-US');
 });
 
 test('returns 404 for an unknown edition', async (t) => {
@@ -455,7 +586,6 @@ test('returns 404 for an unknown edition', async (t) => {
   await assert.rejects(
     updateAdminEdition(db, `missing${RUN}`, {
       title: 'x',
-      language: 'en',
       identifiers: [{ issuer: 'isbn13', value: '1' }],
       contributors: [{ name: 'A' }]
     }),
@@ -476,11 +606,17 @@ test('queues new contributor and publisher entity rows through triggers', async 
       { id: seeded.contributorId, role: 'A01', ref: null },
       { name, identifiers: [{ issuer: 'isni', value: '999' }], role: 'B01', ref: null }
     ],
-    publishers: [{ id: seeded.publisherId }, { name: publisherName, identifiers: [] }]
+    identifiers: [
+      {
+        issuer: 'isbn13',
+        value: '9780000000001',
+        publishers: [{ id: seeded.publisherId }, { name: publisherName, identifiers: [] }]
+      }
+    ]
   }));
 
   const contributor = saved.contributors.find((credit) => credit.name === name);
-  const publisher = saved.publishers.find((entry) => entry.name === publisherName);
+  const publisher = saved.identifiers[0]?.publishers.find((entry) => entry.name === publisherName);
   assert.ok(contributor);
   assert.ok(publisher);
 

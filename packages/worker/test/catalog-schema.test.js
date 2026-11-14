@@ -116,8 +116,9 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'edition_contributors',
       'edition_genre_fetches',
       'edition_genres',
+      'edition_identifier_info',
+      'edition_identifier_publishers',
       'edition_identifiers',
-      'edition_publishers',
       'editions',
       'genres',
       'google_books_cache',
@@ -135,8 +136,9 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'edition_contributors',
       'edition_genre_fetches',
       'edition_genres',
+      'edition_identifier_info',
+      'edition_identifier_publishers',
       'edition_identifiers',
-      'edition_publishers',
       'editions',
       'genres',
       'google_books_cache',
@@ -152,11 +154,11 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     `SELECT table_name FROM information_schema.views
       WHERE table_schema = 'public' AND table_name = ANY($1)
       ORDER BY table_name`,
-    [['appview_book', 'appview_book_lua']]
+    [['appview_book', 'appview_book_lua', 'edition_identifier_shape', 'edition_publishers_shape']]
   );
   assert.deepEqual(
     views.rows.map((row) => row.table_name),
-    ['appview_book', 'appview_book_lua']
+    ['appview_book', 'appview_book_lua', 'edition_identifier_shape', 'edition_publishers_shape']
   );
 
   const functions = await pool.query(
@@ -191,6 +193,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_contributor_record',
       'pds_enqueue_contributors',
       'pds_enqueue_editions',
+      'pds_enqueue_identifier_info',
       'pds_enqueue_identifiers',
       'pds_enqueue_publisher_edits',
       'pds_enqueue_publisher_record',
@@ -231,15 +234,10 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   assert.match(row.rkey, /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/);
   assert.equal(row.title, candidate.title);
   assert.equal(row.subtitle, null);
-  assert.equal(row.language, 'en');
-  assert.equal(row.published_date, '2026-11-11');
-  assert.equal(row.format, 'paperback');
-  assert.equal(row.pages, 321);
   assert.equal(row.duration_seconds, 11_400);
   assert.equal(row.chapters, 12);
   assert.deepEqual(row.series, candidate.series);
   assert.equal(row.book_edition, 'first');
-  assert.equal(row.description, 'A probe edition.');
   assert.equal(row.cover_url, 'https://example.org/cover.jpg');
   assert.ok(row.created_at instanceof Date);
   assert.ok(row.indexed_at instanceof Date);
@@ -253,6 +251,39 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
     { issuer: 'googlebooks', value: 'schema-probe-volume' },
     { issuer: 'isbn13', value: ISBN }
   ]);
+
+  // 0007 moved the shape claims onto the identifier: the candidate's claim is
+  // written for every identifier it supplied, and the edition reads the union.
+  const claims = await pool.query(
+    `SELECT issuer, value, format, language, published_date, pages, description
+       FROM edition_identifier_info
+      WHERE edition_uri = $1 ORDER BY issuer, value`,
+    [editionUri]
+  );
+  const claim = {
+    format: 'paperback',
+    language: 'en',
+    published_date: '2026-11-11',
+    pages: 321,
+    description: 'A probe edition.'
+  };
+  assert.deepEqual(claims.rows, [
+    { issuer: 'googlebooks', value: 'schema-probe-volume', ...claim },
+    { issuer: 'isbn13', value: ISBN, ...claim }
+  ]);
+
+  const readModel = await pool.query(
+    `SELECT language, published_date, format, pages, description
+       FROM appview_book WHERE uri = $1`,
+    [editionUri]
+  );
+  assert.deepEqual(readModel.rows[0], {
+    language: 'en',
+    published_date: '2026-11-11',
+    format: 'paperback',
+    pages: 321,
+    description: 'A probe edition.'
+  });
 
   const contributors = await pool.query(
     `SELECT c.name, c.description, ec.position, ec.role, ec.ref, c.identifiers
@@ -271,14 +302,21 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   }]);
 
   const publishers = await pool.query(
-    `SELECT p.name, ep.position, p.identifiers
-       FROM edition_publishers ep
-       JOIN publishers p ON p.id = ep.publisher_id
-      WHERE ep.edition_uri = $1`,
+    `SELECT p.name, ip.issuer, ip.position, p.identifiers
+       FROM edition_identifier_publishers ip
+       JOIN publishers p ON p.id = ip.publisher_id
+      WHERE ip.edition_uri = $1
+      ORDER BY ip.issuer, ip.position`,
     [editionUri]
   );
   assert.deepEqual(publishers.rows, [{
     name: PUBLISHER,
+    issuer: 'googlebooks',
+    position: 1,
+    identifiers: [{ issuer: 'isni', value: '0000000121032683' }]
+  }, {
+    name: PUBLISHER,
+    issuer: 'isbn13',
     position: 1,
     identifiers: [{ issuer: 'isni', value: '0000000121032683' }]
   }]);

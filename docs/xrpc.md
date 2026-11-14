@@ -78,7 +78,7 @@ headers as well.
 
 The two books-wg procedures never reach HappyView: the edge dispatches them on NSID and answers them
 from the catalog tables (`editions`, `edition_identifiers`, `edition_contributors`,
-`edition_publishers`). They are `POST` by lexicon and reject `GET` with `405 MethodNotAllowed`.
+`edition_identifier_publishers`). They are `POST` by lexicon and reject `GET` with `405 MethodNotAllowed`.
 They never write catalog rows; when the local catalog cannot answer, they may queue a hydration job
 and mark it in `catalog_enqueue_marks`.
 

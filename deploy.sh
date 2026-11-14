@@ -23,7 +23,10 @@
 #     instead of running it with a guessable default.
 #   * Catalog schema: every /usr/lib/bibliograph-worker/sql/*.sql file is
 #     applied with psql against DATABASE_URL from /etc/bibliograph/worker.env.
-#     The files are additive and safe to re-run.
+#     The files are forward-only and safe to re-run (guarded backfills and
+#     drops), but some of them migrate data and drop columns/tables, and they
+#     are not reversible. Back up the database before deploying a release that
+#     adds such a file.
 #   * Feed read path: 0003-feed-read.sql is re-applied after HappyView has
 #     migrated (its tables do not exist during the first catalog pass), so a
 #     fresh host gets the feed indexes and grants without a second full pass.
@@ -408,9 +411,9 @@ if [ "$SKIP_DB" = 0 ]; then
   for file in "${sql_files[@]}"; do
     say "Catalog schema: $(basename "$file")"
     psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -f "$file" \
-      || fail "catalog schema failed at $(basename "$file"); no data was dropped. Fix the error and re-run."
+      || fail "catalog schema failed at $(basename "$file"). Each file is one transaction, so this one was rolled back; earlier files in this run stay applied. Data migrated by an earlier file is not reverted. Fix the error and re-run (the files are re-runnable)."
   done
-  note "Catalog schema applied (idempotent; no data was dropped)"
+  note "Catalog schema applied (re-runnable; migrations are forward-only)"
 else
   note "--skip-db: catalog schema skipped"
 fi
@@ -630,7 +633,9 @@ Install (dependency-first, apt-get --reinstall, stop on failure):
 Database stages:
   * HappyView role/schema gate after step 1 (db-init.sql is a one-time
     superuser step; this script never invents a password)
-  * catalog schema after step 2, idempotent, never drops data
+  * catalog schema after step 2 (forward-only: numbered files may migrate data
+    and drop columns/tables; each file is one transaction, re-running is safe,
+    and the drops are not reversible)
 
 Legacy detection (host preflight):
   dpkg-query -W bibliograph; systemctl is-active bibliograph.service;

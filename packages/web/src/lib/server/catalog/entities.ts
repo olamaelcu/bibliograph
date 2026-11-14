@@ -16,6 +16,7 @@ import type { Pool } from 'pg';
 // (the rest of the app resolves extensionless imports through Vite).
 import {
   EDITION_COLUMNS,
+  EDITION_SHAPE_JOIN,
   hydrate,
   type EditionRow,
   type EditionView
@@ -410,6 +411,7 @@ export async function listEditionsByContributor(
   const page = await pool.query(
     `SELECT ${EDITION_COLUMNS}
        FROM editions e
+       ${EDITION_SHAPE_JOIN}
       WHERE EXISTS (
               SELECT 1 FROM edition_contributors ec
                WHERE ec.edition_uri = e.uri AND ec.contributor_id = $1

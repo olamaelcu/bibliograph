@@ -53,10 +53,9 @@ async function insertEdition(client, uri, rkey, candidate) {
   const series = candidate.series ? JSON.stringify(candidate.series) : null;
   const inserted = await client.query(
     `INSERT INTO editions (
-       uri, rkey, title, subtitle, language, published_date, format, pages,
-       duration_seconds, chapters, series, book_edition, description, cover_url,
-       created_at, indexed_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, now(), now())
+       uri, rkey, title, subtitle, duration_seconds, chapters, series,
+       book_edition, cover_url, created_at, indexed_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, now(), now())
      ON CONFLICT (uri) DO NOTHING
      RETURNING uri`,
     [
@@ -64,15 +63,10 @@ async function insertEdition(client, uri, rkey, candidate) {
       rkey,
       title,
       candidate.subtitle ?? null,
-      candidate.language ?? null,
-      candidate.publishedDate ?? null,
-      candidate.format ?? null,
-      candidate.pages ?? null,
       candidate.durationSeconds ?? null,
       candidate.chapters ?? null,
       series,
       candidate.bookEdition ?? null,
-      candidate.description ?? null,
       candidate.coverUrl ?? null
     ]
   );
@@ -82,58 +76,71 @@ async function insertEdition(client, uri, rkey, candidate) {
 async function fillMissingFields(client, uri, candidate) {
   const values = {
     subtitle: candidate.subtitle ?? null,
-    language: candidate.language ?? null,
-    publishedDate: candidate.publishedDate ?? null,
-    format: candidate.format ?? null,
-    pages: candidate.pages ?? null,
     durationSeconds: candidate.durationSeconds ?? null,
     chapters: candidate.chapters ?? null,
     series: candidate.series ? JSON.stringify(candidate.series) : null,
     bookEdition: candidate.bookEdition ?? null,
-    description: candidate.description ?? null,
     coverUrl: candidate.coverUrl ?? null
   };
 
   await client.query(
     `UPDATE editions SET
        subtitle = COALESCE(subtitle, $2),
-       language = COALESCE(language, $3),
-       published_date = COALESCE(published_date, $4),
-       format = COALESCE(format, $5),
-       pages = COALESCE(pages, $6),
-       duration_seconds = COALESCE(duration_seconds, $7),
-       chapters = COALESCE(chapters, $8),
-       series = COALESCE(series, $9::jsonb),
-       book_edition = COALESCE(book_edition, $10),
-       description = COALESCE(description, $11),
-       cover_url = COALESCE(cover_url, $12)
+       duration_seconds = COALESCE(duration_seconds, $3),
+       chapters = COALESCE(chapters, $4),
+       series = COALESCE(series, $5::jsonb),
+       book_edition = COALESCE(book_edition, $6),
+       cover_url = COALESCE(cover_url, $7)
      WHERE uri = $1
        AND (
          (subtitle IS NULL AND $2::text IS NOT NULL)
-         OR (language IS NULL AND $3::text IS NOT NULL)
-         OR (published_date IS NULL AND $4::text IS NOT NULL)
-         OR (format IS NULL AND $5::text IS NOT NULL)
-         OR (pages IS NULL AND $6::int IS NOT NULL)
-         OR (duration_seconds IS NULL AND $7::int IS NOT NULL)
-         OR (chapters IS NULL AND $8::int IS NOT NULL)
-         OR (series IS NULL AND $9::jsonb IS NOT NULL)
-         OR (book_edition IS NULL AND $10::text IS NOT NULL)
-         OR (description IS NULL AND $11::text IS NOT NULL)
-         OR (cover_url IS NULL AND $12::text IS NOT NULL)
+         OR (duration_seconds IS NULL AND $3::int IS NOT NULL)
+         OR (chapters IS NULL AND $4::int IS NOT NULL)
+         OR (series IS NULL AND $5::jsonb IS NOT NULL)
+         OR (book_edition IS NULL AND $6::text IS NOT NULL)
+         OR (cover_url IS NULL AND $7::text IS NOT NULL)
        )`,
     [
       uri,
       values.subtitle,
-      values.language,
-      values.publishedDate,
-      values.format,
-      values.pages,
       values.durationSeconds,
       values.chapters,
       values.series,
       values.bookEdition,
-      values.description,
       values.coverUrl
+    ]
+  );
+}
+
+// Provider data fills gaps only: an existing claim field is a curator edit or a
+// more specific record, and the `WHERE` keeps a re-ingest from rewriting the row
+// (which would re-queue the edition for no change).
+async function fillIdentifierClaims(client, uri, identifier, claims) {
+  await client.query(
+    `INSERT INTO edition_identifier_info
+           (edition_uri, issuer, value, format, language, published_date, pages, description)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
+       format = COALESCE(edition_identifier_info.format, EXCLUDED.format),
+       language = COALESCE(edition_identifier_info.language, EXCLUDED.language),
+       published_date = COALESCE(edition_identifier_info.published_date, EXCLUDED.published_date),
+       pages = COALESCE(edition_identifier_info.pages, EXCLUDED.pages),
+       description = COALESCE(edition_identifier_info.description, EXCLUDED.description),
+       updated_at = now()
+     WHERE (edition_identifier_info.format IS NULL AND EXCLUDED.format IS NOT NULL)
+        OR (edition_identifier_info.language IS NULL AND EXCLUDED.language IS NOT NULL)
+        OR (edition_identifier_info.published_date IS NULL AND EXCLUDED.published_date IS NOT NULL)
+        OR (edition_identifier_info.pages IS NULL AND EXCLUDED.pages IS NOT NULL)
+        OR (edition_identifier_info.description IS NULL AND EXCLUDED.description IS NOT NULL)`,
+    [
+      uri,
+      identifier.issuer,
+      identifier.value,
+      claims.format,
+      claims.language,
+      claims.publishedDate,
+      claims.pages,
+      claims.description
     ]
   );
 }
@@ -193,9 +200,14 @@ async function linkContributors(client, uri, contributors, authority) {
   }
 }
 
-async function linkPublisher(client, uri, publisher, authority) {
+// The publisher is credited by the identifiers the candidate supplied, not by
+// the edition: two ISBNs may come from different imprints, and the ordered
+// per-edition list (`edition_publishers_shape`) is what the record publishes.
+async function linkPublisher(client, uri, publisher, identifiers, authority) {
   if (typeof publisher?.name !== 'string' || publisher.name.trim() === '') return;
-  const identifiers = JSON.stringify(Array.isArray(publisher.identifiers) ? publisher.identifiers : []);
+  const identifiersJson = JSON.stringify(
+    Array.isArray(publisher.identifiers) ? publisher.identifiers : []
+  );
   const inserted = await client.query(
     `INSERT INTO publishers (name, identifiers, at_uri)
      VALUES ($1, $2::jsonb, 'at://' || $3 || '/' || $4 || '/' || editions_next_tid())
@@ -203,13 +215,21 @@ async function linkPublisher(client, uri, publisher, authority) {
        name = EXCLUDED.name,
        at_uri = COALESCE(publishers.at_uri, EXCLUDED.at_uri)
      RETURNING id, at_uri`,
-    [publisher.name, identifiers, authority, PUBLISHER_COLLECTION]
+    [publisher.name, identifiersJson, authority, PUBLISHER_COLLECTION]
   );
   await client.query(
-    `INSERT INTO edition_publishers (edition_uri, publisher_id, position)
-     VALUES ($1, $2, 1)
-     ON CONFLICT (edition_uri, position) DO UPDATE SET publisher_id = EXCLUDED.publisher_id`,
-    [uri, inserted.rows[0].id]
+    `INSERT INTO edition_identifier_publishers
+       (edition_uri, issuer, value, publisher_id, position)
+     SELECT $1, t.issuer, t.value, $2, 1
+       FROM unnest($3::text[], $4::text[]) AS t(issuer, value)
+     ON CONFLICT (edition_uri, issuer, value, position) DO UPDATE
+       SET publisher_id = EXCLUDED.publisher_id`,
+    [
+      uri,
+      inserted.rows[0].id,
+      identifiers.map((identifier) => identifier.issuer),
+      identifiers.map((identifier) => identifier.value)
+    ]
   );
 }
 
@@ -227,6 +247,18 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
   return async function ingest(candidate) {
     const identifiers = normalizedIdentifiers(candidate);
     if (identifiers.length === 0) return undefined;
+
+    // Each identifier carries its own shape claim: the edition's public shape is
+    // their union, so a provider fill must never overwrite another identifier's
+    // claim (or a curator's edit).
+    const claims = {
+      format: candidate.format ?? null,
+      language: candidate.language ?? null,
+      publishedDate: candidate.publishedDate ?? null,
+      pages: candidate.pages ?? null,
+      description: candidate.description ?? null
+    };
+    const hasClaims = Object.values(claims).some((value) => value !== null && value !== '');
 
     const client = await pool.connect();
     try {
@@ -256,10 +288,11 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
            VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
           [uri, identifier.issuer, identifier.value]
         );
+        if (hasClaims) await fillIdentifierClaims(client, uri, identifier, claims);
       }
 
       await linkContributors(client, uri, candidate.contributors, authority);
-      await linkPublisher(client, uri, candidate.publisher, authority);
+      await linkPublisher(client, uri, candidate.publisher, identifiers, authority);
 
       await client.query('COMMIT');
       return { uri, created };

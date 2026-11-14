@@ -492,16 +492,25 @@ test('ingest creates an edition with a TID under the did:plc authority', async (
   for (const char of rkey) assert.ok(TID_ALPHABET.includes(char), `${rkey} is not a TID`);
 
   const stored = await pool.query(
-    `SELECT e.title, e.pages, e.language, o.op
+    `SELECT e.title, o.op
        FROM editions e LEFT JOIN pds_outbox o ON o.uri = e.uri
       WHERE e.uri = $1`,
     [body.uri]
   );
   assert.equal(stored.rowCount, 1);
   assert.equal(stored.rows[0].title, 'Admin Probe Edition');
-  assert.equal(stored.rows[0].pages, 211);
-  assert.equal(stored.rows[0].language, 'en');
   assert.equal(stored.rows[0].op, 'create');
+
+  // The shape claim lands on every identifier the candidate supplied.
+  const claims = await pool.query(
+    `SELECT issuer, pages, language FROM edition_identifier_info
+      WHERE edition_uri = $1 ORDER BY issuer`,
+    [body.uri]
+  );
+  assert.deepEqual(claims.rows, [
+    { issuer: 'googlebooks', pages: 211, language: 'en' },
+    { issuer: 'isbn13', pages: 211, language: 'en' }
+  ]);
 });
 
 test('ingest rejects a candidate without identifiers', async () => {

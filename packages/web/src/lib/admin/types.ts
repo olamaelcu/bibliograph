@@ -5,6 +5,24 @@ export type Provider = (typeof PROVIDERS)[number];
 
 export type Identifier = { issuer: string; value: string };
 
+/** What one identifier's own record claims about the edition's shape. */
+export type IdentifierInfo = {
+  format: string | null;
+  language: string | null;
+  publishedDate: string | null;
+  pages: number | null;
+  description: string | null;
+};
+
+/**
+ * An edition identifier plus the claim that identifier's own record makes and
+ * the publishers it is linked to.
+ */
+export type AdminEditionIdentifier = Identifier & {
+  info: IdentifierInfo | null;
+  publishers: AdminPublisher[];
+};
+
 export type CandidateContributor = {
   name: string;
   /** Provider-supplied inverted form ("Le Guin, Ursula K."), kept for the record. */
@@ -132,22 +150,16 @@ export type AdminEdition = {
   revision: string;
   title: string;
   subtitle: string | null;
-  language: string | null;
-  publishedDate: string | null;
-  format: string | null;
-  pages: number | null;
   durationSeconds: number | null;
   chapters: number | null;
   series: AdminSeries | null;
   bookEdition: string | null;
-  description: string | null;
   coverUrl: string | null;
   createdAt: string;
   indexedAt: string;
   updatedAt: string;
-  identifiers: Identifier[];
+  identifiers: AdminEditionIdentifier[];
   contributors: AdminContributor[];
-  publishers: AdminPublisher[];
 };
 
 /** One local contributor or publisher returned by the editor's picker. */
@@ -245,29 +257,19 @@ export type ResolveFormatResponse = {
 export type MergeField =
   | 'title'
   | 'subtitle'
-  | 'language'
-  | 'publishedDate'
-  | 'format'
-  | 'pages'
   | 'durationSeconds'
   | 'chapters'
   | 'series'
   | 'bookEdition'
-  | 'description'
   | 'coverUrl';
 
 export const MERGE_FIELDS: ReadonlyArray<{ key: MergeField; label: string }> = [
   { key: 'title', label: 'Title' },
   { key: 'subtitle', label: 'Subtitle' },
-  { key: 'language', label: 'Language' },
-  { key: 'publishedDate', label: 'Published date' },
-  { key: 'format', label: 'Format' },
-  { key: 'pages', label: 'Pages' },
   { key: 'durationSeconds', label: 'Duration (seconds)' },
   { key: 'chapters', label: 'Chapters' },
   { key: 'series', label: 'Series' },
   { key: 'bookEdition', label: 'Book edition' },
-  { key: 'description', label: 'Description' },
   { key: 'coverUrl', label: 'Cover URL' }
 ];
 

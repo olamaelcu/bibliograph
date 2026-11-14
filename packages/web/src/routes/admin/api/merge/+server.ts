@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { requireAdmin } from '$lib/server/admin/auth';
 import { MergeError, mergeEditions } from '$lib/server/admin/merge';
-import { CatalogUnavailableError } from '$lib/server/catalog/db';
+import { CatalogUnavailableError, catalogPool } from '$lib/server/catalog/db';
 
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 
@@ -17,7 +17,7 @@ export const POST: RequestHandler = async ({ cookies, request }) => {
   }
 
   try {
-    return json(await mergeEditions(body), { headers: NO_STORE });
+    return json(await mergeEditions(catalogPool(), body), { headers: NO_STORE });
   } catch (error) {
     if (error instanceof MergeError) {
       return json({ error: 'MergeRejected', message: error.message }, { status: error.status, headers: NO_STORE });

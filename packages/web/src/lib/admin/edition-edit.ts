@@ -6,7 +6,22 @@
 
 import { isKnownContributorRole, normalizeContributorRole } from '../contributor-roles.ts';
 
-export type EditionEditIdentifier = { issuer: string; value: string };
+export type EditionEditIdentifierInfo = {
+  format: string | null;
+  language: string | null;
+  publishedDate: string | null;
+  pages: number | null;
+  description: string | null;
+};
+
+export type EditionEditIdentifier = {
+  issuer: string;
+  value: string;
+  /** Absent = leave any stored claim untouched; null or all-empty = clear it. */
+  info?: EditionEditIdentifierInfo | null;
+  /** Absent = leave the stored publisher links untouched; `[]` clears them. */
+  publishers?: EditionEditPublisher[];
+};
 
 export type EditionEditContributor = {
   id: number | null;
@@ -27,19 +42,13 @@ export type EditionEditSeries = { name: string; position?: string; display?: str
 export type EditionEditInput = {
   title: string;
   subtitle: string | null;
-  language: string | null;
-  publishedDate: string | null;
-  format: string | null;
-  pages: number | null;
   durationSeconds: number | null;
   chapters: number | null;
   series: EditionEditSeries | null;
   bookEdition: string | null;
-  description: string | null;
   coverUrl: string | null;
   identifiers: EditionEditIdentifier[];
   contributors: EditionEditContributor[];
-  publishers: EditionEditPublisher[];
   expectedRevision: string | null;
 };
 
@@ -164,6 +173,101 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     return parsed;
   }
 
+  /** Domain-keyed language tag: canonical BCP 47 or an issue on `path`. */
+  function languageTag(value: unknown, path: string): string | null {
+    const raw = text(value, path, EDITION_EDIT_LIMITS.language);
+    if (raw === null) return null;
+    if (!BCP47_TAG.test(raw)) {
+      issue(path, BCP47_ERROR);
+      return null;
+    }
+    try {
+      const canonical = Intl.getCanonicalLocales(raw)[0];
+      if (canonical === undefined) {
+        issue(path, BCP47_ERROR);
+        return null;
+      }
+      return canonical;
+    } catch {
+      issue(path, BCP47_ERROR);
+      return null;
+    }
+  }
+
+  function publishedDateField(value: unknown, path: string): string | null {
+    const raw = text(value, path, 10);
+    if (raw === null) return null;
+    const problem = publishedDateProblem(raw);
+    if (problem !== null) {
+      issue(path, problem);
+      return null;
+    }
+    return raw;
+  }
+
+  /**
+   * One identifier's shape claim. `undefined` keeps the stored claim (the key is
+   * left out of the result), `null` clears it and an object replaces it field by
+   * field — the write path diffs the three cases.
+   */
+  function identifierInfo(
+    value: unknown,
+    path: string
+  ): EditionEditIdentifierInfo | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      issue(path, 'must be an object or null');
+      return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    return {
+      format: text(record.format, `${path}.format`, EDITION_EDIT_LIMITS.format),
+      language: languageTag(record.language, `${path}.language`),
+      publishedDate: publishedDateField(record.publishedDate, `${path}.publishedDate`),
+      pages: integer(record.pages, `${path}.pages`),
+      description: text(record.description, `${path}.description`, EDITION_EDIT_LIMITS.description)
+    };
+  }
+
+  /**
+   * One identifier's publisher links. Absent keeps the stored links; an array
+   * replaces them, and an empty array clears them.
+   */
+  function publisherList(value: unknown, path: string): EditionEditPublisher[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) {
+      issue(path, 'must be an array');
+      return undefined;
+    }
+    if (value.length > EDITION_EDIT_LIMITS.maxPublishers) {
+      issue(path, `must contain at most ${EDITION_EDIT_LIMITS.maxPublishers} publishers`);
+      return undefined;
+    }
+    const result: EditionEditPublisher[] = [];
+    value.forEach((entry, index) => {
+      const at = `${path}.${index}`;
+      if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+        issue(at, 'must be a publisher object');
+        return;
+      }
+      const publisher = entry as Record<string, unknown>;
+      const id = entityId(publisher.id, `${at}.id`);
+      const name =
+        id === null ? text(publisher.name, `${at}.name`, EDITION_EDIT_LIMITS.name, true) : null;
+      const publisherIdentifiers =
+        publisher.identifiers === undefined
+          ? []
+          : identifiers(
+              publisher.identifiers,
+              `${at}.identifiers`,
+              EDITION_EDIT_LIMITS.maxEntityIdentifiers
+            );
+      result.push({ id, name, identifiers: publisherIdentifiers });
+    });
+    return result;
+  }
+
   function identifiers(
     value: unknown,
     path: string,
@@ -205,7 +309,14 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
         return;
       }
       seen.add(key);
-      result.push({ issuer, value });
+      const info = identifierInfo(entry.info, `${at}.info`);
+      const publishers = publisherList(entry.publishers, `${at}.publishers`);
+      result.push({
+        issuer,
+        value,
+        ...(info === undefined ? {} : { info }),
+        ...(publishers === undefined ? {} : { publishers })
+      });
     });
     if (required && result.length === 0 && errors.every((error) => !error.path.startsWith(path))) {
       issue(path, 'must contain at least one identifier');
@@ -237,29 +348,7 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
   const fields = body as Record<string, unknown>;
   const title = text(fields.title, 'title', EDITION_EDIT_LIMITS.title, true);
   const subtitle = text(fields.subtitle, 'subtitle', EDITION_EDIT_LIMITS.subtitle);
-  const rawLanguage = text(fields.language, 'language', EDITION_EDIT_LIMITS.language);
-  let language: string | null = null;
-  if (rawLanguage !== null) {
-    if (!BCP47_TAG.test(rawLanguage)) {
-      issue('language', BCP47_ERROR);
-    } else {
-      try {
-        const canonical = Intl.getCanonicalLocales(rawLanguage)[0];
-        if (canonical === undefined) issue('language', BCP47_ERROR);
-        else language = canonical;
-      } catch {
-        issue('language', BCP47_ERROR);
-      }
-    }
-  }
-  const publishedDate = text(fields.publishedDate, 'publishedDate', 10);
-  if (publishedDate !== null) {
-    const problem = publishedDateProblem(publishedDate);
-    if (problem !== null) issue('publishedDate', problem);
-  }
-  const format = text(fields.format, 'format', EDITION_EDIT_LIMITS.format);
   const bookEdition = text(fields.bookEdition, 'bookEdition', EDITION_EDIT_LIMITS.bookEdition);
-  const description = text(fields.description, 'description', EDITION_EDIT_LIMITS.description);
   const coverUrl = text(fields.coverUrl, 'coverUrl', EDITION_EDIT_LIMITS.coverUrl);
   if (coverUrl !== null) {
     let protocol: string | null = null;
@@ -273,7 +362,6 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     }
   }
 
-  const pages = integer(fields.pages, 'pages');
   const durationSeconds = integer(fields.durationSeconds, 'durationSeconds');
   const chapters = integer(fields.chapters, 'chapters');
 
@@ -357,38 +445,6 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     });
   }
 
-  const publishers: EditionEditPublisher[] = [];
-  if (fields.publishers !== undefined && fields.publishers !== null) {
-    if (!Array.isArray(fields.publishers)) {
-      issue('publishers', 'must be an array');
-    } else if (fields.publishers.length > EDITION_EDIT_LIMITS.maxPublishers) {
-      issue('publishers', `must contain at most ${EDITION_EDIT_LIMITS.maxPublishers} publishers`);
-    } else {
-      fields.publishers.forEach((entry, index) => {
-        const at = `publishers.${index}`;
-        if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
-          issue(at, 'must be a publisher object');
-          return;
-        }
-        const publisher = entry as Record<string, unknown>;
-        const id = entityId(publisher.id, `${at}.id`);
-        const name =
-          id === null
-            ? text(publisher.name, `${at}.name`, EDITION_EDIT_LIMITS.name, true)
-            : null;
-        const publisherIdentifiers =
-          publisher.identifiers === undefined
-            ? []
-            : identifiers(
-                publisher.identifiers,
-                `${at}.identifiers`,
-                EDITION_EDIT_LIMITS.maxEntityIdentifiers
-              );
-        publishers.push({ id, name, identifiers: publisherIdentifiers });
-      });
-    }
-  }
-
   const expectedRevision = text(fields.expectedRevision, 'expectedRevision', 128);
 
   if (errors.length > 0) return { errors, value: null };
@@ -398,19 +454,13 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     value: {
       title: title as string,
       subtitle,
-      language,
-      publishedDate,
-      format,
-      pages,
       durationSeconds,
       chapters,
       series,
       bookEdition,
-      description,
       coverUrl,
       identifiers: editionIdentifiers,
       contributors,
-      publishers,
       expectedRevision
     }
   };

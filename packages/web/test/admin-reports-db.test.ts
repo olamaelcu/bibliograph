@@ -29,7 +29,12 @@ let ready = false;
 const uri = (rkey: string): string => `${PREFIX}${rkey}`;
 
 /** Fresh database bootstrap, then the entity-records migration. */
-const SCHEMA_FILES = ['0001-catalog-schema.sql', '0004-entity-records.sql'];
+const SCHEMA_FILES = [
+  '0001-catalog-schema.sql',
+  '0004-entity-records.sql',
+  '0007-edition-identifier-info.sql',
+  '0008-edition-identifier-publishers.sql'
+];
 
 async function applySchema(db: pg.PoolClient): Promise<void> {
   for (const file of SCHEMA_FILES) {
@@ -44,29 +49,14 @@ async function addEdition(
     rkey: string;
     title: string;
     cover: string | null;
-    description: string | null;
-    language: string | null;
-    pages: number | null;
-    publishedDate: string | null;
     indexedAt: string;
   }
 ): Promise<void> {
   await db.query(
     `INSERT INTO editions (
-       uri, rkey, title, cover_url, description, language, pages, published_date,
-       created_at, indexed_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)`,
-    [
-      uri(edition.rkey),
-      edition.rkey,
-      edition.title,
-      edition.cover,
-      edition.description,
-      edition.language,
-      edition.pages,
-      edition.publishedDate,
-      edition.indexedAt
-    ]
+       uri, rkey, title, cover_url, created_at, indexed_at
+     ) VALUES ($1, $2, $3, $4, $5, $5)`,
+    [uri(edition.rkey), edition.rkey, edition.title, edition.cover, edition.indexedAt]
   );
 }
 
@@ -88,11 +78,36 @@ async function addIdentifier(
   db: pg.PoolClient,
   rkey: string,
   issuer: string,
-  value: string
+  value: string,
+  claim: {
+    format?: string | null;
+    language?: string | null;
+    publishedDate?: string | null;
+    pages?: number | null;
+    description?: string | null;
+  } = {}
 ): Promise<void> {
   await db.query(
     'INSERT INTO edition_identifiers (edition_uri, issuer, value) VALUES ($1, $2, $3)',
     [uri(rkey), issuer, value]
+  );
+  // `edition_identifier_info` holds the shape claims (0007); the reports read
+  // only these rows, never the edition.
+  if (Object.keys(claim).length === 0) return;
+  await db.query(
+    `INSERT INTO edition_identifier_info
+       (edition_uri, issuer, value, format, language, published_date, pages, description)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      uri(rkey),
+      issuer,
+      value,
+      claim.format ?? null,
+      claim.language ?? null,
+      claim.publishedDate ?? null,
+      claim.pages ?? null,
+      claim.description ?? null
+    ]
   );
 }
 
@@ -103,10 +118,6 @@ async function seed(db: pg.PoolClient): Promise<void> {
     rkey: 'r01',
     title: 'Alpha',
     cover: null,
-    description: null,
-    language: null,
-    pages: null,
-    publishedDate: null,
     indexedAt: '2020-01-03T00:00:00.000Z'
   });
   // e2: empty-string values, a shared ISBN, a second ISBN and a goodreads id.
@@ -114,10 +125,6 @@ async function seed(db: pg.PoolClient): Promise<void> {
     rkey: 'r02',
     title: 'Beta',
     cover: '',
-    description: '',
-    language: '',
-    pages: 0,
-    publishedDate: '',
     indexedAt: '2020-01-02T00:00:00.000Z'
   });
   // e3: whitespace-only cover, no identifiers, no links, no CID.
@@ -125,10 +132,6 @@ async function seed(db: pg.PoolClient): Promise<void> {
     rkey: 'r03',
     title: 'Gamma',
     cover: '   ',
-    description: null,
-    language: 'en',
-    pages: 10,
-    publishedDate: '2024',
     indexedAt: '2020-01-01T00:00:00.000Z'
   });
   // e4: complete edition whose only identifier contains LIKE metacharacters.
@@ -136,19 +139,28 @@ async function seed(db: pg.PoolClient): Promise<void> {
     rkey: 'r04',
     title: 'Delta',
     cover: 'https://example.org/delta.jpg',
-    description: 'A complete edition.',
-    language: 'en',
-    pages: 120,
-    publishedDate: '2024-01-01',
     indexedAt: '2019-12-31T00:00:00.000Z'
   });
 
   await addIdentifier(db, 'r01', 'isbn13', '9780000000001');
   await addIdentifier(db, 'r01', 'isbn13', '9780000000002');
-  await addIdentifier(db, 'r02', 'isbn13', '9780000000001');
+  // A whitespace-only claim is still a missing description/language/date; a
+  // recorded page count of 0 counts as present, so it leaves the pages report.
+  await addIdentifier(db, 'r02', 'isbn13', '9780000000001', {
+    description: '   ',
+    language: ' ',
+    publishedDate: '',
+    pages: 0
+  });
   await addIdentifier(db, 'r02', 'isbn13', '9780000000003');
   await addIdentifier(db, 'r02', 'goodreads', 'abc');
-  await addIdentifier(db, 'r04', 'test', 'a%b_c');
+  await addIdentifier(db, 'r04', 'test', 'a%b_c', {
+    format: 'hardcover',
+    language: 'en',
+    publishedDate: '2024-01-01',
+    pages: 120,
+    description: 'A complete edition.'
+  });
 
   const emptyContributor = await addEntity(
     db,
@@ -174,6 +186,22 @@ async function seed(db: pg.PoolClient): Promise<void> {
     `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.publisher/p01`
   );
 
+  // r04's only identifier gets its own publisher, so a name filter can select it
+  // uniquely; the report's publisher column comes from this link, never a claim.
+  const reportPublisher = await addEntity(
+    db,
+    'publishers',
+    'Solstice Press',
+    '[{"issuer":"isni","value":"2"}]',
+    null
+  );
+  await db.query(
+    `INSERT INTO edition_identifier_publishers
+       (edition_uri, issuer, value, publisher_id, position)
+     VALUES ($1, 'test', 'a%b_c', $2, 1)`,
+    [uri('r04'), reportPublisher]
+  );
+
   await db.query(
     `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role)
      VALUES ($1, $2, 1, 'A01')`,
@@ -185,11 +213,15 @@ async function seed(db: pg.PoolClient): Promise<void> {
     [uri('r02'), fullContributor, nullContributor]
   );
   await db.query(
-    'INSERT INTO edition_publishers (edition_uri, publisher_id, position) VALUES ($1, $2, 1)',
+    `INSERT INTO edition_identifier_publishers
+       (edition_uri, issuer, value, publisher_id, position)
+     VALUES ($1, 'isbn13', '9780000000001', $2, 1)`,
     [uri('r01'), emptyPublisher]
   );
   await db.query(
-    'INSERT INTO edition_publishers (edition_uri, publisher_id, position) VALUES ($1, $2, 1)',
+    `INSERT INTO edition_identifier_publishers
+       (edition_uri, issuer, value, publisher_id, position)
+     VALUES ($1, 'isbn13', '9780000000001', $2, 1)`,
     [uri('r02'), fullPublisher]
   );
 
@@ -275,16 +307,65 @@ test('completeness reports cover descriptions, languages, pages and dates', asyn
   ]);
   assert.deepEqual(uris((await report('editions-missing-language')).rows).sort(), [
     uri('r01'),
-    uri('r02')
+    uri('r02'),
+    uri('r03')
   ]);
   assert.deepEqual(uris((await report('editions-missing-pages')).rows).sort(), [
     uri('r01'),
-    uri('r02')
+    uri('r03')
   ]);
   assert.deepEqual(uris((await report('editions-missing-published-date')).rows).sort(), [
     uri('r01'),
-    uri('r02')
+    uri('r02'),
+    uri('r03')
   ]);
+});
+
+test('identifier report enumerates identifiers, claims and publisher links', async (t) => {
+  requireDatabase(t);
+  if (!ready) return;
+
+  const all = await report('edition-identifier-info');
+  // One row per identifier, including ones without a claim row.
+  assert.equal(all.total, 6);
+  assert.deepEqual(uris(all.rows).sort(), [
+    uri('r01'),
+    uri('r01'),
+    uri('r02'),
+    uri('r02'),
+    uri('r02'),
+    uri('r04')
+  ]);
+
+  // Format compares case-insensitively.
+  const hardcover = await report('edition-identifier-info', 'format=HARDCOVER');
+  assert.equal(hardcover.total, 1);
+  assert.equal(hardcover.rows[0]?.uri, uri('r04'));
+  assert.equal(hardcover.rows[0]?.issuer, 'test');
+  assert.equal(hardcover.rows[0]?.value, 'a%b_c');
+  assert.equal(hardcover.rows[0]?.publisher, 'Solstice Press');
+  assert.equal(hardcover.params.format, 'HARDCOVER');
+
+  // The publisher filter matches the linked entity name.
+  const byPublisher = await report('edition-identifier-info', 'publisher=solstice');
+  assert.deepEqual(uris(byPublisher.rows), [uri('r04')]);
+  assert.equal(byPublisher.params.publisher, 'solstice');
+
+  // Issuer is exact, so only ISBN rows come back (four across r01/r02).
+  const isbn = await report('edition-identifier-info', 'issuer=isbn13');
+  assert.equal(isbn.total, 4);
+
+  // The value filter is an escaped substring, not a pattern.
+  // `%` and `_` are literals: "%b_" matches the seeded value literally...
+  assert.equal((await report('edition-identifier-info', 'value=%25b_')).total, 1);
+  // ...while a wildcard-shaped "%b%" matches nothing, because it is escaped.
+  assert.equal((await report('edition-identifier-info', 'value=%25b%25')).total, 0);
+  assert.equal((await report('edition-identifier-info', 'value=_')).total, 1);
+
+  await assert.rejects(report('edition-identifier-info', 'nope=1'), (error: unknown) => {
+    const typed = error as { code?: string; status?: number };
+    return typed.code === 'UnsupportedParameter' && typed.status === 400;
+  });
 });
 
 test('editions without contributors or publishers', async (t) => {
@@ -296,8 +377,7 @@ test('editions without contributors or publishers', async (t) => {
     uri('r04')
   ]);
   assert.deepEqual(uris((await report('editions-without-publishers')).rows).sort(), [
-    uri('r03'),
-    uri('r04')
+    uri('r03')
   ]);
 });
 

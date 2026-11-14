@@ -21,6 +21,7 @@ import {
   parseEditionEdit,
   type EditionEditContributor,
   type EditionEditIdentifier,
+  type EditionEditIdentifierInfo,
   type EditionEditInput,
   type EditionEditPublisher
 } from '../../admin/edition-edit.ts';
@@ -77,15 +78,6 @@ export async function loadEditionForEdit(
   return records[0] ?? null;
 }
 
-function sameIdentifierBag(
-  current: Array<{ issuer: string; value: string }>,
-  next: EditionEditIdentifier[]
-): boolean {
-  if (current.length !== next.length) return false;
-  const stored = new Set(current.map((identifier) => `${identifier.issuer}\u0000${identifier.value}`));
-  return next.every((identifier) => stored.has(`${identifier.issuer}\u0000${identifier.value}`));
-}
-
 function sameCredits(
   current: AdminEdition['contributors'],
   next: EditionEditContributor[]
@@ -101,15 +93,6 @@ function sameCredits(
   );
 }
 
-function samePublishers(
-  current: AdminEdition['publishers'],
-  next: EditionEditPublisher[]
-): boolean {
-  return (
-    current.length === next.length &&
-    current.every((publisher, index) => publisher.id === next[index]?.id)
-  );
-}
 
 /**
  * Resolve one contributor/publisher credit to an entity row. A supplied id is
@@ -235,38 +218,118 @@ export async function updateAdminEdition(
 
     await client.query(
       `UPDATE editions SET
-         title = $2, subtitle = $3, language = $4, published_date = $5,
-         format = $6, pages = $7, duration_seconds = $8, chapters = $9,
-         series = $10::jsonb, book_edition = $11, description = $12,
-         cover_url = $13
+         title = $2, subtitle = $3, duration_seconds = $4, chapters = $5,
+         series = $6::jsonb, book_edition = $7, cover_url = $8
        WHERE uri = $1`,
       [
         uri,
         input.title,
         input.subtitle,
-        input.language,
-        input.publishedDate,
-        input.format,
-        input.pages,
         input.durationSeconds,
         input.chapters,
         input.series ? JSON.stringify(input.series) : null,
         input.bookEdition,
-        input.description,
         input.coverUrl
       ]
     );
 
-    if (!sameIdentifierBag(current.identifiers, input.identifiers)) {
-      await client.query('DELETE FROM edition_identifiers WHERE edition_uri = $1', [uri]);
+    // Diff, never delete-all/insert-all: untouched pairs keep their own shape
+    // claim (`edition_identifier_info` cascades on delete).
+    const pairKey = (identifier: { issuer: string; value: string }): string =>
+      `${identifier.issuer}\u0000${identifier.value}`;
+    const currentPairs = new Set(current.identifiers.map(pairKey));
+    const nextPairs = new Set(input.identifiers.map(pairKey));
+    const removed = current.identifiers.filter(
+      (identifier) => !nextPairs.has(pairKey(identifier))
+    );
+    const added = input.identifiers.filter((identifier) => !currentPairs.has(pairKey(identifier)));
+
+    if (removed.length > 0) {
+      await client.query(
+        `DELETE FROM edition_identifiers
+          WHERE edition_uri = $1
+            AND (issuer, value) IN (
+                  SELECT t.issuer, t.value
+                    FROM unnest($2::text[], $3::text[]) AS t(issuer, value)
+                )`,
+        [uri, removed.map((identifier) => identifier.issuer), removed.map((i) => i.value)]
+      );
+    }
+    if (added.length > 0) {
       await client.query(
         `INSERT INTO edition_identifiers (edition_uri, issuer, value)
          SELECT $1, t.issuer, t.value
-           FROM unnest($2::text[], $3::text[]) AS t(issuer, value)`,
+           FROM unnest($2::text[], $3::text[]) AS t(issuer, value)
+         ON CONFLICT DO NOTHING`,
+        [uri, added.map((identifier) => identifier.issuer), added.map((i) => i.value)]
+      );
+    }
+
+    // Claims: absent `info` leaves the stored row alone, null (or an all-empty
+    // object) clears it, and an object replaces every field.
+    const claims: Array<EditionEditIdentifier & { info: EditionEditIdentifierInfo }> = [];
+    const cleared: EditionEditIdentifier[] = [];
+    for (const identifier of input.identifiers) {
+      const info = identifier.info;
+      if (info === undefined) continue;
+      if (
+        info === null ||
+        (info.format === null &&
+          info.language === null &&
+          info.publishedDate === null &&
+          info.pages === null &&
+          info.description === null)
+      ) {
+        cleared.push({ issuer: identifier.issuer, value: identifier.value });
+        continue;
+      }
+      claims.push({ issuer: identifier.issuer, value: identifier.value, info });
+    }
+
+    if (cleared.length > 0) {
+      await client.query(
+        `DELETE FROM edition_identifier_info
+          WHERE edition_uri = $1
+            AND (issuer, value) IN (
+                  SELECT t.issuer, t.value
+                    FROM unnest($2::text[], $3::text[]) AS t(issuer, value)
+                )`,
+        [uri, cleared.map((identifier) => identifier.issuer), cleared.map((i) => i.value)]
+      );
+    }
+    if (claims.length > 0) {
+      await client.query(
+        `INSERT INTO edition_identifier_info (
+           edition_uri, issuer, value, format, language,
+           published_date, pages, description
+         )
+         SELECT $1, t.issuer, t.value, t.format, t.language,
+                t.published_date, t.pages::int, t.description
+           FROM unnest($2::text[], $3::text[], $4::text[], $5::text[],
+                       $6::text[], $7::text[], $8::text[])
+                AS t(issuer, value, format, language, published_date,
+                     pages, description)
+         ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
+           format = EXCLUDED.format,
+           language = EXCLUDED.language,
+           published_date = EXCLUDED.published_date,
+           pages = EXCLUDED.pages,
+           description = EXCLUDED.description,
+          updated_at = now()
+         WHERE edition_identifier_info.format IS DISTINCT FROM EXCLUDED.format
+            OR edition_identifier_info.language IS DISTINCT FROM EXCLUDED.language
+            OR edition_identifier_info.published_date IS DISTINCT FROM EXCLUDED.published_date
+            OR edition_identifier_info.pages IS DISTINCT FROM EXCLUDED.pages
+            OR edition_identifier_info.description IS DISTINCT FROM EXCLUDED.description`,
         [
           uri,
-          input.identifiers.map((identifier) => identifier.issuer),
-          input.identifiers.map((identifier) => identifier.value)
+          claims.map((claim) => claim.issuer),
+          claims.map((claim) => claim.value),
+          claims.map((claim) => claim.info.format),
+          claims.map((claim) => claim.info.language),
+          claims.map((claim) => claim.info.publishedDate),
+          claims.map((claim) => (claim.info.pages === null ? null : String(claim.info.pages))),
+          claims.map((claim) => claim.info.description)
         ]
       );
     }
@@ -292,20 +355,27 @@ export async function updateAdminEdition(
       );
     }
 
-    const publisherIds: number[] = [];
-    for (const publisher of input.publishers) {
-      publisherIds.push(await resolveEntity(client, 'publisher', publisher, authority));
-    }
-
-    if (!samePublishers(current.publishers, input.publishers)) {
-      await client.query('DELETE FROM edition_publishers WHERE edition_uri = $1', [uri]);
+    // Publisher links are per identifier: `publishers` omitted keeps the stored
+    // links, an array replaces that identifier's list (positions follow order).
+    for (const identifier of input.identifiers) {
+      if (identifier.publishers === undefined) continue;
+      const publisherIds: number[] = [];
+      for (const publisher of identifier.publishers) {
+        publisherIds.push(await resolveEntity(client, 'publisher', publisher, authority));
+      }
+      await client.query(
+        `DELETE FROM edition_identifier_publishers
+          WHERE edition_uri = $1 AND issuer = $2 AND value = $3`,
+        [uri, identifier.issuer, identifier.value]
+      );
       if (publisherIds.length > 0) {
         await client.query(
-          `INSERT INTO edition_publishers (edition_uri, publisher_id, position)
-           SELECT $1, t.publisher_id, t.position::int
-             FROM unnest($2::bigint[])
+          `INSERT INTO edition_identifier_publishers
+             (edition_uri, issuer, value, publisher_id, position)
+           SELECT $1, $2, $3, t.publisher_id, t.position::int
+             FROM unnest($4::bigint[])
                   WITH ORDINALITY AS t(publisher_id, position)`,
-          [uri, publisherIds]
+          [uri, identifier.issuer, identifier.value, publisherIds]
         );
       }
     }

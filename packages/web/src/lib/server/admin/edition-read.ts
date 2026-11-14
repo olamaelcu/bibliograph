@@ -18,15 +18,10 @@ export type EditionRow = {
   rkey: string;
   title: string;
   subtitle: string | null;
-  language: string | null;
-  published_date: string | null;
-  format: string | null;
-  pages: number | null;
   duration_seconds: number | null;
   chapters: number | null;
   series: AdminSeries | null;
   book_edition: string | null;
-  description: string | null;
   cover_url: string | null;
   created_at: Date;
   indexed_at: Date;
@@ -34,6 +29,17 @@ export type EditionRow = {
 };
 
 export type IdentifierRow = { edition_uri: string; issuer: string; value: string };
+/** One identifier's shape claim as the editor reads it (see `edition_identifier_info`). */
+export type IdentifierInfoRow = {
+  edition_uri: string;
+  issuer: string;
+  value: string;
+  format: string | null;
+  language: string | null;
+  published_date: string | null;
+  pages: number | null;
+  description: string | null;
+};
 export type ContributorRow = {
   edition_uri: string;
   id: string;
@@ -44,15 +50,16 @@ export type ContributorRow = {
 };
 export type PublisherRow = {
   edition_uri: string;
+  issuer: string;
+  value: string;
   id: string;
   name: string;
   identifiers: Identifier[] | null;
 };
 
 export const EDITION_COLUMNS = `
-  e.uri, e.rkey, e.title, e.subtitle, e.language, e.published_date, e.format,
-  e.pages, e.duration_seconds, e.chapters, e.series, e.book_edition,
-  e.description, e.cover_url, e.created_at, e.indexed_at,
+  e.uri, e.rkey, e.title, e.subtitle, e.duration_seconds, e.chapters, e.series,
+  e.book_edition, e.cover_url, e.created_at, e.indexed_at,
   o.updated_at AS outbox_updated_at`;
 
 function iso(value: Date): string {
@@ -72,23 +79,18 @@ function revisionOf(record: AdminEdition): string {
       JSON.stringify({
         title: record.title,
         subtitle: record.subtitle,
-        language: record.language,
-        publishedDate: record.publishedDate,
-        format: record.format,
-        pages: record.pages,
         durationSeconds: record.durationSeconds,
         chapters: record.chapters,
         series: record.series,
         bookEdition: record.bookEdition,
-        description: record.description,
         coverUrl: record.coverUrl,
+        // The claims live on the identifier, so hashing the bag covers them too.
         identifiers: record.identifiers,
         contributors: record.contributors.map((contributor) => ({
           id: contributor.id,
           role: contributor.role,
           ref: contributor.ref
-        })),
-        publishers: record.publishers.map((publisher) => publisher.id)
+        }))
       })
     )
     .digest('hex');
@@ -97,6 +99,7 @@ function revisionOf(record: AdminEdition): string {
 export function editionRecord(
   row: EditionRow,
   identifiers: IdentifierRow[],
+  infoRows: IdentifierInfoRow[],
   contributors: ContributorRow[],
   publishers: PublisherRow[]
 ): AdminEdition {
@@ -105,24 +108,44 @@ export function editionRecord(
     rkey: row.rkey,
     title: row.title,
     subtitle: row.subtitle,
-    language: row.language,
-    publishedDate: row.published_date,
-    format: row.format,
-    pages: row.pages,
     durationSeconds: row.duration_seconds,
     chapters: row.chapters,
     series: row.series,
     bookEdition: row.book_edition,
-    description: row.description,
     coverUrl: row.cover_url,
     createdAt: iso(row.created_at),
     indexedAt: iso(row.indexed_at),
     updatedAt: iso(row.outbox_updated_at ?? row.indexed_at),
     revision: '',
-    identifiers: identifiers.map((identifier) => ({
-      issuer: identifier.issuer,
-      value: identifier.value
-    })),
+    identifiers: identifiers.map((identifier) => {
+      const info = infoRows.find(
+        (candidate) =>
+          candidate.issuer === identifier.issuer && candidate.value === identifier.value
+      );
+      return {
+        issuer: identifier.issuer,
+        value: identifier.value,
+        publishers: publishers
+          .filter(
+            (candidate) =>
+              candidate.issuer === identifier.issuer && candidate.value === identifier.value
+          )
+          .map((publisher) => ({
+            id: Number(publisher.id),
+            name: publisher.name,
+            identifiers: publisher.identifiers ?? []
+          })),
+        info: info
+          ? {
+              format: info.format,
+              language: info.language,
+              publishedDate: info.published_date,
+              pages: info.pages,
+              description: info.description
+            }
+          : null
+      };
+    }),
     contributors: contributors.map((contributor) => ({
       id: Number(contributor.id),
       name: contributor.name,
@@ -130,11 +153,6 @@ export function editionRecord(
       identifiers: contributor.identifiers ?? [],
       ref: contributor.ref
     })),
-    publishers: publishers.map((publisher) => ({
-      id: Number(publisher.id),
-      name: publisher.name,
-      identifiers: publisher.identifiers ?? []
-    }))
   };
   record.revision = revisionOf(record);
   return record;
@@ -155,6 +173,14 @@ export async function hydrateAdminEditions(
       ORDER BY edition_uri, issuer, value`,
     [uris]
   );
+  const infoResult = await client.query<IdentifierInfoRow>(
+    `SELECT edition_uri, issuer, value, format, language,
+            published_date, pages, description
+       FROM edition_identifier_info
+      WHERE edition_uri = ANY($1::text[])
+      ORDER BY edition_uri, issuer, value`,
+    [uris]
+  );
   const contributorResult = await client.query<ContributorRow>(
     `SELECT ec.edition_uri, c.id, c.name, ec.role, c.identifiers, ec.ref
        FROM edition_contributors ec
@@ -164,11 +190,11 @@ export async function hydrateAdminEditions(
     [uris]
   );
   const publisherResult = await client.query<PublisherRow>(
-    `SELECT ep.edition_uri, p.id, p.name, p.identifiers
-       FROM edition_publishers ep
-       JOIN publishers p ON p.id = ep.publisher_id
-      WHERE ep.edition_uri = ANY($1::text[])
-      ORDER BY ep.edition_uri, ep.position`,
+    `SELECT ip.edition_uri, ip.issuer, ip.value, p.id, p.name, p.identifiers
+       FROM edition_identifier_publishers ip
+       JOIN publishers p ON p.id = ip.publisher_id
+      WHERE ip.edition_uri = ANY($1::text[])
+      ORDER BY ip.edition_uri, identifier_shape_rank(ip.issuer), ip.issuer, ip.value, ip.position`,
     [uris]
   );
 
@@ -177,6 +203,12 @@ export async function hydrateAdminEditions(
     const list = identifiers.get(row.edition_uri) ?? [];
     list.push(row);
     identifiers.set(row.edition_uri, list);
+  }
+  const info = new Map<string, IdentifierInfoRow[]>();
+  for (const row of infoResult.rows) {
+    const list = info.get(row.edition_uri) ?? [];
+    list.push(row);
+    info.set(row.edition_uri, list);
   }
   const contributors = new Map<string, ContributorRow[]>();
   for (const row of contributorResult.rows) {
@@ -195,6 +227,7 @@ export async function hydrateAdminEditions(
     editionRecord(
       row,
       identifiers.get(row.uri) ?? [],
+      info.get(row.uri) ?? [],
       contributors.get(row.uri) ?? [],
       publishers.get(row.uri) ?? []
     )

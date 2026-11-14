@@ -128,16 +128,6 @@ CREATE TABLE IF NOT EXISTS publishers (
 CREATE UNIQUE INDEX IF NOT EXISTS publishers_identity_idx
   ON publishers (lower(name), identifiers);
 
-CREATE TABLE IF NOT EXISTS edition_publishers (
-  edition_uri text NOT NULL REFERENCES editions (uri) ON DELETE CASCADE,
-  publisher_id bigint NOT NULL REFERENCES publishers (id) ON DELETE RESTRICT,
-  position integer NOT NULL,
-  PRIMARY KEY (edition_uri, position)
-);
-
-CREATE INDEX IF NOT EXISTS edition_publishers_publisher_idx
-  ON edition_publishers (publisher_id);
-
 -- ---------------------------------------------------------------------------
 -- PDS publication state
 -- ---------------------------------------------------------------------------
@@ -274,24 +264,6 @@ BEGIN
 END;
 $function$;
 
-CREATE OR REPLACE FUNCTION pds_enqueue_publisher_editions()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $function$
-BEGIN
-  INSERT INTO pds_outbox (uri, collection, rkey, op)
-  SELECT DISTINCT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
-    FROM edition_publishers ep
-    JOIN editions e ON e.uri = ep.edition_uri
-   WHERE ep.publisher_id = NEW.id
-  ON CONFLICT (uri) DO UPDATE SET
-    op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
-    value = NULL,
-    updated_at = now();
-  RETURN NEW;
-END;
-$function$;
-
 CREATE OR REPLACE TRIGGER pds_enqueue_editions
   AFTER INSERT OR UPDATE OR DELETE ON editions
   FOR EACH ROW EXECUTE FUNCTION pds_enqueue_edition();
@@ -304,17 +276,9 @@ CREATE OR REPLACE TRIGGER pds_enqueue_contributors
   AFTER INSERT OR UPDATE OR DELETE ON edition_contributors
   FOR EACH ROW EXECUTE FUNCTION pds_enqueue_edition_child();
 
-CREATE OR REPLACE TRIGGER pds_enqueue_publishers
-  AFTER INSERT OR UPDATE OR DELETE ON edition_publishers
-  FOR EACH ROW EXECUTE FUNCTION pds_enqueue_edition_child();
-
 CREATE OR REPLACE TRIGGER pds_enqueue_contributor_edits
   AFTER UPDATE OF name, identifiers ON contributors
   FOR EACH ROW EXECUTE FUNCTION pds_enqueue_contributor_editions();
-
-CREATE OR REPLACE TRIGGER pds_enqueue_publisher_edits
-  AFTER UPDATE OF name, identifiers ON publishers
-  FOR EACH ROW EXECUTE FUNCTION pds_enqueue_publisher_editions();
 
 -- ---------------------------------------------------------------------------
 -- HappyView read models
@@ -327,9 +291,32 @@ CREATE OR REPLACE TRIGGER pds_enqueue_publisher_edits
 -- Keep both: the typed view is the SQL-facing contract (and what web queries
 -- can join), the text view is the HappyView contract (prelude.lua's
 -- `edition_view`). The Lua scripts only read appview_book_lua.
+--
+-- 0007 moved the five shape claims onto the edition's identifiers and 0008 moved
+-- the publisher links there too, so this definition only applies while the old
+-- `edition_publishers` table still exists: 0008 owns both views from then on.
+-- Every file is re-applied on deploy (`deploy.sh`), so the guard keeps this one
+-- harmless once the table is gone.
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE VIEW appview_book AS
+DO $views$
+DECLARE
+  had_shape boolean;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = current_schema()
+       AND table_name = 'editions'
+       AND column_name = 'format'
+  ) INTO had_shape;
+
+  -- Both conditions are historical: 0007 drops the shape columns, 0008 the
+  -- publisher table, and this body names both.
+  IF NOT had_shape OR to_regclass(current_schema() || '.edition_publishers') IS NULL THEN
+    RETURN;
+  END IF;
+
+  EXECUTE $book$CREATE OR REPLACE VIEW appview_book AS
 SELECT
   e.uri,
   e.rkey,
@@ -385,9 +372,9 @@ SELECT
       FROM edition_identifiers i
      WHERE i.edition_uri = e.uri
   ), '[]'::jsonb) AS identifiers
-FROM editions e;
+FROM editions e$book$;
 
-CREATE OR REPLACE VIEW appview_book_lua AS
+  EXECUTE $lua$CREATE OR REPLACE VIEW appview_book_lua AS
 SELECT
   uri,
   rkey,
@@ -411,7 +398,9 @@ SELECT
   publisher::text AS publisher,
   publishers::text AS publishers,
   identifiers::text AS identifiers
-FROM appview_book;
+FROM appview_book$lua$;
+END
+$views$;
 
 -- HappyView reads the catalog through the public schema. If its role already
 -- exists (db-init.sql or a previous deployment), grant it read access here so a

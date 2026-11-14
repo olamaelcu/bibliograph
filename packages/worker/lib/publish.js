@@ -112,11 +112,12 @@ async function loadEditionSnapshot(pool, uri) {
   try {
     await client.query('BEGIN');
     const edition = await client.query(
-      `SELECT uri, rkey, title, subtitle, language, published_date, format, pages,
-              duration_seconds, chapters, series, book_edition, description,
-              cover_url, created_at
-         FROM editions
-        WHERE uri = $1`,
+      `SELECT e.uri, e.rkey, e.title, e.subtitle, s.language, s.published_date,
+              s.format, s.pages, e.duration_seconds, e.chapters, e.series,
+              e.book_edition, s.description, e.cover_url, e.created_at
+         FROM editions e
+         LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri
+        WHERE e.uri = $1`,
       [uri]
     );
     if (edition.rowCount === 0) {
@@ -138,10 +139,11 @@ async function loadEditionSnapshot(pool, uri) {
     );
     const publisher = await client.query(
       `SELECT p.name, p.identifiers, p.at_uri AS ref
-         FROM edition_publishers ep
-         JOIN publishers p ON p.id = ep.publisher_id
-        WHERE ep.edition_uri = $1
-        ORDER BY ep.position
+         FROM edition_publishers_shape ps
+         CROSS JOIN LATERAL unnest(ps.publisher_ids) WITH ORDINALITY AS ord(id, idx)
+         JOIN publishers p ON p.id = ord.id
+        WHERE ps.edition_uri = $1
+        ORDER BY ord.idx
         LIMIT 1`,
       [uri]
     );

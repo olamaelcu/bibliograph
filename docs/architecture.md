@@ -21,9 +21,23 @@ worker; activity records stay in each reader's own PDS.
 ## Catalog identity
 
 Editions are the record type. Contributors and publishers are entities linked
-through `edition_contributors` / `edition_publishers`, and identifiers live in
-`edition_identifiers` as exact `(issuer, value)` pairs. The inline
-contributor/publisher/identifier arrays exist only in two places:
+through `edition_contributors` and `edition_identifier_publishers`, and
+identifiers live in `edition_identifiers` as exact `(issuer, value)` pairs. The inline
+
+An edition's public shape — language, publication date, format, pages and
+description — is not stored on the edition. Each identifier carries its own
+claim in `edition_identifier_info` (one row per `edition_identifiers` pair), and
+the `edition_identifier_shape` view produces the edition's value as a
+deterministic union: `isbn13`, then `isbn10`, then `asin`, then any other
+issuer, with ties broken by `(issuer, value)`. Providers fill only empty claim
+fields and curation edits them per identifier, so two ISBNs may disagree and
+both keep their own evidence. Publisher links hang off the identifier as well
+(`edition_identifier_publishers`, cascading from `edition_identifiers`), so an
+ISBN published by Penguin can sit next to one published by Ace. The published
+`publisher` is the first link in identifier order and `publishers` is the whole
+ordered list; both carry the entity `ref` and identifiers, never a copied name.
+
+The inline contributor/publisher/identifier arrays exist only in two places:
 
 - `buildEditionRecord` in `packages/worker/lib/edition-record.js` when
   publishing `community.lexicon.media.book.edition`;
@@ -112,9 +126,14 @@ The record value is rebuilt from the catalog at publish time — editions with
 stored in `pds_outbox.value`.
 Identifiers come from `edition_identifiers`, contributors from
 `edition_contributors` + `contributors` in `position` order, and the single
-publisher from the lowest-position `edition_publishers` row. `coverUrl` is a
+publisher from the first entry of `edition_publishers_shape` (identifier rank,
+then position). `coverUrl` is a
 URL only; catalog editions never embed blobs, so the publisher repo does not own
-cover bytes. An edition without an identifier row is not lexicon-valid and the
+cover bytes. `language`, `publishedDate`, `format`, `pages` and `description`
+come from `edition_identifier_shape` (0007), not from a column on the edition;
+the `publisher` object is the head of that ordered list and `publishers` is all
+of it. An
+edition without an identifier row is not lexicon-valid and the
 publish is retried as a failure (the outbox row names the reason).
 
 Ordering between collections is irrelevant: a missing `ref` target is optional
@@ -355,7 +374,13 @@ whose nginx config denies an exact-match `/metrics` `location`. The SvelteKit
 status; the XRPC surface records `bibliograph_happyview_requests_total`,
 `bibliograph_pds_proxy_requests_total`, `bibliograph_catalog_queries_total`,
 `bibliograph_catalog_query_duration_seconds` and
-`bibliograph_feed_requests_total`. Each scrape also collects process gauges
+`bibliograph_feed_requests_total`. The feed generator adds
+`bibliograph_feed_request_duration_seconds`,
+`bibliograph_feed_page_items`, `bibliograph_feed_pages_total`,
+`bibliograph_feed_follow_dids`, `bibliograph_feed_query_duration_seconds` (SQL
+phase `follow_dids` or `page`) and `bibliograph_feed_auth_failures_total` (a
+bounded reason: `missing`, `format`, `claims`, `expired`, `issuer`,
+`signature`). Each scrape also collects process gauges
 (`bibliograph_process_resident_memory_bytes`,
 `bibliograph_process_cpu_seconds_total`, `bibliograph_process_uptime_seconds`,
 `bibliograph_nodejs_heap_used_bytes`). Labels are bounded: route ids come from
@@ -451,6 +476,16 @@ inline fallback.
   newly addressed entity records. A save that carries a stale `revision`
   (returned by the page load) answers 409, and the form keeps its unsaved state
   on every validation or conflict error.
+- The editor reconciles the per-identifier shape claims in the same
+  transaction. Every identifier row carries a `Shape` disclosure holding that
+  identifier's own format, language, publication date, pages, description and
+  its publisher links (search an entity, create one by name, or remove). An
+  identifier whose `info` key is omitted keeps its stored
+  claim untouched, `info: null` (or an all-empty object) deletes the row, and
+  an object replaces every claim field. Only rows whose values actually change
+  are written, so saving an unchanged form leaves `updated_at` and the outbox
+  untouched. The edition's public shape is the rank union of these claims, not
+  a value on the edition row.
 - The edition editor's **Resolve from Goodreads** button next to Format asks
   only Goodreads, never the fallback chain. The browser sends the ISBN
   identifiers currently in the form (including unsaved additions); when that
@@ -643,11 +678,20 @@ Reports:
   entity rows whose `identifiers` JSONB is SQL NULL, JSON null or an empty
   array. Rows without an `at_uri` are included; `identifier_status` says
   `none`.
+- `edition-identifier-info`: one row per identifier, left-joined to its shape
+  claim (`edition_identifier_info`) and carrying the names of the publishers it
+  is linked to, so a claim and its provenance can be read together with the
+  edition. Identifiers without a claim row still appear. `issuer`, `format` and
+  `language` compare exactly (`format`/`language` case-insensitively); `value`
+  and `publisher` are escaped case-insensitive substrings (`publisher` matches
+  the linked entity names).
 - `editions-missing-description`, `editions-missing-language`,
-  `editions-missing-pages` (`pages IS NULL OR pages <= 0`) and
-  `editions-missing-published-date`: completeness gaps on the edition row.
+  `editions-missing-pages` and `editions-missing-published-date`: editions where
+  no `edition_identifier_info` row of the edition records that claim. An
+  edition with no claim rows at all is therefore in every one of them.
 - `editions-without-contributors` and `editions-without-publishers`: editions
-  with no `edition_contributors` / `edition_publishers` row.
+  with no `edition_contributors` row, and editions where no identifier is
+  linked to a publisher (`edition_identifier_publishers`).
 - `editions-without-cid`: a left join finds editions with no `pds_cids` row,
   i.e. no known published record version.
 - `duplicate-identifier-pairs`: identifier `(issuer, value)` pairs attached to

@@ -8,6 +8,7 @@
     type AdminEdition,
     type EditionEditResponse,
     type Identifier,
+    type IdentifierInfo,
     type ResolveFormatResponse
   } from '$lib/admin/types';
   import { normalizeContributorRole } from '$lib/contributor-roles';
@@ -15,7 +16,30 @@
   let { data } = $props();
   const initial: AdminEdition = untrack(() => data.edition);
 
-  type IdentifierRow = Identifier & { key: string };
+  type IdentifierInfoDraft = {
+    format: string;
+    language: string;
+    publishedDate: string;
+    pages: string;
+    description: string;
+  };
+  /** `info` is present only on the edition bag: claims exist per edition identifier. */
+  type IdentifierRow = Identifier & {
+    key: string;
+    info?: IdentifierInfoDraft;
+    publishers?: PublisherLink[];
+    publisherQuery?: string;
+    publisherMatches?: AdminEntityMatch[];
+    publisherSearchError?: string | null;
+    publisherSearching?: boolean;
+  };
+  const EMPTY_INFO: IdentifierInfoDraft = {
+    format: '',
+    language: '',
+    publishedDate: '',
+    pages: '',
+    description: ''
+  };
   type ContributorRow = {
     key: string;
     id: number | null;
@@ -24,22 +48,39 @@
     ref: string;
     identifiers: IdentifierRow[];
   };
-  type PublisherRow = {
-    key: string;
-    id: number | null;
-    name: string;
-    identifiers: IdentifierRow[];
-  };
+  /** One publisher credited by a single identifier row. */
+  type PublisherLink = { key: string; id: number | null; name: string };
 
   let keySeed = 0;
   function nextKey(prefix: string): string {
     keySeed += 1;
     return `${prefix}-${keySeed}`;
   }
-  function identifierRows(values: Identifier[], prefix: string): IdentifierRow[] {
+  function identifierRows(
+    values: Array<
+      Identifier & { info?: IdentifierInfo | null; publishers?: Array<{ id: number; name: string }> }
+    >,
+    prefix: string,
+    withClaims = false
+  ): IdentifierRow[] {
     return values.map((identifier, index) => ({
-      ...identifier,
-      key: `${prefix}-${index}-${identifier.issuer}`
+      issuer: identifier.issuer,
+      value: identifier.value,
+      key: `${prefix}-${index}-${identifier.issuer}`,
+      ...(withClaims
+        ? {
+            info: infoDraft(identifier.info),
+            publishers: (identifier.publishers ?? []).map((publisher) => ({
+              key: `${prefix}-${index}-${publisher.id}`,
+              id: publisher.id,
+              name: publisher.name
+            })),
+            publisherQuery: '',
+            publisherMatches: [],
+            publisherSearchError: null,
+            publisherSearching: false
+          }
+        : {})
     }));
   }
 
@@ -52,10 +93,6 @@
 
   let title = $state(initial.title);
   let subtitle = $state(initial.subtitle ?? '');
-  let language = $state(initial.language ?? '');
-  let publishedDate = $state(initial.publishedDate ?? '');
-  let format = $state(initial.format ?? '');
-  let pages = $state(initial.pages === null ? '' : String(initial.pages));
   let durationSeconds = $state(
     initial.durationSeconds === null ? '' : String(initial.durationSeconds)
   );
@@ -64,11 +101,10 @@
   let seriesPosition = $state(initial.series?.position ?? '');
   let seriesDisplay = $state(initial.series?.display ?? '');
   let bookEdition = $state(initial.bookEdition ?? '');
-  let description = $state(initial.description ?? '');
   let coverUrl = $state(initial.coverUrl ?? '');
 
   let identifiers = $state<IdentifierRow[]>(
-    identifierRows(initial.identifiers, 'edition-identifier')
+    identifierRows(initial.identifiers, 'edition-identifier', true)
   );
   let contributors = $state<ContributorRow[]>(
     initial.contributors.map((contributor) => ({
@@ -80,23 +116,17 @@
       identifiers: identifierRows(contributor.identifiers, `contributor-${contributor.id}`)
     }))
   );
-  let publishers = $state<PublisherRow[]>(
-    initial.publishers.map((publisher) => ({
-      key: nextKey('publisher'),
-      id: publisher.id,
-      name: publisher.name,
-      identifiers: identifierRows(publisher.identifiers, `publisher-${publisher.id}`)
-    }))
-  );
 
   let baseline = $state('');
   let saving = $state(false);
   let saveError = $state<string | null>(null);
   let notice = $state<string | null>(null);
   let attempted = $state(false);
-  let resolvingFormat = $state(false);
-  let formatError = $state<string | null>(null);
-  let formatNotice = $state<string | null>(null);
+  /** Which identifier row's Goodreads lookup is running (one at a time). */
+  let resolvingFormatKey = $state<string | null>(null);
+  let formatMessage = $state<{ key: string; kind: 'success' | 'danger'; text: string } | null>(
+    null
+  );
 
   function valueOf(event: Event): string {
     const target = event.currentTarget as EventTarget & { value?: unknown };
@@ -121,10 +151,64 @@
       .map((row) => ({ issuer: row.issuer.trim(), value: row.value.trim() }));
   }
 
-  function currentIsbns(): string[] {
-    return usedIdentifiers(identifiers)
-      .filter((identifier) => ['isbn', 'isbn10', 'isbn13'].includes(identifier.issuer.toLowerCase()))
-      .map((identifier) => identifier.value);
+  function infoDraft(info: IdentifierInfo | null | undefined): IdentifierInfoDraft {
+    return {
+      format: info?.format ?? '',
+      language: info?.language ?? '',
+      publishedDate: info?.publishedDate ?? '',
+      pages: info?.pages === null || info?.pages === undefined ? '' : String(info.pages),
+      description: info?.description ?? ''
+    };
+  }
+
+  /** All five fields blank means "no claim": the server deletes the row. */
+  function infoPayload(draft: IdentifierInfoDraft): IdentifierInfo | null {
+    const empty =
+      draft.format.trim() === '' &&
+      draft.language.trim() === '' &&
+      draft.publishedDate.trim() === '' &&
+      draft.pages.trim() === '' &&
+      draft.description.trim() === '';
+    if (empty) return null;
+    return {
+      format: valueOrNull(draft.format),
+      language: valueOrNull(draft.language),
+      publishedDate: valueOrNull(draft.publishedDate),
+      pages: intOrNull(draft.pages),
+      description: valueOrNull(draft.description)
+    };
+  }
+
+  function usedEditionIdentifiers(): Array<
+    Identifier & {
+      info: IdentifierInfo | null;
+      publishers: Array<{ id: number } | { name: string; identifiers: Identifier[] }>;
+    }
+  > {
+    return identifiers
+      .filter((row) => row.issuer.trim() !== '' || row.value.trim() !== '')
+      .map((row) => ({
+        issuer: row.issuer.trim(),
+        value: row.value.trim(),
+        info: row.info ? infoPayload(row.info) : null,
+        publishers: publisherPayload(row)
+      }));
+  }
+
+  /** `id` reuses a catalog publisher; a name creates one at save time. */
+  function publisherPayload(
+    row: IdentifierRow
+  ): Array<{ id: number } | { name: string; identifiers: Identifier[] }> {
+    const result: Array<{ id: number } | { name: string; identifiers: Identifier[] }> = [];
+    for (const publisher of row.publishers ?? []) {
+      if (publisher.id !== null) {
+        result.push({ id: publisher.id });
+        continue;
+      }
+      const name = publisher.name.trim();
+      if (name !== '') result.push({ name, identifiers: [] });
+    }
+    return result;
   }
 
   function buildPayload() {
@@ -139,17 +223,12 @@
     return {
       title,
       subtitle: valueOrNull(subtitle),
-      language: valueOrNull(language),
-      publishedDate: valueOrNull(publishedDate),
-      format: valueOrNull(format),
-      pages: intOrNull(pages),
       durationSeconds: intOrNull(durationSeconds),
       chapters: intOrNull(chapters),
       series,
       bookEdition: valueOrNull(bookEdition),
-      description: valueOrNull(description),
       coverUrl: valueOrNull(coverUrl),
-      identifiers: usedIdentifiers(identifiers),
+      identifiers: usedEditionIdentifiers(),
       contributors: contributors.map((contributor) =>
         contributor.id !== null
           ? {
@@ -162,14 +241,6 @@
               role: contributor.role,
               ref: valueOrNull(contributor.ref),
               identifiers: usedIdentifiers(contributor.identifiers)
-            }
-      ),
-      publishers: publishers.map((publisher) =>
-        publisher.id !== null
-          ? { id: publisher.id }
-          : {
-              name: publisher.name.trim(),
-              identifiers: usedIdentifiers(publisher.identifiers)
             }
       ),
       expectedRevision: revision
@@ -202,8 +273,13 @@
     }
   });
 
-  function addIdentifier(rows: IdentifierRow[]) {
-    rows.push({ key: nextKey('identifier'), issuer: '', value: '' });
+  function addIdentifier(rows: IdentifierRow[], withClaims: boolean) {
+    rows.push({
+      key: nextKey('identifier'),
+      issuer: '',
+      value: '',
+      ...(withClaims ? { info: { ...EMPTY_INFO } } : {})
+    });
   }
 
   function removeIdentifier(rows: IdentifierRow[], key: string) {
@@ -222,16 +298,6 @@
     contributors.splice(index, 1);
   }
 
-  function movePublisher(index: number, delta: number) {
-    const target = index + delta;
-    if (target < 0 || target >= publishers.length) return;
-    const [row] = publishers.splice(index, 1);
-    if (row) publishers.splice(target, 0, row);
-  }
-
-  function removePublisher(index: number) {
-    publishers.splice(index, 1);
-  }
 
   // ── Existing contributor/publisher picker ─────────────────────────────────
   let contributorQuery = $state('');
@@ -243,14 +309,6 @@
     { key: nextKey('new-contributor-identifier'), issuer: '', value: '' }
   ]);
 
-  let publisherQuery = $state('');
-  let publisherMatches = $state<AdminEntityMatch[]>([]);
-  let publisherSearching = $state(false);
-  let publisherSearchError = $state<string | null>(null);
-  let newPublisherName = $state('');
-  let newPublisherIdentifiers = $state<IdentifierRow[]>([
-    { key: nextKey('new-publisher-identifier'), issuer: '', value: '' }
-  ]);
 
   async function responseError(response: Response): Promise<string> {
     try {
@@ -297,26 +355,6 @@
     }
   }
 
-  async function searchPublishers() {
-    publisherSearchError = null;
-    const query = publisherQuery.trim();
-    if (query === '') {
-      publisherSearchError = 'Enter a name or identifier.';
-      return;
-    }
-    publisherSearching = true;
-    try {
-      publisherMatches = await searchEntities('publisher', query);
-      if (publisherMatches.length === 0) {
-        publisherSearchError = 'No local publisher matched; create one below.';
-      }
-    } catch (error) {
-      publisherMatches = [];
-      publisherSearchError = error instanceof Error ? error.message : 'The search failed.';
-    } finally {
-      publisherSearching = false;
-    }
-  }
 
   function addExistingContributor(match: AdminEntityMatch) {
     if (contributors.some((contributor) => contributor.id === match.id)) {
@@ -358,45 +396,63 @@
     contributorSearchError = null;
   }
 
-  function addExistingPublisher(match: AdminEntityMatch) {
-    if (publishers.some((publisher) => publisher.id === match.id)) {
-      publisherSearchError = 'That publisher is already linked.';
+  // ── Per-identifier publisher picker ───────────────────────────────────────
+  async function searchPublishersFor(row: IdentifierRow) {
+    row.publisherSearchError = null;
+    const query = (row.publisherQuery ?? '').trim();
+    if (query === '') {
+      row.publisherSearchError = 'Enter a name or identifier.';
       return;
     }
-    publishers.push({
-      key: nextKey('publisher'),
-      id: match.id,
-      name: match.name,
-      identifiers: identifierRows(match.identifiers, `publisher-${match.id}`)
-    });
-    publisherSearchError = null;
+    row.publisherSearching = true;
+    try {
+      row.publisherMatches = await searchEntities('publisher', query);
+      if (row.publisherMatches.length === 0) {
+        row.publisherSearchError = 'No local publisher matched; create one with the name below.';
+      }
+    } catch (error) {
+      row.publisherMatches = [];
+      row.publisherSearchError = error instanceof Error ? error.message : 'The search failed.';
+    } finally {
+      row.publisherSearching = false;
+    }
   }
 
-  function addNewPublisher() {
-    const name = newPublisherName.trim();
-    if (name === '') {
-      publisherSearchError = 'Enter a name for the new publisher.';
+  function addPublisherTo(row: IdentifierRow, match: AdminEntityMatch) {
+    if (!row.publishers) return;
+    if (row.publishers.some((publisher) => publisher.id === match.id)) {
+      row.publisherSearchError = 'That publisher is already linked to this identifier.';
       return;
     }
-    publishers.push({
-      key: nextKey('publisher'),
-      id: null,
-      name,
-      identifiers: usedIdentifiers(newPublisherIdentifiers).map((identifier) => ({
-        ...identifier,
-        key: nextKey('publisher-identifier')
-      }))
-    });
-    newPublisherName = '';
-    newPublisherIdentifiers = [
-      { key: nextKey('new-publisher-identifier'), issuer: '', value: '' }
-    ];
-    publisherSearchError = null;
+    row.publishers.push({ key: nextKey('publisher'), id: match.id, name: match.name });
+    row.publisherMatches = [];
+    row.publisherQuery = '';
+    row.publisherSearchError = null;
+  }
+
+  /** A new publisher entity is created by name at save time (`resolveEntity`). */
+  function addNamedPublisherTo(row: IdentifierRow) {
+    if (!row.publishers) return;
+    const name = (row.publisherQuery ?? '').trim();
+    if (name === '') {
+      row.publisherSearchError = 'Enter a name for the new publisher.';
+      return;
+    }
+    row.publishers.push({ key: nextKey('publisher'), id: null, name });
+    row.publisherQuery = '';
+    row.publisherMatches = [];
+    row.publisherSearchError = null;
+  }
+
+  function removePublisherFrom(row: IdentifierRow, key: string) {
+    if (!row.publishers) return;
+    const index = row.publishers.findIndex((publisher) => publisher.key === key);
+    if (index >= 0) row.publishers.splice(index, 1);
   }
 
   function applyEdition(edition: AdminEdition) {
-    formatError = null;
-    formatNotice = null;
+    formatMessage = null;
+    resolvingFormatKey = null;
     uri = edition.uri;
     rkey = edition.rkey;
     createdAt = edition.createdAt;
@@ -405,10 +461,6 @@
     revision = edition.revision;
     title = edition.title;
     subtitle = edition.subtitle ?? '';
-    language = edition.language ?? '';
-    publishedDate = edition.publishedDate ?? '';
-    format = edition.format ?? '';
-    pages = edition.pages === null ? '' : String(edition.pages);
     durationSeconds =
       edition.durationSeconds === null ? '' : String(edition.durationSeconds);
     chapters = edition.chapters === null ? '' : String(edition.chapters);
@@ -416,9 +468,8 @@
     seriesPosition = edition.series?.position ?? '';
     seriesDisplay = edition.series?.display ?? '';
     bookEdition = edition.bookEdition ?? '';
-    description = edition.description ?? '';
     coverUrl = edition.coverUrl ?? '';
-    identifiers = identifierRows(edition.identifiers, 'edition-identifier');
+    identifiers = identifierRows(edition.identifiers, 'edition-identifier', true);
     contributors = edition.contributors.map((contributor) => ({
       key: nextKey('contributor'),
       id: contributor.id,
@@ -426,12 +477,6 @@
       role: contributor.role,
       ref: contributor.ref ?? '',
       identifiers: identifierRows(contributor.identifiers, `contributor-${contributor.id}`)
-    }));
-    publishers = edition.publishers.map((publisher) => ({
-      key: nextKey('publisher'),
-      id: publisher.id,
-      name: publisher.name,
-      identifiers: identifierRows(publisher.identifiers, `publisher-${publisher.id}`)
     }));
     baseline = JSON.stringify(buildPayload());
   }
@@ -467,23 +512,23 @@
     }
   }
 
-  async function resolveFormatFromGoodreads() {
-    formatError = null;
-    formatNotice = null;
-    const isbns = currentIsbns();
-    if (isbns.length === 0) {
-      formatError =
-        'Add an ISBN identifier (issuer isbn, isbn10 or isbn13) before resolving from Goodreads.';
-      return;
-    }
-    resolvingFormat = true;
+  /**
+   * Resolve one identifier's format from Goodreads. The claim belongs to the
+   * identifier row, so the answer is written into that row's draft and nowhere
+   * else; the save is still the operator's.
+   */
+  async function resolveFormatFor(row: IdentifierRow) {
+    const info = row.info;
+    if (!info) return;
+    formatMessage = null;
+    resolvingFormatKey = row.key;
     try {
       const response = await fetch(
         `/admin/api/editions/${encodeURIComponent(rkey)}/resolve-format`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ isbns })
+          body: JSON.stringify({ isbns: [row.value.trim()] })
         }
       );
       if (!response.ok) throw new Error(await responseError(response));
@@ -491,12 +536,20 @@
       if (typeof payload.format !== 'string' || payload.format.trim() === '') {
         throw new Error('Goodreads returned no usable format.');
       }
-      format = payload.format;
-      formatNotice = `Resolved “${payload.format}” from ISBN ${payload.isbn} using Goodreads. Save the edition to keep it.`;
+      info.format = payload.format;
+      formatMessage = {
+        key: row.key,
+        kind: 'success',
+        text: `Resolved “${payload.format}” from ISBN ${payload.isbn} using Goodreads. Save the edition to keep it.`
+      };
     } catch (error) {
-      formatError = error instanceof Error ? error.message : 'The format lookup failed.';
+      formatMessage = {
+        key: row.key,
+        kind: 'danger',
+        text: error instanceof Error ? error.message : 'The format lookup failed.'
+      };
     } finally {
-      resolvingFormat = false;
+      resolvingFormatKey = null;
     }
   }
 
@@ -510,9 +563,13 @@
 
 </script>
 
-{#snippet identifierEditor(rows: IdentifierRow[], label: string)}
+{#snippet identifierEditor(rows: IdentifierRow[], label: string, claims = false)}
   <div class="identifier-list">
     {#each rows as row (row.key)}
+      {@const hint = [row.info?.format ?? '', row.info?.language ?? '']
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .join(' · ')}
       <div class="identifier-row">
         <wa-input
           aria-label={`${label} issuer`}
@@ -535,11 +592,159 @@
         >
           Remove
         </wa-button>
+        {#if claims && row.info}
+          {@const info = row.info}
+          <details class="identifier-info">
+            <summary>Shape{hint ? ` — ${hint}` : ''}</summary>
+          <div class="identifier-info-grid">
+            <div class="field">
+              <span class="field-label">Format</span>
+              <wa-input
+                aria-label={`${label} format`}
+                value={info.format}
+                placeholder="Paperback, Hardcover, Audiobook…"
+                oninput={(event: Event) => (info.format = valueOf(event))}
+              ></wa-input>
+              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+              <wa-button
+                size="small"
+                appearance="outlined"
+                disabled={resolvingFormatKey !== null ||
+                  !['isbn', 'isbn10', 'isbn13'].includes(row.issuer.trim().toLowerCase()) ||
+                  row.value.trim() === ''}
+                onclick={() => void resolveFormatFor(row)}
+              >
+                {resolvingFormatKey === row.key ? 'Resolving…' : 'Resolve from Goodreads'}
+              </wa-button>
+            </div>
+            <div class="field">
+              <span class="field-label">Language</span>
+              <wa-input
+                aria-label={`${label} language`}
+                value={info.language}
+                placeholder="en, en-US, zh-Hant-TW"
+                oninput={(event: Event) => (info.language = valueOf(event))}
+              ></wa-input>
+            </div>
+            <div class="field">
+              <span class="field-label">Published date</span>
+              <wa-input
+                aria-label={`${label} published date`}
+                value={info.publishedDate}
+                placeholder="YYYY, YYYY-MM or YYYY-MM-DD"
+                oninput={(event: Event) => (info.publishedDate = valueOf(event))}
+              ></wa-input>
+            </div>
+            <div class="field">
+              <span class="field-label">Pages</span>
+              <wa-input
+                aria-label={`${label} pages`}
+                value={info.pages}
+                inputmode="numeric"
+                placeholder="0"
+                oninput={(event: Event) => (info.pages = valueOf(event))}
+              ></wa-input>
+            </div>
+            <div class="field identifier-info-wide">
+              <span class="field-label">Description</span>
+              <wa-textarea
+                aria-label={`${label} description`}
+                rows="3"
+                value={info.description}
+                oninput={(event: Event) => (info.description = valueOf(event))}
+              ></wa-textarea>
+            </div>
+            <div class="field identifier-info-wide">
+              <span class="field-label">Publishers</span>
+              {#if row.publishers}
+                {#if row.publishers.length > 0}
+                  <div class="wa-cluster wa-gap-3xs">
+                    {#each row.publishers as publisher (publisher.key)}
+                      <wa-tag size="small" variant="neutral">
+                        {publisher.name}
+                        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                        <wa-button
+                          size="small"
+                          appearance="plain"
+                          aria-label={`Remove publisher ${publisher.name}`}
+                          onclick={() => removePublisherFrom(row, publisher.key)}>Remove</wa-button
+                        >
+                      </wa-tag>
+                    {/each}
+                  </div>
+                {/if}
+                <div class="publisher-search">
+                  <wa-input
+                    aria-label={`${label} publisher search`}
+                    role="textbox"
+                    tabindex="0"
+                    value={row.publisherQuery ?? ''}
+                    placeholder="Search a publisher by name or identifier"
+                    oninput={(event: Event) => (row.publisherQuery = valueOf(event))}
+                    onkeydown={(event: KeyboardEvent) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void searchPublishersFor(row);
+                      }
+                    }}
+                  ></wa-input>
+                  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                  <wa-button
+                    size="small"
+                    disabled={row.publisherSearching}
+                    onclick={() => void searchPublishersFor(row)}
+                  >
+                    {row.publisherSearching ? 'Searching…' : 'Search'}
+                  </wa-button>
+                  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                  <wa-button size="small" appearance="outlined" onclick={() => addNamedPublisherTo(row)}>
+                    Create
+                  </wa-button>
+                </div>
+                {#if row.publisherSearchError}
+                  <span class="field-error">{row.publisherSearchError}</span>
+                {/if}
+                {#if row.publisherMatches && row.publisherMatches.length > 0}
+                  <div class="match-list">
+                    {#each row.publisherMatches as match (match.id)}
+                      <div class="match-row">
+                        <div class="wa-stack wa-gap-2xs">
+                          <strong>{match.name}</strong>
+                          <span class="muted admin-small">
+                            {match.identifiers.length > 0
+                              ? match.identifiers.map(identifierText).join(' · ')
+                              : 'No identifiers'}
+                          </span>
+                        </div>
+                        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                        <wa-button size="small" onclick={() => addPublisherTo(row, match)}>
+                          Add
+                        </wa-button>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+              <span class="muted admin-small">
+                The record publishes the first publisher in identifier order. Search reuses an
+                existing entity; Create makes one from the typed name when the edition is saved.
+              </span>
+            </div>
+          </div>
+          <span class="muted admin-small">
+            What this identifier's own record claims; the edition's public shape is the union
+            (isbn13 first). Empty fields fall back to another identifier, not to the record.
+          </span>
+          {#if formatMessage?.key === row.key}
+            <wa-callout variant={formatMessage.kind}>{formatMessage.text}</wa-callout>
+          {/if}
+          </details>
+        {/if}
       </div>
     {/each}
   </div>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <wa-button size="small" appearance="outlined" onclick={() => addIdentifier(rows)}>
+  <wa-button size="small" appearance="outlined" onclick={() => addIdentifier(rows, claims)}>
     Add identifier
   </wa-button>
 {/snippet}
@@ -607,71 +812,6 @@
             ></wa-input>
           </div>
           <div class="field">
-            <span class="field-label">Language (BCP 47, optional)</span>
-            <wa-input
-              aria-label="Language"
-              value={language}
-              placeholder="en, en-US, zh-Hant-TW"
-              oninput={(event: Event) => (language = valueOf(event))}
-            ></wa-input>
-            <span class="muted admin-small">
-              Leave empty for unknown. Otherwise a BCP 47 tag, for example en, en-US or
-              zh-Hant-TW.
-            </span>
-            {#if fieldError('language')}
-              <span class="field-error">{fieldError('language')}</span>
-            {/if}
-          </div>
-          <div class="field">
-            <span class="field-label">Published date</span>
-            <wa-input
-              aria-label="Published date"
-              value={publishedDate}
-              placeholder="YYYY, YYYY-MM or YYYY-MM-DD"
-              oninput={(event: Event) => (publishedDate = valueOf(event))}
-            ></wa-input>
-            {#if fieldError('publishedDate')}
-              <span class="field-error">{fieldError('publishedDate')}</span>
-            {/if}
-          </div>
-          <div class="field editor-span-2">
-            <span class="field-label">Format</span>
-            <div class="format-row">
-              <wa-input
-                aria-label="Format"
-                value={format}
-                placeholder="Paperback, Hardcover, Audiobook…"
-                oninput={(event: Event) => {
-                  format = valueOf(event);
-                  formatError = null;
-                  formatNotice = null;
-                }}
-              ></wa-input>
-              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-              <wa-button
-                size="small"
-                appearance="outlined"
-                disabled={resolvingFormat}
-                onclick={() => void resolveFormatFromGoodreads()}
-              >
-                {resolvingFormat ? 'Resolving…' : 'Resolve from Goodreads'}
-              </wa-button>
-            </div>
-            <span class="muted admin-small">
-              Free text; the Goodreads value (for example Paperback, Hardcover or Audiobook) is
-              stored exactly. The lookup uses ISBN identifiers in this form and never auto-saves.
-            </span>
-            {#if formatNotice}
-              <wa-callout variant="success">{formatNotice}</wa-callout>
-            {/if}
-            {#if formatError}
-              <span class="field-error">{formatError}</span>
-            {/if}
-            {#if fieldError('format')}
-              <span class="field-error">{fieldError('format')}</span>
-            {/if}
-          </div>
-          <div class="field">
             <span class="field-label">Book edition</span>
             <wa-input
               aria-label="Book edition"
@@ -679,19 +819,6 @@
               placeholder="2nd revised"
               oninput={(event: Event) => (bookEdition = valueOf(event))}
             ></wa-input>
-          </div>
-          <div class="field">
-            <span class="field-label">Pages</span>
-            <wa-input
-              aria-label="Pages"
-              value={pages}
-              inputmode="numeric"
-              placeholder="0"
-              oninput={(event: Event) => (pages = valueOf(event))}
-            ></wa-input>
-            {#if fieldError('pages')}
-              <span class="field-error">{fieldError('pages')}</span>
-            {/if}
           </div>
           <div class="field">
             <span class="field-label">Duration (seconds)</span>
@@ -753,19 +880,6 @@
           <span class="field-error">{sectionErrors('series').join(' · ')}</span>
         {/if}
 
-        <div class="field">
-          <span class="field-label">Description</span>
-          <wa-textarea
-            aria-label="Description"
-            rows="5"
-            value={description}
-            oninput={(event: Event) => (description = valueOf(event))}
-          ></wa-textarea>
-          {#if fieldError('description')}
-            <span class="field-error">{fieldError('description')}</span>
-          {/if}
-        </div>
-
         <div class="editor-grid">
           <div class="field editor-span-2">
             <span class="field-label">Cover URL (http or https)</span>
@@ -796,7 +910,7 @@
           At least one identifier is required. Issuer and value are compared exactly; do not
           normalise ISBNs here unless you intend to change the identifier.
         </p>
-        {@render identifierEditor(identifiers, 'Edition identifier')}
+        {@render identifierEditor(identifiers, 'Edition identifier', true)}
         {#if sectionErrors('identifiers').length > 0}
           <span class="field-error">{sectionErrors('identifiers').join(' · ')}</span>
         {/if}
@@ -983,151 +1097,6 @@
       </div>
     </wa-card>
 
-    <wa-card with-header appearance="outlined">
-      <h2 slot="header">Publishers</h2>
-      <div class="wa-stack wa-gap-m">
-        <p class="muted admin-small">
-          The catalog can link several publishers. The published edition record carries the first
-          one; order is therefore significant.
-        </p>
-
-        <div class="credit-list">
-          {#each publishers as publisher, index (publisher.key)}
-            <div class="credit-row">
-              <div class="credit-header">
-                <div class="wa-stack wa-gap-2xs credit-name">
-                  {#if publisher.id === null}
-                    <wa-input
-                      aria-label={`Publisher ${index + 1} name`}
-                      value={publisher.name}
-                      placeholder="Publisher name"
-                      oninput={(event: Event) => (publisher.name = valueOf(event))}
-                    ></wa-input>
-                  {:else}
-                    <strong>{publisher.name}</strong>
-                    <span class="muted admin-small">catalog row #{publisher.id}</span>
-                  {/if}
-                </div>
-                <div class="wa-cluster wa-gap-2xs">
-                  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                  <wa-button
-                    size="small"
-                    appearance="plain"
-                    aria-label={`Move ${publisher.name} up`}
-                    disabled={index === 0}
-                    onclick={() => movePublisher(index, -1)}>↑</wa-button
-                  >
-                  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                  <wa-button
-                    size="small"
-                    appearance="plain"
-                    aria-label={`Move ${publisher.name} down`}
-                    disabled={index === publishers.length - 1}
-                    onclick={() => movePublisher(index, 1)}>↓</wa-button
-                  >
-                  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                  <wa-button
-                    size="small"
-                    appearance="plain"
-                    aria-label={`Remove ${publisher.name}`}
-                    onclick={() => removePublisher(index)}>Remove</wa-button
-                  >
-                </div>
-              </div>
-
-              {#if fieldError(`publishers.${index}.name`)}
-                <span class="field-error">{fieldError(`publishers.${index}.name`)}</span>
-              {/if}
-
-              {#if publisher.id === null}
-                <div class="wa-stack wa-gap-2xs">
-                  <span class="field-label">New publisher identifiers</span>
-                  {@render identifierEditor(
-                    publisher.identifiers,
-                    `Publisher ${index + 1} identifier`
-                  )}
-                </div>
-              {:else if publisher.identifiers.length > 0}
-                <div class="wa-cluster wa-gap-2xs">
-                  {#each publisher.identifiers as identifier (identifierText(identifier))}
-                    <wa-tag size="small" variant="neutral">{identifierText(identifier)}</wa-tag>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
-
-        <div class="picker">
-          <div class="wa-stack wa-gap-xs">
-            <span class="field-label">Add an existing publisher</span>
-            <div class="picker-search">
-              <wa-input
-                aria-label="Search local publishers"
-                role="textbox"
-                tabindex="0"
-                value={publisherQuery}
-                placeholder="Name or identifier"
-                oninput={(event: Event) => (publisherQuery = valueOf(event))}
-                onkeydown={(event: KeyboardEvent) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    void searchPublishers();
-                  }
-                }}
-              ></wa-input>
-              <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-              <wa-button
-                size="small"
-                disabled={publisherSearching}
-                onclick={() => void searchPublishers()}
-              >
-                {publisherSearching ? 'Searching…' : 'Search'}
-              </wa-button>
-            </div>
-            {#if publisherSearchError}
-              <span class="field-error">{publisherSearchError}</span>
-            {/if}
-            {#if publisherMatches.length > 0}
-              <div class="match-list">
-                {#each publisherMatches as match (match.id)}
-                  <div class="match-row">
-                    <div class="wa-stack wa-gap-2xs">
-                      <strong>{match.name}</strong>
-                      <span class="muted admin-small">
-                        {match.identifiers.length > 0
-                          ? match.identifiers.map(identifierText).join(' · ')
-                          : 'No identifiers'}
-                      </span>
-                    </div>
-                    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                    <wa-button size="small" onclick={() => addExistingPublisher(match)}>
-                      Add
-                    </wa-button>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          </div>
-
-          <div class="wa-stack wa-gap-xs">
-            <span class="field-label">Create a new publisher</span>
-            <wa-input
-              aria-label="New publisher name"
-              value={newPublisherName}
-              placeholder="Publisher name"
-              oninput={(event: Event) => (newPublisherName = valueOf(event))}
-            ></wa-input>
-            {@render identifierEditor(newPublisherIdentifiers, 'New publisher identifier')}
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <wa-button size="small" appearance="outlined" onclick={addNewPublisher}>
-              Add new publisher
-            </wa-button>
-          </div>
-        </div>
-      </div>
-    </wa-card>
-
     <div class="editor-actions">
       <div class="wa-stack wa-gap-2xs">
         <strong>{dirty ? 'Unsaved changes' : 'All changes saved'}</strong>
@@ -1184,17 +1153,6 @@
     font-size: var(--wa-font-size-xs);
   }
 
-  .format-row {
-    display: flex;
-    align-items: center;
-    gap: var(--wa-space-s);
-    flex-wrap: wrap;
-  }
-
-  .format-row wa-input {
-    flex: 1 1 16rem;
-  }
-
   .issue-list {
     margin: 0;
     padding-inline-start: var(--wa-space-l);
@@ -1211,6 +1169,28 @@
     grid-template-columns: minmax(8rem, 0.8fr) minmax(12rem, 1.4fr) auto;
     gap: var(--wa-space-xs);
     align-items: center;
+  }
+
+  /* The claim panel spans all three columns of the identifier row. */
+  .identifier-info {
+    grid-column: 1 / -1;
+  }
+
+  .identifier-info summary {
+    cursor: pointer;
+    font-size: var(--wa-font-size-s);
+    color: var(--wa-color-text-quiet);
+  }
+
+  .identifier-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: var(--wa-space-xs);
+    padding-block: var(--wa-space-xs);
+  }
+
+  .identifier-info-wide {
+    grid-column: 1 / -1;
   }
 
   .credit-list {
@@ -1266,6 +1246,17 @@
 
   .picker-search wa-input {
     flex: 1;
+  }
+
+  .publisher-search {
+    display: flex;
+    gap: var(--wa-space-2xs);
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .publisher-search wa-input {
+    flex: 1 1 12rem;
   }
 
   .match-list {

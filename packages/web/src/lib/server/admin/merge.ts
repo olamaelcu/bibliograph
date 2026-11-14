@@ -1,16 +1,15 @@
-import { catalogPool } from '../catalog/db';
-import { normalizeContributorRole } from '../../contributor-roles';
-import { loadAdminEditions } from './editions';
-import type { PoolClient } from 'pg';
+// Explicit extension: node's test runner loads this module without Vite.
+import { normalizeContributorRole } from '../../contributor-roles.ts';
+import { loadAdminEditionsFrom } from './edition-read.ts';
+import type { Pool, PoolClient } from 'pg';
 import {
   MERGE_FIELDS,
   type AdminContributor,
   type AdminEdition,
-  type AdminPublisher,
   type LinkMode,
   type MergeField,
   type MergeResponse
-} from '$lib/admin/types';
+} from '../../admin/types.ts';
 
 const COLLECTION = 'community.lexicon.media.book.edition';
 
@@ -68,17 +67,18 @@ function uniqueContributors(records: AdminEdition[]): AdminContributor[] {
   return contributors;
 }
 
-function uniquePublishers(records: AdminEdition[]): AdminPublisher[] {
+/** One record's publisher links in published order, first occurrence wins. */
+function publisherIdsOf(record: AdminEdition): number[] {
   const seen = new Set<number>();
-  const publishers: AdminPublisher[] = [];
-  for (const record of records) {
-    for (const publisher of record.publishers) {
+  const ids: number[] = [];
+  for (const identifier of record.identifiers) {
+    for (const publisher of identifier.publishers) {
       if (seen.has(publisher.id)) continue;
       seen.add(publisher.id);
-      publishers.push(publisher);
+      ids.push(publisher.id);
     }
   }
-  return publishers;
+  return ids;
 }
 
 async function replaceContributors(
@@ -102,20 +102,23 @@ async function replaceContributors(
   );
 }
 
-async function replacePublishers(
+/** Replace the base's per-identifier publisher links with the merge plan. */
+async function replacePublisherLinks(
   client: PoolClient,
   base: string,
-  publishers: AdminPublisher[]
+  plan: Map<string, { issuer: string; value: string; ids: number[] }>
 ): Promise<void> {
-  await client.query('DELETE FROM edition_publishers WHERE edition_uri = $1', [base]);
-  if (publishers.length === 0) return;
-  await client.query(
-    `INSERT INTO edition_publishers (edition_uri, publisher_id, position)
-     SELECT $1, t.publisher_id, t.position::int
-       FROM unnest($2::bigint[])
-            WITH ORDINALITY AS t(publisher_id, position)`,
-    [base, publishers.map((publisher) => publisher.id)]
-  );
+  await client.query('DELETE FROM edition_identifier_publishers WHERE edition_uri = $1', [base]);
+  for (const entry of plan.values()) {
+    if (entry.ids.length === 0) continue;
+    await client.query(
+      `INSERT INTO edition_identifier_publishers
+         (edition_uri, issuer, value, publisher_id, position)
+       SELECT $1, $2, $3, t.publisher_id, t.position::int
+         FROM unnest($4::bigint[]) WITH ORDINALITY AS t(publisher_id, position)`,
+      [base, entry.issuer, entry.value, entry.ids]
+    );
+  }
 }
 
 /**
@@ -127,8 +130,11 @@ async function replacePublishers(
  * Duplicate editions are deleted last so their edit history stays available
  * while the base is rebuilt. Deleting them fires the existing outbox trigger,
  * which queues `delete` rows for the PDS publisher.
+ *
+ * The pool is injected rather than read from the environment so a node test can
+ * drive the whole transaction against a scratch database.
  */
-export async function mergeEditions(input: unknown): Promise<MergeResponse> {
+export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeResponse> {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new MergeError(400, 'merge body must be an object');
   }
@@ -144,17 +150,13 @@ export async function mergeEditions(input: unknown): Promise<MergeResponse> {
     throw new MergeError(400, 'base and duplicate editions must be distinct');
   }
 
-  const pool = catalogPool();
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
     // Lock in a stable order so two overlapping merges cannot deadlock; keep
     // the operator's order for contributor/publisher unions.
-    const records = await loadAdminEditions([...all].sort(), {
-      client,
-      forUpdate: true
-    });
+    const records = await loadAdminEditionsFrom(client, [...all].sort(), { forUpdate: true });
     const byUri = new Map(records.map((record) => [record.uri, record]));
     if (records.length !== all.length) {
       const missing = all.filter((uri) => !byUri.has(uri));
@@ -193,10 +195,8 @@ export async function mergeEditions(input: unknown): Promise<MergeResponse> {
     });
     await client.query(
       `UPDATE editions SET
-         title = $2, subtitle = $3, language = $4, published_date = $5,
-         format = $6, pages = $7, duration_seconds = $8, chapters = $9,
-         series = $10::jsonb, book_edition = $11, description = $12,
-         cover_url = $13
+         title = $2, subtitle = $3, duration_seconds = $4, chapters = $5,
+         series = $6::jsonb, book_edition = $7, cover_url = $8
        WHERE uri = $1`,
       [base, ...values]
     );
@@ -218,17 +218,60 @@ export async function mergeEditions(input: unknown): Promise<MergeResponse> {
       );
     }
 
+    // Claims travel with their identifier. The base's own claim wins (it was
+    // curated there), and the newest source claim wins among sources; both fall
+    // out of inserting newest-first with DO NOTHING.
+    if (others.length > 0) {
+      await client.query(
+        `INSERT INTO edition_identifier_info (
+           edition_uri, issuer, value, format, language,
+           published_date, pages, description
+         )
+         SELECT $1, s.issuer, s.value, s.format, s.language,
+                s.published_date, s.pages, s.description
+           FROM edition_identifier_info s
+          WHERE s.edition_uri = ANY($2::text[])
+          ORDER BY s.updated_at DESC
+         ON CONFLICT (edition_uri, issuer, value) DO NOTHING`,
+        [base, others]
+      );
+    }
+
     const contributorRecords =
       contributorChoice.mode === 'union'
         ? uniqueContributors(ordered)
         : (byUri.get(contributorChoice.source as string) as AdminEdition).contributors;
-    const publisherRecords =
-      publisherChoice.mode === 'union'
-        ? uniquePublishers(ordered)
-        : (byUri.get(publisherChoice.source as string) as AdminEdition).publishers;
 
     await replaceContributors(client, base, contributorRecords);
-    await replacePublishers(client, base, publisherRecords);
+
+    // Publisher links follow their identifier. `source` applies the chosen
+    // record's ordered publisher set to every identifier; `union` merges the
+    // per-pair lists in operator order, base first.
+    const sourcePublishers =
+      publisherChoice.mode === 'source'
+        ? publisherIdsOf(byUri.get(publisherChoice.source as string) as AdminEdition)
+        : null;
+    const publisherPlan = new Map<string, { issuer: string; value: string; ids: number[] }>();
+    for (const pair of identifiers) {
+      if (sourcePublishers !== null) {
+        publisherPlan.set(`${pair.issuer}\u0000${pair.value}`, { ...pair, ids: sourcePublishers });
+        continue;
+      }
+      const seen = new Set<number>();
+      const ids: number[] = [];
+      for (const record of ordered) {
+        const identifier = record.identifiers.find(
+          (candidate) => candidate.issuer === pair.issuer && candidate.value === pair.value
+        );
+        for (const publisher of identifier?.publishers ?? []) {
+          if (seen.has(publisher.id)) continue;
+          seen.add(publisher.id);
+          ids.push(publisher.id);
+        }
+      }
+      publisherPlan.set(`${pair.issuer}\u0000${pair.value}`, { ...pair, ids });
+    }
+    await replacePublisherLinks(client, base, publisherPlan);
 
     const deletedResult = await client.query<{ uri: string }>(
       'DELETE FROM editions WHERE uri = ANY($1::text[]) RETURNING uri',
@@ -256,7 +299,10 @@ export async function mergeEditions(input: unknown): Promise<MergeResponse> {
       deleted: deletedResult.rows.map((row) => row.uri),
       identifiers: identifiers.length,
       contributors: contributorRecords.length,
-      publishers: publisherRecords.length
+      publishers: [...publisherPlan.values()].reduce(
+        (total, entry) => total + entry.ids.length,
+        0
+      )
     };
   } catch (error) {
     await client.query('ROLLBACK');

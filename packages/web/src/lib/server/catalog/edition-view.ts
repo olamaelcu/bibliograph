@@ -58,15 +58,15 @@ export type EditionRow = {
   uri: string;
   title: string;
   subtitle: string | null;
-  language: string | null;
-  published_date: string | null;
-  format: string | null;
-  pages: number | null;
+  shape_language: string | null;
+  shape_published_date: string | null;
+  shape_format: string | null;
+  shape_pages: number | null;
   duration_seconds: number | null;
   chapters: number | null;
   series: SeriesView | null;
   book_edition: string | null;
-  description: string | null;
+  shape_description: string | null;
   cover_url: string | null;
   created_at: Date;
 };
@@ -87,9 +87,14 @@ export type PublisherRow = {
 };
 
 export const EDITION_COLUMNS = `
-  e.uri, e.title, e.subtitle, e.language, e.published_date, e.format, e.pages,
-  e.duration_seconds, e.chapters, e.series, e.book_edition, e.description,
-  e.cover_url, e.created_at`;
+  e.uri, e.title, e.subtitle, e.duration_seconds, e.chapters, e.series,
+  e.book_edition, e.cover_url, e.created_at, s.language AS shape_language,
+  s.published_date AS shape_published_date, s.format AS shape_format,
+  s.pages AS shape_pages, s.description AS shape_description`;
+
+/** The shape claim union; every `EDITION_COLUMNS` query needs it. */
+export const EDITION_SHAPE_JOIN =
+  'LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri';
 
 function atUriIdentifier(uri: string): Identifier {
   return { issuer: AT_URI_ISSUER, value: uri };
@@ -138,13 +143,13 @@ export function editionView(
   if (coverUrl) view.coverUrl = coverUrl;
   const subtitle = optional(row.subtitle);
   if (subtitle) view.subtitle = subtitle;
-  const language = optional(row.language);
+  const language = optional(row.shape_language);
   if (language) view.language = language;
-  const publishedDate = optional(row.published_date);
+  const publishedDate = optional(row.shape_published_date);
   if (publishedDate) view.publishedDate = publishedDate;
-  const format = optional(row.format);
+  const format = optional(row.shape_format);
   if (format) view.format = format;
-  const pages = optional(row.pages);
+  const pages = optional(row.shape_pages);
   if (pages !== undefined) view.pages = pages;
   const durationSeconds = optional(row.duration_seconds);
   if (durationSeconds !== undefined) view.durationSeconds = durationSeconds;
@@ -159,7 +164,7 @@ export function editionView(
   }
   const bookEdition = optional(row.book_edition);
   if (bookEdition) view.bookEdition = bookEdition;
-  const description = optional(row.description);
+  const description = optional(row.shape_description);
   if (description) view.description = description;
   if (publisher) {
     view.publisher = {
@@ -192,11 +197,12 @@ export async function hydrate(pool: EditionQueryable, rows: EditionRow[]): Promi
       [uris]
     ),
     pool.query<PublisherRow>(
-      `SELECT ep.edition_uri, p.name, p.identifiers, p.at_uri AS ref
-       FROM edition_publishers ep
-       JOIN publishers p ON p.id = ep.publisher_id
-       WHERE ep.edition_uri = ANY($1)
-       ORDER BY ep.edition_uri, ep.position`,
+      `SELECT ps.edition_uri, p.name, p.identifiers, p.at_uri AS ref
+       FROM edition_publishers_shape ps
+       CROSS JOIN LATERAL unnest(ps.publisher_ids) WITH ORDINALITY AS ord(id, idx)
+       JOIN publishers p ON p.id = ord.id
+       WHERE ps.edition_uri = ANY($1)
+       ORDER BY ps.edition_uri, ord.idx`,
       [uris]
     )
   ]);
