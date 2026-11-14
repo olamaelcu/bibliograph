@@ -47,5 +47,20 @@ export const variables = defineEnvVars({
     schema: (value) => value,
     description:
       'Required for personalized feeds. PLC directory used to resolve did:plc service-token issuers; there is no code default, so following/extended/dynamic answer 503 when it is unset or blank.'
+  },
+  LIVTET_DID_HOSTNAME: {
+    schema: (value) => value?.trim() || 'biblio.livtet.olamaelcu.net',
+    description:
+      'Host whose /.well-known/did.json this app serves as did:web:<host>. The Livtet platform signs against that identity; set it only for a non-production host.'
+  },
+  LIVTET_INTERACTION_KEY_MULTIBASE: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'Public half of the platform LIVTET_ASSERTION_KEY, published as #oauth_interaction. Unset serves a document with no verification method, and MCP sign-in fails until it is set.'
+  },
+  LIVTET_SPACE_MANAGER_ENDPOINT: {
+    schema: (value) => value?.trim() || 'https://livtet.olamaelcu.net',
+    description:
+      'Service endpoint published as #livtet_space_manager; the base URL a PDS calls to mint and check club spaces.'
   }
 });
