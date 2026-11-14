@@ -1,3 +1,31 @@
+bibliograph-worker (0.2.15-1) unstable; urgency=medium
+
+  * 0.2.15 release: edition shape claims and publisher links move onto the
+    identifier.
+
+    - 0007-edition-identifier-info.sql moves `language`, `published_date`,
+      `format`, `pages` and `description` off `editions` onto the new
+      `edition_identifier_info` table (one claim row per identifier, cascading
+      from `edition_identifiers`), backfills every identifier with its edition's
+      current values, and drops the five columns. `edition_identifier_shape`
+      unions the claims back into the edition's public shape in identifier order
+      (isbn13, isbn10, asin, then any other issuer).
+    - 0008-edition-identifier-publishers.sql replaces `edition_publishers` with
+      `edition_identifier_publishers` (FK to `publishers`, cascading from
+      `edition_identifiers`), backfills each edition's links onto every
+      identifier, and drops the old table. `edition_publishers_shape` orders the
+      links per edition; the record publishes its head as `publisher` and the
+      whole list as `publishers`.
+    - Ingest writes the candidate's claims and its publisher onto every
+      identifier it supplied, filling only empty claim fields. Publishing reads
+      both shape views, so `appview_book` keeps its column list and HappyView
+      needs no change.
+    - `editions-missing-*` reports now ask whether any identifier records the
+      claim, and `edition-identifier-info` enumerates identifiers with their
+      claims and linked publisher names.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 16:18:36 +0000
+
 bibliograph-worker (0.2.14-1) unstable; urgency=medium
 
   * 0.2.14 release: ISBNdb as a metered genre source and a soft quota gauge.

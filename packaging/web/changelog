@@ -1,3 +1,32 @@
+bibliograph-web (0.2.15-1) unstable; urgency=medium
+
+  * 0.2.15 release: edit shape claims and publisher links per identifier.
+
+    - The edition editor drops the five edition-level shape inputs. Each
+      identifier now carries a `Shape` disclosure with its own format, language,
+      publication date, pages and description plus its publisher links (search
+      an existing entity, create one by name, or remove). The Goodreads
+      `Resolve from format` action moved onto the identifier row it answers for.
+    - Saving diffs identifiers instead of replacing them, so untouched pairs
+      keep their claims; an omitted `info`/`publishers` key leaves the stored
+      rows alone, `null`/`[]` clears them, and unchanged claims are not
+      rewritten (no `updated_at` bump, no needless republish).
+    - Edition merges union publisher links per identifier pair (base first,
+      positions renumbered) or apply the chosen source record's set to every
+      identifier.
+    - Catalog reads join `edition_identifier_shape`, and the completeness and
+      identifier reports read the claim table and the publisher links.
+    - Feed observability: the feed generator now exports
+      `bibliograph_feed_request_duration_seconds`,
+      `bibliograph_feed_page_items`, `bibliograph_feed_pages_total`,
+      `bibliograph_feed_follow_dids`, `bibliograph_feed_query_duration_seconds`
+      and `bibliograph_feed_auth_failures_total`, the last labelled by a bounded
+      reason (`missing`, `format`, `claims`, `expired`, `issuer`, `signature`)
+      carried on `FeedAuthError.reason`, so rejections are countable without
+      parsing messages.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 16:18:36 +0000
+
 bibliograph-web (0.2.14-1) unstable; urgency=medium
 
   * 0.2.14 release: lockstep version bump, no web payload changes.
