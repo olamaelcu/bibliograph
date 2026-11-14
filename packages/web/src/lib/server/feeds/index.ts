@@ -2,7 +2,15 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 
 import { CatalogUnavailableError, catalogPool } from '$lib/server/catalog/db';
-import { metrics, recordFeedRequest } from '$lib/server/metrics';
+import {
+  metrics,
+  recordFeedAuthFailure,
+  recordFeedFollowDids,
+  recordFeedPage,
+  recordFeedQueryDuration,
+  recordFeedRequest,
+  recordFeedRequestDuration
+} from '$lib/server/metrics';
 import { createDidResolver } from './did';
 import { FeedAuthError, verifyFeedServiceJwt, type DidResolver } from './auth';
 import {
@@ -86,6 +94,7 @@ function didResolver(url: string): DidResolver {
 }
 
 export function describeFeedGenerator(): Response {
+  const started = performance.now();
   const did = feedGeneratorDid();
   const response =
     did === null
@@ -95,6 +104,7 @@ export function describeFeedGenerator(): Response {
           feeds: FEED_KINDS.map((kind) => ({ uri: feedUri(did, kind) }))
         });
   recordFeedRequest(metrics, 'describe', response.status);
+  recordFeedRequestDuration(metrics, 'describe', (performance.now() - started) / 1000);
   return response;
 }
 
@@ -104,11 +114,13 @@ export function describeFeedGenerator(): Response {
  * the public page.
  */
 export async function getFeedSkeleton(request: Request): Promise<Response> {
+  const started = performance.now();
   // `invalid` covers every early rejection; once the feed parameter parses,
   // the metric carries the actual feed kind. Both are bounded label values.
   let metricsKind = 'invalid';
   const respond = (response: Response): Response => {
     recordFeedRequest(metrics, metricsKind, response.status);
+    recordFeedRequestDuration(metrics, metricsKind, (performance.now() - started) / 1000);
     return response;
   };
 
@@ -148,6 +160,7 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
     if (plc === null) return respond(missingConfig('PLC_URL'));
     const token = bearerToken(request.headers.get('authorization'));
     if (token === null) {
+      recordFeedAuthFailure(metrics, 'missing');
       return respond(
         fail(401, ERROR_AUTH_REQUIRED, 'this feed requires an atproto service token')
       );
@@ -159,6 +172,7 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
       });
     } catch (error) {
       if (error instanceof FeedAuthError) {
+        recordFeedAuthFailure(metrics, error.reason);
         return respond(fail(401, ERROR_AUTH_REQUIRED, error.message));
       }
       throw error;
@@ -171,7 +185,13 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
       kind,
       viewerDid,
       limit,
-      cursor
+      cursor,
+      observe: (observation) => {
+        recordFeedQueryDuration(metrics, observation.event, observation.durationSeconds);
+        if (observation.event === 'follow_dids') {
+          recordFeedFollowDids(metrics, observation.kind, observation.dids);
+        }
+      }
     });
   } catch (error) {
     if (error instanceof CatalogUnavailableError) {
@@ -181,5 +201,6 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
     return respond(fail(503, ERROR_UNAVAILABLE, 'feed database is unavailable'));
   }
 
+  recordFeedPage(metrics, metricsKind, { items: page.feed.length, paged: cursor !== null });
   return respond(json(page));
 }

@@ -262,3 +262,41 @@ test('rejects a non-compact token', async () => {
     /not a compact JWT/
   );
 });
+
+/** One fixed issuer DID: the reason codes do not depend on the identity. */
+const ISS = 'did:plc:feedreasoncode';
+
+async function reasonFor(
+  token: string,
+  resolveDid: (did: string) => Promise<DidDocument | null>
+): Promise<string> {
+  try {
+    await verifyFeedServiceJwt(token, { audience: `${ISS}#atproto_feed`, resolveDid, now: NOW });
+  } catch (error) {
+    assert.ok(error instanceof FeedAuthError);
+    return error.reason;
+  }
+  assert.fail('expected a rejection');
+}
+
+test('rejections carry a bounded reason code', async () => {
+  const keypair = await Secp256k1Keypair.create();
+  const valid = await signJwt(keypair, { iss: ISS });
+  const documents = resolverFor({ [ISS]: documentFor(ISS, keypair) });
+
+  assert.equal(await reasonFor('not-a-jwt', documents), 'format');
+
+  const wrongAudience = await signJwt(keypair, { iss: ISS, aud: `${ISS}#other` });
+  assert.equal(await reasonFor(wrongAudience, documents), 'claims');
+
+  const expired = await signJwt(keypair, { iss: ISS, iat: NOW - 120, exp: NOW - 60 });
+  assert.equal(await reasonFor(expired, documents), 'expired');
+
+  assert.equal(await reasonFor(valid, resolverFor({})), 'issuer');
+
+  const [header, payload, signature] = valid.split('.') as [string, string, string];
+  const bytes = Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  bytes[0] = (bytes[0] ?? 0) ^ 0xff;
+  const tampered = `${header}.${payload}.${bytes.toString('base64url')}`;
+  assert.equal(await reasonFor(tampered, documents), 'signature');
+});

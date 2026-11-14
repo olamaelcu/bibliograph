@@ -200,11 +200,18 @@ export async function feedDids(
   return [viewerDid, ...followed.filter((did) => did !== viewerDid)];
 }
 
+/** One timed phase of a skeleton page; the edge maps these to metrics. */
+export type FeedPageObservation =
+  | { event: 'follow_dids'; kind: FeedKind; dids: number; durationSeconds: number }
+  | { event: 'page'; kind: FeedKind; durationSeconds: number };
+
 export type FeedPageOptions = {
   kind: FeedKind;
   viewerDid: string | null;
   limit: number;
   cursor?: FeedCursor | null;
+  /** Optional sink for per-phase timings; absent in tests that do not care. */
+  observe?: (observation: FeedPageObservation) => void;
 };
 
 /**
@@ -216,7 +223,16 @@ export async function fetchFeedPage(
   pool: Queryable,
   options: FeedPageOptions
 ): Promise<FeedSkeleton> {
+  const didsStarted = performance.now();
   const dids = await feedDids(pool, options.kind, options.viewerDid);
+  if (dids !== null) {
+    options.observe?.({
+      event: 'follow_dids',
+      kind: options.kind,
+      dids: dids.length,
+      durationSeconds: (performance.now() - didsStarted) / 1000
+    });
+  }
   if (dids !== null && dids.length === 0) return { feed: [] };
 
   const values: unknown[] = [REVIEW_COLLECTION, BOOK_STATUS_COLLECTION];
@@ -249,7 +265,13 @@ export async function fetchFeedPage(
   values.push(options.limit + 1);
   sql += ` ORDER BY record::jsonb->>'createdAt' DESC NULLS LAST, uri DESC LIMIT $${values.length}`;
 
+  const pageStarted = performance.now();
   const result = await pool.query(sql, values);
+  options.observe?.({
+    event: 'page',
+    kind: options.kind,
+    durationSeconds: (performance.now() - pageStarted) / 1000
+  });
   const rows = result.rows
     .map(asFeedRow)
     .filter((row): row is FeedRow => row !== null)

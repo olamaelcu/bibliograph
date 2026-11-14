@@ -217,6 +217,41 @@ test('cursors are strict base64url JSON {c,u}', () => {
   for (const value of cases) assert.equal(decodeCursor(value), null, value);
 });
 
+test('reports follow-set and page phases once each, and only page for public', async () => {
+  const followingEvents: string[] = [];
+  const followingDids: number[] = [];
+  const durations: number[] = [];
+  const followingPool = queuedPool([
+    [{ did: 'did:plc:one' }, { did: 'at://did:plc:two' }],
+    [row('at://did:plc:one/review/1', REVIEW_COLLECTION, {}, '2026-03-01T00:00:00.000Z')]
+  ]);
+
+  await fetchFeedPage(followingPool, {
+    kind: 'following',
+    viewerDid: 'did:plc:viewer',
+    limit: 20,
+    observe: (observation) => {
+      followingEvents.push(observation.event);
+      durations.push(observation.durationSeconds);
+      if (observation.event === 'follow_dids') followingDids.push(observation.dids);
+    }
+  });
+
+  assert.deepEqual(followingEvents, ['follow_dids', 'page']);
+  assert.deepEqual(followingDids, [2]);
+  for (const duration of durations) assert.equal(typeof duration, 'number');
+
+  const publicEvents: string[] = [];
+  const publicPool = queuedPool([[row('at://a/review/1', REVIEW_COLLECTION, {}, null)]]);
+  await fetchFeedPage(publicPool, {
+    kind: 'public',
+    viewerDid: null,
+    limit: 20,
+    observe: (observation) => publicEvents.push(observation.event)
+  });
+  assert.deepEqual(publicEvents, ['page']);
+});
+
 test('advertises exactly the four documented feeds and no recommendations', () => {
   const kinds: readonly string[] = FEED_KINDS;
   assert.deepEqual(kinds, ['public', 'following', 'extended', 'dynamic']);

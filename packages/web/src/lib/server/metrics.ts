@@ -331,6 +331,32 @@ export function feedOutcomeForStatus(status: number): string {
   }
 }
 
+/** SQL phases `fetchFeedPage` reports; anything else collapses to `other`. */
+const FEED_QUERY_PHASES: Record<string, true> = { follow_dids: true, page: true };
+
+export function normalizeFeedQueryPhase(phase: string): string {
+  return FEED_QUERY_PHASES[phase] === true ? phase : 'other';
+}
+
+/** Every `FeedAuthError.reason` plus `missing` for an absent Authorization header. */
+const FEED_AUTH_FAILURE_REASONS: Record<string, true> = {
+  missing: true,
+  format: true,
+  claims: true,
+  expired: true,
+  issuer: true,
+  signature: true
+};
+
+export function normalizeFeedAuthReason(reason: string): string {
+  return FEED_AUTH_FAILURE_REASONS[reason] === true ? reason : 'other';
+}
+
+/** Items per page: 0 catches empty feeds, 100 is the client limit. */
+const FEED_PAGE_ITEM_BUCKETS = [0, 1, 5, 10, 20, 50, 100] as const;
+/** Follow-set sizes, including the 500-DID cap (`MAX_FEED_DIDS`). */
+const FEED_DID_BUCKETS = [0, 1, 5, 10, 25, 50, 100, 250, 500] as const;
+
 // ---------------------------------------------------------------------------
 // Families
 // ---------------------------------------------------------------------------
@@ -348,6 +374,12 @@ export interface WebMetrics {
   readonly catalogQueries: Counter;
   readonly catalogQueryDuration: Histogram;
   readonly feedRequests: Counter;
+  readonly feedRequestDuration: Histogram;
+  readonly feedPageItems: Histogram;
+  readonly feedPages: Counter;
+  readonly feedFollowDids: Histogram;
+  readonly feedQueryDuration: Histogram;
+  readonly feedAuthFailures: Counter;
   readonly processResidentMemory: Gauge;
   readonly processCpuSeconds: Gauge;
   readonly processUptime: Gauge;
@@ -385,6 +417,32 @@ export function createWebMetrics(): WebMetrics {
     feedRequests: registry.counter(
       'bibliograph_feed_requests_total',
       'Feed generator requests, by kind and outcome.'
+    ),
+    feedRequestDuration: registry.histogram(
+      'bibliograph_feed_request_duration_seconds',
+      'Time spent generating a feed response, by kind.'
+    ),
+    feedPageItems: registry.histogram(
+      'bibliograph_feed_page_items',
+      'Skeleton items returned per feed page, by kind.',
+      FEED_PAGE_ITEM_BUCKETS
+    ),
+    feedPages: registry.counter(
+      'bibliograph_feed_pages_total',
+      'Feed skeleton pages served, by kind and whether the request carried a cursor.'
+    ),
+    feedFollowDids: registry.histogram(
+      'bibliograph_feed_follow_dids',
+      'DIDs a personalized feed resolved before paging, by kind.',
+      FEED_DID_BUCKETS
+    ),
+    feedQueryDuration: registry.histogram(
+      'bibliograph_feed_query_duration_seconds',
+      'Time spent in one feed SQL phase, by operation.'
+    ),
+    feedAuthFailures: registry.counter(
+      'bibliograph_feed_auth_failures_total',
+      'Personalized feed requests rejected by service-token verification, by reason.'
     ),
     processResidentMemory: registry.gauge(
       'bibliograph_process_resident_memory_bytes',
@@ -485,4 +543,38 @@ export function recordCatalogQuery(
 
 export function recordFeedRequest(m: WebMetrics, kind: string, status: number): void {
   m.feedRequests.inc({ kind: normalizeFeedKind(kind), outcome: feedOutcomeForStatus(status) });
+}
+
+export function recordFeedRequestDuration(
+  m: WebMetrics,
+  kind: string,
+  durationSeconds: number
+): void {
+  m.feedRequestDuration.observe({ kind: normalizeFeedKind(kind) }, durationSeconds);
+}
+
+export function recordFeedPage(
+  m: WebMetrics,
+  kind: string,
+  page: { items: number; paged: boolean }
+): void {
+  const normalized = normalizeFeedKind(kind);
+  m.feedPages.inc({ kind: normalized, cursor: page.paged ? 'next' : 'first' });
+  m.feedPageItems.observe({ kind: normalized }, page.items);
+}
+
+export function recordFeedFollowDids(m: WebMetrics, kind: string, dids: number): void {
+  m.feedFollowDids.observe({ kind: normalizeFeedKind(kind) }, dids);
+}
+
+export function recordFeedQueryDuration(
+  m: WebMetrics,
+  phase: string,
+  durationSeconds: number
+): void {
+  m.feedQueryDuration.observe({ operation: normalizeFeedQueryPhase(phase) }, durationSeconds);
+}
+
+export function recordFeedAuthFailure(m: WebMetrics, reason: string): void {
+  m.feedAuthFailures.inc({ reason: normalizeFeedAuthReason(reason) });
 }

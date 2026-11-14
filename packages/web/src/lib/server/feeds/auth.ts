@@ -34,11 +34,18 @@ export type VerifyFeedJwtOptions = {
   now?: number;
 };
 
+/** Bounded reason codes so the edge can label rejections without parsing messages. */
+export const FEED_AUTH_REASONS = ['format', 'claims', 'expired', 'issuer', 'signature'] as const;
+export type FeedAuthReason = (typeof FEED_AUTH_REASONS)[number];
+
 /** Every rejection is a `401`; the message says what failed without leaking crypto detail. */
 export class FeedAuthError extends Error {
-  constructor(message: string) {
+  readonly reason: FeedAuthReason;
+
+  constructor(reason: FeedAuthReason, message: string) {
     super(message);
     this.name = 'FeedAuthError';
+    this.reason = reason;
   }
 }
 
@@ -94,55 +101,66 @@ export async function verifyFeedServiceJwt(
   options: VerifyFeedJwtOptions
 ): Promise<string> {
   const parts = token.split('.');
-  if (parts.length !== 3) throw new FeedAuthError('the service token is not a compact JWT');
+  if (parts.length !== 3) {
+    throw new FeedAuthError('format', 'the service token is not a compact JWT');
+  }
   const [encodedHeader, encodedPayload, encodedSignature] = parts as [string, string, string];
 
   const headerBytes = decodeBase64Url(encodedHeader);
   const payloadBytes = decodeBase64Url(encodedPayload);
   const signature = decodeBase64Url(encodedSignature);
   if (!headerBytes || !payloadBytes || !signature) {
-    throw new FeedAuthError('the service token is not base64url encoded');
+    throw new FeedAuthError('format', 'the service token is not base64url encoded');
   }
 
   const header = decodeJsonObject(headerBytes) as JwtHeader | null;
   const payload = decodeJsonObject(payloadBytes) as JwtPayload | null;
-  if (!header || !payload) throw new FeedAuthError('the service token is not valid JSON');
+  if (!header || !payload) {
+    throw new FeedAuthError('format', 'the service token is not valid JSON');
+  }
 
   if (typeof header.alg !== 'string' || ALLOWED_ALGS[header.alg] !== true) {
-    throw new FeedAuthError('the service token uses an unsupported algorithm');
+    throw new FeedAuthError('claims', 'the service token uses an unsupported algorithm');
   }
   if (header.typ !== undefined && header.typ !== 'JWT' && header.typ !== 'at+jwt') {
-    throw new FeedAuthError('the service token has an unsupported type');
+    throw new FeedAuthError('claims', 'the service token has an unsupported type');
   }
 
   const { iss, aud, lxm, exp, iat } = payload;
-  if (!isDid(iss)) throw new FeedAuthError('the service token issuer is not a DID');
+  if (!isDid(iss)) throw new FeedAuthError('claims', 'the service token issuer is not a DID');
   if (aud !== options.audience) {
-    throw new FeedAuthError('the service token audience is not this feed generator');
+    throw new FeedAuthError('claims', 'the service token audience is not this feed generator');
   }
   if (lxm !== FEED_SKELETON_LXM) {
-    throw new FeedAuthError('the service token is not for com.atproto.feed.getFeedSkeleton');
+    throw new FeedAuthError(
+      'claims',
+      'the service token is not for com.atproto.feed.getFeedSkeleton'
+    );
   }
   if (!isInteger(exp) || !isInteger(iat)) {
-    throw new FeedAuthError('the service token has no integer exp/iat');
+    throw new FeedAuthError('claims', 'the service token has no integer exp/iat');
   }
 
   const now = options.now ?? Math.floor(Date.now() / 1000);
-  if (exp <= now) throw new FeedAuthError('the service token has expired');
-  if (iat > now + CLOCK_SKEW_SECONDS) throw new FeedAuthError('the service token was issued in the future');
-  if (exp <= iat) throw new FeedAuthError('the service token expires before it was issued');
+  if (exp <= now) throw new FeedAuthError('expired', 'the service token has expired');
+  if (iat > now + CLOCK_SKEW_SECONDS) {
+    throw new FeedAuthError('expired', 'the service token was issued in the future');
+  }
+  if (exp <= iat) {
+    throw new FeedAuthError('expired', 'the service token expires before it was issued');
+  }
   if (exp - iat > MAX_TOKEN_LIFETIME_SECONDS) {
-    throw new FeedAuthError('the service token lifetime is too long');
+    throw new FeedAuthError('expired', 'the service token lifetime is too long');
   }
 
   let document: DidDocument | null;
   try {
     document = await options.resolveDid(iss);
   } catch {
-    throw new FeedAuthError('the service token issuer could not be resolved');
+    throw new FeedAuthError('issuer', 'the service token issuer could not be resolved');
   }
   if (!document || typeof document !== 'object') {
-    throw new FeedAuthError('the service token issuer could not be resolved');
+    throw new FeedAuthError('issuer', 'the service token issuer could not be resolved');
   }
 
   const method = Array.isArray(document.verificationMethod)
@@ -150,12 +168,14 @@ export async function verifyFeedServiceJwt(
         (entry) => entry !== null && typeof entry === 'object' && entry.id === `${iss}#atproto`
       )
     : undefined;
-  if (!method) throw new FeedAuthError('the issuer has no #atproto verification method');
+  if (!method) {
+    throw new FeedAuthError('issuer', 'the issuer has no #atproto verification method');
+  }
   if (method.type !== 'Multikey' || typeof method.publicKeyMultibase !== 'string') {
-    throw new FeedAuthError('the issuer #atproto key is not a Multikey');
+    throw new FeedAuthError('issuer', 'the issuer #atproto key is not a Multikey');
   }
   if (method.controller !== undefined && method.controller !== iss) {
-    throw new FeedAuthError('the issuer #atproto key is controlled by another DID');
+    throw new FeedAuthError('issuer', 'the issuer #atproto key is controlled by another DID');
   }
 
   // `verifySignature` hashes with SHA-256, expects a compact `r || s` ECDSA
@@ -172,7 +192,7 @@ export async function verifyFeedServiceJwt(
   } catch {
     valid = false;
   }
-  if (!valid) throw new FeedAuthError('the service token signature does not verify');
+  if (!valid) throw new FeedAuthError('signature', 'the service token signature does not verify');
 
   return iss;
 }

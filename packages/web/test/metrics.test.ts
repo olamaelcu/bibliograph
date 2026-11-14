@@ -6,13 +6,20 @@ import {
   collectProcessMetrics,
   createWebMetrics,
   feedOutcomeForStatus,
+  normalizeFeedAuthReason,
   normalizeFeedKind,
+  normalizeFeedQueryPhase,
   normalizeHttpMethod,
   normalizeRoute,
   normalizeStatus,
   normalizeXrpcMethod,
   recordCatalogQuery,
+  recordFeedAuthFailure,
+  recordFeedFollowDids,
+  recordFeedPage,
+  recordFeedQueryDuration,
   recordFeedRequest,
+  recordFeedRequestDuration,
   recordHappyViewRequest,
   recordHttpRequest,
   recordPdsProxyRequest,
@@ -186,6 +193,46 @@ test('catalog operations and feed kinds are fixed label sets', () => {
   assert.equal(feedOutcomeForStatus(503), 'unavailable');
 });
 
+test('feed latency, page size, follow-set and auth-failure metrics are bounded', () => {
+  const metrics = createWebMetrics();
+  recordFeedRequestDuration(metrics, 'public', 0.042);
+  recordFeedRequestDuration(metrics, 'weird', 0.2);
+  recordFeedPage(metrics, 'following', { items: 12, paged: false });
+  recordFeedPage(metrics, 'following', { items: 3, paged: true });
+  recordFeedFollowDids(metrics, 'extended', 2);
+  recordFeedQueryDuration(metrics, 'page', 0.015);
+  recordFeedQueryDuration(metrics, 'bogus', 0.015);
+  recordFeedAuthFailure(metrics, 'missing');
+  recordFeedAuthFailure(metrics, 'bogus');
+
+  const text = renderWebMetrics(metrics);
+  assert.match(text, /^bibliograph_feed_request_duration_seconds_count\{kind="public"\} 1$/m);
+  assert.match(text, /^bibliograph_feed_request_duration_seconds_count\{kind="other"\} 1$/m);
+  assert.match(
+    text,
+    /^bibliograph_feed_pages_total\{kind="following",cursor="first"\} 1$/m
+  );
+  assert.match(text, /^bibliograph_feed_pages_total\{kind="following",cursor="next"\} 1$/m);
+  assert.match(text, /^bibliograph_feed_page_items_count\{kind="following"\} 2$/m);
+  assert.match(text, /^bibliograph_feed_page_items_sum\{kind="following"\} 15$/m);
+  assert.match(text, /^bibliograph_feed_follow_dids_count\{kind="extended"\} 1$/m);
+  assert.match(
+    text,
+    /^bibliograph_feed_query_duration_seconds_count\{operation="page"\} 1$/m
+  );
+  assert.match(
+    text,
+    /^bibliograph_feed_query_duration_seconds_count\{operation="other"\} 1$/m
+  );
+  assert.match(text, /^bibliograph_feed_auth_failures_total\{reason="missing"\} 1$/m);
+  assert.match(text, /^bibliograph_feed_auth_failures_total\{reason="other"\} 1$/m);
+
+  assert.equal(normalizeFeedQueryPhase('follow_dids'), 'follow_dids');
+  assert.equal(normalizeFeedQueryPhase('bogus'), 'other');
+  assert.equal(normalizeFeedAuthReason('signature'), 'signature');
+  assert.equal(normalizeFeedAuthReason('bogus'), 'other');
+});
+
 test('process gauges are collected from the live process shape', () => {
   const metrics = createWebMetrics();
   collectProcessMetrics(metrics, {
@@ -211,6 +258,12 @@ test('an untouched registry still exposes every contracted family header', () =>
     ['bibliograph_catalog_queries_total', 'counter'],
     ['bibliograph_catalog_query_duration_seconds', 'histogram'],
     ['bibliograph_feed_requests_total', 'counter'],
+    ['bibliograph_feed_request_duration_seconds', 'histogram'],
+    ['bibliograph_feed_page_items', 'histogram'],
+    ['bibliograph_feed_pages_total', 'counter'],
+    ['bibliograph_feed_follow_dids', 'histogram'],
+    ['bibliograph_feed_query_duration_seconds', 'histogram'],
+    ['bibliograph_feed_auth_failures_total', 'counter'],
     ['bibliograph_process_resident_memory_bytes', 'gauge'],
     ['bibliograph_process_cpu_seconds_total', 'gauge'],
     ['bibliograph_process_uptime_seconds', 'gauge'],
