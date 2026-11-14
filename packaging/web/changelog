@@ -1,3 +1,27 @@
+bibliograph-web (0.2.13-1) unstable; urgency=medium
+
+  * 0.2.13 release: merge one contributor into another.
+
+    - New `/admin/contributor/<id>/merge` page, reachable from the contributor
+      editor's heading and prefilled by `?into=<id|at-uri>`: it searches the
+      same local typeahead, previews what the merge will do, and confirms
+      through a form action. `packages/web/src/lib/server/admin/entity-merge.ts`
+      does the write in one transaction: the survivor keeps its id, at-URI,
+      name and creation date; blank fields (description, inverted name, image
+      URL, born, died) and unused identifiers are absorbed, keeping the
+      survivor's pair but filling in a provider `url` it lacks; every edition
+      credit is repointed at the survivor, except one whose normalized role the
+      survivor already holds there, which is dropped; an edge `ref` naming the
+      absorbed row's at-URI is cleared; the absorbed row is deleted last and its
+      record delete is queued. Publication stays trigger-driven.
+    - Both rows must still carry the revisions the page loaded (409
+      `EntityChanged`); the same row on both sides is 400, an unknown ref 404,
+      and absorbing identifiers that already belong to a third row is 409
+      `DuplicateEntity` with both rows untouched.
+    - No XRPC surface change: the described method count is unchanged.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 08:31:35 +0000
+
 bibliograph-web (0.2.12-1) unstable; urgency=medium
 
   * 0.2.12 release: the getGenresOfBook query.

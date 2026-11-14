@@ -1,3 +1,26 @@
+bibliograph-worker (0.2.13-1) unstable; urgency=medium
+
+  * 0.2.13 release: contributor merge support and a cheaper genre sweep.
+
+    - One contributor (or publisher) can legitimately hold two credits on one
+      edition — author and translator. `pds_enqueue_contributor_editions` and
+      `pds_enqueue_publisher_editions` (0001) joined the link table by entity id
+      and inserted one outbox row per credit position, so the second insert
+      made `ON CONFLICT` fail with `cannot affect row a second time` (21000) and
+      rolled back the whole edit. Both now select `DISTINCT` editions. The web
+      editor's new contributor merge creates exactly that state, which is how
+      the defect surfaced; the definitions are `CREATE OR REPLACE`, so applying
+      the schema repairs an existing database.
+    - `catalog.genres.sweep` no longer proves an empty fresh set with a set
+      difference over the whole catalog: two index-only counts short-circuit it
+      when every edition already has a ledger row. The retry pass reads the
+      ledger directly and orders by its clock, and
+      `edition_genre_fetches_retry_idx` (0005) is partial on
+      `outcome IS DISTINCT FROM 'found'` so already-answered editions leave the
+      walk, replacing the per-row join back to `edition_genres`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 08:31:35 +0000
+
 bibliograph-worker (0.2.12-1) unstable; urgency=medium
 
   * 0.2.12 release: contributor biographies and edition genres.
