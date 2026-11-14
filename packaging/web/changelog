@@ -1,3 +1,24 @@
+bibliograph-web (0.2.12-1) unstable; urgency=medium
+
+  * 0.2.12 release: the getGenresOfBook query.
+
+    - Answer GET net.olamaelcu.livtet.biblio.getGenresOfBook at the edge from
+      the catalog tables, never a provider or the PDS: `uri` must be an
+      edition at-uri, an unknown edition is RecordNotFound, and an edition
+      with no genres yet answers an empty array after queueing one provider
+      fetch. The described XRPC surface is now 47 methods.
+    - Queue that fetch through `enqueueGenreFetch`, which calls the catalog
+      schema's `catalog_enqueue_genre_fetch` so the edge and the worker's
+      sweep share one seven-day claim ledger; a database without 0005-genres
+      or graphile_worker is logged and the read still answers.
+    - Attribute the query in `normalizeXrpcMethod` as a catalog operation
+      instead of `other`.
+    - No contributor-path change: a bio written by the worker's ingest is
+      read by the existing admin editors and the getContributor mapping
+      unchanged.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 08:11:36 +0000
+
 bibliograph-web (0.2.11-1) unstable; urgency=medium
 
   * 0.2.11 release: publish the XRPC surface the deployment serves.

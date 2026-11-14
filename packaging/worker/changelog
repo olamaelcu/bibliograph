@@ -1,3 +1,36 @@
+bibliograph-worker (0.2.12-1) unstable; urgency=medium
+
+  * 0.2.12 release: contributor biographies and edition genres.
+
+    - Persist the provider biography of each credited contributor on ingest.
+      OpenLibrary author detail is now read for every keyed author of an
+      edition lookup — the name and the biography — still bounded to ten per
+      lookup and shared across a work's editions. The new
+      `describeContributors` provider method fills a missing bio for the admin
+      transport. `linkContributors` writes `contributors.description`, clipped
+      to the record's 1024-grapheme / 8192-byte lexicon bounds, and fills it
+      only when the row has none, so an operator-curated bio is never
+      replaced. `/ingest` and `/publisher-import` enrich before writing;
+      `catalog.search` is unchanged, so a 50-candidate run cannot multiply
+      upstream calls. No backfill: existing rows gain a bio the next time an
+      edition crediting them is ingested.
+    - Add edition genres (0005-genres.sql): a curated `genres` vocabulary, the
+      `edition_genres` links and an `edition_genre_fetches` claim ledger, plus
+      `catalog_enqueue_genre_fetch` as the single enqueue point shared by the
+      edge and the worker. The new `catalog.genres` task hydrates one edition
+      from OpenLibrary subjects and Goodreads book-page genres, mapped to
+      canonical names before storage; `catalog.genres.sweep` walks ungenred
+      editions every ten minutes and once at worker boot. A label with no
+      canonical mapping is dropped rather than stored raw. Genres are
+      edge-only and are not part of the published edition record.
+    - Provider reads: OpenLibrary `subjectsFromWork` (with one redirect hop
+      followed for a merged work key) and Goodreads `genresForEdition`, which
+      resolves by Goodreads id or ISBN and never falls back to a title search.
+      A WAF challenge still propagates as a provider failure, not an empty
+      answer.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 08:11:36 +0000
+
 bibliograph-worker (0.2.11-1) unstable; urgency=medium
 
   * 0.2.11 release: lockstep version bump, no worker payload changes.
