@@ -124,6 +124,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'genres',
       'google_books_cache',
       'isbndb_cache',
+      'language_aliases',
       'pds_cids',
       'pds_outbox',
       'provider_daily_usage',
@@ -145,6 +146,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'genres',
       'google_books_cache',
       'isbndb_cache',
+      'language_aliases',
       'pds_cids',
       'pds_outbox',
       'provider_daily_usage',
@@ -173,6 +175,8 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'catalog_enqueue_genre_fetch',
       'editions_next_tid',
       'editions_tid_encode',
+      'normalize_identifier_language',
+      'normalize_language',
       'pds_enqueue_contributor_editions',
       'pds_enqueue_edition',
       'pds_enqueue_edition_child',
@@ -180,7 +184,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_publisher_editions'
     ]]
   );
-  assert.equal(functions.rows.length, 9);
+  assert.equal(functions.rows.length, 11);
 
   const triggers = await pool.query(
     `SELECT tgname FROM pg_trigger t
@@ -192,6 +196,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
   assert.deepEqual(
     triggers.rows.map((row) => row.tgname),
     [
+      'normalize_identifier_language',
       'pds_enqueue_contributor_edits',
       'pds_enqueue_contributor_record',
       'pds_enqueue_contributors',
@@ -676,5 +681,48 @@ test('entities.prepare mints once, queues the record, and is idempotent', { skip
     publishersMinted: 0,
     entityRowsQueued: 0,
     editionsQueued: 0
+  });
+});
+
+test('language claims are normalized to a single BCP 47 spelling', { skip: SKIP }, async () => {
+  const ingest = createIngest({ pool, publisherDid: AUTHORITY });
+  const result = await ingest({
+    identifiers: [{ issuer: 'isbn13', value: '9780000009911' }],
+    title: 'Language normalization probe',
+    language: 'ENG'
+  });
+  assert.ok(result?.uri);
+
+  // The claim trigger rewrites the provider's ISO 639-2 code on write, so the
+  // stored value and the edition's public shape agree with curation's BCP 47.
+  const claim = await pool.query(
+    'SELECT language FROM edition_identifier_info WHERE edition_uri = $1',
+    [result.uri]
+  );
+  assert.deepEqual(claim.rows, [{ language: 'en' }]);
+
+  const shape = await pool.query(
+    'SELECT language FROM edition_identifier_shape WHERE edition_uri = $1',
+    [result.uri]
+  );
+  assert.deepEqual(shape.rows, [{ language: 'en' }]);
+
+  // Both ISO 639-2 forms map, a region suffix survives, and a code the alias
+  // table does not know is only trimmed.
+  const normalized = await pool.query(
+    `SELECT normalize_language('fre') AS fre,
+            normalize_language('fra') AS fra,
+            normalize_language('ENG-us') AS mixed,
+            normalize_language('en') AS plain,
+            normalize_language('zzz') AS unknown,
+            normalize_language('  ') AS blank`
+  );
+  assert.deepEqual(normalized.rows[0], {
+    fre: 'fr',
+    fra: 'fr',
+    mixed: 'en-us',
+    plain: 'en',
+    unknown: 'zzz',
+    blank: null
   });
 });
