@@ -5,6 +5,7 @@ import { createTasks } from './lib/tasks.js';
 import { createOutboxPublisher } from './lib/publish.js';
 import { resolvePublisherAuthority, resolvePublisherConfig } from './lib/pds.js';
 import { ensureSupportSchema } from './lib/setup.js';
+import { createCoverMetrics } from './lib/cover-metrics.js';
 import { startMetricsServer } from './lib/metrics.js';
 import { startAdminServer } from './lib/admin.js';
 import { parseDailyLimit } from './lib/providers/usage.js';
@@ -29,6 +30,8 @@ const publisherHost = process.env.ATP_SERVICE_HOST || 'biblio.livtet.olamaelcu.n
 // Unset disables the cover cache instead of guessing a path.
 const coversCacheDir = (process.env.COVERS_CACHE_DIR ?? '').trim();
 const coversBaseUrl = coversBaseUrlFromEnv(process.env, publisherHost);
+// One counter instance: the cover jobs increment it, the scrape reports it.
+const coverMetrics = createCoverMetrics();
 if (coversCacheDir === '') {
   console.error(
     'worker: cover caching is DISABLED — COVERS_CACHE_DIR is not set. ' +
@@ -114,6 +117,7 @@ try {
     pool,
     limit: isbndbDailyLimit,
     providerMetrics: providers.metrics,
+    coverMetrics,
     // Outbox gauges count the rows this publisher can claim; a database shared
     // with another identity must not inflate this worker's backlog.
     publisherDid
@@ -144,7 +148,8 @@ const taskList = createTasks({
   publisherHost,
   publisher,
   coversCacheDir,
-  coversBaseUrl
+  coversBaseUrl,
+  coverMetrics
 });
 
 // One publisher at a time: the task queue serializes the jobs, so two batches

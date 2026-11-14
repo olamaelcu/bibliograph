@@ -86,11 +86,45 @@ export function readProcessMetrics(source = process) {
   };
 }
 
+/**
+ * Label values here are code-controlled tokens (`cached`, `rejected`, `retry`,
+ * an HTTP status, `none`). Anything else is stripped, which keeps the exposition
+ * valid without a general-purpose escaper.
+ */
+function labelValue(value) {
+  return String(value).replace(/[^A-Za-z0-9_.-]/g, '');
+}
+
+/**
+ * Cover download outcomes, counted in memory by `catalog.covers`.
+ *
+ * `result` says what happened — `cached`, `rejected` (terminal, never retried)
+ * or `retry` (the provider failed and graphile will try again) — and `status`
+ * carries the HTTP status that decided it, or `none` when no response arrived.
+ * The series count stays bounded because both labels come from this package's
+ * own branches, not from response content.
+ */
+function renderCoverMetrics(coverMetrics) {
+  const rows = coverMetrics?.snapshot?.() ?? [];
+  const lines = [
+    '# HELP bibliograph_cover_downloads_total Cover image downloads attempted, by result and HTTP status.',
+    '# TYPE bibliograph_cover_downloads_total counter'
+  ];
+  for (const row of rows) {
+    lines.push(
+      `bibliograph_cover_downloads_total{result="${labelValue(row.result)}",` +
+        `status="${labelValue(row.status)}"} ${Math.trunc(nonNegative(row.count))}`
+    );
+  }
+  return lines.join('\n');
+}
+
 /** Render the Prometheus text exposition for quota, outbox and provider telemetry. */
 export function renderMetrics({
   calls,
   limit = DEFAULT_ISBNDB_DAILY_LIMIT,
   providerMetrics,
+  coverMetrics,
   outbox = { ready: 0, parked: 0, oldestAgeSeconds: 0 },
   runtime = readProcessMetrics()
 }) {
@@ -142,6 +176,7 @@ export function renderMetrics({
     '# HELP bibliograph_pds_outbox_oldest_age_seconds Age of the oldest claimable row, or 0 when none.',
     '# TYPE bibliograph_pds_outbox_oldest_age_seconds gauge',
     `bibliograph_pds_outbox_oldest_age_seconds ${nonNegative(outbox.oldestAgeSeconds)}`,
+    renderCoverMetrics(coverMetrics),
     renderProviderMetrics(providerMetrics),
     ''
   ].join('\n');
@@ -166,6 +201,7 @@ export function createMetricsServer({
   pool,
   limit = DEFAULT_ISBNDB_DAILY_LIMIT,
   providerMetrics,
+  coverMetrics,
   publisherDid,
   logger = console
 } = {}) {
@@ -199,7 +235,7 @@ export function createMetricsServer({
       response.end(
         request.method === 'HEAD'
           ? undefined
-          : renderMetrics({ calls, limit, providerMetrics, outbox })
+          : renderMetrics({ calls, limit, providerMetrics, coverMetrics, outbox })
       );
     } catch (error) {
       // A metrics scrape must never take the worker down; report the failure to
@@ -219,6 +255,7 @@ export async function startMetricsServer({
   pool,
   limit = DEFAULT_ISBNDB_DAILY_LIMIT,
   providerMetrics,
+  coverMetrics,
   publisherDid,
   host,
   port,
@@ -226,7 +263,14 @@ export async function startMetricsServer({
 } = {}) {
   const bindHost = (host ?? process.env.WORKER_METRICS_HOST ?? '').trim() || DEFAULT_HOST;
   const bindPort = parseMetricsPort(port ?? process.env.WORKER_METRICS_PORT, logger);
-  const server = createMetricsServer({ pool, limit, providerMetrics, publisherDid, logger });
+  const server = createMetricsServer({
+    pool,
+    limit,
+    providerMetrics,
+    coverMetrics,
+    publisherDid,
+    logger
+  });
 
   await new Promise((resolve, reject) => {
     const onError = (error) => {

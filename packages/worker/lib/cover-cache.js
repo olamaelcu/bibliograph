@@ -189,7 +189,19 @@ export async function downloadCover(
   const response = await coverGate(() =>
     fetchImpl(source, { redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) })
   );
-  if (!response.ok) throw new Error(`${source} answered ${response.status}`);
+  if (!response.ok) {
+    // A 4xx (403 for a Google Books volume with no public cover, 404 for a
+    // withdrawn image) answers the same way tomorrow, so the URL is terminal
+    // and retrying it only spends provider requests. 408/429 and 5xx are the
+    // provider asking for time, and a transport error never reaches here.
+    const status = response.status;
+    const message = `${source} answered ${status}`;
+    const retryable = status === 408 || status === 429 || status >= 500;
+    throw Object.assign(
+      retryable ? new Error(message) : new CoverRejectedError(message),
+      { status }
+    );
+  }
 
   const declared = Number.parseInt(response.headers?.get?.('content-length') ?? '', 10);
   if (Number.isFinite(declared) && declared > MAX_COVER_BYTES) {

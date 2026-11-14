@@ -408,7 +408,11 @@ backlog for the configured publisher DID: `bibliograph_pds_outbox_ready`
 `bibliograph_process_cpu_seconds_total`, `bibliograph_process_uptime_seconds`,
 `bibliograph_nodejs_heap_used_bytes`). In-memory provider
 attempt/retry/request counters and breaker states are rendered by the same
-worker. A scrape that cannot query the database answers `500`; a port that
+worker, as is `bibliograph_cover_downloads_total{result,status}` (cover
+download outcomes: `cached`, `rejected` for a URL that will never retry, and
+`retry` for a provider failure), so a provider refusing cover images is visible
+without reading the journal. A scrape that cannot query the database answers
+`500`; a port that
 cannot be bound is logged and leaves the worker running. The default loopback
 bind keeps the endpoint off the network;
 set `WORKER_METRICS_HOST=0.0.0.0` only for a container/host scraper and

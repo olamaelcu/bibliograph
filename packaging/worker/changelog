@@ -1,3 +1,23 @@
+bibliograph-worker (0.2.18-1) unstable; urgency=medium
+
+  * 0.2.18 release: a refused cover URL is terminal, and downloads are counted.
+
+    - `downloadCover` treats an HTTP 4xx (other than 408/429) as a
+      `CoverRejectedError`: a Google Books `books/content` URL that answers 403
+      answers the same way tomorrow, so retrying it only spent provider
+      requests. Those jobs used to exhaust their five attempts and leave the
+      ledger row `inflight`, so the same URL was re-attempted a week later.
+      408/429/5xx and transport failures stay retryable, and every error now
+      carries the HTTP `status` that produced it.
+    - New `bibliograph_cover_downloads_total{result,status}` counter
+      (`result` = `cached` | `rejected` | `retry`, `status` = the HTTP status or
+      `none`) on the worker scrape. Cover download failures were previously
+      only in the journal, which is why the 403s were invisible to alerting.
+      The counter is process-local, so it resets on restart, like the provider
+      counters beside it.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 19:19:57 +0000
+
 bibliograph-worker (0.2.17-1) unstable; urgency=medium
 
   * 0.2.17 release: covers are cached on disk, and a format carries its unit.

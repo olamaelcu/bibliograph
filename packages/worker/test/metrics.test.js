@@ -7,6 +7,7 @@ import {
   readProcessMetrics,
   renderMetrics
 } from '../lib/metrics.js';
+import { createCoverMetrics } from '../lib/cover-metrics.js';
 import { MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from '../lib/publish.js';
 
 
@@ -19,6 +20,35 @@ import { MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from '../lib/publish.js';
 
 const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
 
+
+test('cover download outcomes render by result and status', () => {
+  // The endpoint is the only place an operator can see the 403s that never
+  // reach the ledger as a retryable failure; the labels must survive a scrape.
+  const coverMetrics = createCoverMetrics();
+  coverMetrics.record('cached', '200');
+  coverMetrics.record('rejected', '403');
+  coverMetrics.record('rejected', '403');
+  coverMetrics.record('retry', '503');
+
+  const text = renderMetrics({ calls: 0, limit: 100, coverMetrics });
+
+  assert.match(
+    text,
+    /# TYPE bibliograph_cover_downloads_total counter/
+  );
+  assert.match(
+    text,
+    /bibliograph_cover_downloads_total\{result="cached",status="200"\} 1/
+  );
+  assert.match(
+    text,
+    /bibliograph_cover_downloads_total\{result="rejected",status="403"\} 2/
+  );
+  assert.match(
+    text,
+    /bibliograph_cover_downloads_total\{result="retry",status="503"\} 1/
+  );
+});
 const EMPTY = { ready: 0, parked: 0, oldestAgeSeconds: 0 };
 
 test('renders worker liveness and outbox gauges with the existing families', () => {

@@ -12,6 +12,7 @@ import {
   removeCachedCover,
   writeCachedCover
 } from './cover-cache.js';
+import { createCoverMetrics } from './cover-metrics.js';
 
 /** Upper bound on editions one catalog task ingests; providers may return fewer. */
 export const CANDIDATES_PER_TASK = 50;
@@ -136,7 +137,10 @@ export function createTasks({
   // is disabled rather than guessing a directory the process cannot write.
   coversCacheDir = '',
   coversBaseUrl = '',
-  coverFetch = fetch
+  coverFetch = fetch,
+  // Shared with the metrics endpoint so a scrape reports what the jobs saw; a
+  // bare caller (a test, a script) gets its own counter.
+  coverMetrics = createCoverMetrics()
 }) {
   const ingest = createIngest({ pool, publisherDid, publisherHost });
   const coversDir = coversCacheDir.trim();
@@ -565,7 +569,13 @@ export function createTasks({
         // source, and the edition loses a URL that never had a cover behind it.
         // Anything else (transport, a 5xx, a truncated response) is a provider
         // problem, so it propagates and graphile retries with a fresh claim.
-        if (!(error instanceof CoverRejectedError)) throw error;
+        // The endpoint reports both classes: `rejected` never retries, `retry`
+        // will, so a rising `retry` count is the provider-health signal.
+        if (!(error instanceof CoverRejectedError)) {
+          coverMetrics.record('retry', String(error.status ?? 'none'));
+          throw error;
+        }
+        coverMetrics.record('rejected', String(error.status ?? 'none'));
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
@@ -659,6 +669,7 @@ export function createTasks({
       helpers.logger.info(
         `catalog.covers ${uri}: cached ${image.byteSize} bytes from ${source}`
       );
+      coverMetrics.record('cached', '200');
     },
 
     // Files editions that still need a cached cover into the queue.

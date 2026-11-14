@@ -16,6 +16,7 @@ import { join } from 'node:path';
 
 import { createTasks } from '../lib/tasks.js';
 import { coverCachePath, writeCachedCover } from '../lib/cover-cache.js';
+import { createCoverMetrics } from '../lib/cover-metrics.js';
 
 const EDITION = 'at://did:plc:publisher/community.lexicon.media.book.edition/3abc';
 const ISBN = '9780441478125';
@@ -259,11 +260,13 @@ test('a provider 5xx is retried rather than treated as a missing cover', async (
   const cacheDir = cacheDirFor(t);
   const { pool, statements } = coverPool({ coverUrl: COVER });
   const download = coverFetch(503);
+  const coverMetrics = createCoverMetrics();
   const tasks = createTasks({
     pool,
     providers: coverProviders(),
     publisherHost: 'covers.example',
     coversCacheDir: cacheDir,
+    coverMetrics,
     coverFetch: download.impl
   });
 
@@ -272,6 +275,31 @@ test('a provider 5xx is retried rather than treated as a missing cover', async (
     /answered 503/
   );
   assert.equal(ledger(statements), undefined);
+  // A 5xx is a provider problem: the retry is what the counter must show.
+  assert.deepEqual(coverMetrics.snapshot(), [{ result: 'retry', status: '503', count: 1 }]);
+});
+
+test('a 403 is terminal for its URL, and the outcome is counted', async (t) => {
+  const cacheDir = cacheDirFor(t);
+  const { pool, statements } = coverPool({ coverUrl: GOOGLE_COVER });
+  const download = coverFetch(403);
+  const coverMetrics = createCoverMetrics();
+  const tasks = createTasks({
+    pool,
+    providers: coverProviders(),
+    publisherHost: 'covers.example',
+    coversCacheDir: cacheDir,
+    coverMetrics,
+    coverFetch: download.impl
+  });
+
+  // No throw: retrying a URL the provider refuses only spends requests, so the
+  // edition loses the dead URL and the ledger records it terminaally.
+  await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
+
+  assert.match(ledger(statements)?.sql ?? '', /outcome = 'rejected'/);
+  assert.match(statementsLike(statements, 'UPDATE editions')[0]?.sql ?? '', /cover_url = NULL/);
+  assert.deepEqual(coverMetrics.snapshot(), [{ result: 'rejected', status: '403', count: 1 }]);
 });
 
 test('an edition without a cover URL discovers one, then caches it', async (t) => {
