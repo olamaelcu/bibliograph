@@ -292,6 +292,7 @@ export function normalizeXrpcMethod(method: string): string {
 }
 
 const CATALOG_OPERATIONS: Record<string, true> = {
+  getGenresOfBook: true,
   resolveEditions: true,
   searchEditions: true
 };

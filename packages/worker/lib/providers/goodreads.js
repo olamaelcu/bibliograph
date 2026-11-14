@@ -315,6 +315,37 @@ export function candidatesFromBookPage(html) {
   return [candidate];
 }
 
+/**
+ * The genre labels on a book page, in provider order.
+ *
+ * Goodreads embeds them in the page's Apollo state as `bookGenres` edges: the
+ * genre is either inlined (`{ name: 'Science Fiction' }`) or referenced
+ * (`{ __ref: 'Genre:123' }`), so both shapes are read. The list includes
+ * format pseudo-genres (`Audiobook`, `Kindle Edition`); they are returned
+ * verbatim and dropped by the vocabulary mapping, because deciding what is a
+ * genre is that module's job, not this parser's.
+ */
+export function genresFromBookPage(html) {
+  const data = nextData(html);
+  const apollo = data?.props?.pageProps?.apolloState;
+  if (!apollo) return [];
+
+  const books = Object.values(apollo).filter((value) => value?.__typename === 'Book');
+  const book =
+    books.find((value) => Array.isArray(value.bookGenres)) ??
+    books.find((value) => value.details?.isbn13);
+  if (!book || !Array.isArray(book.bookGenres)) return [];
+
+  const genres = [];
+  for (const edge of book.bookGenres) {
+    const genre = edge?.genre;
+    const name = typeof genre?.__ref === 'string' ? apollo[genre.__ref]?.name : genre?.name;
+    const label = cleanString(name);
+    if (label) genres.push(label);
+  }
+  return genres;
+}
+
 export function candidatesFromSearchPage(html) {
   const rows = html.split(/<tr\s+itemscope/).slice(1);
   const candidates = [];
@@ -513,6 +544,40 @@ export function createGoodreads({
       const page = await get(`/search?q=${encodeURIComponent(text)}`, 'search');
       if (!page) return [];
       return [candidatesFromBookPage(page.text), candidatesFromSearchPage(page.text)].flat();
-    }
+    },
+
+    /**
+     * Genre labels for one edition.
+     *
+     * A Goodreads id resolves straight to its book page; otherwise the ISBN
+     * does. There is deliberately no title/author search fallback: a fuzzy
+     * match would attach another book's genres, which is worse than none.
+     * `get` carries the cache, the politeness gate, challenge detection and the
+     * breaker, so a WAF block propagates as `GoodreadsChallengeError` and the
+     * caller decides whether that fails the job.
+     */
+    async genresForEdition(identifiers = []) {
+      const bag = Array.isArray(identifiers) ? identifiers : [];
+      const bookId = bag
+        .filter((identifier) => cleanString(identifier?.issuer)?.toLowerCase() === 'goodreads')
+        .map((identifier) => cleanString(identifier?.value))
+        .find(Boolean);
+
+      if (bookId) {
+        const page = await get(`/book/show/${encodeURIComponent(bookId)}`);
+        return page ? genresFromBookPage(page.text) : [];
+      }
+
+      const isbn = normalizeIsbn13(
+        cleanString(
+          bag.find((identifier) =>
+            ['isbn13', 'isbn10', 'isbn'].includes(cleanString(identifier?.issuer)?.toLowerCase())
+          )?.value
+        )
+      );
+      if (!isbn) return [];
+      const page = await get(`/book/isbn/${isbn}`);
+      return page ? genresFromBookPage(page.text) : [];
+    },
   };
 }

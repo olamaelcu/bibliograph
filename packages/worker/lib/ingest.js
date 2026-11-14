@@ -3,8 +3,12 @@
 // resolvable through `com.atproto.repo.getRecord`.
 import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
 import { CONTRIBUTOR_COLLECTION, PUBLISHER_COLLECTION } from './entity-record.js';
+import { clippedText } from './record-fields.js';
 
 const COLLECTION = 'community.lexicon.media.book.edition';
+
+// Lexicon bounds for the contributor record's description (8192 bytes / 1024 graphemes).
+const DESCRIPTION_LIMITS = { maxGraphemes: 1024, maxBytes: 8192 };
 
 function editionUri(publisherDid, rkey) {
   return `at://${publisherDid}/${COLLECTION}/${rkey}`;
@@ -154,18 +158,20 @@ async function linkContributors(client, uri, contributors, authority) {
       typeof contributor?.nameInverted === 'string' && contributor.nameInverted.trim() !== ''
         ? contributor.nameInverted
         : null;
+    const description = clippedText(contributor.description, DESCRIPTION_LIMITS) ?? null;
     const identifiers = JSON.stringify(
       Array.isArray(contributor.identifiers) ? contributor.identifiers : []
     );
     const inserted = await client.query(
-      `INSERT INTO contributors (name, name_inverted, identifiers, at_uri)
-       VALUES ($1, $2, $3::jsonb, 'at://' || $4 || '/' || $5 || '/' || editions_next_tid())
+      `INSERT INTO contributors (name, name_inverted, description, identifiers, at_uri)
+       VALUES ($1, $2, $3, $4::jsonb, 'at://' || $5 || '/' || $6 || '/' || editions_next_tid())
        ON CONFLICT (lower(name), identifiers) DO UPDATE SET
          name = EXCLUDED.name,
          name_inverted = COALESCE(NULLIF(contributors.name_inverted, ''), EXCLUDED.name_inverted),
+         description = COALESCE(NULLIF(btrim(contributors.description), ''), EXCLUDED.description),
          at_uri = COALESCE(contributors.at_uri, EXCLUDED.at_uri)
        RETURNING id, at_uri`,
-      [displayName, nameInverted, identifiers, authority, CONTRIBUTOR_COLLECTION]
+      [displayName, nameInverted, description, identifiers, authority, CONTRIBUTOR_COLLECTION]
     );
     const contributorId = inserted.rows[0].id;
     await client.query(

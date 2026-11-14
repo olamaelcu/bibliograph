@@ -73,6 +73,20 @@ the entity trigger queues the record. Rows that predate the feature have a NULL
 The task is idempotent; `--phase=editions` is the post-publish republish pass
 for editions whose records were published before the refs existed.
 
+`contributors.description` is filled from ingest, and only OpenLibrary has a
+biography to offer: `expandEdition` fetches `/authors/<key>.json` for every
+keyed author and carries the normalized `description` into the edition
+candidate, which `linkContributors` clips to the record's 1024-grapheme /
+8192-byte lexicon bound and writes. The write is fill-null only
+(`COALESCE(NULLIF(btrim(existing), ''), incoming)`), so an operator-curated bio
+is never replaced; other providers carry no bio and leave the column untouched.
+The admin transport keeps a round-tripped bio and calls the provider's
+`describeContributors` before ingest, so a search-sourced candidate gets one
+too. Existing rows gain a bio the next time an edition crediting them is
+ingested; there is no backfill. `pds_enqueue_contributor_edits` is `UPDATE OF
+name, identifiers`, so a bio fill queues the entity record only and republishes
+no edition.
+
 Editions link to the records with `defs#contributor.ref` (already in the shared
 lexicon) and a local `defs#publisher.ref` extension mirroring it. Both are
 plain at-uris, not strongRefs: a CID would change on every entity edit and
@@ -271,10 +285,11 @@ OpenLibrary is keyless and uses `OPENLIBRARY_BASE_URL` (default
 `https://openlibrary.org`). Edition search requests 40 documents with an
 explicit `fields` list; `/isbn/<isbn>.json` and `/books/<key>.json` provide
 editions, and a missing edition description is filled from the work record.
-Author keys are expanded through `/authors/<key>.json` (bounded to ten names
-per lookup, cached within that lookup). Requests carry a descriptive
-User-Agent and pass through one serializing politeness gate; timeouts, retries
-and the `openlibrary` breaker come from the shared provider HTTP layer. Author
+Author keys are expanded through `/authors/<key>.json` (bounded to ten author
+details per lookup — the name and the biography — cached within that lookup).
+Requests carry a descriptive User-Agent and pass through one serializing
+politeness gate; timeouts, retries and the `openlibrary` breaker come from the
+shared provider HTTP layer. Author
 search (`/search/authors.json`) and detail (`/authors/<key>.json`) both normalize
 to read-only contributor candidates: `displayName`, optional `nameInverted`,
 description, image URL, full `born`/`died` dates, an `openlibrary` author-key

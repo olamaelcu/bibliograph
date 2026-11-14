@@ -123,6 +123,10 @@ function contributorList(value) {
     // It is not identity, so it never influences dedupe.
     const nameInverted = stringValue(entry.nameInverted);
     if (nameInverted) contributor.nameInverted = nameInverted;
+    // A provider bio round-trips through the admin UI untouched; losing it here
+    // would make every operator edit drop the persisted description.
+    const description = stringValue(entry.description);
+    if (description) contributor.description = description;
     const identifiers = identifierList(entry.identifiers);
     if (identifiers.length > 0) contributor.identifiers = identifiers;
     const ref = stringValue(entry.ref);
@@ -599,7 +603,26 @@ export async function startAdminServer({
   }
   if (!pool || !providers) throw new Error('admin server requires the catalog pool and providers');
 
-  const ingest = createIngest({ pool, publisherDid, publisherHost });
+  // OpenLibrary candidates from a book lookup already carry bios; a search
+  // candidate does not, so the one-candidate admin ingest spends at most ten
+  // author lookups filling them. The worker tasks are deliberately untouched:
+  // they ingest up to 50 search candidates per run. Both `/ingest` and
+  // `/publisher-import` write through here.
+  const baseIngest = createIngest({ pool, publisherDid, publisherHost });
+  const openlibrary = providers?.providers?.openlibrary;
+  const ingest = async (candidate) => {
+    if (
+      !openlibrary ||
+      !Array.isArray(candidate?.contributors) ||
+      candidate.contributors.length === 0
+    ) {
+      return baseIngest(candidate);
+    }
+    return baseIngest({
+      ...candidate,
+      contributors: await openlibrary.describeContributors(candidate.contributors)
+    });
+  };
   const handler = createAdminHandler({ providers, ingest, token: config.token, logger });
   const server = http.createServer((request, response) => {
     void handler(request, response);

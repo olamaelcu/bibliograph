@@ -17,6 +17,27 @@ export function nonEmptyString(value) {
   return trimmed === '' ? undefined : trimmed;
 }
 
+/**
+ * Clip a lexicon text field to its `maxGraphemes` / `maxLength` bounds.
+ * Returns undefined for a blank value. Grapheme segmentation keeps a combined
+ * character whole; the byte count keeps UTF-8 within `maxLength` even when a
+ * grapheme is longer than one byte.
+ */
+export function clippedText(value, { maxGraphemes, maxBytes }) {
+  const text = nonEmptyString(value);
+  if (!text) return undefined;
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  const parts = [];
+  let bytes = 0;
+  for (const { segment } of segmenter.segment(text)) {
+    const size = Buffer.byteLength(segment, 'utf8');
+    if (parts.length >= maxGraphemes || bytes + size > maxBytes) break;
+    parts.push(segment);
+    bytes += size;
+  }
+  return nonEmptyString(parts.join(''));
+}
+
 /** One `defs#identifier` value, or undefined when either half is empty. */
 export function identifier(value) {
   if (value === null || typeof value !== 'object') return undefined;

@@ -249,11 +249,12 @@ test('identifiers stored as JSON text are decoded', async () => {
   ]);
 });
 
-test('the seven entity methods split into five GET queries and two POST procedures', () => {
-  assert.equal(ENTITY_METHODS.size, 7);
-  assert.equal(ENTITY_QUERIES.size, 5);
+test('the eight entity methods split into six GET queries and two POST procedures', () => {
+  assert.equal(ENTITY_METHODS.size, 8);
+  assert.equal(ENTITY_QUERIES.size, 6);
   assert.equal(ENTITY_PROCEDURES.size, 2);
   assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.getContributor'));
+  assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.getGenresOfBook'));
   assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.searchPublishers'));
   assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.listEditionsByContributor'));
   assert.ok(ENTITY_PROCEDURES.has('net.olamaelcu.livtet.biblio.resolveContributors'));

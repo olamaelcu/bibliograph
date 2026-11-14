@@ -125,20 +125,32 @@ const taskList = createTasks({ pool, providers, publisherDid, publisherHost, pub
 
 // One publisher at a time: the task queue serializes the jobs, so two batches
 // never race for the same rows (claiming is safe anyway, this just avoids noise).
-const parsedCronItems = publisher
-  ? parseCronItems([
-      {
-        task: 'pds-publish',
-        match: '* * * * *',
-        options: {
-          queueName: 'pds-publish',
-          jobKey: 'pds-publish:cron',
-          maxAttempts: 3
-        }
-      }
-    ])
-  : // An empty list overrides graphile-worker's default `./crontab` read.
-    [];
+//
+// The genre sweep is unconditional: it only enqueues genre fetches, which work
+// with or without publisher credentials. Passing a non-empty list also overrides
+// graphile-worker's default `./crontab` read, which this deployment never wanted.
+const cronItems = [];
+if (publisher) {
+  cronItems.push({
+    task: 'pds-publish',
+    match: '* * * * *',
+    options: {
+      queueName: 'pds-publish',
+      jobKey: 'pds-publish:cron',
+      maxAttempts: 3
+    }
+  });
+}
+cronItems.push({
+  task: 'catalog.genres.sweep',
+  match: '*/10 * * * *',
+  options: {
+    queueName: 'genres-sweep',
+    jobKey: 'catalog.genres.sweep:cron',
+    maxAttempts: 3
+  }
+});
+const parsedCronItems = parseCronItems(cronItems);
 
 const runner = await run({
   connectionString: databaseUrl,
@@ -171,6 +183,15 @@ if (publisher) {
     jobKeyMode: 'unsafe_dedupe'
   });
 }
+
+// Same for the genre backlog: a restart should file the existing editions
+// immediately instead of waiting up to ten minutes for the cron.
+await runner.addJob('catalog.genres.sweep', {}, {
+  queueName: 'genres-sweep',
+  maxAttempts: 3,
+  jobKey: 'catalog.genres.sweep:boot',
+  jobKeyMode: 'unsafe_dedupe'
+});
 
 try {
   await runner.promise;

@@ -10,6 +10,7 @@ build
 
 __pycache__/
 *.pyc
+.pyre/
 
 # Debian packaging artifacts
 dist/

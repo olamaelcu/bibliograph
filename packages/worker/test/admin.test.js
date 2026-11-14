@@ -12,6 +12,7 @@ const DATABASE_URL =
 const AUTHORITY = 'did:plc:adminapitest';
 const TOKEN = 'admin-test-token';
 const CONTRIBUTOR = 'Admin API Probe Author';
+const BIO_AUTHOR = 'Admin API Bio Author';
 const PUBLISHER = 'Admin API Probe Press';
 const TID_ALPHABET = '234567abcdefghijklmnopqrstuvwxyz';
 
@@ -73,6 +74,7 @@ async function cleanup() {
   const prefix = `at://${AUTHORITY}/%`;
   await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE name = $1', [CONTRIBUTOR]);
+  await pool.query('DELETE FROM contributors WHERE name = $1', [BIO_AUTHOR]);
   await pool.query('DELETE FROM publishers WHERE name = $1', [PUBLISHER]);
   // A shared row that a real edition still credits stays; clear only the
   // test-authority pointer this suite minted on it.
@@ -251,6 +253,12 @@ before(async () => {
           { key: 'OL901A', name: 'Partial Probe Author', birth_date: '1930' }
         ]
       });
+      return;
+    }
+
+    if (url.pathname === '/openlibrary/authors/OL900A.json') {
+      openlibraryRequests += 1;
+      send({ key: '/authors/OL900A', name: CONTRIBUTOR, bio: 'Admin probe author bio.' });
       return;
     }
 
@@ -503,6 +511,51 @@ test('ingest rejects a candidate without identifiers', async () => {
   assert.equal(response.status, 400);
   const body = await response.json();
   assert.match(body.message, /identifiers/);
+});
+
+test('ingest stores a provider bio and never overwrites it', async () => {
+  const first = await post(admin, '/ingest', {
+    candidate: {
+      identifiers: [{ issuer: 'isbn13', value: isbn13For(4323) }],
+      title: 'Admin Bio Probe',
+      contributors: [
+        {
+          name: BIO_AUTHOR,
+          role: 'author',
+          identifiers: [{ issuer: 'openlibrary', value: 'OL900A' }]
+        }
+      ]
+    }
+  });
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).created, true);
+
+  const stored = await pool.query('SELECT description FROM contributors WHERE name = $1', [
+    BIO_AUTHOR
+  ]);
+  assert.deepEqual(stored.rows, [{ description: 'Admin probe author bio.' }]);
+
+  const second = await post(admin, '/ingest', {
+    candidate: {
+      identifiers: [{ issuer: 'isbn13', value: isbn13For(4324) }],
+      title: 'Admin Bio Probe Two',
+      contributors: [
+        {
+          name: BIO_AUTHOR,
+          role: 'author',
+          description: 'A different bio.',
+          identifiers: [{ issuer: 'openlibrary', value: 'OL900A' }]
+        }
+      ]
+    }
+  });
+  assert.equal(second.status, 200);
+  assert.equal((await second.json()).created, true);
+
+  const kept = await pool.query('SELECT description FROM contributors WHERE name = $1', [
+    BIO_AUTHOR
+  ]);
+  assert.deepEqual(kept.rows, [{ description: 'Admin probe author bio.' }]);
 });
 
 test('unknown providers and empty queries are bad requests', async () => {

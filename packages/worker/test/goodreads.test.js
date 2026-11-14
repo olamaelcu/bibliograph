@@ -7,6 +7,7 @@ import {
   GoodreadsRedirectLoopError,
   createGoodreads,
   createPageCache,
+  genresFromBookPage,
   isChallengePage,
   profileHeaders
 } from '../lib/providers/goodreads.js';
@@ -497,4 +498,101 @@ test('the serialized gate jitters its injected delay between requests', async ()
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(delays, [2500]);
+});
+
+// ---------------------------------------------------------------------------
+// Genres: inline `bookGenres` edges on a book page
+// ---------------------------------------------------------------------------
+
+const GOODREADS_ID = '234225';
+
+const genrePageHtml = `<html><head></head><body>
+<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+  props: {
+    pageProps: {
+      apolloState: {
+        'Book:kca://book/dune': {
+          __typename: 'Book',
+          legacyId: 234225,
+          title: 'Dune',
+          details: { isbn13: ISBN13 },
+          bookGenres: [
+            { genre: { __ref: 'Genre:7' } },
+            { genre: { name: 'Classics' } },
+            { genre: { name: '   ' } },
+            { genre: {} },
+            { genre: { name: 'Audiobook' } }
+          ]
+        },
+        'Genre:7': { __typename: 'Genre', name: 'Science Fiction' }
+      }
+    }
+  }
+})}</script></body></html>`;
+
+test('genresFromBookPage reads inline and referenced genre entries', () => {
+  assert.deepEqual(genresFromBookPage(genrePageHtml), [
+    'Science Fiction',
+    'Classics',
+    'Audiobook'
+  ]);
+});
+
+test('genresFromBookPage answers nothing for a page without the payload or genres', () => {
+  assert.deepEqual(genresFromBookPage('<html><body>No such edition</body></html>'), []);
+  // The plain book page carries no `bookGenres` at all.
+  assert.deepEqual(genresFromBookPage(bookPageHtml), []);
+});
+
+test('genresForEdition reads the page of a Goodreads id', async () => {
+  const { requests, fetchImpl } = recorder({
+    [`/book/show/${GOODREADS_ID}`]: (url) => response({ url, body: genrePageHtml })
+  });
+  const provider = makeProvider({ fetchImpl });
+
+  const genres = await provider.genresForEdition([
+    { issuer: 'isbn13', value: ISBN13 },
+    { issuer: 'goodreads', value: GOODREADS_ID }
+  ]);
+
+  assert.deepEqual(genres, ['Science Fiction', 'Classics', 'Audiobook']);
+  assert.deepEqual(
+    requests.map((request) => request.path),
+    [`/book/show/${GOODREADS_ID}`],
+    'the Goodreads id wins over the ISBN'
+  );
+});
+
+test('genresForEdition falls back to the ISBN route', async () => {
+  const { requests, fetchImpl } = recorder({
+    [`/book/isbn/${ISBN13}`]: (url) => response({ url, body: genrePageHtml })
+  });
+  const provider = makeProvider({ fetchImpl });
+
+  const genres = await provider.genresForEdition([{ issuer: 'isbn13', value: ISBN13 }]);
+
+  assert.equal(genres[0], 'Science Fiction');
+  assert.deepEqual(requests.map((request) => request.path), [`/book/isbn/${ISBN13}`]);
+});
+
+test('genresForEdition never searches and answers nothing without a usable identifier', async () => {
+  const { requests, fetchImpl } = recorder({
+    '*': (url) => response({ url, body: genrePageHtml })
+  });
+  const provider = makeProvider({ fetchImpl });
+
+  assert.deepEqual(await provider.genresForEdition([{ issuer: 'goodreads', value: '' }]), []);
+  assert.deepEqual(await provider.genresForEdition([]), []);
+  assert.deepEqual(await provider.genresForEdition(), []);
+  assert.equal(requests.length, 0, 'a fuzzy match on another book is worse than no genre');
+});
+
+test('genresForEdition answers nothing when the book page is missing', async () => {
+  const { fetchImpl } = recorder({});
+  const provider = makeProvider({ fetchImpl });
+
+  assert.deepEqual(
+    await provider.genresForEdition([{ issuer: 'goodreads', value: GOODREADS_ID }]),
+    []
+  );
 });

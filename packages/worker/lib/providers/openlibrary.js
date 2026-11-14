@@ -213,20 +213,23 @@ function isbnIdentifiers(values) {
   return identifiers;
 }
 
-function contributorFromEdge(edge, authorNames) {
+function contributorFromEdge(edge, authorDetails) {
   const key = openLibraryKey(edge?.key ?? edge?.author?.key);
-  const name = cleanString(edge?.name) ?? (key ? cleanString(authorNames.get(key)) : undefined);
+  const detail = key ? authorDetails.get(key) : undefined;
+  const name = cleanString(edge?.name) ?? cleanString(detail?.displayName);
   if (!name) return undefined;
   const contributor = { name, role: DEFAULT_CONTRIBUTOR_ROLE };
   if (key) contributor.identifiers = [{ issuer: 'openlibrary', value: key }];
+  const description = cleanString(detail?.description);
+  if (description) contributor.description = description;
   return contributor;
 }
 
-function contributorsFromEdition(edition, authorNames) {
+function contributorsFromEdition(edition, authorDetails) {
   const contributors = [];
   const seen = new Set();
   for (const edge of Array.isArray(edition?.authors) ? edition.authors : []) {
-    const contributor = contributorFromEdge(edge, authorNames);
+    const contributor = contributorFromEdge(edge, authorDetails);
     if (!contributor) continue;
     const key = contributor.identifiers?.[0]?.value ?? `name:${contributor.name}`;
     if (seen.has(key)) continue;
@@ -255,6 +258,22 @@ function contributorsFromSearch(doc) {
   });
 
   return contributors;
+}
+
+/**
+ * The subject labels of a work document, in the order OpenLibrary returns
+ * them.
+ *
+ * Subjects live on the work, never on the edition document, and they are this
+ * provider's only genre signal. They are raw library headings
+ * (`Fiction, science fiction, general`, `nyt:mass-market-monthly=2021-11-07`),
+ * so they are returned verbatim and mapped to the vocabulary by the caller.
+ */
+export function subjectsFromWork(work) {
+  if (!Array.isArray(work?.subjects)) return [];
+  return work.subjects
+    .map((subject) => cleanString(subject))
+    .filter((subject) => subject !== undefined);
 }
 
 /** Normalize one `/search.json` document into the edition candidate shape. */
@@ -303,11 +322,11 @@ export function candidateFromSearchDocument(doc) {
 }
 
 /**
- * Normalize one edition/books document. `authorNames` maps author keys to the
- * names fetched from `/authors/<key>.json`; `workDescription` fills a missing
- * edition description from the work record.
+ * Normalize one edition/books document. `authorDetails` maps author keys to the
+ * normalized author candidates fetched from `/authors/<key>.json`;
+ * `workDescription` fills a missing edition description from the work record.
  */
-export function candidateFromEdition(edition, { authorNames = new Map(), workDescription } = {}) {
+export function candidateFromEdition(edition, { authorDetails = new Map(), workDescription } = {}) {
   if (!edition || typeof edition !== 'object') return undefined;
   const title = cleanString(edition.title);
   if (!title) return undefined;
@@ -323,7 +342,7 @@ export function candidateFromEdition(edition, { authorNames = new Map(), workDes
   const candidate = {
     identifiers,
     title,
-    contributors: contributorsFromEdition(edition, authorNames)
+    contributors: contributorsFromEdition(edition, authorDetails)
   };
 
   const subtitle = cleanString(edition.subtitle);
@@ -401,7 +420,38 @@ export function createOpenLibrary({ baseUrl, fetchImpl = fetch } = {}) {
     return gate(() => fetchJson(fetchImpl, `${root}${path}`, { headers }));
   }
 
-  async function expandEdition(edition, { expandWork = true, authorNames = new Map(), budget } = {}) {
+  /**
+   * One work document, following at most one `/type/redirect` hop.
+   *
+   * OpenLibrary answers some work keys with a redirect stub instead of the
+   * work (`{ type: { key: '/type/redirect' }, location: '/works/OL…W' }`) —
+   * usually a merged duplicate. Exactly one hop is followed, because that is
+   * how far the merge goes; a second redirect is treated as "no such work"
+   * rather than chased. A 404 arrives as `undefined` from `fetchJson`.
+   */
+  async function workDocument(value) {
+    const key = openLibraryBookKey(value);
+    if (!key || !key.endsWith('W')) return undefined;
+
+    const body = await query(`/works/${key}.json`);
+    if (!body || typeof body !== 'object') return undefined;
+    if (body.type?.key !== '/type/redirect') return body;
+
+    const location = body.location;
+    if (typeof location !== 'string' || !location.startsWith('/')) return undefined;
+    const target = openLibraryBookKey(location);
+    if (!target || !target.endsWith('W')) return undefined;
+    const redirected = await query(`/works/${target}.json`);
+    if (!redirected || typeof redirected !== 'object') return undefined;
+    return redirected.type?.key === '/type/redirect' ? undefined : redirected;
+  }
+
+  /** The work key an edition document belongs to, or undefined. */
+  function workKeyOf(edition) {
+    return openLibraryBookKey(edition?.works?.[0]?.key);
+  }
+
+  async function expandEdition(edition, { expandWork = true, authorDetails = new Map(), budget } = {}) {
     if (!edition) return undefined;
 
     const workKey = openLibraryBookKey(edition.works?.[0]?.key);
@@ -417,26 +467,29 @@ export function createOpenLibrary({ baseUrl, fetchImpl = fetch } = {}) {
 
     for (const edge of Array.isArray(edition.authors) ? edition.authors : []) {
       const key = openLibraryKey(edge?.key ?? edge?.author?.key);
-      if (!key || cleanString(edge?.name) || authorNames.has(key)) continue;
+      if (!key || authorDetails.has(key)) continue;
       if (budget && budget.remaining <= 0) continue;
       if (budget) budget.remaining -= 1;
       try {
         const author = await query(`/authors/${key}.json`);
-        const name = cleanString(author?.name) ?? cleanString(author?.personal_name);
-        if (name) authorNames.set(key, name);
+        const detail = contributorFromAuthorDocument(author);
+        if (detail) authorDetails.set(key, detail);
       } catch {
-        // An unnamed author is omitted rather than guessed; the edition stands.
+        // An author whose record cannot be read is still credited by name when
+        // the edition edge carries one; the edition stands either way.
       }
     }
 
-    return candidateFromEdition(edition, { authorNames, workDescription });
+    return candidateFromEdition(edition, { authorDetails, workDescription });
   }
 
   async function byIsbn(isbn) {
     const normalized = normalizeIsbn13(isbn);
     if (!normalized) return [];
     const edition = await query(`/isbn/${encodeURIComponent(normalized)}.json`);
-    return [await expandEdition(edition)].filter(Boolean);
+    return [
+      await expandEdition(edition, { budget: { remaining: MAX_AUTHOR_EXPANSIONS } })
+    ].filter(Boolean);
   }
 
   async function byIdentifier(value) {
@@ -450,20 +503,60 @@ export function createOpenLibrary({ baseUrl, fetchImpl = fetch } = {}) {
 
     const body = await query(`/works/${key}/editions.json?limit=${SEARCH_LIMIT}`);
     const entries = Array.isArray(body?.entries) ? body.entries : [];
-    const authorNames = new Map();
+    const authorDetails = new Map();
     const budget = { remaining: MAX_AUTHOR_EXPANSIONS };
     const candidates = [];
     for (const entry of entries.slice(0, SEARCH_LIMIT)) {
-      // The editions endpoint is already work-scoped; only author names need
+      // The editions endpoint is already work-scoped; only author detail needs
       // expansion. The shared budget keeps one work lookup from fanning out.
       const candidate = await expandEdition(entry, {
         expandWork: false,
-        authorNames,
+        authorDetails,
         budget
       });
       if (candidate) candidates.push(candidate);
     }
     return mergeCandidates(candidates);
+  }
+
+  /**
+   * Genre labels for one edition, taken from its work's `subjects`.
+   *
+   * Subjects live on the work, not the edition, so every path ends at a work
+   * document: a work key answers straight away, an edition key or an ISBN needs
+   * one extra fetch to reach `works[0].key`. Nothing usable in the identifier
+   * bag, or a work with no subjects, is an empty list rather than an error — a
+   * 404 already arrives as `undefined`. A network failure propagates: the
+   * caller decides whether the job is worth retrying.
+   */
+  async function genresForEdition(identifiers = []) {
+    const bag = Array.isArray(identifiers) ? identifiers : [];
+    const values = [];
+    for (const identifier of bag) {
+      const value = cleanString(identifier?.value);
+      if (value) values.push(value);
+    }
+
+    const workKey = values.map(openLibraryBookKey).find((key) => key?.endsWith('W'));
+    if (workKey) return subjectsFromWork(await workDocument(workKey));
+
+    const editionKey = values.map(openLibraryBookKey).find((key) => key?.endsWith('M'));
+    if (editionKey) {
+      const edition = await query(`/books/${editionKey}.json`);
+      return subjectsFromWork(await workDocument(workKeyOf(edition)));
+    }
+
+    const isbn = normalizeIsbn13(
+      cleanString(
+        bag.find((identifier) =>
+          ['isbn13', 'isbn10', 'isbn'].includes(cleanString(identifier?.issuer)?.toLowerCase())
+        )?.value
+      )
+    );
+    if (!isbn) return [];
+
+    const edition = await query(`/isbn/${encodeURIComponent(isbn)}.json`);
+    return subjectsFromWork(await workDocument(workKeyOf(edition)));
   }
 
   async function search(input = {}) {
@@ -513,12 +606,44 @@ export function createOpenLibrary({ baseUrl, fetchImpl = fetch } = {}) {
     return body ? contributorFromAuthorDocument(body) : undefined;
   }
 
+  /**
+   * Fill a missing `description` on contributor candidates from OpenLibrary
+   * author detail. A candidate that already has a bio, has no OpenLibrary author
+   * key, or exceeds `limit` is returned unchanged; a failed lookup is not fatal.
+   */
+  async function describeContributors(contributors, { limit = MAX_AUTHOR_EXPANSIONS } = {}) {
+    if (!Array.isArray(contributors)) return [];
+    let remaining = limit;
+    const out = [];
+    for (const contributor of contributors) {
+      const key = openLibraryKey(
+        (Array.isArray(contributor?.identifiers) ? contributor.identifiers : [])
+          .find((identifier) => identifier?.issuer === 'openlibrary')?.value
+      );
+      if (cleanString(contributor?.description) || !key || !key.endsWith('A') || remaining <= 0) {
+        out.push(contributor);
+        continue;
+}
+      remaining -= 1;
+      try {
+        const detail = contributorFromAuthorDocument(await query(`/authors/${key}.json`));
+        const description = cleanString(detail?.description);
+        out.push(description ? { ...contributor, description } : contributor);
+      } catch {
+        out.push(contributor);
+      }
+    }
+    return out;
+  }
+
   return {
     byIsbn,
     byIdentifier,
+    genresForEdition,
     search,
     searchContributors,
     author,
+    describeContributors,
     byAuthorKey: author
   };
 }

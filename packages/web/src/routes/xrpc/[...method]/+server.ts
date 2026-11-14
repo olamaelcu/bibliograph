@@ -30,6 +30,7 @@ import {
 } from "$lib/server/catalog/entities";
 import {
   GET_CONTRIBUTOR,
+  GET_GENRES_OF_BOOK,
   GET_PUBLISHER,
   LIST_EDITIONS_BY_CONTRIBUTOR,
   RESOLVE_CONTRIBUTORS,
@@ -38,8 +39,10 @@ import {
   SEARCH_PUBLISHERS,
 } from "$lib/server/catalog/entity-methods";
 import { decodeOffsetCursor } from "$lib/server/catalog/sql";
+import { EDITION_COLLECTION, getEditionGenres } from "$lib/server/catalog/genres";
 import {
   enqueueResolveMiss,
+  enqueueGenreFetch,
   enqueueIsbnHydration,
   enqueueSearchHydration,
 } from "$lib/server/catalog/jobs";
@@ -234,6 +237,43 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
   const params = new URL(request.url).searchParams;
   try {
     const pool = catalogPool();
+    if (method === GET_GENRES_OF_BOOK) {
+      const uri = params.get("uri");
+      if (uri === null || uri === "") {
+        return fail(400, "InvalidRequest", "`uri` is required");
+      }
+      if (parseEntityUri(uri, EDITION_COLLECTION) === null) {
+        return fail(400, "InvalidRequest", "`uri` must be an edition record at-uri");
+      }
+
+      const started = performance.now();
+      try {
+        const result = await getEditionGenres(pool, uri);
+        if (result === null) {
+          return fail(404, "RecordNotFound", "no edition has that URI");
+        }
+        recordCatalogQuery(
+          metrics,
+          "getGenresOfBook",
+          "ok",
+          (performance.now() - started) / 1000,
+        );
+        // An edition with no genres yet is a miss, not an error: queue one
+        // provider fetch. The ledger inside the SQL function dedupes it across
+        // callers, so a hot edition cannot flood the queue.
+        if (result.genres.length === 0) await enqueueGenreFetch(uri);
+        return json(result);
+      } catch (error) {
+        recordCatalogQuery(
+          metrics,
+          "getGenresOfBook",
+          error instanceof CatalogUnavailableError ? "unavailable" : "error",
+          (performance.now() - started) / 1000,
+        );
+        return catalogFailure(error);
+      }
+    }
+
     if (method === GET_CONTRIBUTOR || method === GET_PUBLISHER) {
       const uri = params.get("uri");
       if (uri === null || uri === "") {

@@ -8,7 +8,8 @@ import {
   createOpenLibrary,
   openLibraryBookKey,
   parseOpenLibraryDate,
-  SEARCH_LIMIT
+  SEARCH_LIMIT,
+  subjectsFromWork
 } from '../lib/providers/openlibrary.js';
 import { createProviders } from '../lib/providers/index.js';
 import { candidateKey } from '../lib/util.js';
@@ -177,6 +178,7 @@ test('normalizes an edition with work and author expansion', async () => {
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0].description, 'Work description.');
   assert.equal(candidates[0].contributors[0].name, 'Ursula K. Le Guin');
+  assert.equal(candidates[0].contributors[0].description, 'An American author.');
   assert.equal(candidates[0].coverUrl, 'https://covers.openlibrary.org/b/id/12345-L.jpg');
   assert.equal(candidates[0].format, 'Paperback');
   assert.equal(candidates[0].series.name, 'The Hainish Cycle');
@@ -310,6 +312,72 @@ test('candidateFromEdition accepts missing optional fields', () => {
     contributors: []
   });
   assert.equal(candidateFromEdition({ title: 'No identity' }), undefined);
+});
+
+test('candidateFromEdition takes the contributor bio from author detail', () => {
+  const candidate = candidateFromEdition(
+    {
+      key: '/books/OL2M',
+      title: 'Bio Edition',
+      isbn_13: ['9780306406157'],
+      authors: [{ key: `/authors/${AUTHOR_KEY}` }]
+    },
+    {
+      authorDetails: new Map([
+        [AUTHOR_KEY, { displayName: 'Bio Author', description: 'A bio.' }]
+      ])
+    }
+  );
+
+  assert.deepEqual(candidate.contributors, [
+    {
+      name: 'Bio Author',
+      role: 'A01',
+      description: 'A bio.',
+      identifiers: [{ issuer: 'openlibrary', value: AUTHOR_KEY }]
+    }
+  ]);
+});
+
+test('describeContributors fills only a missing bio', async () => {
+  const { provider, calls } = openLibrary({
+    handler: (url) => {
+      if (url.pathname === `/authors/${AUTHOR_KEY}.json`) return jsonResponse(authorDocument);
+      return jsonResponse({}, 404);
+    }
+  });
+  const authorCalls = () => calls.filter((url) => url.pathname.startsWith('/authors/'));
+
+  const contributors = [
+    { name: 'No Bio', role: 'A01', identifiers: [{ issuer: 'openlibrary', value: AUTHOR_KEY }] },
+    {
+      name: 'Already Described',
+      role: 'A01',
+      description: 'Kept.',
+      identifiers: [{ issuer: 'openlibrary', value: AUTHOR_KEY }]
+    },
+    { name: 'No Identifiers', role: 'A01' },
+    {
+      name: 'Unknown Author',
+      role: 'A01',
+      identifiers: [{ issuer: 'openlibrary', value: 'OL999A' }]
+    }
+  ];
+
+  const described = await provider.describeContributors(contributors);
+  assert.equal(described[0].description, 'An American author.');
+  assert.equal(described[1].description, 'Kept.');
+  assert.equal(described[1], contributors[1], 'a described candidate is untouched');
+  assert.equal(described[2].description, undefined);
+  assert.equal(described[3].description, undefined, 'a failed lookup is not fatal');
+  assert.deepEqual(
+    authorCalls().map((url) => url.pathname),
+    [`/authors/${AUTHOR_KEY}.json`, '/authors/OL999A.json']
+  );
+
+  const skipped = await provider.describeContributors(contributors, { limit: 0 });
+  assert.deepEqual(skipped, contributors);
+  assert.equal(authorCalls().length, 2, 'limit 0 makes no author request');
 });
 
 test('provider chain tries Goodreads before OpenLibrary', async () => {
@@ -501,4 +569,131 @@ test('openlibrary identifiers resolve directly', async () => {
   assert.ok(called.includes('/openlibrary/books/OL123M.json'));
   assert.ok(!called.some((path) => path.startsWith('/google/')));
   assert.ok(!called.some((path) => path.startsWith('/goodreads/')));
+});
+
+// ---------------------------------------------------------------------------
+// Genres: subjects live on the work, so every path ends at a work document
+// ---------------------------------------------------------------------------
+
+const DUNE_WORK = {
+  key: '/works/OL893414W',
+  title: 'Dune',
+  subjects: ['Fiction', 'Science fiction', 'Dune (Imaginary place)', 'nyt:mass-market-monthly=2021-11-07']
+};
+
+test('subjectsFromWork keeps only the non-empty strings', () => {
+  assert.deepEqual(subjectsFromWork(DUNE_WORK), DUNE_WORK.subjects);
+  assert.deepEqual(subjectsFromWork({ subjects: ['Fiction', '', '   ', 42, null] }), ['Fiction']);
+  assert.deepEqual(subjectsFromWork({ subjects: 'Fiction' }), [], 'a bare string is not a list');
+  assert.deepEqual(subjectsFromWork({}), []);
+  assert.deepEqual(subjectsFromWork(undefined), []);
+});
+
+test('genresForEdition resolves a work key in one request', async () => {
+  const { provider, calls } = openLibrary({
+    handler: (url) =>
+      url.pathname === '/works/OL893414W.json' ? jsonResponse(DUNE_WORK) : jsonResponse({}, 404)
+  });
+
+  const subjects = await provider.genresForEdition([
+    { issuer: 'openlibrary', value: 'OL893414W' }
+  ]);
+
+  assert.deepEqual(subjects, DUNE_WORK.subjects);
+  assert.deepEqual(calls.map((call) => call.pathname), ['/works/OL893414W.json']);
+});
+
+test('genresForEdition reaches the work through an edition key', async () => {
+  const { provider, calls } = openLibrary({
+    handler: (url) => {
+      if (url.pathname === '/books/OL123M.json') {
+        return jsonResponse({ key: '/books/OL123M', works: [{ key: '/works/OL893414W' }] });
+      }
+      if (url.pathname === '/works/OL893414W.json') return jsonResponse(DUNE_WORK);
+      return jsonResponse({}, 404);
+    }
+  });
+
+  const subjects = await provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL123M' }]);
+
+  assert.equal(subjects[1], 'Science fiction');
+  assert.deepEqual(calls.map((call) => call.pathname), [
+    '/books/OL123M.json',
+    '/works/OL893414W.json'
+  ]);
+});
+
+test('genresForEdition reaches the work through an ISBN', async () => {
+  const { provider, calls } = openLibrary({
+    handler: (url) => {
+      if (url.pathname === `/isbn/${ISBN13}.json`) {
+        return jsonResponse({ key: '/books/OL123M', works: [{ key: '/works/OL893414W' }] });
+      }
+      if (url.pathname === '/works/OL893414W.json') return jsonResponse(DUNE_WORK);
+      return jsonResponse({}, 404);
+    }
+  });
+
+  const subjects = await provider.genresForEdition([
+    { issuer: 'isbn13', value: ISBN13 },
+    { issuer: 'goodreads', value: '234225' }
+  ]);
+
+  assert.equal(subjects[0], 'Fiction');
+  assert.deepEqual(calls.map((call) => call.pathname), [
+    `/isbn/${ISBN13}.json`,
+    '/works/OL893414W.json'
+  ]);
+});
+
+test('genresForEdition follows exactly one work redirect', async () => {
+  const { provider, calls } = openLibrary({
+    handler: (url) => {
+      if (url.pathname === '/works/OL893415W.json') {
+        return jsonResponse({ type: { key: '/type/redirect' }, location: '/works/OL893414W' });
+      }
+      if (url.pathname === '/works/OL893414W.json') return jsonResponse(DUNE_WORK);
+      return jsonResponse({}, 404);
+    }
+  });
+
+  assert.deepEqual(
+    await provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL893415W' }]),
+    DUNE_WORK.subjects
+  );
+  assert.deepEqual(calls.map((call) => call.pathname), [
+    '/works/OL893415W.json',
+    '/works/OL893414W.json'
+  ]);
+});
+
+test('genresForEdition answers nothing for a second redirect, a 404 or no identifier', async () => {
+  const redirecting = openLibrary({
+    handler: (url) => {
+      if (url.pathname === '/works/OL893414W.json') {
+        return jsonResponse({ type: { key: '/type/redirect' }, location: '/works/OL893416W' });
+      }
+      if (url.pathname === '/works/OL893416W.json') {
+        return jsonResponse({ type: { key: '/type/redirect' }, location: '/works/OL893417W' });
+      }
+      return jsonResponse({}, 404);
+    }
+  });
+  assert.deepEqual(
+    await redirecting.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL893414W' }]),
+    [],
+    'a redirect chain is not chased'
+  );
+  assert.equal(redirecting.calls.length, 2, 'the second hop was attempted once, not followed again');
+
+  const missing = openLibrary({ handler: () => jsonResponse({}, 404) });
+  assert.deepEqual(
+    await missing.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL404W' }]),
+    []
+  );
+
+  const empty = openLibrary({ handler: () => jsonResponse({}, 404) });
+  assert.deepEqual(await empty.provider.genresForEdition([]), []);
+  assert.deepEqual(await empty.provider.genresForEdition(), []);
+  assert.equal(empty.calls.length, 0, 'no identifier means no request');
 });

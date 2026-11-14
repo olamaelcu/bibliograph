@@ -98,7 +98,7 @@ test('the described surface is exactly the registries it is built from', () => {
     ...FORWARDED_PROCEDURES
   ]);
   assert.deepEqual(serviceMethods(), [...expected].sort());
-  assert.equal(serviceMethods().length, 46);
+  assert.equal(serviceMethods().length, 47);
 });
 
 test('every described method is a valid NSID, listed once', () => {

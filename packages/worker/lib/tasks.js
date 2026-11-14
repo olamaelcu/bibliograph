@@ -3,9 +3,15 @@ import { publisherConfigError, resolvePublisherConfig } from './pds.js';
 import { createIngest } from './ingest.js';
 import { isbn13 as normalizeIsbn13 } from './util.js';
 import { prepareEntityRecords } from './prepare-entities.js';
+import { mergeGenres } from './genres.js';
 
 /** Upper bound on editions one catalog task ingests; providers may return fewer. */
 export const CANDIDATES_PER_TASK = 50;
+
+/** Editions one genre sweep claims when the payload names no limit. */
+export const GENRE_SWEEP_BATCH = 25;
+/** Upper bound on one sweep, whatever the payload asks for. */
+export const GENRE_SWEEP_BATCH_MAX = 200;
 
 function validIdentifier(identifier) {
   return (
@@ -113,6 +119,206 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
       const ingested = await ingestCandidates(candidates, CANDIDATES_PER_TASK);
       helpers.logger.info(
         `catalog.isbn ${isbn}: ${candidates.length} candidate(s), ${ingested} ingested`
+      );
+    },
+
+    // Hydrates one edition's genres from the providers that actually have
+    // them: OpenLibrary subjects and Goodreads book-page genres.
+    //
+    // Idempotent by construction. An edition that already has genres is never
+    // re-fetched, and `edition_genre_fetches` records when an edition was last
+    // asked and what came back. A failed provider is not fatal while the other
+    // answers, and the stored list is only rewritten when there is something to
+    // write — so a provider outage can never wipe genres.
+    'catalog.genres': async (payload, helpers) => {
+      const uri =
+        typeof payload?.editionUri === 'string' && payload.editionUri !== ''
+          ? payload.editionUri
+          : null;
+      if (uri === null) {
+        helpers.logger.warn('catalog.genres: invalid payload');
+        return;
+      }
+
+      const existing = await pool.query(
+        'SELECT EXISTS (SELECT 1 FROM edition_genres WHERE edition_uri = $1) AS has_genres',
+        [uri]
+      );
+      if (existing.rows[0]?.has_genres === true) {
+        await pool.query(
+          `UPDATE edition_genre_fetches
+              SET requested_at = now(), outcome = 'found'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.info(`catalog.genres ${uri}: already has genres`);
+        return;
+      }
+
+      const identifiers = (
+        await pool.query(
+          `SELECT issuer, value
+             FROM edition_identifiers
+            WHERE edition_uri = $1
+            ORDER BY issuer, value`,
+          [uri]
+        )
+      ).rows;
+      if (identifiers.length === 0) {
+        await pool.query(
+          `UPDATE edition_genre_fetches
+              SET requested_at = now(), outcome = 'none'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.warn(`catalog.genres ${uri}: no identifiers`);
+        return;
+      }
+
+      // Both providers are asked at once; they are gated independently, and a
+      // Goodreads challenge must not cost the OpenLibrary answer.
+      const [goodreads, openlibrary] = await Promise.allSettled([
+        providers.providers.goodreads.genresForEdition(identifiers),
+        providers.providers.openlibrary.genresForEdition(identifiers)
+      ]);
+      for (const settled of [goodreads, openlibrary]) {
+        if (settled.status === 'rejected') {
+          const reason = settled.reason;
+          helpers.logger.warn(
+            `catalog.genres ${uri}: provider failed — ${reason?.message ?? reason}`
+          );
+        }
+      }
+      if (goodreads.status === 'rejected' && openlibrary.status === 'rejected') {
+        // Nothing answered, so this is an outage rather than an absence. Rethrow
+        // so the job retries; the ledger keeps the claim, so the retry does not
+        // wait out the seven-day window.
+        throw goodreads.reason;
+      }
+
+      const merged = mergeGenres({
+        goodreads: goodreads.status === 'fulfilled' ? goodreads.value : [],
+        openlibrary: openlibrary.status === 'fulfilled' ? openlibrary.value : []
+      });
+      if (merged.length === 0) {
+        await pool.query(
+          `UPDATE edition_genre_fetches
+              SET requested_at = now(), outcome = 'none'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.info(`catalog.genres ${uri}: 0 genres`);
+        return;
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('DELETE FROM edition_genres WHERE edition_uri = $1', [uri]);
+        for (const [index, genre] of merged.entries()) {
+          // The no-op `DO UPDATE` is what makes RETURNING yield a row on
+          // conflict; `DO NOTHING` would return nothing for an existing genre.
+          const row = await client.query(
+            `INSERT INTO genres (name) VALUES ($1)
+             ON CONFLICT (lower(name)) DO UPDATE SET name = genres.name
+             RETURNING id`,
+            [genre.name]
+          );
+          await client.query(
+            `INSERT INTO edition_genres (edition_uri, genre_id, position, source)
+             VALUES ($1, $2, $3, $4)`,
+            [uri, row.rows[0].id, index + 1, genre.source]
+          );
+        }
+        await client.query(
+          `UPDATE edition_genre_fetches
+              SET requested_at = now(), outcome = 'found'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      helpers.logger.info(`catalog.genres ${uri}: ${merged.length} genre(s)`);
+    },
+
+    // Files editions that have no genres into the queue.
+    //
+    // Two passes, in priority order. Editions that were never attempted come
+    // first, because they are the ones no reader has ever seen genres for; the
+    // retry pass only fills capacity the first pass left over. Without that
+    // split a large population of genreless editions, re-armed every seven days
+    // by the claim function, could occupy every sweep and starve new arrivals —
+    // and since candidates are ordered oldest-`indexed_at` first, a fresh
+    // edition would never reach the front.
+    //
+    // The claim itself lives in `catalog_enqueue_genre_fetch`, so a sweep racing
+    // the edge never queues the same edition twice.
+    'catalog.genres.sweep': async (payload, helpers) => {
+      const limit = Number.isInteger(payload?.limit)
+        ? Math.min(Math.max(payload.limit, 1), GENRE_SWEEP_BATCH_MAX)
+        : GENRE_SWEEP_BATCH;
+
+      // Backed by `editions_indexed_at_idx`, so the LIMIT ends the walk instead
+      // of scanning `editions` and sorting it.
+      const fresh = await pool.query(
+        `SELECT e.uri
+           FROM editions e
+          WHERE NOT EXISTS (
+                  SELECT 1 FROM edition_genres g WHERE g.edition_uri = e.uri
+                )
+            AND NOT EXISTS (
+                  SELECT 1 FROM edition_genre_fetches f WHERE f.edition_uri = e.uri
+                )
+          ORDER BY e.indexed_at ASC, e.uri ASC
+          LIMIT $1`,
+        [limit]
+      );
+      const candidates = [...fresh.rows];
+
+      if (candidates.length < limit) {
+        // `EXISTS` restricts this pass to editions that already have a ledger
+        // row, so it can never hand back a row the first pass already returned.
+        const retries = await pool.query(
+          // Driven by the ledger, ordered by the ledger clock: the editions that
+          // have waited longest for a retry come first, and
+          // `edition_genre_fetches_requested_at_idx` serves that order, so the
+          // scan starts at the eligible end of the table and stops at the
+          // limit. Ordering this pass by `indexed_at` instead made the planner
+          // walk the whole catalog before reaching its first aged row (4.5 s for
+          // 25 rows at 300k editions) — the exact cost the first pass no longer
+          // pays.
+          `SELECT e.uri
+             FROM edition_genre_fetches f
+             JOIN editions e ON e.uri = f.edition_uri
+            WHERE f.requested_at < now() - interval '7 days'
+              AND NOT EXISTS (
+                    SELECT 1 FROM edition_genres g WHERE g.edition_uri = e.uri
+                  )
+            ORDER BY f.requested_at ASC
+            LIMIT $1`,
+          [limit - candidates.length]
+        );
+        candidates.push(...retries.rows);
+      }
+
+      let enqueued = 0;
+      for (const row of candidates) {
+        const claimed = await pool.query(
+          'SELECT catalog_enqueue_genre_fetch($1::text) AS enqueued',
+          [row.uri]
+        );
+        if (claimed.rows[0]?.enqueued === true) enqueued += 1;
+      }
+      helpers.logger.info(
+        `catalog.genres.sweep: ${candidates.length} candidate(s) ` +
+          `(${fresh.rows.length} new, ${candidates.length - fresh.rows.length} retry), ` +
+          `${enqueued} enqueued`
       );
     },
 

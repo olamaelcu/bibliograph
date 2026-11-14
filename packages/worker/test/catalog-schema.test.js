@@ -55,6 +55,7 @@ const candidate = {
     {
       name: CONTRIBUTOR,
       role: 'author',
+      description: 'A probe author bio.',
       identifiers: [{ issuer: 'orcid', value: '0000-0002-1825-0097' }],
       ref: 'at://did:plc:probecontributor/community.lexicon.media.book.contributor/1'
     }
@@ -113,9 +114,12 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     [[
       'contributors',
       'edition_contributors',
+      'edition_genre_fetches',
+      'edition_genres',
       'edition_identifiers',
       'edition_publishers',
       'editions',
+      'genres',
       'google_books_cache',
       'isbndb_cache',
       'pds_cids',
@@ -129,9 +133,12 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     [
       'contributors',
       'edition_contributors',
+      'edition_genre_fetches',
+      'edition_genres',
       'edition_identifiers',
       'edition_publishers',
       'editions',
+      'genres',
       'google_books_cache',
       'isbndb_cache',
       'pds_cids',
@@ -158,6 +165,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
         AND proname = ANY($1)
       ORDER BY proname`,
     [[
+      'catalog_enqueue_genre_fetch',
       'editions_next_tid',
       'editions_tid_encode',
       'pds_enqueue_contributor_editions',
@@ -167,7 +175,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_publisher_editions'
     ]]
   );
-  assert.equal(functions.rows.length, 7);
+  assert.equal(functions.rows.length, 8);
 
   const triggers = await pool.query(
     `SELECT tgname FROM pg_trigger t
@@ -247,7 +255,7 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   ]);
 
   const contributors = await pool.query(
-    `SELECT c.name, ec.position, ec.role, ec.ref, c.identifiers
+    `SELECT c.name, c.description, ec.position, ec.role, ec.ref, c.identifiers
        FROM edition_contributors ec
        JOIN contributors c ON c.id = ec.contributor_id
       WHERE ec.edition_uri = $1`,
@@ -255,6 +263,7 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   );
   assert.deepEqual(contributors.rows, [{
     name: CONTRIBUTOR,
+    description: 'A probe author bio.',
     position: 1,
     role: 'A01',
     ref: 'at://did:plc:probecontributor/community.lexicon.media.book.contributor/1',
@@ -318,7 +327,11 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
 
 test('re-ingesting the same identifier bag updates in place without downgrading the create', { skip: SKIP }, async () => {
   const ingest = createIngest({ pool, publisherDid: AUTHORITY });
-  const result = await ingest({ ...candidate, subtitle: 'Filled by a later provider' });
+  const result = await ingest({
+    ...candidate,
+    subtitle: 'Filled by a later provider',
+    contributors: [{ ...candidate.contributors[0], description: 'Replacement bio.' }]
+  });
 
   assert.deepEqual(result, { uri: editionUri, created: false });
 
@@ -340,6 +353,13 @@ test('re-ingesting the same identifier bag updates in place without downgrading 
     [editionUri]
   );
   assert.equal(identifiers.rows[0].n, 2);
+
+  // A bio is filled once and never replaced, so a later provider cannot
+  // overwrite the stored description.
+  const bio = await pool.query('SELECT description FROM contributors WHERE name = $1', [
+    CONTRIBUTOR
+  ]);
+  assert.equal(bio.rows[0].description, 'A probe author bio.');
 
   const outbox = await pool.query(
     'SELECT op FROM pds_outbox WHERE uri = $1',

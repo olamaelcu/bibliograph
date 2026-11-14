@@ -1,0 +1,64 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getGenresOfBook",
+  "description": "Fetch the genres of one catalog edition by its AT-URI. This is an anonymous catalog read served by the bibliograph edge from the catalog tables; it is never handled by HappyView. Genres come from OpenLibrary subjects and Goodreads book pages, mapped to a curated vocabulary.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uri"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the edition these genres belong to."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "genres"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the edition these genres belong to."
+            },
+            "genres": {
+              "type": "array",
+              "description": "Genres in provider order; empty when none are known yet.",
+              "items": {
+                "type": "object",
+                "required": ["name", "source"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Canonical genre name."
+                  },
+                  "source": {
+                    "type": "string",
+                    "knownValues": ["openlibrary", "goodreads"],
+                    "description": "Provider that supplied the genre."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "The uri is missing, malformed, or not an edition record URI."
+        },
+        {
+          "name": "RecordNotFound",
+          "description": "No catalog edition has that URI."
+        }
+      ]
+    }
+  }
+}

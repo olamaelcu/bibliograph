@@ -120,3 +120,28 @@ export function enqueueSearchHydration(input: {
 export function enqueueIsbnHydration(isbn13: string): Promise<boolean> {
   return enqueue(`isbn:${isbn13}`, 'catalog.isbn', { isbn: isbn13 }, RESOLVE_TTL_MS);
 }
+
+/**
+ * Queue a genre fetch for an edition whose genres came back empty.
+ *
+ * The claim and the retry window live in the SQL function, not here: it inserts
+ * or refreshes the ledger row and only then queues the job, so the edge and the
+ * worker's sweep share one definition of "already asked recently". A database
+ * without `0005-genres.sql` (or without `graphile_worker`) raises, which is
+ * caught and logged exactly like an absent hydration schema: the read still
+ * answered, so the caller must not fail.
+ */
+export async function enqueueGenreFetch(editionUri: string): Promise<boolean> {
+  try {
+    if (!(await workerReady())) return false;
+    const pool = catalogPool();
+    const result = await pool.query<{ enqueued: boolean }>(
+      'SELECT catalog_enqueue_genre_fetch($1::text) AS enqueued',
+      [editionUri]
+    );
+    return result.rows[0]?.enqueued === true;
+  } catch (error) {
+    console.warn('[xrpc] could not enqueue genre hydration', error);
+    return false;
+  }
+}
