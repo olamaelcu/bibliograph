@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "grafana": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-grafana"],
+      "env": {
+        "GRAFANA_URL": "https://grafana.olamaelcu.net",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "!sed -n 's/^GRAFANA_SERVICE_ACCOUNT_TOKEN=//p' /home/vrgl/Code/olamaelcu/infra/.env | tr -d '\n'"
+      }
+    },
+    "lexicon-garden": {
+      "type": "http",
+      "url": "https://lexicon.garden/mcp",
+      "directTools": true
+    }
+  }
+}
