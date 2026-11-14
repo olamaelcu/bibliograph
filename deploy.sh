@@ -400,6 +400,21 @@ if [ "$SKIP_DB" = 0 ]; then
     sudo -u postgres createuser --pwprompt bibliograph
     sudo -u postgres createdb -O bibliograph bibliograph
   See docs/operations/fresh-database.md."
+  # A stop ends graphile in the middle of a batch: the job row and its queue row
+  # keep `locked_at`, and graphile only clears locks older than four hours, so
+  # the `pds-publish` queue stays unavailable and the outbox grows while nothing
+  # publishes. This host runs one worker and it is stopped right now, so no lock
+  # can be legitimately held. A fresh database has no graphile schema yet; that
+  # is not an error.
+  psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -c "
+    UPDATE graphile_worker._private_jobs
+       SET locked_at = NULL, locked_by = NULL, run_at = greatest(run_at, now())
+     WHERE locked_at IS NOT NULL;
+    UPDATE graphile_worker._private_job_queues
+       SET locked_at = NULL, locked_by = NULL
+     WHERE locked_at IS NOT NULL;" \
+    && note "Worker job locks cleared (a stop leaves in-flight jobs locked for four hours)" \
+    || note "graphile_worker locks not cleared (no schema yet); continuing"
 
   sql_dir=/usr/lib/bibliograph-worker/sql
   [ -d "$sql_dir" ] \
