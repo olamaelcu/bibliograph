@@ -243,6 +243,11 @@
         <span class="muted admin-small">
           id <code>{id}</code> · created {new Date(createdAt).toISOString()}
         </span>
+        {#if entityKind === 'contributor'}
+          <a class="admin-small" href={`/admin/contributor/${id}/merge`}>
+            Merge this row into another contributor →
+          </a>
+        {/if}
       </div>
       {#if dirty}
         <wa-badge variant="warning">Unsaved changes</wa-badge>

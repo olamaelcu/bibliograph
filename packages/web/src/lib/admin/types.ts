@@ -200,6 +200,39 @@ export type ContributorEditResponse = { contributor: AdminContributorRecord };
 
 export type PublisherEditResponse = { publisher: AdminPublisherRecord };
 
+/** Fields a contributor merge can take from the absorbed row. */
+export type ContributorMergeField =
+  | 'description'
+  | 'nameInverted'
+  | 'imageUrl'
+  | 'born'
+  | 'died';
+
+/** What one contributor merge does, computed before and after the write. */
+export type ContributorMergePlan = {
+  /** Edition credits repointed from the absorbed row to the survivor. */
+  moved: number;
+  /** Credits dropped because the survivor already holds that role there. */
+  dropped: number;
+  /** Identifier pairs the survivor did not already carry. */
+  identifiersAdded: number;
+  /** Fields taken from the absorbed row because the survivor's are blank. */
+  fields: ContributorMergeField[];
+};
+
+export type ContributorMergePreview = {
+  source: AdminContributorRecord;
+  target: AdminContributorRecord;
+  plan: ContributorMergePlan;
+};
+
+export type ContributorMergeResponse = {
+  target: AdminContributorRecord;
+  absorbedId: number;
+  absorbedAtUri: string | null;
+  plan: ContributorMergePlan;
+};
+
 export type EditionEditResponse = { edition: AdminEdition };
 
 /** Goodreads returns the free-text format it uses on the edition page. */

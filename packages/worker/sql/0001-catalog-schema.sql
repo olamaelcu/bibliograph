@@ -262,7 +262,7 @@ LANGUAGE plpgsql
 AS $function$
 BEGIN
   INSERT INTO pds_outbox (uri, collection, rkey, op)
-  SELECT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
+  SELECT DISTINCT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
     FROM edition_contributors ec
     JOIN editions e ON e.uri = ec.edition_uri
    WHERE ec.contributor_id = NEW.id
@@ -280,7 +280,7 @@ LANGUAGE plpgsql
 AS $function$
 BEGIN
   INSERT INTO pds_outbox (uri, collection, rkey, op)
-  SELECT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
+  SELECT DISTINCT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
     FROM edition_publishers ep
     JOIN editions e ON e.uri = ep.edition_uri
    WHERE ep.publisher_id = NEW.id

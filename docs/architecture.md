@@ -520,6 +520,47 @@ the name, identifiers, canonical AT URI (or that it is not minted), the row id
 and a link to its editor. The two panels share no state with each other, the
 edition editor or the merge workbench.
 
+## Merging contributors
+
+Contributor identity is `(lower(name), identifiers)`, so one person can own
+several rows whenever a provider supplied a different identifier bag, a
+different name spelling or no identifiers at all. `GET
+/admin/contributor/<id>/merge` (also reachable from the contributor editor's
+heading) absorbs one row — the source — into another — the survivor, chosen
+through the same entity typeahead. The page previews the plan and the merge
+itself runs from a form action through
+`packages/web/src/lib/server/admin/entity-merge.ts`; `?into=<id|at-uri>`
+renders the confirmation step directly.
+
+The survivor keeps its `id`, `at_uri`, name and `created_at`, takes the
+source's `description`, `name_inverted`, `image_url`, `born` and `died` only
+where its own value is blank, and adopts the source's identifiers: the union
+keeps the survivor's pair on a conflict but fills in a provider `url` the
+survivor lacks. Every `edition_contributors` row of the source is repointed at
+the survivor, except one whose normalized role the survivor already holds on
+that edition — that credit is deleted instead, so the same person is never
+credited twice for one role. A credit with a different role is kept, and an
+edge `ref` naming the source's at-URI is cleared so the read model falls back
+to the survivor's URI rather than a deleted record.
+
+The source row is deleted last, after nothing references it
+(`edition_contributors.contributor_id` is `ON DELETE RESTRICT`); the survivor is
+updated after that delete because the merged identifier bag can equal the
+absorbed row's, which `contributors_identity_idx` would otherwise reject. Both
+rows must still carry the revisions the page loaded (409 `EntityChanged`
+otherwise); an unknown ref is 404, the same row on both sides is 400, and
+absorbing identifiers that already belong to a third row is 409
+`DuplicateEntity` with both rows untouched. Publication is trigger-driven like
+the editors: repointed or dropped credits queue those editions, the survivor's
+update queues its record and every edition crediting it, and the delete queues
+the source record's delete when it has an at-URI.
+
+One person can legitimately hold two credits on one edition (author and
+translator), which the merge preserves. `pds_enqueue_contributor_editions` and
+`pds_enqueue_publisher_editions` therefore select `DISTINCT` editions: the
+join through the link table returns one row per credit position, and
+`ON CONFLICT` cannot touch the same outbox row twice.
+
 ## Lexicon provenance
 
 `happyview/lexicons/community/lexicon/media/book/` is the source of truth for
