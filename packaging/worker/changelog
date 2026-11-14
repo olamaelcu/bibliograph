@@ -1,3 +1,26 @@
+bibliograph-worker (0.2.14-1) unstable; urgency=medium
+
+  * 0.2.14 release: ISBNdb as a metered genre source and a soft quota gauge.
+
+    - `catalog.genres` now falls back to ISBNdb when Goodreads and OpenLibrary
+      both return nothing: `genresForEdition` reads the ISBN's book record and
+      its `subjects` list, which ISBNdb marks deprecated, so it is a last
+      resort and not a primary source. It goes through the provider's metered
+      path — a cached `/book/{isbn}` (seven days) costs no daily call, a miss
+      reserves one from `provider_daily_usage` — and a refused quota answers
+      `undefined`, so the ledger row is left unmarked instead of recording "no
+      genres". `mergeGenres` appends the subject sources alphabetically after
+      Goodreads' relevance order, and 0006-genre-sources.sql widens the
+      `edition_genres.source` CHECK to accept `isbndb`.
+    - The Prometheus exposition splits the ISBNdb quota into a hard limit and a
+      soft one: `bibliograph_isbndb_daily_limit` (5000, what `reserveDailyCall`
+      enforces) and `bibliograph_isbndb_daily_soft_limit` (95% of it — 4750 —
+      where an alert should fire), with `bibliograph_isbndb_calls_remaining`
+      and `bibliograph_isbndb_calls_remaining_soft` alongside them.
+      `renderMetrics` now defaults the limit instead of rendering 0.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 14:53:18 +0000
+
 bibliograph-worker (0.2.13-1) unstable; urgency=medium
 
   * 0.2.13 release: contributor merge support and a cheaper genre sweep.

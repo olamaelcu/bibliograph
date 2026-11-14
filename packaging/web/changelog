@@ -1,3 +1,12 @@
+bibliograph-web (0.2.14-1) unstable; urgency=medium
+
+  * 0.2.14 release: lockstep version bump, no web payload changes.
+
+    - The ISBNdb genre source and the soft/hard quota gauges are worker-side;
+      packages/web is unchanged since 0.2.13.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sat, 14 Nov 2026 14:53:18 +0000
+
 bibliograph-web (0.2.13-1) unstable; urgency=medium
 
   * 0.2.13 release: merge one contributor into another.
