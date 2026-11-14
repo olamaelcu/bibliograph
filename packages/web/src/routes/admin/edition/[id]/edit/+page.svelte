@@ -13,7 +13,13 @@
   } from '$lib/admin/types';
   import { normalizeContributorRole } from '$lib/contributor-roles';
 
-  let { data } = $props();
+  let {
+    data,
+    form
+  }: {
+    data: { edition: AdminEdition };
+    form: { message?: string } | null;
+  } = $props();
   const initial: AdminEdition = untrack(() => data.edition);
 
   type IdentifierInfoDraft = {
@@ -117,6 +123,8 @@
   );
 
   let baseline = $state('');
+  /** Two-step delete: the trigger reveals the confirm form, never one click. */
+  let confirmDelete = $state(false);
   let saving = $state(false);
   let saveError = $state<string | null>(null);
   let notice = $state<string | null>(null);
@@ -783,6 +791,9 @@
     {#if saveError}
       <wa-callout variant="danger">{saveError}</wa-callout>
     {/if}
+    {#if form?.message}
+      <wa-callout variant="danger">{form.message}</wa-callout>
+    {/if}
     {#if notice}
       <wa-callout variant="success">{notice}</wa-callout>
     {/if}
@@ -1096,6 +1107,38 @@
       </div>
     </wa-card>
 
+    <div class="editor-danger">
+      <div class="wa-stack wa-gap-2xs">
+        <strong>Delete this edition</strong>
+        <span class="muted admin-small">
+          Removes the edition with its identifiers, shape claims, cover ledger, credits and
+          publisher links, then queues the record deletion. This cannot be undone.
+          {#if dirty}Unsaved changes are discarded.{/if}
+        </span>
+      </div>
+      {#if confirmDelete}
+        <form method="POST" action="?/delete" class="wa-cluster wa-gap-2xs">
+          <input type="hidden" name="revision" value={revision} />
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <wa-button type="submit" variant="danger" disabled={saving}>Delete permanently</wa-button>
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <wa-button type="button" appearance="plain" onclick={() => (confirmDelete = false)}>
+            Cancel
+          </wa-button>
+        </form>
+      {:else}
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <wa-button
+          variant="danger"
+          appearance="outlined"
+          disabled={saving}
+          onclick={() => (confirmDelete = true)}
+        >
+          Delete edition…
+        </wa-button>
+      {/if}
+    </div>
+
     <div class="editor-actions">
       <div class="wa-stack wa-gap-2xs">
         <strong>{dirty ? 'Unsaved changes' : 'All changes saved'}</strong>
@@ -1279,7 +1322,10 @@
     box-shadow: var(--wa-shadow-s);
   }
 
-  .editor-actions {
+  /* The save bar is sticky; the delete zone is not, so it can never be covered
+     by the bar it sits above. */
+  .editor-actions,
+  .editor-danger {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1289,6 +1335,9 @@
     border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
     border-radius: var(--wa-border-radius-m);
     background: var(--wa-color-surface-lowered);
+  }
+
+  .editor-actions {
     position: sticky;
     bottom: var(--wa-space-s);
     z-index: 2;

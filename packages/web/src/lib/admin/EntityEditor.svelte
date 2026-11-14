@@ -11,7 +11,15 @@
 
   type EntityRecord = AdminContributorRecord | AdminPublisherRecord;
 
-  let { kind, record }: { kind: EntityKind; record: EntityRecord } = $props();
+  let {
+    kind,
+    record,
+    form = null
+  }: {
+    kind: EntityKind;
+    record: EntityRecord;
+    form?: { message?: string } | null;
+  } = $props();
 
   const initial: EntityRecord = untrack(() => record);
   // The two editor routes mount different page components, so `kind` is fixed
@@ -59,6 +67,8 @@
   let ended = $state(entityKind === 'publisher' ? (publisherInitial.ended ?? '') : '');
 
   let baseline = $state('');
+  /** Two-step delete: the trigger reveals the confirm form, never one click. */
+  let confirmDelete = $state(false);
   let saving = $state(false);
   let saveError = $state<string | null>(null);
   let notice = $state<string | null>(null);
@@ -243,11 +253,9 @@
         <span class="muted admin-small">
           id <code>{id}</code> · created {new Date(createdAt).toISOString()}
         </span>
-        {#if entityKind === 'contributor'}
-          <a class="admin-small" href={`/admin/contributor/${id}/merge`}>
-            Merge this row into another contributor →
-          </a>
-        {/if}
+        <a class="admin-small" href={`/admin/${entityKind}/${id}/merge`}>
+          Merge this row into another {entityKind} →
+        </a>
       </div>
       {#if dirty}
         <wa-badge variant="warning">Unsaved changes</wa-badge>
@@ -258,6 +266,9 @@
 
     {#if saveError}
       <wa-callout variant="danger">{saveError}</wa-callout>
+    {/if}
+    {#if form?.message}
+      <wa-callout variant="danger">{form.message}</wa-callout>
     {/if}
     {#if notice}
       <wa-callout variant="success">{notice}</wa-callout>
@@ -441,9 +452,47 @@
       </div>
     </wa-card>
 
+    <div class="editor-danger">
+      <div class="wa-stack wa-gap-2xs">
+        <strong>Delete this {entityKind}</strong>
+        <span class="muted admin-small">
+          {#if entityKind === 'contributor'}
+            A contributor still credited on an edition is refused; merge it into another
+            contributor instead. An uncredited row is removed and its record deletion queued.
+          {:else}
+            A publisher still linked to an edition identifier is refused; merge it into
+            another publisher instead. An unlinked row is removed and its record deletion
+            queued.
+          {/if}
+        </span>
+      </div>
+      {#if confirmDelete}
+        <form method="POST" action="?/delete" class="wa-cluster wa-gap-2xs">
+          <input type="hidden" name="revision" value={revision} />
+          <wa-button type="submit" variant="danger" disabled={saving}>
+            Delete permanently
+          </wa-button>
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <wa-button type="button" appearance="plain" onclick={() => (confirmDelete = false)}>
+            Cancel
+          </wa-button>
+        </form>
+      {:else}
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <wa-button
+          variant="danger"
+          appearance="outlined"
+          disabled={saving}
+          onclick={() => (confirmDelete = true)}
+        >
+          Delete {entityKind}…
+        </wa-button>
+      {/if}
+    </div>
+
     <div class="editor-actions">
       <span class="muted admin-small">
-        Editing this row changes the shared catalog record. Nothing is deleted.
+        Editing this row changes the shared catalog record; saving never deletes anything.
       </span>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <wa-button
@@ -526,7 +575,10 @@
     overflow-wrap: anywhere;
   }
 
-  .editor-actions {
+  /* The save bar is sticky; the delete zone is not, so it can never be covered
+     by the bar it sits above. */
+  .editor-actions,
+  .editor-danger {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -536,6 +588,9 @@
     border: var(--wa-border-width-s) solid var(--wa-color-surface-border);
     border-radius: var(--wa-border-radius-m);
     background: var(--wa-color-surface-lowered);
+  }
+
+  .editor-actions {
     position: sticky;
     bottom: var(--wa-space-s);
     z-index: 2;

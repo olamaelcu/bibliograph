@@ -31,7 +31,18 @@ the `edition_identifier_shape` view produces the edition's value as a
 deterministic union: `isbn13`, then `isbn10`, then `asin`, then any other
 issuer, with ties broken by `(issuer, value)`. Providers fill only empty claim
 fields and curation edits them per identifier, so two ISBNs may disagree and
-both keep their own evidence. Publisher links hang off the identifier as well
+both keep their own evidence.
+
+`language` is the one claim that is canonicalised rather than kept verbatim:
+`0011-language-normalization.sql` stores the two-letter ISO 639-1 code and keeps
+any region suffix, so a provider's `eng` becomes `en` and `fre`/`fra` become
+`fr`. It is a `BEFORE` trigger on the claim table, not a step each writer has to
+remember, so ingest, the admin editor and any later writer agree; the alias
+table is generated from ICU's own canonicalisation, so it covers every
+three-letter form that has a two-letter equivalent. Without it one language had
+two spellings, and `searchEditions`' `language` filter matched half a catalog.
+
+Publisher links hang off the identifier as well
 (`edition_identifier_publishers`, cascading from `edition_identifiers`), so an
 ISBN published by Penguin can sit next to one published by Ace. The published
 `publisher` is the first link in identifier order and `publishers` is the whole
@@ -511,6 +522,21 @@ inline fallback.
   are written, so saving an unchanged form leaves `updated_at` and the outbox
   untouched. The edition's public shape is the rank union of these claims, not
   a value on the edition row.
+- Both editors can delete their row through a two-step confirm that POSTs a
+  SvelteKit form action (`?/delete`) carrying the `revision` the editor loaded;
+  a stale revision answers 409 and nothing is removed. Deleting an edition
+  drops the row and everything cascading from it (identifiers, shape claims,
+  publisher links, credits, genre and cover ledgers), and the catalog trigger
+  queues the record deletion; `pds-publish` removes the stored CID, treating an
+  already-absent record as deleted. Deleting a contributor is refused with 409
+  `EntityInUse` while an edition still credits it: the credit table is
+  `ON DELETE RESTRICT`, and deleting the credit instead would rewrite a
+  published edition the operator never opened, so a credited row is retired by
+  merging it into a survivor. An uncredited row is removed and its record
+  deletion queued. A publisher works the same way: it is refused while an
+  identifier still links it (`edition_identifier_publishers` is
+  `ON DELETE RESTRICT`), so a linked row is retired by merging it into another
+  publisher instead.
 - The edition editor's **Resolve from Goodreads** button next to Format asks
   only Goodreads, never the fallback chain. The browser sends the ISBN
   identifiers currently in the form (including unsaved additions); when that
@@ -647,14 +673,46 @@ translator), which the merge preserves. `pds_enqueue_contributor_editions` and
 join through the link table returns one row per credit position, and
 `ON CONFLICT` cannot touch the same outbox row twice.
 
+## Merging publishers
+
+Publisher identity is `(lower(name), identifiers)` for the same reason, so one
+imprint can own several rows. `GET /admin/publisher/<id>/merge` (reachable from
+the publisher editor's heading) mirrors the contributor flow — typeahead
+survivor, previewed plan, form-action merge, `?into=<id|at-uri>` — through
+`packages/web/src/lib/server/admin/publisher-merge.ts`. The two flows share the
+identifier-bag merge and the blank-field copy (`description`, `image_url`,
+`started`, `ended`); only the link handling differs.
+
+A publisher is linked through the identifier, not the edition:
+`edition_identifier_publishers` keys `(edition_uri, issuer, value, position)`,
+and one identifier can credit one publisher — its imprint — exactly once. So a
+source link whose `(edition, issuer, value)` already credits the survivor is
+dropped instead of producing a second row for the same publisher, and every
+other source link is repointed at the survivor with its position unchanged.
+The source row is deleted last (`publisher_id` is `ON DELETE RESTRICT`), and the
+survivor is updated after that delete for the same identity-index reason as a
+contributor merge. Errors match the contributor flow: 409 `EntityChanged` on a
+stale revision, 404 unknown ref, 400 for the same row or a missing revision, 409
+`DuplicateEntity` when the merged bag already belongs to a third row.
+
+Publication stays trigger-driven: a repointed or dropped link queues that
+edition (`pds_enqueue_publishers`), the survivor's name/identifier update queues
+every edition crediting it (`pds_enqueue_publisher_edits`), and the delete
+queues the source record's delete when it has an at-URI.
+
 ## Lexicon provenance
 
 `happyview/lexicons/community/lexicon/media/book/` is the source of truth for
 the shared book NSIDs. It imports five files from
 [lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest)
-(`1f246574e733dfb37ef30637b97d8bbc371820a2`), which is open, not merged; four
-are verbatim and `defs.json` adds the local `publisher.ref` extension described
-below.
+`1f246574e733dfb37ef30637b97d8bbc371820a2`), which is open, not merged. Three
+are verbatim (`edition.json`, `resolveEditions.json`, `review.json`) and two
+carry local extensions: `defs.json` adds `publisher.ref` and `searchEditions.json`
+adds the `sort`/`order`/`language` inputs. Anything not in PR #18 is marked as a
+local extension in the schema's own description, so a consumer reading the
+published lexicon can tell it apart from the upstream contract (the service
+description lists method NSIDs only, not their schemas).
+
 `vendor/books-wg-lexicons` is a separate upstream working-set submodule pinned
 at `3bcee8e344681fc5251abf43537d2c13ba85ff94` for provenance only; no build
 reads it, and its `defs.json`/`edition.json` predate the PR, so they must not
@@ -666,8 +724,9 @@ Lexicons publish as `com.atproto.lexicon.schema` records with
 `mise run publish-lex`. A repo write is not a namespace claim: consumers also
 need `_lexicon.<authority>` TXT to name the publisher DID.
 `com.atproto.lexicon.resolveLexicon` is not implemented by the PDS and is not
-served by this edge. `defs#publisher.ref` is a local extension to PR #18 and
-remains to be proposed upstream.
+served by this edge. `defs#publisher.ref` and the `searchEditions`
+`sort`/`order`/`language` inputs are local extensions to PR #18 and remain to be
+proposed upstream.
 
 ## Admin reports
 

@@ -190,3 +190,105 @@ export async function updateAdminEntity(
   if (!saved) throw new EntityEditError(404, `${kind} not found after saving`, 'NotFound');
   return saved;
 }
+
+/**
+ * Delete one contributor or publisher row.
+ *
+ * The catalog triggers queue the record deletion when the row has an `at_uri`;
+ * `pds-publish` owns the PDS side, so nothing here writes `pds_outbox`.
+ *
+ * A contributor still credited on an edition is refused: `edition_contributors`
+ * is `ON DELETE RESTRICT`, and deleting the credits instead would silently
+ * rewrite published editions the operator never opened. Merging into a
+ * survivor is the supported path for a credited row. A publisher is refused the
+ * same way when identifiers still link it, only through the FK violation.
+ */
+export async function deleteAdminEntity(
+  pool: Pool,
+  kind: EntityKind,
+  ref: string,
+  expectedRevision: string | null
+): Promise<number> {
+  const table = TABLES[kind];
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const current = await loadAdminEntity(client, kind, ref, { forUpdate: true });
+    if (!current) {
+      throw new EntityEditError(404, `${kind} not found`, 'NotFound');
+    }
+    if (expectedRevision !== null && expectedRevision !== current.revision) {
+      throw new EntityEditError(
+        409,
+        `this ${kind} changed since it was loaded; reload before deleting`,
+        'EntityChanged'
+      );
+    }
+
+    if (kind === 'contributor') {
+      const credits = await client.query<{ n: number; example: string | null }>(
+        `SELECT count(*)::int AS n, min(e.title) AS example
+           FROM edition_contributors ec
+           JOIN editions e ON e.uri = ec.edition_uri
+          WHERE ec.contributor_id = $1`,
+        [current.id]
+      );
+      const count = credits.rows[0]?.n ?? 0;
+      if (count > 0) {
+        throw new EntityEditError(
+          409,
+          `this contributor is credited on ${count} edition${count === 1 ? '' : 's'} ` +
+            `(for example “${credits.rows[0]?.example ?? 'an edition'}”); ` +
+            'merge it into another contributor instead of deleting it',
+          'EntityInUse'
+        );
+      }
+    }
+
+    if (kind === 'publisher') {
+      const links = await client.query<{ n: number; example: string | null }>(
+        `SELECT count(*)::int AS n, min(e.title) AS example
+           FROM edition_identifier_publishers ip
+           JOIN editions e ON e.uri = ip.edition_uri
+          WHERE ip.publisher_id = $1`,
+        [current.id]
+      );
+      const count = links.rows[0]?.n ?? 0;
+      if (count > 0) {
+        throw new EntityEditError(
+          409,
+          `this publisher is still linked to ${count} edition identifier` +
+            `${count === 1 ? '' : 's'} ` +
+            `(for example “${links.rows[0]?.example ?? 'an edition'}”); ` +
+            'merge it into another publisher instead of deleting it',
+          'EntityInUse'
+        );
+      }
+    }
+
+    await client.query(`DELETE FROM ${table} WHERE id = $1`, [current.id]);
+    await client.query('COMMIT');
+    return current.id;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error instanceof EntityEditError) throw error;
+    if (
+      error !== null &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === '23503'
+    ) {
+      throw new EntityEditError(
+        409,
+        `this ${kind} is still referenced by ${kind === 'publisher' ? 'edition identifiers' : 'editions'}; ` +
+          'remove those links first',
+        'EntityInUse'
+      );
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}

@@ -2,7 +2,13 @@
   import EntityEditor from '$lib/admin/EntityEditor.svelte';
   import type { AdminContributorRecord } from '$lib/admin/types';
 
-  let { data }: { data: { contributor: AdminContributorRecord } } = $props();
+  let {
+    data,
+    form
+  }: {
+    data: { contributor: AdminContributorRecord };
+    form: { message?: string } | null;
+  } = $props();
 </script>
 
-<EntityEditor kind="contributor" record={data.contributor} />
+<EntityEditor kind="contributor" record={data.contributor} {form} />

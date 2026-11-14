@@ -245,6 +245,34 @@ export type ContributorMergeResponse = {
   plan: ContributorMergePlan;
 };
 
+/** Fields a publisher merge can take from the absorbed row. */
+export type PublisherMergeField = 'description' | 'imageUrl' | 'started' | 'ended';
+
+/** What one publisher merge does, computed before and after the write. */
+export type PublisherMergePlan = {
+  /** Identifier links repointed from the absorbed row to the survivor. */
+  moved: number;
+  /** Links dropped because that identifier already credits the survivor. */
+  dropped: number;
+  /** Identifier pairs the survivor did not already carry. */
+  identifiersAdded: number;
+  /** Fields taken from the absorbed row because the survivor's are blank. */
+  fields: PublisherMergeField[];
+};
+
+export type PublisherMergePreview = {
+  source: AdminPublisherRecord;
+  target: AdminPublisherRecord;
+  plan: PublisherMergePlan;
+};
+
+export type PublisherMergeResponse = {
+  target: AdminPublisherRecord;
+  absorbedId: number;
+  absorbedAtUri: string | null;
+  plan: PublisherMergePlan;
+};
+
 export type EditionEditResponse = { edition: AdminEdition };
 
 /** Goodreads returns the free-text format it uses on the edition page. */

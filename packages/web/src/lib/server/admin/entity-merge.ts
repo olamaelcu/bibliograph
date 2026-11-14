@@ -50,7 +50,7 @@ export class ContributorMergeError extends Error {
 }
 
 /** Stored identifiers are jsonb; this is the shape the merge preserves. */
-type RawIdentifier = { issuer: string; value: string; url?: string };
+export type RawIdentifier = { issuer: string; value: string; url?: string };
 
 /** One edition credit, reduced to what the merge decides on. */
 type Credit = { editionUri: string; position: number; contributorId: number; role: string };
@@ -70,7 +70,7 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
-function rawIdentifiers(value: unknown): RawIdentifier[] {
+export function rawIdentifiers(value: unknown): RawIdentifier[] {
   if (!Array.isArray(value)) return [];
   const identifiers: RawIdentifier[] = [];
   for (const entry of value) {
@@ -87,8 +87,37 @@ function rawIdentifiers(value: unknown): RawIdentifier[] {
   return identifiers;
 }
 
-function isBlank(value: string | null): boolean {
+export function isBlank(value: string | null): boolean {
   return value === null || value.trim() === '';
+}
+
+/**
+ * The survivor's identifier bag after absorbing another row's.
+ *
+ * The survivor's own pair wins; a provider `url` it lacks is worth keeping.
+ * `added` counts the pairs the survivor did not already carry, which is what
+ * both merge plans report.
+ */
+export function mergeIdentifierBags(
+  target: RawIdentifier[],
+  source: RawIdentifier[]
+): { identifiers: RawIdentifier[]; added: number } {
+  const bag = new Map<string, RawIdentifier>();
+  for (const identifier of target) {
+    bag.set(`${identifier.issuer}\u0000${identifier.value}`, identifier);
+  }
+  const targetCount = bag.size;
+  for (const identifier of source) {
+    const key = `${identifier.issuer}\u0000${identifier.value}`;
+    const existing = bag.get(key);
+    if (!existing) {
+      bag.set(key, identifier);
+      continue;
+    }
+    if (!existing.url && identifier.url) bag.set(key, { ...existing, url: identifier.url });
+  }
+  const identifiers = [...bag.values()];
+  return { identifiers, added: Math.max(identifiers.length - targetCount, 0) };
 }
 
 type MergePlan = {
@@ -139,22 +168,10 @@ function planMerge(
     rolesByEdition.set(credit.editionUri, roles);
   }
 
-  const identifierBag = new Map<string, RawIdentifier>();
-  for (const identifier of rawIdentifiersById.get(target.id) ?? []) {
-    identifierBag.set(`${identifier.issuer}\u0000${identifier.value}`, identifier);
-  }
-  const targetCount = identifierBag.size;
-  for (const identifier of rawIdentifiersById.get(source.id) ?? []) {
-    const key = `${identifier.issuer}\u0000${identifier.value}`;
-    const existing = identifierBag.get(key);
-    if (!existing) {
-      identifierBag.set(key, identifier);
-      continue;
-    }
-    // The survivor's pair wins, but a provider URL it lacks is worth keeping.
-    if (!existing.url && identifier.url) identifierBag.set(key, { ...existing, url: identifier.url });
-  }
-  const identifiers = [...identifierBag.values()];
+  const { identifiers, added: identifiersAdded } = mergeIdentifierBags(
+    rawIdentifiersById.get(target.id) ?? [],
+    rawIdentifiersById.get(source.id) ?? []
+  );
 
   const absorbed: Array<{ column: string; value: string }> = [];
   const fields: ContributorMergeField[] = [];
@@ -170,7 +187,7 @@ function planMerge(
     plan: {
       moved: move.length,
       dropped: drop.length,
-      identifiersAdded: Math.max(identifiers.length - targetCount, 0),
+      identifiersAdded,
       fields
     },
     move,

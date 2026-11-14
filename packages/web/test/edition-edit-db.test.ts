@@ -4,6 +4,7 @@ import pg from 'pg';
 
 import {
   EditionEditError,
+  deleteAdminEdition,
   loadEditionForEdit,
   updateAdminEdition
 } from '../src/lib/server/admin/edition-edit.ts';
@@ -656,4 +657,95 @@ test('queues new contributor and publisher entity rows through triggers', async 
     [seeded.uri]
   );
   assert.ok(editionOutbox.rows[0], 'the edition row must be queued by the catalog trigger');
+});
+
+test('deletes an edition with its children and queues the record deletion', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await seedEdition('Delete me');
+  await db.query(
+    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, pages, duration_seconds)
+     VALUES ($1, 'isbn13', '9780000000001', 320, 3600)`,
+    [seeded.uri]
+  );
+  await db.query('INSERT INTO edition_cover_fetches (edition_uri) VALUES ($1)', [seeded.uri]);
+  await db.query('INSERT INTO edition_genre_fetches (edition_uri) VALUES ($1)', [seeded.uri]);
+  const original = await loaded(seeded.rkey);
+  assert.equal(
+    (await db.query<{ op: string }>('SELECT op FROM pds_outbox WHERE uri = $1', [seeded.uri])).rows[0]
+      ?.op,
+    'create',
+    'a fresh seeded edition is queued as a create'
+  );
+
+  const deleted = await deleteAdminEdition(db, seeded.rkey, original.revision);
+
+  assert.equal(deleted, seeded.uri);
+  const counts = await db.query<{
+    editions: number;
+    identifiers: number;
+    claims: number;
+    credits: number;
+    publishers: number;
+    covers: number;
+    genres: number;
+  }>(
+    `SELECT (SELECT count(*)::int FROM editions WHERE uri = $1) AS editions,
+            (SELECT count(*)::int FROM edition_identifiers WHERE edition_uri = $1) AS identifiers,
+            (SELECT count(*)::int FROM edition_identifier_info WHERE edition_uri = $1) AS claims,
+            (SELECT count(*)::int FROM edition_contributors WHERE edition_uri = $1) AS credits,
+            (SELECT count(*)::int FROM edition_identifier_publishers WHERE edition_uri = $1) AS publishers,
+            (SELECT count(*)::int FROM edition_cover_fetches WHERE edition_uri = $1) AS covers,
+            (SELECT count(*)::int FROM edition_genre_fetches WHERE edition_uri = $1) AS genres`,
+    [seeded.uri]
+  );
+  assert.deepEqual(counts.rows[0], {
+    editions: 0,
+    identifiers: 0,
+    claims: 0,
+    credits: 0,
+    publishers: 0,
+    covers: 0,
+    genres: 0
+  });
+
+  const outbox = await db.query<{ op: string }>('SELECT op FROM pds_outbox WHERE uri = $1', [
+    seeded.uri
+  ]);
+  assert.deepEqual(outbox.rows, [{ op: 'delete' }], 'the parked create is rewritten to a delete');
+  assert.equal(await loadEditionForEdit(db, seeded.rkey), null);
+});
+
+test('refuses to delete an edition that changed since it was loaded', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await seedEdition('Stale delete');
+  const original = await loaded(seeded.rkey);
+  await updateAdminEdition(
+    db,
+    seeded.rkey,
+    bodyFrom(original, { title: 'Renamed before delete' })
+  );
+
+  await assert.rejects(
+    () => deleteAdminEdition(db, seeded.rkey, original.revision),
+    (error: unknown) =>
+      error instanceof EditionEditError &&
+      error.status === 409 &&
+      error.code === 'EditionChanged'
+  );
+  assert.ok(
+    (await loadEditionForEdit(db, seeded.rkey)) !== null,
+    'a refused delete leaves the edition in place'
+  );
+});
+
+test('reports an unknown edition as 404 on delete', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  await assert.rejects(
+    () => deleteAdminEdition(db, `missing${RUN}`, null),
+    (error: unknown) =>
+      error instanceof EditionEditError && error.status === 404 && error.code === 'NotFound'
+  );
 });

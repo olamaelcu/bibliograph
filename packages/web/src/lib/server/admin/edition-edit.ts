@@ -232,6 +232,11 @@ export async function updateAdminEdition(
       ]
     );
 
+    // A curated cover URL is a new source, so the cover ledger has to forget the
+    // old one: the previous `found`/`rejected` outcome described a different
+    // URL, and keeping it would block the sweep's re-fetch for up to a week.
+    await client.query('DELETE FROM edition_cover_fetches WHERE edition_uri = $1', [uri]);
+
     // Diff, never delete-all/insert-all: untouched pairs keep their own shape
     // claim (`edition_identifier_info` cascades on delete).
     const pairKey = (identifier: { issuer: string; value: string }): string =>
@@ -411,5 +416,62 @@ export async function updateAdminEdition(
   const saved = records[0];
   if (!saved) throw new EditionEditError(404, 'edition not found after saving', 'NotFound');
   return saved;
+}
+
+/**
+ * Delete one edition and everything keyed to it.
+ *
+ * Identifiers, shape claims, publisher links, credits, genres, the genre ledger
+ * and the cover ledger all cascade from `editions`; the catalog trigger queues
+ * the record deletion and `pds-publish` removes the stored CID when it drains
+ * that op (an already-absent record counts as deleted), so this transaction
+ * writes neither `pds_outbox` nor `pds_cids` itself.
+ *
+ * `expectedRevision` is the editor's optimistic concurrency token; `null` skips
+ * the check, like the update path.
+ */
+export async function deleteAdminEdition(
+  pool: Pool,
+  ref: string,
+  expectedRevision: string | null
+): Promise<string> {
+  const client = await pool.connect();
+  let uri: string;
+  try {
+    await client.query('BEGIN');
+
+    const found = await client.query<{ uri: string }>(
+      `SELECT uri FROM editions WHERE uri = $1 OR rkey = $1 LIMIT 1 FOR UPDATE`,
+      [normalizeRef(ref)]
+    );
+    uri = found.rows[0]?.uri as string;
+    const foundUri = found.rows[0]?.uri;
+    if (foundUri === undefined) {
+      throw new EditionEditError(404, 'edition not found', 'NotFound');
+    }
+    uri = foundUri;
+
+    if (expectedRevision !== null) {
+      const current = (await loadAdminEditionsFrom(client, [uri], { forUpdate: true }))[0];
+      if (!current) throw new EditionEditError(404, 'edition not found', 'NotFound');
+      if (current.revision !== expectedRevision) {
+        throw new EditionEditError(
+          409,
+          'this edition changed since it was loaded; reload before deleting',
+          'EditionChanged'
+        );
+      }
+    }
+
+    await client.query('DELETE FROM editions WHERE uri = $1', [uri]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return uri;
 }
 

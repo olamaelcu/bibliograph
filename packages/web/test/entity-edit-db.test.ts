@@ -4,6 +4,7 @@ import pg from 'pg';
 
 import {
   EntityEditError,
+  deleteAdminEntity,
   updateAdminEntity
 } from '../src/lib/server/admin/entity-edit.ts';
 import { loadAdminEntity } from '../src/lib/server/admin/entity-read.ts';
@@ -540,4 +541,138 @@ test('accepts a save with no expectedRevision and a no-op save', async (t) => {
   );
   assert.equal(noop.revision, noRevision.revision);
   assert.equal(noop.description, 'No token');
+});
+
+test('deletes an uncredited contributor and queues its record deletion', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await createContributor(`${RUN} Deletable Person`);
+  const record = await loadedContributor(db, String(seeded.id));
+  await clearOutbox([seeded.atUri]);
+
+  const deleted = await deleteAdminEntity(
+    db,
+    'contributor',
+    String(seeded.id),
+    record.revision
+  );
+
+  assert.equal(deleted, seeded.id);
+  assert.equal(await loadAdminEntity(db, 'contributor', String(seeded.id)), null);
+  assert.deepEqual(await outbox(seeded.atUri), {
+    collection: CONTRIBUTOR_COLLECTION,
+    op: 'delete'
+  });
+});
+
+test('refuses to delete a contributor still credited on an edition', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const contributor = await createContributor(`${RUN} Credited Person`);
+  const publisher = await createPublisher(`${RUN} Credited Press`);
+  const editionUri = await seedEdition(contributor.id, publisher.id);
+  const record = await loadedContributor(db, String(contributor.id));
+
+  await assert.rejects(
+    () => deleteAdminEntity(db, 'contributor', String(contributor.id), record.revision),
+    (error: unknown) => {
+      assert.ok(error instanceof EntityEditError);
+      assert.equal(error.status, 409);
+      assert.equal(error.code, 'EntityInUse');
+      assert.match(error.message, /credited on 1 edition/);
+      assert.match(error.message, /merge it into another contributor/);
+      return true;
+    }
+  );
+
+  assert.ok(
+    (await loadAdminEntity(db, 'contributor', String(contributor.id))) !== null,
+    'a refused delete leaves the contributor and its credit in place'
+  );
+  const credits = await db.query<{ n: number }>(
+    'SELECT count(*)::int AS n FROM edition_contributors WHERE edition_uri = $1',
+    [editionUri]
+  );
+  assert.equal(credits.rows[0]?.n, 1);
+});
+
+test('refuses to delete a contributor that changed since it was loaded', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await createContributor(`${RUN} Stale Person`);
+  const record = await loadedContributor(db, String(seeded.id));
+  await updateAdminEntity(db, 'contributor', String(seeded.id), {
+    ...bodyFrom(record),
+    name: `${RUN} Renamed Person`
+  });
+
+  await assert.rejects(
+    () => deleteAdminEntity(db, 'contributor', String(seeded.id), record.revision),
+    (error: unknown) =>
+      error instanceof EntityEditError && error.status === 409 && error.code === 'EntityChanged'
+  );
+  assert.ok((await loadAdminEntity(db, 'contributor', String(seeded.id))) !== null);
+});
+
+test('reports an unknown contributor as 404 on delete', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  await assert.rejects(
+    () => deleteAdminEntity(db, 'contributor', `missing${RUN}`, null),
+    (error: unknown) =>
+      error instanceof EntityEditError && error.status === 404 && error.code === 'NotFound'
+  );
+});
+
+test('deletes an unlinked publisher and queues its record deletion', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await createPublisher(`${RUN} Deletable Press`);
+  const record = await loadedPublisher(db, String(seeded.id));
+  await clearOutbox([seeded.atUri]);
+
+  const deleted = await deleteAdminEntity(
+    db,
+    'publisher',
+    String(seeded.id),
+    record.revision
+  );
+
+  assert.equal(deleted, seeded.id);
+  assert.equal(await loadAdminEntity(db, 'publisher', String(seeded.id)), null);
+  assert.deepEqual(await outbox(seeded.atUri), {
+    collection: PUBLISHER_COLLECTION,
+    op: 'delete'
+  });
+});
+
+test('refuses to delete a publisher still linked to an edition identifier', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const contributor = await createContributor(`${RUN} Linked Press Author`);
+  const publisher = await createPublisher(`${RUN} Linked Press`);
+  const editionUri = await seedEdition(contributor.id, publisher.id);
+  const record = await loadedPublisher(db, String(publisher.id));
+
+  await assert.rejects(
+    () => deleteAdminEntity(db, 'publisher', String(publisher.id), record.revision),
+    (error: unknown) => {
+      assert.ok(error instanceof EntityEditError);
+      assert.equal(error.status, 409);
+      assert.equal(error.code, 'EntityInUse');
+      assert.match(error.message, /linked to 1 edition identifier/);
+      assert.match(error.message, /merge it into another publisher/);
+      return true;
+    }
+  );
+
+  assert.ok(
+    (await loadAdminEntity(db, 'publisher', String(publisher.id))) !== null,
+    'a refused delete leaves the publisher and its link in place'
+  );
+  const links = await db.query<{ n: number }>(
+    'SELECT count(*)::int AS n FROM edition_identifier_publishers WHERE edition_uri = $1',
+    [editionUri]
+  );
+  assert.equal(links.rows[0]?.n, 1);
 });
