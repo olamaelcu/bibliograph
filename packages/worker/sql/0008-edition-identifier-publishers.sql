@@ -85,7 +85,7 @@ SELECT
   s.published_date,
   s.format,
   s.pages,
-  e.duration_seconds,
+  s.duration_seconds,
   e.chapters,
   e.series,
   e.book_edition,

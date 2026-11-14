@@ -53,9 +53,9 @@ async function insertEdition(client, uri, rkey, candidate) {
   const series = candidate.series ? JSON.stringify(candidate.series) : null;
   const inserted = await client.query(
     `INSERT INTO editions (
-       uri, rkey, title, subtitle, duration_seconds, chapters, series,
+       uri, rkey, title, subtitle, chapters, series,
        book_edition, cover_url, created_at, indexed_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, now(), now())
+     ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, now(), now())
      ON CONFLICT (uri) DO NOTHING
      RETURNING uri`,
     [
@@ -63,7 +63,6 @@ async function insertEdition(client, uri, rkey, candidate) {
       rkey,
       title,
       candidate.subtitle ?? null,
-      candidate.durationSeconds ?? null,
       candidate.chapters ?? null,
       series,
       candidate.bookEdition ?? null,
@@ -76,7 +75,6 @@ async function insertEdition(client, uri, rkey, candidate) {
 async function fillMissingFields(client, uri, candidate) {
   const values = {
     subtitle: candidate.subtitle ?? null,
-    durationSeconds: candidate.durationSeconds ?? null,
     chapters: candidate.chapters ?? null,
     series: candidate.series ? JSON.stringify(candidate.series) : null,
     bookEdition: candidate.bookEdition ?? null,
@@ -86,24 +84,21 @@ async function fillMissingFields(client, uri, candidate) {
   await client.query(
     `UPDATE editions SET
        subtitle = COALESCE(subtitle, $2),
-       duration_seconds = COALESCE(duration_seconds, $3),
-       chapters = COALESCE(chapters, $4),
-       series = COALESCE(series, $5::jsonb),
-       book_edition = COALESCE(book_edition, $6),
-       cover_url = COALESCE(cover_url, $7)
+       chapters = COALESCE(chapters, $3),
+       series = COALESCE(series, $4::jsonb),
+       book_edition = COALESCE(book_edition, $5),
+       cover_url = COALESCE(cover_url, $6)
      WHERE uri = $1
        AND (
          (subtitle IS NULL AND $2::text IS NOT NULL)
-         OR (duration_seconds IS NULL AND $3::int IS NOT NULL)
-         OR (chapters IS NULL AND $4::int IS NOT NULL)
-         OR (series IS NULL AND $5::jsonb IS NOT NULL)
-         OR (book_edition IS NULL AND $6::text IS NOT NULL)
-         OR (cover_url IS NULL AND $7::text IS NOT NULL)
+         OR (chapters IS NULL AND $3::int IS NOT NULL)
+         OR (series IS NULL AND $4::jsonb IS NOT NULL)
+         OR (book_edition IS NULL AND $5::text IS NOT NULL)
+         OR (cover_url IS NULL AND $6::text IS NOT NULL)
        )`,
     [
       uri,
       values.subtitle,
-      values.durationSeconds,
       values.chapters,
       values.series,
       values.bookEdition,
@@ -118,20 +113,23 @@ async function fillMissingFields(client, uri, candidate) {
 async function fillIdentifierClaims(client, uri, identifier, claims) {
   await client.query(
     `INSERT INTO edition_identifier_info
-           (edition_uri, issuer, value, format, language, published_date, pages, description)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (edition_uri, issuer, value, format, language, published_date, pages,
+            description, duration_seconds)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
        format = COALESCE(edition_identifier_info.format, EXCLUDED.format),
        language = COALESCE(edition_identifier_info.language, EXCLUDED.language),
        published_date = COALESCE(edition_identifier_info.published_date, EXCLUDED.published_date),
        pages = COALESCE(edition_identifier_info.pages, EXCLUDED.pages),
        description = COALESCE(edition_identifier_info.description, EXCLUDED.description),
+       duration_seconds = COALESCE(edition_identifier_info.duration_seconds, EXCLUDED.duration_seconds),
        updated_at = now()
      WHERE (edition_identifier_info.format IS NULL AND EXCLUDED.format IS NOT NULL)
         OR (edition_identifier_info.language IS NULL AND EXCLUDED.language IS NOT NULL)
         OR (edition_identifier_info.published_date IS NULL AND EXCLUDED.published_date IS NOT NULL)
         OR (edition_identifier_info.pages IS NULL AND EXCLUDED.pages IS NOT NULL)
-        OR (edition_identifier_info.description IS NULL AND EXCLUDED.description IS NOT NULL)`,
+        OR (edition_identifier_info.description IS NULL AND EXCLUDED.description IS NOT NULL)
+        OR (edition_identifier_info.duration_seconds IS NULL AND EXCLUDED.duration_seconds IS NOT NULL)`,
     [
       uri,
       identifier.issuer,
@@ -140,7 +138,8 @@ async function fillIdentifierClaims(client, uri, identifier, claims) {
       claims.language,
       claims.publishedDate,
       claims.pages,
-      claims.description
+      claims.description,
+      claims.durationSeconds
     ]
   );
 }
@@ -256,7 +255,8 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
       language: candidate.language ?? null,
       publishedDate: candidate.publishedDate ?? null,
       pages: candidate.pages ?? null,
-      description: candidate.description ?? null
+      description: candidate.description ?? null,
+      durationSeconds: candidate.durationSeconds ?? null
     };
     const hasClaims = Object.values(claims).some((value) => value !== null && value !== '');
 

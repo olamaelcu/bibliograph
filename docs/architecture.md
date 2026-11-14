@@ -24,8 +24,8 @@ Editions are the record type. Contributors and publishers are entities linked
 through `edition_contributors` and `edition_identifier_publishers`, and
 identifiers live in `edition_identifiers` as exact `(issuer, value)` pairs. The inline
 
-An edition's public shape — language, publication date, format, pages and
-description — is not stored on the edition. Each identifier carries its own
+An edition's public shape — language, publication date, format, pages, duration
+and description — is not stored on the edition. Each identifier carries its own
 claim in `edition_identifier_info` (one row per `edition_identifiers` pair), and
 the `edition_identifier_shape` view produces the edition's value as a
 deterministic union: `isbn13`, then `isbn10`, then `asin`, then any other
@@ -342,6 +342,30 @@ seven days, and an ISBNdb quota refusal leaves the row unmarked rather than
 recording "no genres". The sweep's 25-edition batch (every ten minutes) also
 bounds the metered spend to well under the default daily limit.
 
+### Covers
+
+A cover belongs to the edition (`editions.cover_url`), not to an identifier:
+the picture is one artefact for the book, while duration and the other shape
+claims describe the specific product an ISBN names. Ingest fills the column
+when the candidate that creates the edition carries one; `catalog.covers`
+backfills the rest, because nothing else ever revisited an edition that
+arrived without one.
+
+OpenLibrary answers first (`coverForEdition`: one request through the ISBN, the
+edition document for an `OL…M` key, or that work's edition list for an `OL…W`
+key), then Google Books, only for an ISBN and only when OpenLibrary found
+nothing. ISBNdb stays out: a backfill would burn the metered daily quota.
+Goodreads stays out too, since its WAF already forces a cooldown. A no-cover
+answer is final and recorded; a provider failure rethrows so the job retries,
+because an outage must never be recorded as an absence. `edition_cover_fetches`
+is the ledger and the retry clock, exactly like `edition_genre_fetches`: a
+`found` row is terminal, anything else is retried after seven days, and the
+edition update only fires while `cover_url` is still empty, so a concurrent
+curator edit wins. `catalog.covers.sweep` runs every five minutes in batches of
+100 (500 at most) and claims each candidate through
+`catalog_enqueue_cover_fetch`, so the edge and the sweep never queue the same
+edition twice.
+
 The worker starts a dependency-free Prometheus endpoint on
 `WORKER_METRICS_HOST:WORKER_METRICS_PORT` (default `127.0.0.1:9464`) serving
 `/metrics`. `bibliograph_worker_up` is `1` while the process answers. Each
@@ -478,8 +502,9 @@ inline fallback.
   on every validation or conflict error.
 - The editor reconciles the per-identifier shape claims in the same
   transaction. Every identifier row carries a `Shape` disclosure holding that
-  identifier's own format, language, publication date, pages, description and
-  its publisher links (search an entity, create one by name, or remove). An
+  identifier's own format, language, publication date, pages, duration,
+  description and its publisher links (search an entity, create one by name,
+  or remove). An
   identifier whose `info` key is omitted keeps its stored
   claim untouched, `info: null` (or an all-empty object) deletes the row, and
   an object replaces every claim field. Only rows whose values actually change

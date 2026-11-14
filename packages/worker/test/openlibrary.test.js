@@ -697,3 +697,56 @@ test('genresForEdition answers nothing for a second redirect, a 404 or no identi
   assert.deepEqual(await empty.provider.genresForEdition(), []);
   assert.equal(empty.calls.length, 0, 'no identifier means no request');
 });
+
+test('coverForEdition reads the cover of the edition an ISBN resolves to', async () => {
+  const { provider, calls } = openLibrary({
+    handler: (url) =>
+      url.pathname === `/isbn/${ISBN13}.json`
+        ? jsonResponse({ key: '/books/OL123M', covers: [12345] })
+        : jsonResponse({}, 404)
+  });
+
+  const cover = await provider.coverForEdition([
+    { issuer: 'isbn13', value: ISBN13 },
+    { issuer: 'goodreads', value: '234225' }
+  ]);
+
+  assert.equal(cover, 'https://covers.openlibrary.org/b/id/12345-L.jpg');
+  assert.deepEqual(calls.map((call) => call.pathname), [`/isbn/${ISBN13}.json`]);
+});
+
+test('coverForEdition treats a missing or non-positive cover as no cover', async () => {
+  for (const covers of [undefined, [-1], [0], [], null]) {
+    const { provider } = openLibrary({
+      handler: () => jsonResponse({ key: '/books/OL123M', covers })
+    });
+    assert.equal(
+      await provider.coverForEdition([{ issuer: 'isbn13', value: ISBN13 }]),
+      undefined,
+      `covers ${JSON.stringify(covers)}`
+    );
+  }
+});
+
+test('coverForEdition reads an OL…M identifier edition without an ISBN', async () => {
+  const { provider, calls } = openLibrary({
+    handler: (url) =>
+      url.pathname === '/books/OL123M.json'
+        ? jsonResponse({ key: '/books/OL123M', covers: [777] })
+        : jsonResponse({}, 404)
+  });
+
+  const cover = await provider.coverForEdition([{ issuer: 'openlibrary', value: 'OL123M' }]);
+
+  assert.equal(cover, 'https://covers.openlibrary.org/b/id/777-L.jpg');
+  assert.deepEqual(calls.map((call) => call.pathname), ['/books/OL123M.json']);
+});
+
+test('coverForEdition makes no request for a bag with no usable identifier', async () => {
+  const { provider, calls } = openLibrary({ handler: () => jsonResponse({}, 404) });
+
+  assert.equal(await provider.coverForEdition([{ issuer: 'goodreads', value: '234225' }]), undefined);
+  assert.equal(await provider.coverForEdition([]), undefined);
+  assert.equal(await provider.coverForEdition(), undefined);
+  assert.equal(calls.length, 0, 'no usable identifier means no request');
+});

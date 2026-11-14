@@ -18,7 +18,6 @@ export type EditionRow = {
   rkey: string;
   title: string;
   subtitle: string | null;
-  duration_seconds: number | null;
   chapters: number | null;
   series: AdminSeries | null;
   book_edition: string | null;
@@ -39,6 +38,7 @@ export type IdentifierInfoRow = {
   published_date: string | null;
   pages: number | null;
   description: string | null;
+  duration_seconds: number | null;
 };
 export type ContributorRow = {
   edition_uri: string;
@@ -58,7 +58,7 @@ export type PublisherRow = {
 };
 
 export const EDITION_COLUMNS = `
-  e.uri, e.rkey, e.title, e.subtitle, e.duration_seconds, e.chapters, e.series,
+  e.uri, e.rkey, e.title, e.subtitle, e.chapters, e.series,
   e.book_edition, e.cover_url, e.created_at, e.indexed_at,
   o.updated_at AS outbox_updated_at`;
 
@@ -79,7 +79,6 @@ function revisionOf(record: AdminEdition): string {
       JSON.stringify({
         title: record.title,
         subtitle: record.subtitle,
-        durationSeconds: record.durationSeconds,
         chapters: record.chapters,
         series: record.series,
         bookEdition: record.bookEdition,
@@ -108,7 +107,6 @@ export function editionRecord(
     rkey: row.rkey,
     title: row.title,
     subtitle: row.subtitle,
-    durationSeconds: row.duration_seconds,
     chapters: row.chapters,
     series: row.series,
     bookEdition: row.book_edition,
@@ -141,7 +139,8 @@ export function editionRecord(
               language: info.language,
               publishedDate: info.published_date,
               pages: info.pages,
-              description: info.description
+              description: info.description,
+              durationSeconds: info.duration_seconds
             }
           : null
       };
@@ -175,7 +174,7 @@ export async function hydrateAdminEditions(
   );
   const infoResult = await client.query<IdentifierInfoRow>(
     `SELECT edition_uri, issuer, value, format, language,
-            published_date, pages, description
+            published_date, pages, description, duration_seconds
        FROM edition_identifier_info
       WHERE edition_uri = ANY($1::text[])
       ORDER BY edition_uri, issuer, value`,

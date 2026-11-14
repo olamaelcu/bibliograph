@@ -218,14 +218,13 @@ export async function updateAdminEdition(
 
     await client.query(
       `UPDATE editions SET
-         title = $2, subtitle = $3, duration_seconds = $4, chapters = $5,
-         series = $6::jsonb, book_edition = $7, cover_url = $8
+         title = $2, subtitle = $3, chapters = $4,
+         series = $5::jsonb, book_edition = $6, cover_url = $7
        WHERE uri = $1`,
       [
         uri,
         input.title,
         input.subtitle,
-        input.durationSeconds,
         input.chapters,
         input.series ? JSON.stringify(input.series) : null,
         input.bookEdition,
@@ -278,7 +277,8 @@ export async function updateAdminEdition(
           info.language === null &&
           info.publishedDate === null &&
           info.pages === null &&
-          info.description === null)
+          info.description === null &&
+          info.durationSeconds === null)
       ) {
         cleared.push({ issuer: identifier.issuer, value: identifier.value });
         continue;
@@ -301,26 +301,28 @@ export async function updateAdminEdition(
       await client.query(
         `INSERT INTO edition_identifier_info (
            edition_uri, issuer, value, format, language,
-           published_date, pages, description
+           published_date, pages, description, duration_seconds
          )
          SELECT $1, t.issuer, t.value, t.format, t.language,
-                t.published_date, t.pages::int, t.description
+                t.published_date, t.pages::int, t.description, t.duration_seconds::int
            FROM unnest($2::text[], $3::text[], $4::text[], $5::text[],
-                       $6::text[], $7::text[], $8::text[])
+                       $6::text[], $7::text[], $8::text[], $9::text[])
                 AS t(issuer, value, format, language, published_date,
-                     pages, description)
+                     pages, description, duration_seconds)
          ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
            format = EXCLUDED.format,
            language = EXCLUDED.language,
            published_date = EXCLUDED.published_date,
            pages = EXCLUDED.pages,
            description = EXCLUDED.description,
+           duration_seconds = EXCLUDED.duration_seconds,
           updated_at = now()
          WHERE edition_identifier_info.format IS DISTINCT FROM EXCLUDED.format
             OR edition_identifier_info.language IS DISTINCT FROM EXCLUDED.language
             OR edition_identifier_info.published_date IS DISTINCT FROM EXCLUDED.published_date
             OR edition_identifier_info.pages IS DISTINCT FROM EXCLUDED.pages
-            OR edition_identifier_info.description IS DISTINCT FROM EXCLUDED.description`,
+            OR edition_identifier_info.description IS DISTINCT FROM EXCLUDED.description
+            OR edition_identifier_info.duration_seconds IS DISTINCT FROM EXCLUDED.duration_seconds`,
         [
           uri,
           claims.map((claim) => claim.issuer),
@@ -329,7 +331,10 @@ export async function updateAdminEdition(
           claims.map((claim) => claim.info.language),
           claims.map((claim) => claim.info.publishedDate),
           claims.map((claim) => (claim.info.pages === null ? null : String(claim.info.pages))),
-          claims.map((claim) => claim.info.description)
+          claims.map((claim) => claim.info.description),
+          claims.map((claim) =>
+            claim.info.durationSeconds === null ? null : String(claim.info.durationSeconds)
+         )
         ]
       );
     }

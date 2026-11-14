@@ -143,18 +143,16 @@ async function makeEdition({
   const rkey = `pds-test-${Date.now()}-${sequence}`;
   const uri = `${PREFIX}${rkey}`;
   const createdAt = new Date('2026-02-03T04:05:06.000Z');
-
   await pool.query(
     `INSERT INTO editions (
-       uri, rkey, title, subtitle, duration_seconds, chapters, series,
+       uri, rkey, title, subtitle, chapters, series,
        book_edition, cover_url, created_at, indexed_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,now())`,
+     ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,now())`,
     [
       uri,
       rkey,
       title,
       'A Subtitle',
-      3600,
       12,
       JSON.stringify({ name: 'Test Series', position: '1' }),
       'First',
@@ -172,8 +170,9 @@ async function makeEdition({
     // claim has to live on the identifier.
     await pool.query(
       `INSERT INTO edition_identifier_info
-         (edition_uri, issuer, value, format, language, published_date, pages, description)
-       VALUES ($1,$2,$3,'physical','en','2020-01',320,'A test description.')`,
+         (edition_uri, issuer, value, format, language, published_date, pages,
+          description, duration_seconds)
+       VALUES ($1,$2,$3,'physical','en','2020-01',320,'A test description.',3600)`,
       [uri, identifier.issuer, identifier.value]
     );
   }

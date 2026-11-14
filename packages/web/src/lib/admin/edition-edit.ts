@@ -12,6 +12,7 @@ export type EditionEditIdentifierInfo = {
   publishedDate: string | null;
   pages: number | null;
   description: string | null;
+  durationSeconds: number | null;
 };
 
 export type EditionEditIdentifier = {
@@ -42,7 +43,6 @@ export type EditionEditSeries = { name: string; position?: string; display?: str
 export type EditionEditInput = {
   title: string;
   subtitle: string | null;
-  durationSeconds: number | null;
   chapters: number | null;
   series: EditionEditSeries | null;
   bookEdition: string | null;
@@ -226,7 +226,8 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
       language: languageTag(record.language, `${path}.language`),
       publishedDate: publishedDateField(record.publishedDate, `${path}.publishedDate`),
       pages: integer(record.pages, `${path}.pages`),
-      description: text(record.description, `${path}.description`, EDITION_EDIT_LIMITS.description)
+      description: text(record.description, `${path}.description`, EDITION_EDIT_LIMITS.description),
+      durationSeconds: integer(record.durationSeconds, `${path}.durationSeconds`)
     };
   }
 
@@ -362,7 +363,6 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     }
   }
 
-  const durationSeconds = integer(fields.durationSeconds, 'durationSeconds');
   const chapters = integer(fields.chapters, 'chapters');
 
   let series: EditionEditSeries | null = null;
@@ -454,7 +454,6 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     value: {
       title: title as string,
       subtitle,
-      durationSeconds,
       chapters,
       series,
       bookEdition,

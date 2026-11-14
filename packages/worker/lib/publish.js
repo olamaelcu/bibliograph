@@ -113,7 +113,7 @@ async function loadEditionSnapshot(pool, uri) {
     await client.query('BEGIN');
     const edition = await client.query(
       `SELECT e.uri, e.rkey, e.title, e.subtitle, s.language, s.published_date,
-              s.format, s.pages, e.duration_seconds, e.chapters, e.series,
+              s.format, s.pages, s.duration_seconds, e.chapters, e.series,
               e.book_edition, s.description, e.cover_url, e.created_at
          FROM editions e
          LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri

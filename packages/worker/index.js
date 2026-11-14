@@ -126,7 +126,7 @@ const taskList = createTasks({ pool, providers, publisherDid, publisherHost, pub
 // One publisher at a time: the task queue serializes the jobs, so two batches
 // never race for the same rows (claiming is safe anyway, this just avoids noise).
 //
-// The genre sweep is unconditional: it only enqueues genre fetches, which work
+// The catalog sweeps are unconditional: they only enqueue fetch jobs, which work
 // with or without publisher credentials. Passing a non-empty list also overrides
 // graphile-worker's default `./crontab` read, which this deployment never wanted.
 const cronItems = [];
@@ -147,6 +147,15 @@ cronItems.push({
   options: {
     queueName: 'genres-sweep',
     jobKey: 'catalog.genres.sweep:cron',
+    maxAttempts: 3
+  }
+});
+cronItems.push({
+  task: 'catalog.covers.sweep',
+  match: '*/5 * * * *',
+  options: {
+    queueName: 'covers-sweep',
+    jobKey: 'catalog.covers.sweep:cron',
     maxAttempts: 3
   }
 });
@@ -190,6 +199,15 @@ await runner.addJob('catalog.genres.sweep', {}, {
   queueName: 'genres-sweep',
   maxAttempts: 3,
   jobKey: 'catalog.genres.sweep:boot',
+  jobKeyMode: 'unsafe_dedupe'
+});
+
+// Coverless editions are a much smaller backlog and cost one provider request
+// each, so the boot drain is the same one-shot job on its own queue.
+await runner.addJob('catalog.covers.sweep', {}, {
+  queueName: 'covers-sweep',
+  maxAttempts: 3,
+  jobKey: 'catalog.covers.sweep:boot',
   jobKeyMode: 'unsafe_dedupe'
 });
 

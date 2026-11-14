@@ -107,7 +107,6 @@ function bodyFrom(edition: AdminEdition, overrides: Record<string, unknown> = {}
   return {
     title: edition.title,
     subtitle: edition.subtitle,
-    durationSeconds: edition.durationSeconds,
     chapters: edition.chapters,
     series: edition.series,
     bookEdition: edition.bookEdition,
@@ -178,7 +177,6 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
   const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
     title: 'Edited title',
     subtitle: 'An edited subtitle',
-    durationSeconds: 3600,
     chapters: 12,
     series: { name: 'Saga', position: '2', display: 'Vol. II' },
     bookEdition: '2nd revised',
@@ -192,7 +190,8 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
           language: 'en',
           publishedDate: '2024-02-29',
           pages: 320,
-          description: 'Edited description'
+          description: 'Edited description',
+          durationSeconds: 3600
         },
         publishers: [{ id: secondPublisher }]
       },
@@ -219,7 +218,8 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     language: 'en',
     publishedDate: '2024-02-29',
     pages: 320,
-    description: 'Edited description'
+    description: 'Edited description',
+    durationSeconds: 3600
   });
   assert.deepEqual(
     claimed?.publishers.map((publisher) => publisher.id),
@@ -257,7 +257,8 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
   ]);
 
   const claims = await db.query(
-    `SELECT issuer, value, format, language, published_date, pages, description
+    `SELECT issuer, value, format, language, published_date, pages, description,
+            duration_seconds
        FROM edition_identifier_info WHERE edition_uri = $1`,
     [seeded.uri]
   );
@@ -269,7 +270,8 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
       language: 'en',
       published_date: '2024-02-29',
       pages: 320,
-      description: 'Edited description'
+      description: 'Edited description',
+      duration_seconds: 3600
     }
   ]);
 
@@ -284,10 +286,15 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
   );
 
   const shape = await db.query(
-    'SELECT format, language, pages FROM edition_identifier_shape WHERE edition_uri = $1',
+    'SELECT format, language, pages, duration_seconds FROM edition_identifier_shape WHERE edition_uri = $1',
     [seeded.uri]
   );
-  assert.deepEqual(shape.rows[0], { format: 'ebook', language: 'en', pages: 320 });
+  assert.deepEqual(shape.rows[0], {
+    format: 'ebook',
+    language: 'en',
+    pages: 320,
+    duration_seconds: 3600
+  });
 
   const publisher = await db.query<{ publisher: { name: string } }>(
     'SELECT publisher FROM appview_book WHERE uri = $1',
@@ -468,24 +475,28 @@ test('claims are kept when omitted, cleared with null and written per identifier
       format: string | null;
       language: string | null;
       pages: number | null;
+      duration_seconds: number | null;
       updated_at: Date;
     }>(
-      `SELECT format, language, pages, updated_at FROM edition_identifier_info
-        WHERE edition_uri = $1 AND issuer = 'isbn13'`,
+      `SELECT format, language, pages, duration_seconds, updated_at FROM edition_identifier_info WHERE edition_uri = $1 AND issuer = 'isbn13'`,
       [seeded.uri]
     );
     return result.rows[0];
   };
 
   await db.query(
-    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, format, language, pages)
-     VALUES ($1, 'isbn13', '9780000000001', 'hardcover', 'en-GB', 320)`,
+    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, format, language, pages, duration_seconds) VALUES ($1, 'isbn13', '9780000000001', 'hardcover', 'en-GB', 320, 5400)`,
     [seeded.uri]
   );
   const seededClaim = await claimRow();
   assert.deepEqual(
-    { format: seededClaim?.format, language: seededClaim?.language, pages: seededClaim?.pages },
-    { format: 'hardcover', language: 'en-GB', pages: 320 }
+    {
+      format: seededClaim?.format,
+      language: seededClaim?.language,
+      pages: seededClaim?.pages,
+      duration_seconds: seededClaim?.duration_seconds
+    },
+    { format: 'hardcover', language: 'en-GB', pages: 320, duration_seconds: 5400 }
   );
 
   // Invalid claim field: rejected before the transaction, nothing changes.
@@ -546,14 +557,15 @@ test('claims are kept when omitted, cleared with null and written per identifier
       language: null,
       publishedDate: '2024-02',
       pages: 288,
-      description: null
+      description: null,
+      durationSeconds: null
     }
   );
   const shape = await db.query<{ format: string; pages: number }>(
-    'SELECT format, pages FROM edition_identifier_shape WHERE edition_uri = $1',
+    'SELECT format, pages, duration_seconds FROM edition_identifier_shape WHERE edition_uri = $1',
     [seeded.uri]
   );
-  assert.deepEqual(shape.rows[0], { format: 'hardcover', pages: 320 });
+  assert.deepEqual(shape.rows[0], { format: 'hardcover', pages: 320, duration_seconds: 5400 });
 
   // Null clears the row; the isbn13 claim still wins the union.
   const cleared = await updateAdminEdition(db, seeded.rkey, bodyFrom(added, {

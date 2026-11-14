@@ -559,6 +559,50 @@ export function createOpenLibrary({ baseUrl, fetchImpl = fetch } = {}) {
     return subjectsFromWork(await workDocument(workKeyOf(edition)));
   }
 
+  /**
+   * A cover URL for one edition, or undefined when OpenLibrary has none.
+   *
+   * Covers hang off the edition record, so the cheapest path is the ISBN: one
+   * request. An `OL…M` identifier reads its own edition document, and a
+   * `OL…W` work key walks that work's editions until one has a cover — one
+   * source and at most one JSON request per call, with no author or work
+   * expansion.
+   *
+   * A 404 arrives as `undefined` from `fetchJson` (no cover, not an error); a
+   * network failure propagates so the caller can decide whether the job is
+   * worth retrying.
+   */
+  async function coverForEdition(identifiers = []) {
+    const bag = Array.isArray(identifiers) ? identifiers : [];
+    const isbn = normalizeIsbn13(
+      cleanString(
+        bag.find((identifier) =>
+          ['isbn13', 'isbn10', 'isbn'].includes(cleanString(identifier?.issuer)?.toLowerCase())
+        )?.value
+      )
+    );
+    if (isbn) {
+      const edition = await query(`/isbn/${encodeURIComponent(isbn)}.json`);
+      return coverUrl(edition?.covers?.[0]);
+    }
+
+    const values = bag.map((identifier) => cleanString(identifier?.value)).filter(Boolean);
+    const editionKey = values.map(openLibraryBookKey).find((key) => key?.endsWith('M'));
+    if (editionKey) {
+      const edition = await query(`/books/${editionKey}.json`);
+      return coverUrl(edition?.covers?.[0]);
+    }
+
+    const workKey = values.map(openLibraryBookKey).find((key) => key?.endsWith('W'));
+    if (!workKey) return undefined;
+    const body = await query(`/works/${workKey}/editions.json?limit=${SEARCH_LIMIT}`);
+    for (const entry of Array.isArray(body?.entries) ? body.entries : []) {
+      const cover = coverUrl(entry?.covers?.[0]);
+      if (cover) return cover;
+    }
+    return undefined;
+  }
+
   async function search(input = {}) {
     const isbn = input.identifiers?.find((identifier) =>
       ['isbn13', 'isbn10', 'isbn'].includes(identifier?.issuer)
@@ -640,6 +684,7 @@ export function createOpenLibrary({ baseUrl, fetchImpl = fetch } = {}) {
     byIsbn,
     byIdentifier,
     genresForEdition,
+    coverForEdition,
     search,
     searchContributors,
     author,

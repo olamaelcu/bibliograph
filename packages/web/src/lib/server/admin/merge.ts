@@ -195,8 +195,8 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
     });
     await client.query(
       `UPDATE editions SET
-         title = $2, subtitle = $3, duration_seconds = $4, chapters = $5,
-         series = $6::jsonb, book_edition = $7, cover_url = $8
+         title = $2, subtitle = $3, chapters = $4,
+         series = $5::jsonb, book_edition = $6, cover_url = $7
        WHERE uri = $1`,
       [base, ...values]
     );
@@ -225,10 +225,10 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
       await client.query(
         `INSERT INTO edition_identifier_info (
            edition_uri, issuer, value, format, language,
-           published_date, pages, description
+           published_date, pages, description, duration_seconds
          )
          SELECT $1, s.issuer, s.value, s.format, s.language,
-                s.published_date, s.pages, s.description
+                s.published_date, s.pages, s.description, s.duration_seconds
            FROM edition_identifier_info s
           WHERE s.edition_uri = ANY($2::text[])
           ORDER BY s.updated_at DESC

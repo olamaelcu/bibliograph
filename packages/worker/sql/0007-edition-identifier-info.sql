@@ -39,12 +39,19 @@ CREATE TABLE IF NOT EXISTS edition_identifier_info (
   published_date text,
   pages integer,
   description text,
+  duration_seconds integer,
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   PRIMARY KEY (edition_uri, issuer, value),
   FOREIGN KEY (edition_uri, issuer, value)
     REFERENCES edition_identifiers (edition_uri, issuer, value)
     ON DELETE CASCADE ON UPDATE CASCADE
 );
+
+-- `CREATE TABLE IF NOT EXISTS` never adds a column to an existing table, and
+-- 0010 moves the duration claim onto this one. The line is what gives an
+-- already-deployed database the column before the shape view names it; on a
+-- fresh database it is a no-op.
+ALTER TABLE edition_identifier_info ADD COLUMN IF NOT EXISTS duration_seconds integer;
 
 CREATE INDEX IF NOT EXISTS edition_identifier_info_shape_idx
   ON edition_identifier_info (lower(format), lower(language));
@@ -61,7 +68,9 @@ SELECT
   (array_agg(pages ORDER BY identifier_shape_rank(issuer), issuer, value)
      FILTER (WHERE pages IS NOT NULL))[1] AS pages,
   (array_agg(description ORDER BY identifier_shape_rank(issuer), issuer, value)
-     FILTER (WHERE description IS NOT NULL AND btrim(description) <> ''))[1] AS description
+     FILTER (WHERE description IS NOT NULL AND btrim(description) <> ''))[1] AS description,
+  (array_agg(duration_seconds ORDER BY identifier_shape_rank(issuer), issuer, value)
+     FILTER (WHERE duration_seconds IS NOT NULL))[1] AS duration_seconds
 FROM edition_identifier_info
 GROUP BY edition_uri;
 

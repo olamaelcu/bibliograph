@@ -1,7 +1,7 @@
 import { createOutboxPublisher, DEFAULT_BATCH } from './publish.js';
 import { publisherConfigError, resolvePublisherConfig } from './pds.js';
 import { createIngest } from './ingest.js';
-import { isbn13 as normalizeIsbn13 } from './util.js';
+import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
 import { prepareEntityRecords } from './prepare-entities.js';
 import { mergeGenres } from './genres.js';
 
@@ -12,6 +12,11 @@ export const CANDIDATES_PER_TASK = 50;
 export const GENRE_SWEEP_BATCH = 25;
 /** Upper bound on one sweep, whatever the payload asks for. */
 export const GENRE_SWEEP_BATCH_MAX = 200;
+
+/** Editions one cover sweep claims when the payload names no limit. */
+export const COVER_SWEEP_BATCH = 100;
+/** Upper bound on one cover sweep, whatever the payload asks for. */
+export const COVER_SWEEP_BATCH_MAX = 500;
 
 function validIdentifier(identifier) {
   return (
@@ -362,6 +367,214 @@ export function createTasks({ pool, providers, publisherDid, publisherHost, publ
         `catalog.genres.sweep: ${candidates.length} candidate(s) ` +
           `(${freshCount} new, ${candidates.length - freshCount} retry), ` +
           `${enqueued} enqueued`
+      );
+    },
+
+    // Backfills one edition's cover from the free providers.
+    //
+    // A cover otherwise arrives only with an ingested candidate, so an edition
+    // whose first provider had none would stay coverless forever. OpenLibrary
+    // is asked first (one request, no key); Google Books only for an ISBN and
+    // only when OpenLibrary had nothing.
+    //
+    // A "no cover" answer is final and recorded; an outage throws so graphile
+    // retries, because a transient failure must not be mistaken for an
+    // absence. The ledger is the retry clock, and the edition update is
+    // guarded so a concurrent curator edit wins.
+    'catalog.covers': async (payload, helpers) => {
+      const uri =
+        typeof payload?.editionUri === 'string' && payload.editionUri !== ''
+          ? payload.editionUri
+          : null;
+      if (uri === null) {
+        helpers.logger.warn('catalog.covers: invalid payload');
+        return;
+      }
+
+      const edition = await pool.query('SELECT cover_url FROM editions WHERE uri = $1', [uri]);
+      if (edition.rowCount === 0) {
+        // The ledger row cascaded away with the edition.
+        helpers.logger.warn(`catalog.covers ${uri}: edition not found`);
+        return;
+      }
+      if (cleanString(edition.rows[0]?.cover_url)) {
+        await pool.query(
+          `UPDATE edition_cover_fetches
+              SET requested_at = now(), outcome = 'found'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.info(`catalog.covers ${uri}: already has a cover`);
+        return;
+      }
+
+      const identifiers = (
+        await pool.query(
+          `SELECT issuer, value
+             FROM edition_identifiers
+            WHERE edition_uri = $1
+            ORDER BY issuer, value`,
+          [uri]
+        )
+      ).rows;
+      if (identifiers.length === 0) {
+        await pool.query(
+          `UPDATE edition_cover_fetches
+              SET requested_at = now(), outcome = 'none'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.warn(`catalog.covers ${uri}: no identifiers`);
+        return;
+      }
+
+      let attempted = 0;
+      let failed = 0;
+      let firstFailure;
+      const noteFailure = (label, error) => {
+        failed += 1;
+        firstFailure ??= error;
+        helpers.logger.warn(
+          `catalog.covers ${uri}: ${label} failed — ${error?.message ?? error}`
+        );
+      };
+
+      let cover;
+      const openlibrary = providers?.providers?.openlibrary;
+      if (openlibrary) {
+        attempted += 1;
+        try {
+          cover = cleanString(await openlibrary.coverForEdition(identifiers));
+        } catch (error) {
+          noteFailure('OpenLibrary', error);
+        }
+      }
+
+      if (!cover) {
+        const isbn = normalizeIsbn13(
+          cleanString(
+            identifiers.find((identifier) =>
+              ['isbn13', 'isbn10', 'isbn'].includes(
+                cleanString(identifier?.issuer)?.toLowerCase()
+              )
+            )?.value
+          )
+        );
+        const google = providers?.providers?.google;
+        if (isbn && google) {
+          attempted += 1;
+          try {
+            const candidates = await google.byIsbn(isbn);
+            cover = candidates.map((candidate) => cleanString(candidate?.coverUrl)).find(Boolean);
+          } catch (error) {
+            noteFailure('Google Books', error);
+          }
+        }
+      }
+
+      if (!cover) {
+        if (attempted > 0 && failed === attempted) {
+          // Nothing answered, so this is an outage rather than an absence.
+          // Rethrow so the job retries; the claim is still held, so the retry
+          // does not wait out the seven-day window.
+          throw firstFailure;
+        }
+        await pool.query(
+          `UPDATE edition_cover_fetches
+              SET requested_at = now(), outcome = 'none'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.info(`catalog.covers ${uri}: no cover`);
+        return;
+      }
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `UPDATE editions SET cover_url = $2
+            WHERE uri = $1 AND (cover_url IS NULL OR btrim(cover_url) = '')`,
+          [uri, cover]
+        );
+        await client.query(
+          `UPDATE edition_cover_fetches
+              SET requested_at = now(), outcome = 'found'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      helpers.logger.info(`catalog.covers ${uri}: found ${cover}`);
+    },
+
+    // Files coverless editions into the queue.
+    //
+    // Two passes, like the genre sweep: editions that were never attempted come
+    // first, and a retry only fills the capacity left over — a population of
+    // genuinely coverless editions, re-armed every seven days, could otherwise
+    // occupy every sweep and starve new arrivals.
+    //
+    // No count precheck: the partial `editions_missing_cover_idx` makes the
+    // first walk index-only-sized when nothing is coverless, so proving there is
+    // nothing to do is already cheap, and a stale precheck could only hide new
+    // arrivals.
+    //
+    // The claim lives in `catalog_enqueue_cover_fetch`, so a sweep racing the
+    // edge never queues the same edition twice.
+    'catalog.covers.sweep': async (payload, helpers) => {
+      const limit = Number.isInteger(payload?.limit)
+        ? Math.min(Math.max(payload.limit, 1), COVER_SWEEP_BATCH_MAX)
+        : COVER_SWEEP_BATCH;
+
+      const candidates = [];
+      const fresh = await pool.query(
+        `SELECT e.uri
+           FROM editions e
+          WHERE (e.cover_url IS NULL OR btrim(e.cover_url) = '')
+            AND NOT EXISTS (
+                  SELECT 1 FROM edition_cover_fetches f WHERE f.edition_uri = e.uri
+                )
+          ORDER BY e.indexed_at ASC, e.uri ASC
+          LIMIT $1`,
+        [limit]
+      );
+      candidates.push(...fresh.rows);
+
+      if (candidates.length < limit) {
+        const retries = await pool.query(
+          // Driven by the ledger, so it can only return editions the fresh pass
+          // already excluded, oldest attempt first; the partial
+          // `edition_cover_fetches_retry_idx` serves that order.
+          `SELECT f.edition_uri AS uri
+             FROM edition_cover_fetches f
+             JOIN editions e ON e.uri = f.edition_uri
+            WHERE f.requested_at < now() - interval '7 days'
+              AND f.outcome IS DISTINCT FROM 'found'
+              AND (e.cover_url IS NULL OR btrim(e.cover_url) = '')
+            ORDER BY f.requested_at ASC
+            LIMIT $1`,
+          [limit - candidates.length]
+        );
+        candidates.push(...retries.rows);
+      }
+
+      let enqueued = 0;
+      for (const row of candidates) {
+        const claimed = await pool.query(
+          'SELECT catalog_enqueue_cover_fetch($1::text) AS enqueued',
+          [row.uri]
+        );
+        if (claimed.rows[0]?.enqueued === true) enqueued += 1;
+      }
+      helpers.logger.info(
+        `catalog.covers.sweep: ${candidates.length} candidate(s), ${enqueued} enqueued`
       );
     },
 

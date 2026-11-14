@@ -114,6 +114,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     [[
       'contributors',
       'edition_contributors',
+      'edition_cover_fetches',
       'edition_genre_fetches',
       'edition_genres',
       'edition_identifier_info',
@@ -134,6 +135,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     [
       'contributors',
       'edition_contributors',
+      'edition_cover_fetches',
       'edition_genre_fetches',
       'edition_genres',
       'edition_identifier_info',
@@ -167,6 +169,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
         AND proname = ANY($1)
       ORDER BY proname`,
     [[
+      'catalog_enqueue_cover_fetch',
       'catalog_enqueue_genre_fetch',
       'editions_next_tid',
       'editions_tid_encode',
@@ -177,7 +180,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_publisher_editions'
     ]]
   );
-  assert.equal(functions.rows.length, 8);
+  assert.equal(functions.rows.length, 9);
 
   const triggers = await pool.query(
     `SELECT tgname FROM pg_trigger t
@@ -234,7 +237,6 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   assert.match(row.rkey, /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/);
   assert.equal(row.title, candidate.title);
   assert.equal(row.subtitle, null);
-  assert.equal(row.duration_seconds, 11_400);
   assert.equal(row.chapters, 12);
   assert.deepEqual(row.series, candidate.series);
   assert.equal(row.book_edition, 'first');
@@ -255,7 +257,8 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   // 0007 moved the shape claims onto the identifier: the candidate's claim is
   // written for every identifier it supplied, and the edition reads the union.
   const claims = await pool.query(
-    `SELECT issuer, value, format, language, published_date, pages, description
+    `SELECT issuer, value, format, language, published_date, pages, description,
+            duration_seconds
        FROM edition_identifier_info
       WHERE edition_uri = $1 ORDER BY issuer, value`,
     [editionUri]
@@ -265,7 +268,8 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
     language: 'en',
     published_date: '2026-11-11',
     pages: 321,
-    description: 'A probe edition.'
+    description: 'A probe edition.',
+    duration_seconds: 11_400
   };
   assert.deepEqual(claims.rows, [
     { issuer: 'googlebooks', value: 'schema-probe-volume', ...claim },
@@ -273,7 +277,7 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   ]);
 
   const readModel = await pool.query(
-    `SELECT language, published_date, format, pages, description
+    `SELECT language, published_date, format, pages, description, duration_seconds
        FROM appview_book WHERE uri = $1`,
     [editionUri]
   );
@@ -282,8 +286,17 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
     published_date: '2026-11-11',
     format: 'paperback',
     pages: 321,
-    description: 'A probe edition.'
+    description: 'A probe edition.',
+    duration_seconds: 11_400
   });
+
+  // 0010 moved the duration onto the identifier; no edition keeps one.
+  const durationColumn = await pool.query(
+    `SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'editions'
+        AND column_name = 'duration_seconds'`
+  );
+  assert.equal(durationColumn.rowCount, 0, 'editions no longer holds a duration');
 
   const contributors = await pool.query(
     `SELECT c.name, c.description, ec.position, ec.role, ec.ref, c.identifiers

@@ -87,7 +87,7 @@ export type PublisherRow = {
 };
 
 export const EDITION_COLUMNS = `
-  e.uri, e.title, e.subtitle, e.duration_seconds, e.chapters, e.series,
+  e.uri, e.title, e.subtitle, s.duration_seconds, e.chapters, e.series,
   e.book_edition, e.cover_url, e.created_at, s.language AS shape_language,
   s.published_date AS shape_published_date, s.format AS shape_format,
   s.pages AS shape_pages, s.description AS shape_description`;

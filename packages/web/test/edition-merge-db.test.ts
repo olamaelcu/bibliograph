@@ -192,6 +192,14 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
   // A parked delete on the base must be rewritten to an edit by the merge.
   await db.query("UPDATE pds_outbox SET op = 'delete' WHERE uri = $1", [base.uri]);
 
+  // Duration is a per-identifier claim: the base's own isbn13 value must
+  // survive, and the source's isbn10 value must travel with its identifier.
+  await db.query(
+    `INSERT INTO edition_identifier_info (edition_uri, issuer, value, duration_seconds)
+     VALUES ($1, 'isbn13', '9780000009001', 7200), ($2, 'isbn10', '0000000002', 3600)`,
+    [base.uri, other.uri]
+  );
+
   const result = await mergeEditions(db, {
     base: base.uri,
     others: [other.uri],
@@ -224,6 +232,20 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
   assert.deepEqual(identifiers.rows, [
     { issuer: 'isbn10', value: '0000000002' },
     { issuer: 'isbn13', value: '9780000009001' }
+  ]);
+
+  const durations = await db.query<{
+    issuer: string;
+    value: string;
+    duration_seconds: number;
+  }>(
+    `SELECT issuer, value, duration_seconds FROM edition_identifier_info
+      WHERE edition_uri = $1 ORDER BY issuer`,
+    [base.uri]
+  );
+  assert.deepEqual(durations.rows, [
+    { issuer: 'isbn10', value: '0000000002', duration_seconds: 3600 },
+    { issuer: 'isbn13', value: '9780000009001', duration_seconds: 7200 }
   ]);
 
   // Base-first, position-renumbered, never overwritten.

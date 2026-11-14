@@ -12,6 +12,7 @@ export type IdentifierInfo = {
   publishedDate: string | null;
   pages: number | null;
   description: string | null;
+  durationSeconds: number | null;
 };
 
 /**
@@ -150,7 +151,6 @@ export type AdminEdition = {
   revision: string;
   title: string;
   subtitle: string | null;
-  durationSeconds: number | null;
   chapters: number | null;
   series: AdminSeries | null;
   bookEdition: string | null;
@@ -257,7 +257,6 @@ export type ResolveFormatResponse = {
 export type MergeField =
   | 'title'
   | 'subtitle'
-  | 'durationSeconds'
   | 'chapters'
   | 'series'
   | 'bookEdition'
@@ -266,7 +265,6 @@ export type MergeField =
 export const MERGE_FIELDS: ReadonlyArray<{ key: MergeField; label: string }> = [
   { key: 'title', label: 'Title' },
   { key: 'subtitle', label: 'Subtitle' },
-  { key: 'durationSeconds', label: 'Duration (seconds)' },
   { key: 'chapters', label: 'Chapters' },
   { key: 'series', label: 'Series' },
   { key: 'bookEdition', label: 'Book edition' },

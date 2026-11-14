@@ -93,7 +93,10 @@ test('rejects invalid BCP 47 language tags', () => {
 
 test('rejects negative, fractional and oversized integers', () => {
   assert.ok(paths(withInfo({ pages: -1 })).includes('identifiers.0.info.pages'));
-  assert.ok(paths({ ...valid(), durationSeconds: 1.5 }).includes('durationSeconds'));
+  assert.ok(
+    paths(withInfo({ durationSeconds: 1.5 })).includes('identifiers.0.info.durationSeconds')
+  );
+  assert.deepEqual(paths(withInfo({ durationSeconds: 3600 })), []);
   assert.ok(paths({ ...valid(), chapters: 2_147_483_648 }).includes('chapters'));
   assert.deepEqual(paths({ ...valid(), chapters: null }), []);
 });
@@ -109,14 +112,28 @@ test('validates published dates, including calendar days', () => {
 });
 
 test('identifier claims are optional, nullable and typed', () => {
-  const parsed = parseEditionEdit(withInfo({ pages: '12', format: 'hardcover' }));
+  const parsed = parseEditionEdit(
+    withInfo({ pages: '12', format: 'hardcover', durationSeconds: 12 })
+  );
   assert.deepEqual(parsed.errors, []);
   assert.deepEqual(parsed.value?.identifiers[0]?.info, {
     format: 'hardcover',
     language: null,
     publishedDate: null,
     pages: 12,
-    description: null
+    description: null,
+    durationSeconds: 12
+  });
+
+  const durationOnly = parseEditionEdit(withInfo({ durationSeconds: 1 }));
+  assert.deepEqual(durationOnly.errors, [], 'a duration alone is a claim');
+  assert.deepEqual(durationOnly.value?.identifiers[0]?.info, {
+    format: null,
+    language: null,
+    publishedDate: null,
+    pages: null,
+    description: null,
+    durationSeconds: 1
   });
 
   const cleared = parseEditionEdit(withInfo(null));

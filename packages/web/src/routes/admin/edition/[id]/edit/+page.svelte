@@ -21,6 +21,7 @@
     language: string;
     publishedDate: string;
     pages: string;
+    durationSeconds: string;
     description: string;
   };
   /** `info` is present only on the edition bag: claims exist per edition identifier. */
@@ -38,6 +39,7 @@
     language: '',
     publishedDate: '',
     pages: '',
+    durationSeconds: '',
     description: ''
   };
   type ContributorRow = {
@@ -93,9 +95,6 @@
 
   let title = $state(initial.title);
   let subtitle = $state(initial.subtitle ?? '');
-  let durationSeconds = $state(
-    initial.durationSeconds === null ? '' : String(initial.durationSeconds)
-  );
   let chapters = $state(initial.chapters === null ? '' : String(initial.chapters));
   let seriesName = $state(initial.series?.name ?? '');
   let seriesPosition = $state(initial.series?.position ?? '');
@@ -157,17 +156,22 @@
       language: info?.language ?? '',
       publishedDate: info?.publishedDate ?? '',
       pages: info?.pages === null || info?.pages === undefined ? '' : String(info.pages),
+      durationSeconds:
+        info?.durationSeconds === null || info?.durationSeconds === undefined
+          ? ''
+          : String(info.durationSeconds),
       description: info?.description ?? ''
     };
   }
 
-  /** All five fields blank means "no claim": the server deletes the row. */
+  /** Every field blank means "no claim": the server deletes the row. */
   function infoPayload(draft: IdentifierInfoDraft): IdentifierInfo | null {
     const empty =
       draft.format.trim() === '' &&
       draft.language.trim() === '' &&
       draft.publishedDate.trim() === '' &&
       draft.pages.trim() === '' &&
+      draft.durationSeconds.trim() === '' &&
       draft.description.trim() === '';
     if (empty) return null;
     return {
@@ -175,6 +179,7 @@
       language: valueOrNull(draft.language),
       publishedDate: valueOrNull(draft.publishedDate),
       pages: intOrNull(draft.pages),
+      durationSeconds: intOrNull(draft.durationSeconds),
       description: valueOrNull(draft.description)
     };
   }
@@ -223,7 +228,6 @@
     return {
       title,
       subtitle: valueOrNull(subtitle),
-      durationSeconds: intOrNull(durationSeconds),
       chapters: intOrNull(chapters),
       series,
       bookEdition: valueOrNull(bookEdition),
@@ -461,8 +465,6 @@
     revision = edition.revision;
     title = edition.title;
     subtitle = edition.subtitle ?? '';
-    durationSeconds =
-      edition.durationSeconds === null ? '' : String(edition.durationSeconds);
     chapters = edition.chapters === null ? '' : String(edition.chapters);
     seriesName = edition.series?.name ?? '';
     seriesPosition = edition.series?.position ?? '';
@@ -645,6 +647,16 @@
                 oninput={(event: Event) => (info.pages = valueOf(event))}
               ></wa-input>
             </div>
+            <div class="field">
+              <span class="field-label">Duration (seconds)</span>
+              <wa-input
+                aria-label={`${label} duration in seconds`}
+                value={info.durationSeconds}
+                inputmode="numeric"
+                placeholder="0"
+                oninput={(event: Event) => (info.durationSeconds = valueOf(event))}
+              ></wa-input>
+            </div>
             <div class="field identifier-info-wide">
               <span class="field-label">Description</span>
               <wa-textarea
@@ -819,19 +831,6 @@
               placeholder="2nd revised"
               oninput={(event: Event) => (bookEdition = valueOf(event))}
             ></wa-input>
-          </div>
-          <div class="field">
-            <span class="field-label">Duration (seconds)</span>
-            <wa-input
-              aria-label="Duration in seconds"
-              value={durationSeconds}
-              inputmode="numeric"
-              placeholder="0"
-              oninput={(event: Event) => (durationSeconds = valueOf(event))}
-            ></wa-input>
-            {#if fieldError('durationSeconds')}
-              <span class="field-error">{fieldError('durationSeconds')}</span>
-            {/if}
           </div>
           <div class="field">
             <span class="field-label">Chapters</span>
