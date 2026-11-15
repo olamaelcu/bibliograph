@@ -1,0 +1,95 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.readingProgress",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Where a reader is in one catalog edition, in the copy they are holding. One record per (edition, format): the rkey is the edition's rkey and the format's slug, so a save rewrites the same record rather than appending an event per tap. `createdAt` is when the position was first published and `updatedAt` when it last moved. A record is written by Livtet in the reader's own repo and indexed by the catalog.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["book", "format", "position", "createdAt", "updatedAt"],
+        "properties": {
+          "book": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The catalog edition being read."
+          },
+          "format": {
+            "type": "string",
+            "minLength": 1,
+            "maxGraphemes": 40,
+            "description": "The reader's format name as the app's seeded formats table spells it (`Hardcover`, `ePub`, `Audiobook`). It is the reader's own copy, not the edition's merged medium: two readers of one edition can report a print and an audio position against it."
+          },
+          "identifier": {
+            "type": "ref",
+            "ref": "#identifier",
+            "description": "The product identifier this position's `total` came from; absent when the total came from the edition record."
+          },
+          "position": {
+            "type": "ref",
+            "ref": "#position"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When this position was first published."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When the reader last moved to this position."
+          }
+        }
+      }
+    },
+    "identifier": {
+      "type": "object",
+      "description": "The catalog identifier a total belongs to, such as the print ISBN-13 whose page count `position.total` holds. The edition record's own page count and duration are separate rank winners over these claims, so without this a consumer cannot tell which product a total describes.",
+      "required": ["issuer", "value"],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "description": "The identifier's issuing scheme, as the catalog spells it (`isbn13`, `isbn10`, `asin`)."
+        },
+        "value": {
+          "type": "string",
+          "description": "The identifier value as issued."
+        }
+      }
+    },
+    "position": {
+      "type": "object",
+      "description": "The position, on the unit's own scale. `per_mille` is tenths of a percent (0–1000); `page` and `virtual_page` are counts; `timestamp` is seconds; `chapter` is the whole chapter number, with any fraction in `locator`; `cfi` is not a scale, so the CFI rides in `locator` and `value` is 0.",
+      "required": ["unit", "value"],
+      "properties": {
+        "unit": {
+          "type": "string",
+          "knownValues": [
+            "per_mille",
+            "page",
+            "virtual_page",
+            "timestamp",
+            "chapter",
+            "cfi"
+          ]
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The position in `unit`. Only `per_mille` has a fixed range (0–1000)."
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The whole in the same unit: a page count (`identifier`'s claim), a chapter count (the edition's), or a duration in seconds (the audio claim's). Absent when no extent is known."
+        },
+        "locator": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The precise position the integer rounds off: an EPUB CFI, a printed page label, or a clock time."
+        }
+      }
+    }
+  }
+}
