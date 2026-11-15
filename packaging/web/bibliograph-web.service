@@ -1,8 +1,15 @@
 [Unit]
 Description=Bibliograph web edge (SvelteKit)
 Documentation=https://github.com/olamaelcu/bibliograph
-After=network-online.target
 Wants=network-online.target
+# Order-only, deliberately not Wants=: Depends: names only nodejs and
+# bibliograph-happyview, and DATABASE_URL may point at a remote cluster, so a
+# local postgresql.service is not required (happyview only Recommends:
+# postgresql). Where it does exist, multi-user.target pulls it in and this
+# ordering keeps the edge from starting before the cluster accepts
+# connections. The catalog routes query Postgres directly, so without it a boot
+# leaves those requests failing until the cluster comes up.
+After=network-online.target postgresql.service
 
 [Service]
 Type=simple

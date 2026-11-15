@@ -3,7 +3,11 @@ Description=Seed the Bibliograph edge's HappyView XRPC client
 Documentation=https://github.com/olamaelcu/bibliograph
 # Must finish before HappyView loads its client registry into memory.
 Before=happyview.service
-After=network.target
+# Order-only: the seed shells out to psql, so it must not run before the cluster
+# accepts connections (it failed at boot with "Connection refused" on 5432,
+# leaving happyview.service to start without its XRPC client). Only Recommends:
+# postgresql, so a local cluster is not required here either.
+After=network.target postgresql.service
 
 [Service]
 Type=oneshot
