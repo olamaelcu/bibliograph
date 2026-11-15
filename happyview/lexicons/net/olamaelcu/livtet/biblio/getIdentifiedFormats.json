@@ -1,0 +1,93 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getIdentifiedFormats",
+  "description": "Fetch the per-identifier format claims of one catalog edition. This is an anonymous catalog read served by the bibliograph edge from the catalog tables; it is never handled by HappyView. Each identifier carries its own medium and extent, because the edition record's format, pages and duration are an independent rank union over those claims and can describe a product no identifier claims.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["uri"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the edition whose identifier claims to fetch."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["uri", "identifiers"],
+          "properties": {
+            "uri": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the edition these claims belong to."
+            },
+            "chapters": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Chapter count of the edition, when one is known. A chapter-denominated position's total comes from here."
+            },
+            "identifiers": {
+              "type": "array",
+              "description": "One claim per identifier, in the catalog's own rank order: isbn13, then isbn10, then asin, then any other issuer; ties broken by issuer and value. Consumers take the first claim whose medium matches and never re-sort.",
+              "items": {
+                "type": "ref",
+                "ref": "#identifiedFormat"
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "The uri is missing, malformed, or not an edition record URI."
+        },
+        {
+          "name": "RecordNotFound",
+          "description": "No catalog edition has that URI."
+        }
+      ]
+    },
+    "identifiedFormat": {
+      "type": "object",
+      "description": "The product one identifier denotes: its medium and the extent that medium is measured in. An identifier attached without a provider claim has neither, and is still listed.",
+      "required": ["issuer", "value"],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "description": "The identifier's issuing scheme, as the catalog spells it (isbn13, isbn10, asin, …)."
+        },
+        "value": {
+          "type": "string",
+          "description": "The identifier value as issued."
+        },
+        "format": {
+          "type": "string",
+          "knownValues": ["physical", "ebook", "audio"],
+          "description": "The medium this identifier denotes, when the provider named one."
+        },
+        "pages": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Page count of this product, when the provider reported one. A page-denominated position's total comes from here."
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Duration of this product in seconds, when the provider reported one. A timestamp-denominated position's total comes from here."
+        },
+        "progressUnit": {
+          "type": "string",
+          "knownValues": ["page", "timestamp"],
+          "description": "The scale this identifier's extent is measured in, not the reader's preferred unit: timestamp when a duration is known, else page when a page count is known, else absent."
+        }
+      }
+    }
+  }
+}

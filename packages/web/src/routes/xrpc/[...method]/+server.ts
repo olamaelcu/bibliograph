@@ -46,6 +46,7 @@ import {
 import {
   GET_CONTRIBUTOR,
   GET_GENRES_OF_BOOK,
+  GET_IDENTIFIED_FORMATS,
   GET_PUBLISHER,
   LIST_EDITIONS_BY_CONTRIBUTOR,
   RESOLVE_CONTRIBUTORS,
@@ -55,6 +56,7 @@ import {
 } from "$lib/server/catalog/entity-methods";
 import { decodeOffsetCursor } from "$lib/server/catalog/sql";
 import { EDITION_COLLECTION, getEditionGenres } from "$lib/server/catalog/genres";
+import { getEditionIdentifiedFormats } from "$lib/server/catalog/identified-formats";
 import {
   enqueueResolveMiss,
   enqueueGenreFetch,
@@ -338,6 +340,41 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
         recordCatalogQuery(
           metrics,
           "getGenresOfBook",
+          error instanceof CatalogUnavailableError ? "unavailable" : "error",
+          (performance.now() - started) / 1000,
+        );
+        return catalogFailure(error);
+      }
+    }
+
+    if (method === GET_IDENTIFIED_FORMATS) {
+      const uri = params.get("uri");
+      if (uri === null || uri === "") {
+        return fail(400, "InvalidRequest", "`uri` is required");
+      }
+      if (parseEntityUri(uri, EDITION_COLLECTION) === null) {
+        return fail(400, "InvalidRequest", "`uri` must be an edition record at-uri");
+      }
+
+      const started = performance.now();
+      try {
+        const result = await getEditionIdentifiedFormats(pool, uri);
+        if (result === null) {
+          return fail(404, "RecordNotFound", "no edition has that URI");
+        }
+        recordCatalogQuery(
+          metrics,
+          "getIdentifiedFormats",
+          "ok",
+          (performance.now() - started) / 1000,
+        );
+        // No hydration job: the claims arrive with the identifier's provider
+        // record during ingest, so there is nothing left to fetch here.
+        return json(result);
+      } catch (error) {
+        recordCatalogQuery(
+          metrics,
+          "getIdentifiedFormats",
           error instanceof CatalogUnavailableError ? "unavailable" : "error",
           (performance.now() - started) / 1000,
         );
