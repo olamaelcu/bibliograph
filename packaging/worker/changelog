@@ -1,3 +1,19 @@
+bibliograph-worker (0.2.22-1) unstable; urgency=medium
+
+  * 0.2.22 release: no worker payload change since 0.2.21.
+
+    - The ESM, the production `node_modules` and `sql/` are identical to
+      `0.2.21-1`; the newest migration is still
+      `0018-feed-order-nulls-last.sql`. The release number moves with the edge
+      so both Node packages share one; installing this package restarts the
+      unit and re-applies the schema, which is a no-op on a host already at
+      `0.2.21-1`.
+    - This release was shipped as a web-only install: the 0.2.22 change is on
+      the edge, and a full deploy would re-queue the Bookhive import and its
+      publish backlog for no worker-side benefit.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 18:28:00 +0000
+
 bibliograph-worker (0.2.21-1) unstable; urgency=medium
 
   * 0.2.21 release: the feed order index matches the feed's own order.

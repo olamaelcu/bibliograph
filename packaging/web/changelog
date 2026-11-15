@@ -1,3 +1,20 @@
+bibliograph-web (0.2.22-1) unstable; urgency=medium
+
+  * 0.2.22 release: the docs page and `/api/stats` stop counting the catalog on
+    every request.
+
+    - `readCatalogStats` ran four `count(*)` over the whole catalog (measured
+      565 ms warm and 1.5 s cold on the production catalog: 146k editions, 357k
+      identifiers), and that was the entire latency of `GET /` — the last route
+      above the dashboard's 0.5 s line, at 2.14 s p95.
+    - The counts are now reused for a minute and concurrent renders share one
+      load (`lib/server/cached-loader.ts`), so a burst is one query rather than
+      one per request. A failed load is not cached, so an outage recovers on the
+      next call. The numbers are exact; a docs page does not need the count of
+      this second.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 18:28:00 +0000
+
 bibliograph-web (0.2.21-1) unstable; urgency=medium
 
   * 0.2.21 release: the feed generator stops paying catalogue-scan latency,

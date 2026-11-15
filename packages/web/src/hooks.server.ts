@@ -6,7 +6,15 @@ import type { Handle } from '@sveltejs/kit/hooks';
 
 import { metrics, recordHttpRequest } from '$lib/server/metrics';
 import { buildServiceDidDocument } from '$lib/server/service-did';
+import { readCatalogStats } from '$lib/server/catalog/stats';
 import { env } from '$env/dynamic/private';
+
+// Warm the catalog stats the docs page advertises before the first request.
+// SvelteKit loads route modules lazily, so doing this from `stats.ts` itself
+// would only start the load when `/` is first hit — exactly the request that
+// must not pay for four `count(*)`. A failure is not cached and is retried by
+// the next reader, so a boot-time outage costs nothing here.
+void readCatalogStats().catch(() => {});
 
 /**
  * Record every HTTP request at the SvelteKit boundary.
