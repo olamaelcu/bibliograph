@@ -569,7 +569,9 @@ export function createTasks({
       // No usable image for this source: either the cache row is stale or the
       // file it names is gone. The path is keyed by URI alone, so leftover bytes
       // from another source have to be removed before a new download lands.
-      await removeCachedCover(coversDir, uri);
+      // Counted only when a file was actually there: the counter tracks the
+      // cache directory, not removal attempts.
+      if (await removeCachedCover(coversDir, uri)) coverMetrics.recordRemoval();
       await pool.query('DELETE FROM edition_cover_files WHERE edition_uri = $1', [uri]);
       let source = cleanString(row.cover_url);
       let discovered = false;
@@ -688,6 +690,7 @@ export function createTasks({
       helpers.logger.info(
         `catalog.covers ${uri}: cached ${image.byteSize} bytes from ${source}`
       );
+      coverMetrics.recordWrite(image.byteSize);
       coverMetrics.record('cached', '200');
     },
 

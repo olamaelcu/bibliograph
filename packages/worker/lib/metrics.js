@@ -147,6 +147,7 @@ function renderBookhiveMetrics(bookhiveMetrics) {
  */
 function renderCoverMetrics(coverMetrics) {
   const rows = coverMetrics?.snapshot?.() ?? [];
+  const totals = coverMetrics?.counters?.() ?? { writes: 0, writeBytes: 0, removals: 0 };
   const lines = [
     '# HELP bibliograph_cover_downloads_total Cover image downloads attempted, by result and HTTP status.',
     '# TYPE bibliograph_cover_downloads_total counter'
@@ -157,6 +158,20 @@ function renderCoverMetrics(coverMetrics) {
         `status="${labelValue(row.status)}"} ${Math.trunc(nonNegative(row.count))}`
     );
   }
+  // Files, not attempts: the cache's footprint on disk. `writes` is what the
+  // `cached` outcome above also counts once per file; the byte total is the one
+  // number no other series carries, and `removals` is what keeps the two honest.
+  lines.push(
+    '# HELP bibliograph_cover_writes_total Cover image files written to the cache.',
+    '# TYPE bibliograph_cover_writes_total counter',
+    `bibliograph_cover_writes_total ${Math.trunc(nonNegative(totals.writes))}`,
+    '# HELP bibliograph_cover_write_bytes_total Bytes written to the cover cache.',
+    '# TYPE bibliograph_cover_write_bytes_total counter',
+    `bibliograph_cover_write_bytes_total ${Math.trunc(nonNegative(totals.writeBytes))}`,
+    '# HELP bibliograph_cover_removals_total Cached cover files removed (a stale source or a re-download).',
+    '# TYPE bibliograph_cover_removals_total counter',
+    `bibliograph_cover_removals_total ${Math.trunc(nonNegative(totals.removals))}`
+  );
   return lines.join('\n');
 }
 

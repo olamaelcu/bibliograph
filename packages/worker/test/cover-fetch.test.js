@@ -308,11 +308,13 @@ test('an edition without a cover URL discovers one, then caches it', async (t) =
   const { pool, statements } = coverPool();
   const providers = coverProviders({ openlibrary: COVER });
   const download = coverFetch(bytes);
+  const coverMetrics = createCoverMetrics();
   const tasks = createTasks({
     pool,
     providers,
     publisherHost: 'covers.example',
     coversCacheDir: cacheDir,
+    coverMetrics,
     coverFetch: download.impl
   });
 
@@ -326,6 +328,13 @@ test('an edition without a cover URL discovers one, then caches it', async (t) =
   assert.match(discovered[0]?.sql ?? '', /cover_url IS NULL OR btrim\(cover_url\) = ''/);
   assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
   assert.equal(await fileExists(coverCachePath(cacheDir, EDITION)), true);
+  // One file on disk, and the byte total is its size — the metric an operator
+  // reads to explain the cache directory's growth.
+  assert.deepEqual(coverMetrics.counters(), {
+    writes: 1,
+    writeBytes: bytes.length,
+    removals: 0
+  });
 });
 
 test('Google Books answers when OpenLibrary has no cover', async (t) => {

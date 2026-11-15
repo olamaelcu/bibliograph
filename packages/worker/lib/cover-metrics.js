@@ -16,6 +16,11 @@ export function createCoverMetrics() {
   /** @type {Map<string, { result: string, status: string, count: number }>} */
   const counts = new Map();
 
+  // Files, not attempts: the disk footprint is what outlives a task, and an
+  // operator cannot derive it from the outcome series alone (a `cached` call is
+  // one file now, a `retry` is none).
+  const totals = { writes: 0, writeBytes: 0, removals: 0 };
+
   return {
     /**
      * Count one download attempt.
@@ -41,6 +46,22 @@ export function createCoverMetrics() {
         .sort(
           (a, b) => a.result.localeCompare(b.result) || a.status.localeCompare(b.status)
         );
+    },
+
+    /** One cover image file written to the cache, with its size in bytes. */
+    recordWrite(byteSize) {
+      totals.writes += 1;
+      totals.writeBytes += Math.max(0, Math.trunc(Number(byteSize) || 0));
+    },
+
+    /** One cached cover file removed (a stale source, or a re-download). */
+    recordRemoval() {
+      totals.removals += 1;
+    },
+
+    /** Copy-on-read totals for the exposition. */
+    counters() {
+      return { ...totals };
     }
   };
 }

@@ -12,7 +12,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { dirname, join } from 'node:path';
 import { createGate } from './util.js';
@@ -81,9 +81,20 @@ export async function writeCachedCover(cacheDir, editionUri, bytes) {
   return target;
 }
 
-/** Drop a cached image; a file that is already gone is not an error. */
+/**
+ * Drop a cached image; a file that is already gone is not an error. Returns
+ * whether a file was actually removed, so a caller's counter tracks files on
+ * disk rather than removal attempts.
+ */
 export async function removeCachedCover(cacheDir, editionUri) {
-  await rm(coverCachePath(cacheDir, editionUri), { force: true });
+  const target = coverCachePath(cacheDir, editionUri);
+  try {
+    await access(target);
+  } catch {
+    return false;
+  }
+  await rm(target, { force: true });
+  return true;
 }
 
 /** Magic-byte sniff; the response's own Content-Type is never trusted. */

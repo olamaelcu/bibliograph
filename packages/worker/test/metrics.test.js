@@ -58,6 +58,23 @@ test('a scrape with no bookhive import still exposes both families', () => {
   assert.match(text, /# TYPE bibliograph_catalog_bookhive_total counter/);
 });
 
+test('cover writes and removals are counted as files, not attempts', () => {
+  const coverMetrics = createCoverMetrics();
+  coverMetrics.recordWrite(2048);
+  coverMetrics.recordWrite(1024);
+  coverMetrics.recordRemoval();
+  // A retry writes nothing: the disk counters must not follow the outcome series.
+  coverMetrics.record('retry', '503');
+
+  const text = renderMetrics({ calls: 0, limit: 100, coverMetrics });
+
+  assert.match(text, /^bibliograph_cover_writes_total 2$/m);
+  assert.match(text, /^bibliograph_cover_write_bytes_total 3072$/m);
+  assert.match(text, /^bibliograph_cover_removals_total 1$/m);
+  assert.match(text, /# TYPE bibliograph_cover_write_bytes_total counter/);
+  assert.deepEqual(coverMetrics.counters(), { writes: 2, writeBytes: 3072, removals: 1 });
+});
+
 test('cover download outcomes render by result and status', () => {
   // The endpoint is the only place an operator can see the 403s that never
   // reach the ledger as a retryable failure; the labels must survive a scrape.

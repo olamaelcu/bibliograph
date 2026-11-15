@@ -437,7 +437,14 @@ attempt/retry/request counters and breaker states are rendered by the same
 worker, as is `bibliograph_cover_downloads_total{result,status}` (cover
 download outcomes: `cached`, `rejected` for a URL that will never retry, and
 `retry` for a provider failure), so a provider refusing cover images is visible
-without reading the journal. The Bookhive catalog import is visible twice:
+without reading the journal. The cache directory's own growth is counted in
+files rather than attempts: `bibliograph_cover_writes_total`,
+`bibliograph_cover_write_bytes_total` and `bibliograph_cover_removals_total` are
+one increment per file written (with its size) and per file removed, so a
+re-download shows as one write and one removal and an already-cached hit as
+neither. The durable footprint is measured from the host instead, by
+`textfile_bibliograph_covers_files` / `_bytes` in `prometheus-textfile-metrics`.
+The Bookhive catalog import is visible twice:
 `bibliograph_catalog_bookhive_editions` is read from `edition_identifiers` on
 every scrape — the durable count of catalog books whose hive id names an
 edition, so it survives restarts and shows whether the weekly walk is still
