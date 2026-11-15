@@ -163,6 +163,17 @@ the last published CID so the worker chooses create/update without a read. An
 entity trigger skips a NULL `at_uri`, so applying the schema queues nothing by
 itself.
 
+A trigger fires only on a real change. Every ingest upserts entities and links
+with `ON CONFLICT ... DO UPDATE`, which is an UPDATE even when each SET value
+equals the stored one, so 0019 compares values instead of trusting the
+statement: `pds_enqueue_contributor_edits` and `pds_enqueue_publisher_edits`
+carry a `WHEN` on the compared `name`/`identifiers`, and `pds_enqueue_entity` /
+`pds_enqueue_edition_child` return early on an UPDATE whose tuple is identical
+(`WHEN` cannot do that job: these triggers also cover INSERT and DELETE, where
+PostgreSQL rejects an OLD reference in the condition). Re-ingesting a known
+edition therefore queues nothing, while a rename still republishes every
+edition crediting the entity.
+
 The record value is rebuilt from the catalog at publish time — editions with
 `buildEditionRecord` (`packages/worker/lib/edition-record.js`), entities with
 `buildContributorRecord` / `buildPublisherRecord` (`entity-record.js`) — not
@@ -721,8 +732,9 @@ stored identifier `url` is kept for pairs the editor retained. The entity row,
 its `at_uri` and `created_at` are never deleted or rewritten on any path.
 Publication is trigger-driven and the editors never write `pds_outbox`:
 `pds_enqueue_contributor_record`/`pds_enqueue_publisher_record` (0004) queue the
-record itself on any update, while `pds_enqueue_contributor_edits` /
-`pds_enqueue_publisher_edits` (0001, `AFTER UPDATE OF name, identifiers`) queue
+record itself when the row actually changes, while
+`pds_enqueue_contributor_edits` / `pds_enqueue_publisher_edits` (0001, `AFTER
+UPDATE OF name, identifiers`, guarded on a value change by 0019) queue
 every edition that credits the row. A description-only edit therefore queues
 the entity record but no editions, because editions embed only the entity's
 name, identifiers and ref.

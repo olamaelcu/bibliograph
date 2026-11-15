@@ -663,6 +663,25 @@ test('claimBatch, completeEntry and pds_cids work against the fresh schema', { s
   assert.equal(stored.rows[0].cid, cid);
 });
 
+// A re-ingest upserts the same entity values and the same links. `ON CONFLICT
+// ... DO UPDATE` is an UPDATE even when nothing changed, and without the guards
+// it re-queued the edition and both entity records on every ingest of a known
+// edition: 93M outbox rows on production for ~300k entity writes.
+test('re-ingesting an unchanged edition queues nothing', { skip: SKIP }, async () => {
+  const before = await pool.query('SELECT uri, op, updated_at FROM pds_outbox ORDER BY uri');
+
+  const ingest = createIngest({ pool, publisherDid: AUTHORITY });
+  const again = await ingest(candidate);
+  assert.equal(again.uri, editionUri);
+  assert.equal(again.created, false);
+
+  const after = await pool.query('SELECT uri, op, updated_at FROM pds_outbox ORDER BY uri');
+  assert.deepEqual(after.rows, before.rows);
+
+  const requeued = await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [editionUri]);
+  assert.equal(requeued.rowCount, 0);
+});
+
 test('contributor/publisher edits and edition deletes enqueue update/delete and clear the CID', { skip: SKIP }, async () => {
   await pool.query('UPDATE contributors SET name = $1 WHERE name = $2', [
     CONTRIBUTOR_RENAMED,
