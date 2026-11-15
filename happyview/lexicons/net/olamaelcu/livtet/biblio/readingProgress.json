@@ -4,11 +4,11 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "Where a reader is in one catalog edition, in the copy they are holding. One record per (edition, format): the rkey is the edition's rkey and the format's slug, so a save rewrites the same record rather than appending an event per tap. `createdAt` is when the position was first published and `updatedAt` when it last moved. A record is written by Livtet in the reader's own repo and indexed by the catalog.",
+      "description": "A reader's relation to one catalog edition, published from the copy they are holding. Two shapes share this collection: a position record (one per edition and format, its rkey the edition's rkey and the format's slug, rewritten as the reader moves) and an annotation record (one per note, under a TID, rewritten when the note is edited). `createdAt` is when the record was first published — the position's first save, the note's own creation — and `updatedAt` when it last changed. Written by Livtet in the reader's own repo and indexed by the catalog.",
       "key": "any",
       "record": {
         "type": "object",
-        "required": ["book", "format", "position", "createdAt", "updatedAt"],
+        "required": ["book", "format", "createdAt", "updatedAt"],
         "properties": {
           "book": {
             "type": "string",
@@ -28,17 +28,23 @@
           },
           "position": {
             "type": "ref",
-            "ref": "#position"
+            "ref": "#position",
+            "description": "The reading position. Present on a position record, absent on an annotation record."
+          },
+          "annotation": {
+            "type": "ref",
+            "ref": "#annotation",
+            "description": "The note this record mirrors. A record carries either a `position` or an `annotation`; the rkey is a TID, so a note's record is found through the reader's own database rather than derived."
           },
           "createdAt": {
             "type": "string",
             "format": "datetime",
-            "description": "When this position was first published."
+            "description": "When this record was first published."
           },
           "updatedAt": {
             "type": "string",
             "format": "datetime",
-            "description": "When the reader last moved to this position."
+            "description": "When the reader last moved to this position, or last edited this note."
           }
         }
       }
@@ -88,6 +94,41 @@
           "type": "string",
           "maxLength": 512,
           "description": "The precise position the integer rounds off: an EPUB CFI, a printed page label, or a clock time."
+        }
+      }
+    },
+    "annotation": {
+      "type": "object",
+      "description": "One note taken while reading, mirrored from the reader's own database. `id` is the note's id there, so an edit rewrites the same record instead of appending one.",
+      "required": ["id", "text"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The note's id in the reader's database."
+        },
+        "text": {
+          "type": "string",
+          "maxGraphemes": 10000
+        },
+        "locator": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "Where in the copy the note sits: a printed page, a chapter, a CFI."
+        },
+        "quote": {
+          "type": "string",
+          "maxGraphemes": 2000,
+          "description": "The passage the note is attached to."
+        },
+        "pageNumber": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "color": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "The highlight colour, as the reader's app spells it."
         }
       }
     }
