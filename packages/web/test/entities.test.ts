@@ -310,7 +310,7 @@ test('listEditionsByContributor uses the shared order and language clauses', asy
     return [];
   });
 
-  await listEditionsByContributor(pool, {
+  const page = await listEditionsByContributor(pool, {
     contributor: CONTRIBUTOR_URI,
     language: 'EN-us',
     sort: 'publishedYear',
@@ -331,11 +331,37 @@ test('listEditionsByContributor uses the shared order and language clauses', asy
   assert.match(pageCall.sql, /DESC NULLS LAST/);
   // contributor, language, limit + 1, offset; the count reuses the first two.
   assert.deepEqual(pageCall.values, [42, 'en-us', 11, 0]);
+  // A short first page is the whole listing: its length is the total, and the
+  // count (the same semi-join over the catalogue) is not run at all.
+  assert.equal(page?.total, 1);
+  assert.equal(
+    calls.some((call) => call.sql.includes('count(*)::int AS n')),
+    false,
+    'a page shorter than the limit is its own total'
+  );
+});
 
+test('listEditionsByContributor counts only a full first page', async () => {
+  const rows = Array.from({ length: 11 }, (_, index) => editionRow(`${EDITION_PREFIX}${index}`));
+  const { pool, calls } = fakePool((sql) => {
+    if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
+    if (sql.includes('count(*)::int AS n')) return [{ n: 27 }];
+    if (sql.includes('FROM editions e')) return rows;
+    return [];
+  });
+
+  const page = await listEditionsByContributor(pool, {
+    contributor: CONTRIBUTOR_URI,
+    offset: 0,
+    limit: 10
+  });
+
+  assert.equal(page?.items.length, 10);
+  assert.equal(page?.total, 27);
+  assert.ok(page?.cursor, 'a full page has more behind it');
   const countCall = calls.find((call) => call.sql.includes('count(*)::int AS n'));
-  assert.ok(countCall);
-  assert.match(countCall.sql, /split_part\(lower\(s\.language\)/);
-  assert.deepEqual(countCall.values, [42, 'en-us']);
+  assert.ok(countCall, 'a full first page is counted');
+  assert.deepEqual(countCall.values, [42]);
 });
 
 test('listEditionsByContributor returns null for an unknown contributor', async () => {

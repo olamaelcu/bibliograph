@@ -29,7 +29,7 @@ BEGIN
   EXECUTE $index$
     CREATE INDEX IF NOT EXISTS happyview_records_feed_order_idx
       ON happyview.happyview_records
-        (collection, (record::jsonb ->> 'createdAt') DESC, uri DESC)
+        (collection, (record::jsonb ->> 'createdAt') DESC NULLS LAST, uri DESC)
   $index$;
 
   EXECUTE $index$

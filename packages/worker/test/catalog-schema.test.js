@@ -120,6 +120,8 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'edition_identifier_info',
       'edition_identifier_publishers',
       'edition_identifiers',
+      'edition_publisher_list',
+      'edition_shape',
       'editions',
       'genres',
       'google_books_cache',
@@ -142,6 +144,8 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'edition_identifier_info',
       'edition_identifier_publishers',
       'edition_identifiers',
+      'edition_publisher_list',
+      'edition_shape',
       'editions',
       'genres',
       'google_books_cache',
@@ -184,10 +188,14 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_edition',
       'pds_enqueue_edition_child',
       'pds_enqueue_entity',
-      'pds_enqueue_publisher_editions'
+      'pds_enqueue_publisher_editions',
+      'refresh_edition_publishers',
+      'refresh_edition_publishers_row',
+      'refresh_edition_shape',
+      'refresh_edition_shape_row'
     ]]
   );
-  assert.equal(functions.rows.length, 14);
+  assert.equal(functions.rows.length, 18);
 
   // 0013 makes the three claim columns projections of `extent`, so no writer
   // can set them directly and the shape view reads a single consistent claim.
@@ -224,7 +232,9 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_identifiers',
       'pds_enqueue_publisher_edits',
       'pds_enqueue_publisher_record',
-      'pds_enqueue_publishers'
+      'pds_enqueue_publishers',
+      'refresh_edition_publishers',
+      'refresh_edition_shape'
     ]
   );
 });

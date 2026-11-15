@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 
-import { CatalogUnavailableError, catalogPool } from '$lib/server/catalog/db';
+import { CatalogUnavailableError, feedPool } from '$lib/server/catalog/db';
 import {
   metrics,
   recordFeedAuthFailure,
@@ -181,7 +181,7 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
 
   let page: FeedSkeleton;
   try {
-    page = await fetchFeedPage(catalogPool(), {
+    page = await fetchFeedPage(feedPool(), {
       kind,
       viewerDid,
       limit,

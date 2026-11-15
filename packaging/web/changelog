@@ -1,3 +1,51 @@
+bibliograph-web (0.2.21-1) unstable; urgency=medium
+
+  * 0.2.21 release: the feed generator stops paying catalogue-scan latency,
+    and a slow feed page no longer answers 503.
+
+    - `fetchFeedPage` asks each activity collection for its own ordered page and
+      merges them, instead of one `collection IN (…)` query. With an `IN` list
+      the planner reads every row of the three collections and sorts them; with
+      three ordered branches it merges the index scans and stops after the
+      requested rows. A `MATERIALIZED` page CTE keeps the Bookhive `hiveId`
+      lookup on the emitted rows, never on the join input.
+    - The feed generator takes its own pool (`feedPool()`) instead of the
+      catalog pool, so the catalog's 5 s statement bound cannot abort a feed
+      page — that turned every page into `503 feed database is unavailable`
+      because a page took 8.5 s on the production catalogue.
+    - Measured with `0018`'s corrected index: one public feed page 8 537 ms →
+      31 ms, and the endpoint answers `200` again.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 17:26:00 +0000
+
+bibliograph-web (0.2.20-1) unstable; urgency=medium
+
+  * 0.2.20 release: catalog reads answer in milliseconds instead of seconds.
+
+    - `searchEditions` expresses its text match as a union of index-backed
+      candidate sets (title, description, contributor name, identifier value)
+      joined back to `editions`, instead of one `OR` whose `EXISTS` branches
+      forced a catalogue scan with a subplan per row. Each branch carries the
+      relevance bucket the old `CASE` emitted, so `min(rank)` reproduces the
+      same order; the exact match set and page content are unchanged. A
+      language-only browse still takes the plain catalogue scan.
+    - `searchContributors` and `searchPublishers` get the same treatment (name
+      and identifier value as two joined sets), and their identifier branch
+      skips rows whose `identifiers` array is empty, which is what the partial
+      indexes serve.
+    - `resolveEditions`, `searchEditions` and `listEditionsByContributor` no
+      longer count a first page that is shorter than `limit`: its length is the
+      exact total, so the second full pass over the predicate is skipped. The
+      response contract does not change — `total` stays exact.
+    - The catalog pool is 15 connections (`CATALOG_POOL_MAX`), with a 2 s
+      acquire timeout and a 5 s statement bound, so a saturated or runaway
+      query fails inside the request instead of queueing the whole surface
+      behind five slots.
+    - `bibliograph_catalog_queries_total` gains `outcome="pool_timeout"`, so a
+      pool-acquire timeout is no longer indistinguishable from a SQL error.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 16:58:18 +0000
+
 bibliograph-web (0.2.19-1) unstable; urgency=medium
 
   * 0.2.19 release: per-identifier format claims, and a filtered contributor

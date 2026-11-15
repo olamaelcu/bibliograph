@@ -1,3 +1,50 @@
+bibliograph-worker (0.2.21-1) unstable; urgency=medium
+
+  * 0.2.21 release: the feed order index matches the feed's own order.
+
+    - `0018-feed-order-nulls-last.sql` replaces
+      `happyview_records_feed_order_idx` with the same key but
+      `DESC NULLS LAST`. The edge pages `com.atproto.feed.getFeedSkeleton` with
+      `DESC NULLS LAST` (a record with no `createdAt` sorts last), and a plain
+      `DESC` keyset defaults to `NULLS FIRST`, so the index could never supply
+      the order: every page read all three activity collections and sorted them
+      — 8.5 s measured on the production catalogue, against 31 ms once the
+      index matches. The file converges: it only drops an index whose
+      definition lacks `NULLS LAST`, so later deploys skip it.
+    - `0003-feed-read.sql` now creates the same `NULLS LAST` definition, so a
+      fresh database gets the usable index on its post-boot re-apply.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 17:26:00 +0000
+
+bibliograph-worker (0.2.20-1) unstable; urgency=medium
+
+  * 0.2.20 release: the edition shape becomes a maintained table, and the
+    search predicates get trigram indexes.
+
+    - `0015-materialize-edition-shape.sql` replaces the two aggregate views
+      (`edition_identifier_shape`, `edition_publishers_shape`) with
+      `edition_shape` and `edition_publisher_list`, kept current by a per-row
+      refresh trigger on `edition_identifier_info` and
+      `edition_identifier_publishers`. Both views keep their names, columns
+      and order, so no reader changes; the join every catalog read performs is
+      now a primary-key lookup instead of a `GROUP BY` over the whole claim
+      table. The backfill runs only while a table is empty, so a re-applied
+      file is a no-op, and an edition whose last claim goes away loses its row
+      exactly as the aggregate view produced none.
+    - `0016-search-indexes.sql` enables `pg_trgm` and adds the four trigram
+      indexes the search match needs: `editions.title`,
+      `coalesce(edition_shape.description, '')` (the expression the query
+      compares), `contributors.name` and `edition_identifiers.value`. They are
+      built with `CREATE INDEX CONCURRENTLY`, outside a transaction block, so
+      the catalog stays writable while they build.
+    - `0017-entity-search-indexes.sql` adds `publishers.name` and the two
+      partial `(id) WHERE identifiers <> '[]'` indexes the contributor and
+      publisher searches branch through.
+    - All three are additive: no column or table is dropped, and the newest
+      migration is `0017-entity-search-indexes.sql`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 16:58:18 +0000
+
 bibliograph-worker (0.2.19-1) unstable; urgency=medium
 
   * 0.2.19 release: no worker payload change since 0.2.18.

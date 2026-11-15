@@ -342,14 +342,25 @@ async function searchEntity<Row, T>(
   const q = input.q.trim();
   if (q === '') throw new EntityQueryError('q is required');
   const offset = decodeOffsetCursor(input.cursor);
+  // A name hit and an identifier-value hit are two index-backed sets, joined
+  // instead of `OR`ed: an `OR` with an `EXISTS` branch can use no index, so the
+  // whole table was read and the subquery ran per row. The non-empty guard
+  // removes no result — an empty array has no element to match — and lets the
+  // identifier branch ride the partial index that skips rows without one.
   const result = await pool.query(
-    `SELECT ${columns}, NULL::text AS cid
+    `WITH candidates AS (
+       SELECT c.id FROM ${table} c WHERE c.name ILIKE $1
+       UNION
+       SELECT c.id FROM ${table} c
+        WHERE c.identifiers <> '[]'::jsonb
+          AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(c.identifiers) AS i(entry)
+                 WHERE i.entry->>'value' ILIKE $1
+              )
+     )
+     SELECT ${columns}, NULL::text AS cid
        FROM ${table} c
-      WHERE c.name ILIKE $1
-         OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements(c.identifiers) AS i(entry)
-               WHERE i.entry->>'value' ILIKE $1
-            )
+       JOIN candidates k ON k.id = c.id
       ORDER BY CASE
                  WHEN lower(c.name) = lower($2) THEN 0
                  WHEN c.name ILIKE $3 THEN 1
@@ -455,7 +466,7 @@ export async function listEditionsByContributor(
     fallback: 'e.created_at DESC, e.uri ASC'
   });
 
-  const pagePromise = pool.query(
+  const page = await pool.query(
     `SELECT ${EDITION_COLUMNS}
        FROM editions e
        ${EDITION_SHAPE_JOIN}
@@ -465,21 +476,22 @@ export async function listEditionsByContributor(
       LIMIT ${limit} OFFSET ${offset}`,
     params
   );
+  const rows = (page.rows as EditionRow[]).slice(0, input.limit);
 
   // The same predicate as the page, so a language filter narrows the total too.
-  const countedPromise =
-    input.offset === 0
-      ? pool.query(
+  // A first page shorter than `limit` is the whole listing, so its length is the
+  // exact total and the count (which repeats the same semi-join over the
+  // catalogue) is not worth running.
+  const counted =
+    input.offset === 0 && rows.length === input.limit
+      ? await pool.query(
           `SELECT count(*)::int AS n
        FROM editions e
        ${EDITION_SHAPE_JOIN}
             WHERE ${where}`,
           params.slice(0, params.length - 2)
         )
-      : Promise.resolve(null);
-
-  const [page, counted] = await Promise.all([pagePromise, countedPromise]);
-  const rows = (page.rows as EditionRow[]).slice(0, input.limit);
+      : null;
   const views = await hydrate(pool, rows, input.coversBaseUrl ?? '');
   const items = rows.flatMap((row, index) => {
     const edition = views[index];
@@ -491,6 +503,8 @@ export async function listEditionsByContributor(
     ...(page.rows.length > input.limit
       ? { cursor: encodeOffsetCursor(input.offset + items.length) }
       : {}),
-    ...(counted ? { total: Number(counted.rows[0]?.n ?? 0) } : {})
+    ...(input.offset === 0
+      ? { total: counted ? Number(counted.rows[0]?.n ?? 0) : rows.length }
+      : {})
   };
 }

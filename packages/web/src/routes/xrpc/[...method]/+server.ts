@@ -9,7 +9,7 @@ import {
 } from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
 import { proxyPdsRead } from "$lib/server/pds";
-import { catalogPool } from "$lib/server/catalog/db";
+import { catalogPool, isCatalogPoolTimeout } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import {
   resolveEditions,
@@ -81,6 +81,15 @@ const MAX_HYDRATION_JOBS_PER_REQUEST = 10;
 
 function fail(status: number, error: string, message: string): Response {
   return json({ error, message }, { status });
+}
+
+/**
+ * The `bibliograph_catalog_queries_total` outcome for a failed catalog call.
+ * A pool-acquire timeout is not a SQL error: the statement never ran.
+ */
+function catalogOutcome(error: unknown): "unavailable" | "pool_timeout" | "error" {
+  if (error instanceof CatalogUnavailableError) return "unavailable";
+  return isCatalogPoolTimeout(error) ? "pool_timeout" : "error";
 }
 
 async function readBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -179,7 +188,7 @@ async function handleResolve(request: Request): Promise<Response> {
     recordCatalogQuery(
       metrics,
       "resolveEditions",
-      error instanceof CatalogUnavailableError ? "unavailable" : "error",
+      catalogOutcome(error),
       (performance.now() - started) / 1000,
     );
     return catalogFailure(error);
@@ -282,7 +291,7 @@ async function handleSearch(request: Request): Promise<Response> {
     recordCatalogQuery(
       metrics,
       "searchEditions",
-      error instanceof CatalogUnavailableError ? "unavailable" : "error",
+      catalogOutcome(error),
       (performance.now() - started) / 1000,
     );
     return catalogFailure(error);
@@ -340,7 +349,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
         recordCatalogQuery(
           metrics,
           "getGenresOfBook",
-          error instanceof CatalogUnavailableError ? "unavailable" : "error",
+          catalogOutcome(error),
           (performance.now() - started) / 1000,
         );
         return catalogFailure(error);
@@ -375,7 +384,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
         recordCatalogQuery(
           metrics,
           "getIdentifiedFormats",
-          error instanceof CatalogUnavailableError ? "unavailable" : "error",
+          catalogOutcome(error),
           (performance.now() - started) / 1000,
         );
         return catalogFailure(error);

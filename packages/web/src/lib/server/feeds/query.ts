@@ -278,41 +278,66 @@ export async function fetchFeedPage(
   if (dids !== null && dids.length === 0) return { feed: [] };
 
   const values: unknown[] = [REVIEW_COLLECTION, BOOK_STATUS_COLLECTION, BUZZ_BOOKHIVE_BOOK];
-  // A Bookhive record names no edition: `appview_bookhive_lua` resolves its
-  // `hiveId` to the edition the catalog import minted, and that edition is the
-  // entry's reason. A row whose hive id is not imported yet still feeds (the
-  // reason keeps its `bookhive:<shelf>` prefix).
-  let sql = `SELECT uri,
-                    collection,
-                    record::jsonb AS record,
-                    record::jsonb->>'createdAt' AS created_at,
-                    m.edition_uri AS book_uri
-               FROM happyview.happyview_records
-               LEFT JOIN public.appview_bookhive_lua m
-                      ON m.hive_id = record::jsonb->>'hiveId'
-              WHERE collection IN ($1, $2, $3)`;
 
   if (dids !== null) {
     values.push(dids);
-    sql += ` AND did = ANY($${values.length}::text[])`;
   }
+  const didParam = dids === null ? null : `$${values.length}`;
 
   if (options.cursor) {
     values.push(options.cursor.c, options.cursor.u);
-    const c = `$${values.length - 1}`;
-    const u = `$${values.length}`;
-    sql += ` AND (
-      CASE WHEN ${c}::text IS NULL
-        THEN record::jsonb->>'createdAt' IS NULL AND uri < ${u}
-        ELSE record::jsonb->>'createdAt' IS NULL
-          OR record::jsonb->>'createdAt' < ${c}
-          OR (record::jsonb->>'createdAt' = ${c} AND uri < ${u})
-      END
-    )`;
   }
+  const cursorParams = options.cursor
+    ? { createdAt: `$${values.length - 1}`, uri: `$${values.length}` }
+    : null;
 
   values.push(options.limit + 1);
-  sql += ` ORDER BY record::jsonb->>'createdAt' DESC NULLS LAST, uri DESC LIMIT $${values.length}`;
+  const limitParam = `$${values.length}`;
+
+  // One ordered branch per collection, unioned. A single `IN` list makes the
+  // planner read every row of the three collections and sort them (measured
+  // 8.5 s on the production catalogue); three ordered branches let it merge the
+  // three index scans and stop after `limit + 1` rows (0.8 ms), because
+  // `happyview_records_feed_order_idx` matches this ORDER BY exactly — see
+  // 0018-feed-order-nulls-last.sql.
+  const branches = [REVIEW_COLLECTION, BOOK_STATUS_COLLECTION, BUZZ_BOOKHIVE_BOOK].map(
+    (_, index) => {
+      let branch = `(SELECT uri,
+                            collection,
+                            record::jsonb AS record,
+                            record::jsonb->>'createdAt' AS created_at,
+                            record::jsonb->>'hiveId' AS hive_id
+                       FROM happyview.happyview_records
+                      WHERE collection = $${index + 1}`;
+      if (didParam !== null) branch += ` AND did = ANY(${didParam}::text[])`;
+      if (cursorParams !== null) {
+        branch += ` AND (
+        CASE WHEN ${cursorParams.createdAt}::text IS NULL
+          THEN record::jsonb->>'createdAt' IS NULL AND uri < ${cursorParams.uri}
+          ELSE record::jsonb->>'createdAt' IS NULL
+            OR record::jsonb->>'createdAt' < ${cursorParams.createdAt}
+            OR (record::jsonb->>'createdAt' = ${cursorParams.createdAt} AND uri < ${cursorParams.uri})
+        END
+      )`;
+      }
+      return `${branch} ORDER BY record::jsonb->>'createdAt' DESC NULLS LAST, uri DESC LIMIT ${limitParam})`;
+    }
+  );
+
+  // A Bookhive record names no edition: `appview_bookhive_lua` resolves its
+  // `hiveId` to the edition the catalog import minted, and that edition is the
+  // entry's reason. A row whose hive id is not imported yet still feeds (the
+  // reason keeps its `bookhive:<shelf>` prefix). Materialised so the lookup runs
+  // for the emitted page only, never as a join input the sorted scan has to
+  // walk.
+  const sql = `WITH page AS MATERIALIZED (
+                 ${branches.join('\n                 UNION ALL\n                 ')}
+               )
+               SELECT p.uri, p.collection, p.record, p.created_at, m.edition_uri AS book_uri
+                 FROM page p
+                 LEFT JOIN public.appview_bookhive_lua m ON m.hive_id = p.hive_id
+                ORDER BY p.created_at DESC NULLS LAST, p.uri DESC
+                LIMIT ${limitParam}`;
 
   const pageStarted = performance.now();
   const result = await pool.query(sql, values);

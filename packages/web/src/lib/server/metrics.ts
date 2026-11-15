@@ -610,10 +610,15 @@ export function recordPdsProxyRequest(
   recordProxy(m.pdsProxyRequests, request);
 }
 
+/**
+ * `ok`, `error` (a statement failed), `unavailable` (no `DATABASE_URL`) and
+ * `pool_timeout` (no pooled connection came free) are the only outcomes; the
+ * last one used to be indistinguishable from `error`.
+ */
 export function recordCatalogQuery(
   m: WebMetrics,
   operation: string,
-  outcome: 'ok' | 'error' | 'unavailable',
+  outcome: 'ok' | 'error' | 'unavailable' | 'pool_timeout',
   durationSeconds: number
 ): void {
   const normalized = normalizeCatalogOperation(operation);

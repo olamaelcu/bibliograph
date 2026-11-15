@@ -149,7 +149,7 @@ export async function resolveEditions(input: {
   const limit = push(input.limit + 1);
   const offset = push(input.offset);
 
-  const pagePromise = pool.query<EditionRow>(
+  const page = await pool.query<EditionRow>(
     `WITH matches AS (
        SELECT DISTINCT i.edition_uri FROM edition_identifiers i WHERE ${matches}
      )
@@ -161,25 +161,26 @@ export async function resolveEditions(input: {
      LIMIT ${limit} OFFSET ${offset}`,
     params
   );
+  const rows = page.rows.slice(0, input.limit);
 
-  const totalPromise =
-    input.offset === 0
-      ? pool.query<{ n: number }>(
+  // A first page shorter than `limit` is the whole match set, so its length is
+  // the exact total and the count scan is not worth running. Only a full first
+  // page can have more matches behind it.
+  const counted =
+    input.offset === 0 && rows.length === input.limit
+      ? await pool.query<{ n: number }>(
           `SELECT count(*)::int AS n FROM (
              SELECT DISTINCT i.edition_uri FROM edition_identifiers i WHERE ${matches}
            ) matched`,
           params.slice(0, params.length - 2)
         )
       : null;
-
-  const [page, counted] = await Promise.all([pagePromise, totalPromise]);
-  const rows = page.rows.slice(0, input.limit);
   const items = await hydrate(pool, rows, input.coversBaseUrl ?? '');
 
   return {
     items,
     hasMore: page.rows.length > input.limit,
-    ...(counted ? { total: counted.rows[0]?.n ?? 0 } : {})
+    ...(input.offset === 0 ? { total: counted ? counted.rows[0]?.n ?? 0 : rows.length } : {})
   };
 }
 
@@ -203,76 +204,69 @@ export async function searchEditions(input: {
     return `$${params.length}`;
   };
 
-  const clauses: string[] = [];
-  let identifierClause: string | undefined;
-  let titleClause: string | undefined;
-  let authorClause: string | undefined;
-  let textClause: string | undefined;
+  // Each hint contributes one index-backed set of edition URIs, tagged with the
+  // relevance bucket the old `CASE` emitted: 0 exact identifier, 1 title, 2
+  // author, 3 broad text. `min(rank)` over an edition's branches reproduces
+  // that precedence exactly, and the union of the branches is the same match
+  // set the `OR` selected — as a few hundred URIs instead of a catalogue scan
+  // with a correlated subplan per row (which no `BitmapOr` can absorb, because
+  // two of the four text branches are `EXISTS` subqueries).
+  const branches: string[] = [];
+  let rankedHint = false;
 
   if (input.identifiers.length > 0) {
-    identifierClause = `EXISTS (
-      SELECT 1 FROM edition_identifiers i
-      WHERE i.edition_uri = e.uri AND ${identifierMatch(input.identifiers, push)}
-    )`;
-    clauses.push(identifierClause);
+    branches.push(
+      `SELECT i.edition_uri AS edition_uri, 0 AS rank
+         FROM edition_identifiers i
+        WHERE ${identifierMatch(input.identifiers, push)}`
+    );
+    rankedHint = true;
   }
 
   if (input.title) {
     const pattern = push(likePattern(input.title));
-    titleClause = `e.title ILIKE ${pattern}`;
-    clauses.push(titleClause);
+    branches.push(
+      `SELECT e.uri AS edition_uri, 1 AS rank FROM editions e WHERE e.title ILIKE ${pattern}`
+    );
+    rankedHint = true;
   }
 
   if (input.author) {
     const pattern = push(likePattern(input.author));
-    authorClause = `EXISTS (
-      SELECT 1 FROM edition_contributors ec
-      JOIN contributors c ON c.id = ec.contributor_id
-      WHERE ec.edition_uri = e.uri AND c.name ILIKE ${pattern}
-    )`;
-    clauses.push(authorClause);
+    branches.push(
+      `SELECT ec.edition_uri, 2 AS rank FROM edition_contributors ec
+         JOIN contributors c ON c.id = ec.contributor_id
+        WHERE c.name ILIKE ${pattern}`
+    );
+    rankedHint = true;
   }
 
   if (input.q) {
     const pattern = push(likePattern(input.q));
-    textClause = `(
-      e.title ILIKE ${pattern}
-      OR coalesce(s.description, '') ILIKE ${pattern}
-      OR EXISTS (
-        SELECT 1 FROM edition_contributors ecq
-        JOIN contributors cq ON cq.id = ecq.contributor_id
-        WHERE ecq.edition_uri = e.uri AND cq.name ILIKE ${pattern}
-      )
-      OR EXISTS (
-        SELECT 1 FROM edition_identifiers iq
-        WHERE iq.edition_uri = e.uri AND iq.value ILIKE ${pattern}
-      )
-    )`;
-    clauses.push(textClause);
+    // The broad text match was an `OR` of these four branches; each one is
+    // served by a trigram index of its own.
+    branches.push(
+      `SELECT e.uri AS edition_uri, 3 AS rank FROM editions e WHERE e.title ILIKE ${pattern}`,
+      `SELECT s.edition_uri, 3 AS rank FROM edition_identifier_shape s
+        WHERE coalesce(s.description, '') ILIKE ${pattern}`,
+      `SELECT ec.edition_uri, 3 AS rank FROM edition_contributors ec
+         JOIN contributors c ON c.id = ec.contributor_id
+        WHERE c.name ILIKE ${pattern}`,
+      `SELECT i.edition_uri, 3 AS rank FROM edition_identifiers i
+        WHERE i.value ILIKE ${pattern}`
+    );
   }
-  // The hints above are ORed; a language is a filter, so it is ANDed with them.
-  const filters: string[] = [];
-  if (input.language) filters.push(editionLanguageClause(input.language, push));
 
-  const conditions = [
-    ...(clauses.length > 0 ? [`(${clauses.join(' OR ')})`] : []),
-    ...filters
-  ];
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  // A language is a filter, not a hint: it is ANDed with the match set.
+  const where = input.language ? `WHERE ${editionLanguageClause(input.language, push)}` : '';
 
   // Local ranking is deliberately simple and stable: exact identifier matches
-  // first, then title matches, then author matches, then broad text matches.
-  const rank = (clause: string | undefined, value: number): string =>
-    clause ? `WHEN ${clause} THEN ${value}` : '';
-  const whens = [rank(identifierClause, 0), rank(titleClause, 1), rank(authorClause, 2)].filter(
-    Boolean
-  );
-  // No hint means no ranking key: an integer literal here would be read as a
-  // select-list position, not a constant.
-  const relevanceOrder =
-    whens.length > 0
-      ? `CASE ${whens.join(' ')} ELSE 3 END, e.indexed_at DESC, e.uri ASC`
-      : 'e.indexed_at DESC, e.uri ASC';
+  // first, then title matches, then author matches, then broad text matches. A
+  // body with none of the three ranked hints has no ranking key at all, so its
+  // page stays in recency order.
+  const relevanceOrder = rankedHint
+    ? 'r.rank, e.indexed_at DESC, e.uri ASC'
+    : 'e.indexed_at DESC, e.uri ASC';
 
   const limit = push(input.limit + 1);
   const offset = push(input.offset);
@@ -285,9 +279,24 @@ export async function searchEditions(input: {
     fallback: relevanceOrder
   });
 
-  const pagePromise = pool.query<EditionRow>(
-    `SELECT ${EDITION_COLUMNS}
-     FROM editions e
+  // A body with no hint (`language` only) has no candidate set to narrow to and
+  // keeps the catalogue scan. `ranked` folds an edition's branches down to the
+  // best rank it earned, so each edition contributes one row.
+  const cte =
+    branches.length > 0
+      ? `WITH candidates AS (
+       ${branches.join('\n       UNION ALL\n       ')}
+     ), ranked AS (
+       SELECT edition_uri, min(rank) AS rank FROM candidates GROUP BY edition_uri
+     )
+     `
+      : '';
+  const from =
+    branches.length > 0 ? 'editions e JOIN ranked r ON r.edition_uri = e.uri' : 'editions e';
+
+  const page = await pool.query<EditionRow>(
+    `${cte}SELECT ${EDITION_COLUMNS}
+     FROM ${from}
      ${EDITION_SHAPE_JOIN}
      ${EDITION_COVERS_JOIN}
      ${where}
@@ -295,24 +304,26 @@ export async function searchEditions(input: {
      LIMIT ${limit} OFFSET ${offset}`,
     params
   );
+  const rows = page.rows.slice(0, input.limit);
 
-  const totalPromise =
-    input.offset === 0
-      ? pool.query<{ n: number }>(
-          `SELECT count(*)::int AS n FROM editions e
+  // See `resolveEditions`: a short first page is the whole match set. The count
+  // re-runs the same predicate over the catalogue, so it is only paid for a
+  // page that could have more behind it.
+  const counted =
+    input.offset === 0 && rows.length === input.limit
+      ? await pool.query<{ n: number }>(
+          `${cte}SELECT count(*)::int AS n
+             FROM ${from}
              ${EDITION_SHAPE_JOIN}
              ${where}`,
           params.slice(0, params.length - 2)
         )
       : null;
-
-  const [page, counted] = await Promise.all([pagePromise, totalPromise]);
-  const rows = page.rows.slice(0, input.limit);
   const items = await hydrate(pool, rows, input.coversBaseUrl ?? '');
 
   return {
     items,
     hasMore: page.rows.length > input.limit,
-    ...(counted ? { total: counted.rows[0]?.n ?? 0 } : {})
+    ...(input.offset === 0 ? { total: counted ? counted.rows[0]?.n ?? 0 : rows.length } : {})
   };
 }
