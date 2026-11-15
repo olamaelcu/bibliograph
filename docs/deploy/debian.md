@@ -282,6 +282,7 @@ On the target, after the installs:
 | `--replace-legacy` | Explicitly stop and purge the retired combined package, remove its nginx site, then cut over and require the new vhost + HTTPS. Destructive: purges old conffile edits; PostgreSQL data is untouched. Without it, a detected legacy install aborts before upload. |
 | `--skip-db` | Skip the HappyView role/schema gate and the catalog schema. |
 | `--skip-nginx` | Do not run `nginx -t`/reload after installing the web package. |
+| `--skip-bookhive` | Do not queue the `catalog.bookhive` walk. By default it is queued after the worker restarts (`job_key` `catalog.bookhive:deploy`, replaced on each deploy) because its only other trigger is the weekly `0 3 * * 1` cron, so a fresh host would have no Bookhive `hiveId` → edition join until the next Monday. The walk is idempotent. |
 | `-h`, `--help` | Usage. |
 
 `deploy.sh` is the single implementation; `.mise/tasks/deploy` only adds the

@@ -30,6 +30,11 @@
 #   * Feed read path: 0003-feed-read.sql is re-applied after HappyView has
 #     migrated (its tables do not exist during the first catalog pass), so a
 #     fresh host gets the feed indexes and grants without a second full pass.
+#   * Bookhive import: after the worker restarts, `catalog.bookhive` is queued
+#     as a one-off job (`job_key` `catalog.bookhive:deploy`, replaced on every
+#     deploy). Its weekly cron is `0 3 * * 1`, so without this a fresh host has
+#     no hive id -> edition join until the next Monday. Skip it with
+#     `--skip-bookhive`; the walk is idempotent either way.
 #
 # Usage:
 #   ./deploy.sh                          -> veve@lescayes.ts.olamaelcu.net
@@ -39,6 +44,7 @@
 #   ./deploy.sh --print-remote           print the remote script; no ssh
 #   ./deploy.sh --skip-db                DB already provisioned by another tool
 #   ./deploy.sh --skip-nginx             do not validate/reload nginx
+#   ./deploy.sh --skip-bookhive          do not queue the Bookhive import
 #   DIST_DIR=some/dir ./deploy.sh        select debs from somewhere else
 #
 # Requires: ssh, scp, dpkg-deb and sha256sum locally; passwordless sudo,
@@ -67,6 +73,7 @@ PRINT_REMOTE=0
 SKIP_DB=0
 SKIP_NGINX=0
 REPLACE_LEGACY=0
+SKIP_BOOKHIVE=0
 
 say() { printf '==> %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
@@ -109,6 +116,9 @@ Options:
   --skip-db       Skip the HappyView role/schema gate and the catalog schema
                   (use only when another tool owns the database).
   --skip-nginx    Skip nginx -t / reload after installing the web package.
+  --skip-bookhive Skip queueing the Bookhive catalog import (it runs weekly
+                  anyway; queued here so a fresh deploy has a hive id -> edition
+                  join instead of waiting for the next Monday 03:00 cron).
   -h, --help      Show this help.
 
 Environment:
@@ -147,6 +157,7 @@ WEB_SHA="$6"
 SKIP_DB="$7"
 SKIP_NGINX="$8"
 REPLACE_LEGACY="${9:-0}"
+SKIP_BOOKHIVE="${10:-0}"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -501,6 +512,36 @@ else
 fi
 
 restart_unit bibliograph-worker.service
+
+# Queue the Bookhive catalog import. Without it the weekly cron would wait for
+# the next Monday 03:00, and until it runs no Bookhive `hiveId` names an edition:
+# those records are neither reviews nor linkable feed entries. The walk is
+# idempotent (identifier set *and* claims are compared per book), so a re-deploy
+# replaces the pending job and the second run mostly skips.
+if [ "$SKIP_DB" = 0 ] && [ "$SKIP_BOOKHIVE" = 0 ]; then
+  worker_url="$(combined_env_value DATABASE_URL /etc/bibliograph/worker.env)"
+  [ -n "$worker_url" ] \
+    || fail "DATABASE_URL is empty in /etc/bibliograph/worker.env; cannot queue the Bookhive import"
+  say "Queueing the Bookhive catalog import (catalog.bookhive:deploy)"
+  # `add_job` is graphile's public enqueue function; job_key + replace makes a
+  # repeated deploy idempotent instead of stacking copies of the walk.
+  psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -c "
+    SELECT graphile_worker.add_job(
+      'catalog.bookhive',
+      json_build_object('pages', 5000)::json,
+      queue_name => 'bookhive',
+      max_attempts => 2,
+      job_key => 'catalog.bookhive:deploy',
+      job_key_mode => 'replace'
+    );" >/dev/null \
+    || fail "could not queue catalog.bookhive; the worker is up but the import was not queued"
+  note "queued; the worker walks Bookhive's catalog in the background (5000 pages at most)"
+elif [ "$SKIP_BOOKHIVE" = 1 ]; then
+  note "--skip-bookhive: Bookhive import not queued (the Monday cron still runs it)"
+else
+  note "--skip-db: Bookhive import not queued"
+fi
+
 restart_unit bibliograph-web.service
 
 # The web unit and the packaged nginx vhost must agree on the port, or nginx
@@ -675,6 +716,7 @@ while (($# > 0)); do
     --replace-legacy) REPLACE_LEGACY=1 ;;
     --skip-db) SKIP_DB=1 ;;
     --skip-nginx) SKIP_NGINX=1 ;;
+    --skip-bookhive) SKIP_BOOKHIVE=1 ;;
     --) shift; break ;;
     -*) die "unknown option '$1' (try --help)" ;;
     *)
@@ -1030,7 +1072,7 @@ scp -q "$HV_DEB" "$WORKER_DEB" "$WEB_DEB" "$HOST:/tmp/"
 say "Installing and verifying on $HOST (dependency order)"
 REMOTE_ARGS="--"
 for arg in "$HV_NAME" "$HV_SHA" "$WORKER_NAME" "$WORKER_SHA" "$WEB_NAME" "$WEB_SHA" \
-           "$SKIP_DB" "$SKIP_NGINX" "$REPLACE_LEGACY"; do
+           "$SKIP_DB" "$SKIP_NGINX" "$REPLACE_LEGACY" "$SKIP_BOOKHIVE"; do
   REMOTE_ARGS="$REMOTE_ARGS '$arg'"
 done
 
