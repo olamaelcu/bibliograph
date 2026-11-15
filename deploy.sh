@@ -437,10 +437,31 @@ if [ "$SKIP_DB" = 0 ]; then
   [ "${#sql_files[@]}" -gt 0 ] \
     || fail "no *.sql files in $sql_dir; the worker package is incomplete"
 
+  # A migration takes AccessExclusiveLock on the relations it recreates
+  # (`CREATE OR REPLACE VIEW` included), while HappyView and the edge keep
+  # reading them: the two can deadlock, and a plain `psql` waits indefinitely.
+  # `lock_timeout` makes the migration fail fast instead of deadlocking, and a
+  # re-runnable file is simply retried a few seconds later.
   for file in "${sql_files[@]}"; do
     say "Catalog schema: $(basename "$file")"
-    psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -f "$file" \
-      || fail "catalog schema failed at $(basename "$file"). Each file is one transaction, so this one was rolled back; earlier files in this run stay applied. Data migrated by an earlier file is not reverted. Fix the error and re-run (the files are re-runnable)."
+    attempt=1
+    while :; do
+      if output=$(PGOPTIONS='-c lock_timeout=15000' psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -f "$file" 2>&1); then
+        break
+      fi
+      case "$output" in
+        *"deadlock detected"*|*"could not obtain lock"*|*"canceling statement due to lock timeout"*)
+          if [ "$attempt" -lt 3 ]; then
+            note "lock conflict applying $(basename "$file") (attempt $attempt/3); retrying in 5s"
+            attempt=$((attempt + 1))
+            sleep 5
+            continue
+          fi
+          ;;
+      esac
+      printf '%s\n' "$output"
+      fail "catalog schema failed at $(basename "$file"). Each file is one transaction, so this one was rolled back; earlier files in this run stay applied. Data migrated by an earlier file is not reverted. Fix the error and re-run (the files are re-runnable)."
+    done
   done
   note "Catalog schema applied (re-runnable; migrations are forward-only)"
 else
