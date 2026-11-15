@@ -33,6 +33,7 @@ import {
 } from './entity-record.js';
 import {
   PublisherConfigError,
+  MAX_WRITES_PER_CALL,
   createPdsPublisher,
   publisherConfigError,
   resolvePublisherConfig
@@ -44,8 +45,13 @@ export const EDITION_COLLECTION = 'community.lexicon.media.book.edition';
 export const OUTBOX_COLLECTIONS = Object.freeze([EDITION_COLLECTION, ...ENTITY_COLLECTIONS]);
 
 export const MAX_ATTEMPTS = 10;
-export const DEFAULT_BATCH = 25;
+/** One claim, and therefore one `applyWrites` call: the PDS charges per call. */
+export const DEFAULT_BATCH = MAX_WRITES_PER_CALL;
 export const DEFAULT_LEASE_MS = 5 * 60 * 1000;
+/** Snapshots built in parallel; each is a short read transaction. */
+export const PREPARE_CONCURRENCY = 8;
+/** Write calls in flight at once. One call is ~230 ms of PDS work per 100 records. */
+export const WRITE_CONCURRENCY = 4;
 const MAX_BACKOFF_SECONDS = 60 * 60;
 const MAX_ERROR_LENGTH = 2000;
 
@@ -207,11 +213,13 @@ function writeRecordValue(entry, snapshot, coversBaseUrl) {
 }
 
 /**
- * Publish one claimed row. Returns the atproto result (`{ uri, cid }` for
- * create/update; `{ uri }`, or nothing for an already-absent record, on delete).
+ * Resolve one claimed row into the write it needs, without sending it:
+ * `{ entry, operation, value? }`. A delete carries no value.
+ *
+ * This is the half of publishing that costs a catalog read; the write half is
+ * batched, so a chunk of rows shares one PDS call.
  */
-export async function publishEntry({
-  pds,
+export async function prepareEntry({
   publisherDid,
   pool,
   entry,
@@ -233,19 +241,7 @@ export async function publishEntry({
     );
   }
 
-  if (entry.op === 'delete') {
-    try {
-      const result = await pds.applyWrite({
-        operation: 'delete',
-        collection: entry.collection,
-        rkey: entry.rkey
-      });
-      return { ...result, operation: 'delete' };
-    } catch (error) {
-      if (isRecordNotFound(error)) return { operation: 'delete', absent: true };
-      throw error;
-    }
-  }
+  if (entry.op === 'delete') return { entry, operation: 'delete' };
 
   const snapshot = await loadSnapshot(pool, entry.uri, entry.collection);
   if (!snapshot) {
@@ -259,43 +255,111 @@ export async function publishEntry({
   const value = writeRecordValue(entry, snapshot, coversBaseUrl);
   const operation = snapshot.cid ? 'update' : 'create';
 
-  logger.info?.(
-    `pds-publish: ${operation} ${entry.uri}` +
-      (snapshot.cid ? ` (previous cid ${snapshot.cid})` : '')
-  );
+  return { entry, operation, value };
+}
+
+/**
+ * Send one prepared write on its own, with the two race fallbacks: a record
+ * created out-of-band looks like AlreadyExists to create and a deleted one
+ * looks like RecordNotFound to update, so each is retried once as the other op.
+ */
+async function writePreparedOne(pds, prepared) {
+  const { entry, operation, value } = prepared;
+  const send = (op) => {
+    const write = { operation: op, collection: entry.collection, rkey: entry.rkey };
+    if (op !== 'delete') write.value = value;
+    return pds.applyWrite(write);
+  };
 
   try {
-    const result = await pds.applyWrite({
+    return { ...(await send(operation)), operation, value };
+  } catch (error) {
+    if (operation === 'delete' && isRecordNotFound(error)) {
+      return { operation: 'delete', absent: true };
+    }
+    if (operation === 'create' && error?.code === 'AlreadyExists') {
+      return { ...(await send('update')), operation: 'update', value };
+    }
+    if (operation === 'update' && isRecordNotFound(error)) {
+      return { ...(await send('create')), operation: 'create', value };
+    }
+    throw error;
+  }
+}
+
+/** One `applyWrites` call for a prepared chunk; results stay in order. */
+async function writePreparedChunk(pds, prepared) {
+  const results = await pds.applyWrites({
+    writes: prepared.map(({ entry, operation, value }) => ({
       operation,
       collection: entry.collection,
       rkey: entry.rkey,
       value
-    });
-    return { ...result, operation, value };
-  } catch (error) {
-    // The two ops race with external state: a record created out-of-band looks
-    // like AlreadyExists to create and a deleted one looks like RecordNotFound
-    // to update. Retry once with the other operation; anything else propagates.
-    if (operation === 'create' && error?.code === 'AlreadyExists') {
-      const result = await pds.applyWrite({
-        operation: 'update',
-        collection: entry.collection,
-        rkey: entry.rkey,
-        value
-      });
-      return { ...result, operation: 'update', value };
+    }))
+  });
+  return prepared.map((one, index) => ({
+    ...results[index],
+    operation: one.operation,
+    value: one.value
+  }));
+}
+
+/**
+ * Publish a chunk, isolating a bad record instead of failing its neighbours.
+ *
+ * `applyWrites` is atomic on the PDS, so a rejected chunk is split in half and
+ * retried until one row is left; that row is then sent on its own, which is
+ * also where the create/update race fallbacks apply.
+ */
+async function publishChunk({ pds, prepared, out }) {
+  if (prepared.length === 1) {
+    try {
+      out.push({ prepared: prepared[0], result: await writePreparedOne(pds, prepared[0]) });
+    } catch (error) {
+      out.push({ prepared: prepared[0], error });
     }
-    if (operation === 'update' && isRecordNotFound(error)) {
-      const result = await pds.applyWrite({
-        operation: 'create',
-        collection: entry.collection,
-        rkey: entry.rkey,
-        value
-      });
-      return { ...result, operation: 'create', value };
-    }
-    throw error;
+    return;
   }
+  try {
+    const results = await writePreparedChunk(pds, prepared);
+    prepared.forEach((one, index) => out.push({ prepared: one, result: results[index] }));
+  } catch {
+    const middle = Math.ceil(prepared.length / 2);
+    await publishChunk({ pds, prepared: prepared.slice(0, middle), out });
+    await publishChunk({ pds, prepared: prepared.slice(middle), out });
+  }
+}
+
+/**
+ * Publish one claimed row. Returns the atproto result (`{ uri, cid }` for
+ * create/update; `{ uri }`, or nothing for an already-absent record, on delete).
+ */
+export async function publishEntry({
+  pds,
+  publisherDid,
+  pool,
+  entry,
+  logger = console,
+  coversBaseUrl = ''
+}) {
+  const prepared = await prepareEntry({ publisherDid, pool, entry, logger, coversBaseUrl });
+  return writePreparedOne(pds, prepared);
+}
+
+/** Run `fn` over `items` with at most `size` in flight; results keep order. */
+async function mapPool(items, size, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const width = Math.max(1, Math.min(size, items.length));
+  await Promise.all(
+    Array.from({ length: width }, async () => {
+      for (let index = next; index < items.length; index = next) {
+        next += 1;
+        results[index] = await fn(items[index], index);
+      }
+    })
+  );
+  return results;
 }
 
 /** Delete the outbox row and record the CID, atomically. */
@@ -378,46 +442,94 @@ export function createOutboxPublisher({ pool, config, fetchImpl, coversBaseUrl =
   if (!resolved.configured) throw publisherConfigError(resolved);
   const pds = createPdsPublisher({ config: resolved, fetchImpl });
 
-  async function drain({ limit = DEFAULT_BATCH, logger = console, maxBatches = 50 } = {}) {
+  /**
+   * Publish one claim through three pools: snapshots are prepared
+   * concurrently, the prepared rows are written a chunk at a time (one
+   * `applyWrites` per chunk, several chunks in flight), then each row is
+   * completed or backed off. A row that cannot be prepared never reaches a
+   * chunk; a row the PDS rejects is isolated by `publishChunk`.
+   */
+  async function drain({
+    limit = DEFAULT_BATCH,
+    logger = console,
+    maxBatches = 50,
+    prepareConcurrency = PREPARE_CONCURRENCY,
+    writeConcurrency = WRITE_CONCURRENCY,
+    // Records per `applyWrites` call. 200 is the atproto cap and the cheapest
+    // per record on the local PDS at this record size, but a host whose PDS
+    // spends too long on one large transaction can lower it.
+    chunkSize = MAX_WRITES_PER_CALL
+  } = {}) {
+    const chunk = Math.max(1, Math.min(chunkSize, MAX_WRITES_PER_CALL));
     let published = 0;
     let failed = 0;
     let batches = 0;
+    let calls = 0;
 
     while (batches < maxBatches) {
       const entries = await claimBatch(pool, { limit, publisherDid: resolved.publisherDid });
       if (entries.length === 0) break;
       batches += 1;
 
-      for (const entry of entries) {
+      const prepared = [];
+      const unbuildable = [];
+      await mapPool(entries, prepareConcurrency, async (entry) => {
         try {
-          const result = await publishEntry({
-            pds,
-            publisherDid: resolved.publisherDid,
-            pool,
-            entry,
-            logger,
-            coversBaseUrl
-          });
-          const completed = await completeEntry(pool, entry, result);
-          published += 1;
-          logger.info?.(
-            `pds-publish: ${result.operation ?? entry.op} ${entry.uri} ` +
-              `${result.cid ?? '(no cid)'}${completed ? '' : ' (superseded while publishing)'}`
+          prepared.push(
+            await prepareEntry({
+              publisherDid: resolved.publisherDid,
+              pool,
+              entry,
+              logger,
+              coversBaseUrl
+            })
           );
         } catch (error) {
+          unbuildable.push({ entry, error });
+        }
+      });
+
+      const chunks = [];
+      for (let index = 0; index < prepared.length; index += chunk) {
+        chunks.push(prepared.slice(index, index + chunk));
+      }
+      const outcomes = [];
+      await mapPool(chunks, writeConcurrency, (chunk) => publishChunk({ pds, prepared: chunk, out: outcomes }));
+      calls += chunks.length;
+
+      for (const { entry, error } of unbuildable) {
+        failed += 1;
+        const retry = await failEntry(pool, entry, error);
+        logger.error?.(
+          `pds-publish: ${entry.uri} failed (attempt ${retry.attempts}/${MAX_ATTEMPTS}, ` +
+            `retry in ${retry.retryInSeconds}s): ${describeError(error)}`
+        );
+      }
+
+      for (const outcome of outcomes) {
+        const { entry } = outcome.prepared;
+        if (outcome.error !== undefined) {
           failed += 1;
-          const retry = await failEntry(pool, entry, error);
+          const retry = await failEntry(pool, entry, outcome.error);
           logger.error?.(
             `pds-publish: ${entry.uri} failed (attempt ${retry.attempts}/${MAX_ATTEMPTS}, ` +
-              `retry in ${retry.retryInSeconds}s): ${describeError(error)}`
+              `retry in ${retry.retryInSeconds}s): ${describeError(outcome.error)}`
           );
+          continue;
         }
+        const completed = await completeEntry(pool, entry, outcome.result);
+        published += 1;
+        logger.info?.(
+          `pds-publish: ${outcome.result.operation ?? entry.op} ${entry.uri} ` +
+            `${outcome.result.cid ?? '(no cid)'}` +
+            `${completed ? '' : ' (superseded while publishing)'}`
+        );
       }
 
       if (entries.length < limit) break;
     }
 
-    return { published, failed, batches };
+    return { published, failed, batches, calls };
   }
 
   return { config: resolved, pds, drain };

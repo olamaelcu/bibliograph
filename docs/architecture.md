@@ -478,12 +478,22 @@ and no metric carries a URL, identifier, query or other user input. Prometheus
 scrapes both loopback endpoints directly; no new environment variable is
 required.
 
-`pds-publish` claims at most 25 ready rows for its configured publisher DID per
-batch with `FOR UPDATE SKIP LOCKED` and a five-minute lease, so several worker
-processes can share the database. Claiming writes `claimed_at`; the PDS call happens outside a
-transaction. Completion deletes the outbox row and upserts `pds_cids` from the
-returned CID in one transaction, guarded by the row's `updated_at`, so a trigger
-that rewrites the row mid-publish leaves the newer state queued instead of
+`pds-publish` claims up to 200 ready rows (`DEFAULT_BATCH`, the `applyWrites`
+cap) for its configured publisher DID with `FOR UPDATE SKIP LOCKED` and a
+five-minute lease, so several worker processes can share the database. Claiming
+writes `claimed_at`; the PDS calls happen outside a transaction. Publishing is
+batched because the PDS charges per call, not per record: one `applyWrites` of
+200 records costs about what a single record costs (~110 ms of PDS work plus
+~1 ms per extra record), while one call per record is ~113 ms each. A claim is
+prepared concurrently (snapshot and record build, `PREPARE_CONCURRENCY`),
+written as one `applyWrites` per chunk with several chunks in flight
+(`WRITE_CONCURRENCY`), and settled per row afterwards. `applyWrites` is atomic,
+so a chunk the PDS rejects is split in half until a single row is left; that row
+is then retried on its own, which is also where a create/update race
+(`AlreadyExists`, `RecordNotFound`) is resolved. Completion deletes the outbox
+row and upserts `pds_cids` from the returned CID in one transaction, guarded by
+the row's `updated_at`, so a trigger that rewrites the row mid-publish leaves
+the newer state queued instead of
 swallowing it. A failed publish increments `attempts`, clears `claimed_at`,
 records `last_error`, and schedules `next_at = now() + 60s × 2^attempts` (capped
 at one hour). `attempts < 10` is part of the claim predicate, matching the

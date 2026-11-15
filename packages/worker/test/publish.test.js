@@ -52,6 +52,8 @@ function startStub() {
   const state = {
     requests: [],
     applyWrites: [],
+    rejected: [],
+    poisonRkey: undefined,
     applyWriteNext: undefined,
     refreshNext: undefined,
     refreshJwt: 'test-refresh-jwt'
@@ -103,13 +105,26 @@ function startStub() {
         state.applyWriteNext = undefined;
         return send(next.status, next.body);
       }
-      const write = body.writes[0];
-      const uri = `at://${body.repo}/${write.collection}/${write.rkey}`;
-      const result = write.$type.endsWith('#delete')
-        ? { uri }
-        : { uri, cid: `bafy-test-${state.applyWrites.length + 1}`, validationStatus: 'valid' };
-      state.applyWrites.push({ body, result });
-      return send(200, { results: [result], commit: { cid: 'bafy-commit', rev: 'test' } });
+      // A poisoned rkey makes the whole call fail, as an atomic PDS call would.
+      if (state.poisonRkey && body.writes.some((write) => write.rkey === state.poisonRkey)) {
+        state.rejected.push({ body });
+        return send(500, {
+          error: 'InternalServerError',
+          message: `the PDS refused the chunk containing ${state.poisonRkey}`
+        });
+      }
+      const results = body.writes.map((write) => {
+        const uri = `at://${body.repo}/${write.collection}/${write.rkey}`;
+        return write.$type.endsWith('#delete')
+          ? { uri }
+          : {
+              uri,
+              cid: `bafy-test-${state.applyWrites.length + 1}-${write.rkey}`,
+              validationStatus: 'valid'
+            };
+      });
+      state.applyWrites.push({ body, results });
+      return send(200, { results, commit: { cid: 'bafy-commit', rev: 'test' } });
     }
     send(404, { error: 'NotFound', message: `no stub route for ${request.method} ${request.url}` });
   });
@@ -281,6 +296,8 @@ afterEach(async () => {
   await cleanup();
   stub.state.requests.length = 0;
   stub.state.applyWrites.length = 0;
+  stub.state.rejected.length = 0;
+  stub.state.poisonRkey = undefined;
   stub.state.applyWriteNext = undefined;
   stub.state.refreshNext = undefined;
   stub.state.refreshJwt = 'test-refresh-jwt';
@@ -372,7 +389,7 @@ test('publishes a create, stores the returned CID and drains the outbox row', as
 
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
   assert.equal(cids.rowCount, 1);
-  assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].result.cid);
+  assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].results[0].cid);
 });
 
 test('an audio edition publishes its duration instead of a page count', async () => {
@@ -467,7 +484,7 @@ test('a did:plc publisher authority mints and drains an edition', async () => {
 
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [ingested.uri]);
   assert.equal(cids.rowCount, 1);
-  assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].result.cid);
+  assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].results[0].cid);
 });
 
 test('an update uses the recorded CID and replaces it', async () => {
@@ -490,7 +507,7 @@ test('an update uses the recorded CID and replaces it', async () => {
   assert.equal(writes[1].body.writes[0].value.title, 'Renamed Edition');
 
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
-  assert.equal(cids.rows[0].cid, stub.state.applyWrites[1].result.cid);
+  assert.equal(cids.rows[0].cid, stub.state.applyWrites[1].results[0].cid);
 });
 
 test('a delete removes the CID and treats RecordNotFound as success', async () => {
@@ -815,4 +832,103 @@ test('the task fails loudly when the publisher cannot be constructed', async () 
       else process.env[key] = value;
     }
   }
+});
+
+test('one claim publishes in one applyWrites call carrying every write', async () => {
+  // The PDS charges per call, not per write: three rows must not become three
+  // requests.
+  const fixtures = [await makeEdition(), await makeEdition(), await makeEdition()];
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  const results = [];
+  await tasks['pds-publish'](
+    { limit: 10 },
+    { logger: { ...silent, info: (line) => results.push(line) } }
+  );
+
+  const writes = applyWriteRequests();
+  assert.equal(writes.length, 1, 'the claim rides one call');
+  // Each edition also queues its contributor and publisher, so the call is
+  // wider than the three fixtures — which is the point.
+  assert.ok(writes[0].body.writes.length >= fixtures.length);
+  assert.ok(writes[0].body.writes.length <= DEFAULT_BATCH);
+
+  for (const fixture of fixtures) {
+    const rkey = fixture.uri.split('/').pop();
+    const index = writes[0].body.writes.findIndex((write) => write.rkey === rkey);
+    assert.ok(index >= 0, `${rkey} is in the same call as its neighbours`);
+    const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
+    assert.equal(cids.rowCount, 1, 'each row keeps its own returned CID');
+    assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].results[index].cid);
+    const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri]);
+    assert.equal(outbox.rowCount, 0);
+  }
+  assert.equal(
+    results.filter((line) => line.includes('pds-publish: create') && line.includes(`/${COLLECTION}/`))
+      .length,
+    fixtures.length
+  );
+});
+
+test('a record the PDS rejects is isolated from the rest of its chunk', async () => {
+  const good = await makeEdition();
+  const poison = await makeEdition();
+  const alsoGood = await makeEdition();
+  stub.state.poisonRkey = poison.uri.split('/').pop();
+
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  // The chunk failed, then each half was retried; only the poisoned row is left.
+  assert.ok(stub.state.rejected.length > 0, 'the PDS refused the chunk');
+  for (const fixture of [good, alsoGood]) {
+    const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri]);
+    assert.equal(outbox.rowCount, 0, `${fixture.uri} published despite its neighbour`);
+    const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
+    assert.equal(cids.rowCount, 1);
+  }
+
+  const parked = await pool.query(
+    'SELECT attempts, last_error FROM pds_outbox WHERE uri = $1',
+    [poison.uri]
+  );
+  assert.equal(parked.rowCount, 1, 'the rejected row stays queued');
+  assert.equal(parked.rows[0].attempts, 1, 'it consumed exactly one attempt');
+  assert.match(parked.rows[0].last_error, /InternalServerError|500/);
+});
+
+test('deletes and creates share a call without losing their operations', async () => {
+  const created = await makeEdition();
+  const removed = await makeEdition();
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const tasks = createTasks({ pool, publisherHost: HOST, publisher });
+
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+  // One row to update and one to delete, so the next claim is genuinely mixed.
+  await pool.query("UPDATE editions SET title = 'Renamed While Deleting' WHERE uri = $1", [
+    created.uri
+  ]);
+  await pool.query('DELETE FROM editions WHERE uri = $1', [removed.uri]);
+
+  stub.state.applyWrites.length = 0;
+  stub.state.requests.length = 0;
+  await tasks['pds-publish']({ limit: 10 }, helpers());
+
+  const writes = applyWriteRequests();
+  assert.equal(writes.length, 1);
+  // The operations are per write, not per call: an update and a delete ride
+  // together and each keeps its own `$type`.
+  const createdRkey = created.uri.split('/').pop();
+  const updateWrite = writes[0].body.writes.find((write) => write.rkey === createdRkey);
+  assert.equal(updateWrite.$type, 'com.atproto.repo.applyWrites#update');
+  assert.equal(updateWrite.value.title, 'Renamed While Deleting');
+  const removedRkey = removed.uri.split('/').pop();
+  const deleteWrite = writes[0].body.writes.find((write) => write.rkey === removedRkey);
+  assert.equal(deleteWrite.$type, 'com.atproto.repo.applyWrites#delete');
+  assert.equal(deleteWrite.value, undefined, 'a delete carries no value');
+  const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [removed.uri]);
+  assert.equal(cids.rowCount, 0, 'a delete drops the recorded CID');
 });

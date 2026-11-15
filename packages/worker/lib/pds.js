@@ -36,6 +36,13 @@ export class PdsError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
+/**
+ * Writes one `com.atproto.repo.applyWrites` call may carry (the lexicon's cap).
+ * A call costs ~110 ms of PDS work whatever it carries and each additional
+ * record ~1 ms, so a full chunk is two orders of magnitude cheaper per record
+ * than one call per record.
+ */
+export const MAX_WRITES_PER_CALL = 200;
 
 /**
  * The repo authority catalog URIs are minted under: `ATP_SERVICE_DID` when set,
@@ -273,30 +280,56 @@ export function createPdsPublisher({ config, fetchImpl = fetch, timeoutMs = DEFA
   }
 
   /**
-   * Send one write to the publisher repo. Returns the atproto result item
-   * (`{ uri, cid, validationStatus }`, or `{ uri }` for deletes).
+   * Send up to `MAX_WRITES_PER_CALL` writes in one call and return the atproto
+   * result items in the same order (`{ uri, cid, validationStatus }`, or
+   * `{ uri }` for deletes).
+   *
+   * The call is atomic on the PDS: one bad record fails every write in it, so
+   * the caller is responsible for splitting a failed chunk.
    */
-  async function applyWrite({ operation, collection, rkey, value }) {
+  async function applyWrites({ writes = [] } = {}) {
+    if (!Array.isArray(writes) || writes.length === 0) {
+      throw new PdsError('applyWrites needs at least one write');
+    }
+    if (writes.length > MAX_WRITES_PER_CALL) {
+      throw new PdsError(
+        `applyWrites accepts ${MAX_WRITES_PER_CALL} writes per call, got ${writes.length}`
+      );
+    }
+
     const response = await rpc('com.atproto.repo.applyWrites', {
       body: {
         repo: cfg.publisherDid,
         validate: false,
-        writes: [write(operation, collection, rkey, value)]
+        writes: writes.map(({ operation, collection, rkey, value }) =>
+          write(operation, collection, rkey, value)
+        )
       }
     });
-    const result = response.results?.[0];
-    if (result === undefined) {
-      throw new PdsError('applyWrites returned no result for the write', { body: response });
+
+    const results = response.results;
+    if (!Array.isArray(results) || results.length !== writes.length) {
+      throw new PdsError('applyWrites returned no result for every write', { body: response });
     }
-    if (operation !== 'delete' && (typeof result.cid !== 'string' || result.cid === '')) {
-      throw new PdsError(`applyWrites ${operation} returned no CID`, { body: response });
+    for (const [index, one] of writes.entries()) {
+      if (one.operation !== 'delete' &&
+          (typeof results[index].cid !== 'string' || results[index].cid === '')) {
+        throw new PdsError(`applyWrites ${one.operation} returned no CID`, { body: response });
+      }
     }
+    return results;
+  }
+
+  /** One write, as a call of its own. */
+  async function applyWrite(one) {
+    const [result] = await applyWrites({ writes: [one] });
     return result;
   }
 
   return {
     config: cfg,
     applyWrite,
+    applyWrites,
     /** For diagnostics/tests; drops the cached session. */
     resetSession() {
       session = undefined;
