@@ -12,6 +12,10 @@ User=bibliograph
 Group=bibliograph
 WorkingDirectory=/usr/lib/bibliograph-worker
 Environment=NODE_ENV=production
+# One worker owns this database, so any graphile lock present at boot was left
+# by a killed predecessor and is cleared (see clearStaleGraphileLocks). Remove
+# this if a second worker is ever pointed at the same database.
+Environment=WORKER_CLEAR_STALE_LOCKS=1
 EnvironmentFile=-/etc/bibliograph/worker.env
 ExecStart=/usr/bin/node /usr/lib/bibliograph-worker/index.js
 
@@ -22,7 +26,14 @@ RestartSec=10s
 # graphile-worker handles SIGTERM and exits 0; these cover the boot window
 # before its signal handlers are installed.
 SuccessExitStatus=143 130
-TimeoutStopSec=20s
+# Graphile stops fetching on SIGTERM and aborts in-flight jobs after
+# `gracefulShutdownAbortTimeout` (30 s, set in index.js). The jobs it is asked
+# to stop — a batched pds-publish drain, a catalog.bookhive walk — observe the
+# abort at their next claim or page boundary and return, which is what keeps
+# their place. systemd must wait past that window: a SIGKILL leaves graphile's
+# job and queue locks held for four hours and stalls pds-publish.
+KillSignal=SIGTERM
+TimeoutStopSec=60s
 LimitNOFILE=65536
 SyslogIdentifier=bibliograph-worker
 

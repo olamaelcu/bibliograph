@@ -26,3 +26,41 @@ export async function ensureSupportSchema(pool) {
     )
   `);
 }
+
+/**
+ * Release graphile locks a previous process left behind.
+ *
+ * A graceful stop (SIGTERM) lets graphile finish in-flight work and release its
+ * own locks, but a stop that outlives the abort window, a SIGKILL or a crash
+ * leaves the job row and its queue row locked; graphile only reclaims them after
+ * four hours, and a locked queue means that task cannot run at all — a stalled
+ * `pds-publish` and a growing outbox.
+ *
+ * Only safe where exactly one worker owns the database: a second live worker's
+ * locks would be stolen. The packaged single-instance unit therefore sets
+ * `WORKER_CLEAR_STALE_LOCKS=1`; `index.js` calls this when it is set. Nothing
+ * sensitive is cleared: an unlocked job simply becomes claimable again, and the
+ * claim predicate still applies (attempts, backoff).
+ *
+ * Returns `{ jobs, queues }` — how many locks were cleared.
+ */
+export async function clearStaleGraphileLocks(pool, logger = console) {
+  try {
+    const jobs = await pool.query(
+      `UPDATE graphile_worker._private_jobs
+          SET locked_at = NULL, locked_by = NULL, run_at = greatest(run_at, now())
+        WHERE locked_at IS NOT NULL`
+    );
+    const queues = await pool.query(
+      `UPDATE graphile_worker._private_job_queues
+          SET locked_at = NULL, locked_by = NULL
+        WHERE locked_at IS NOT NULL`
+    );
+    return { jobs: jobs.rowCount ?? 0, queues: queues.rowCount ?? 0 };
+  } catch (error) {
+    // No graphile schema yet (a fresh database): nothing can be locked.
+    if (error?.code === '42P01') return { jobs: 0, queues: 0 };
+    logger?.warn?.(`worker: could not clear stale graphile locks — ${error.message}`);
+    return { jobs: 0, queues: 0 };
+  }
+}

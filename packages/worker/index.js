@@ -4,7 +4,7 @@ import { createProviders } from './lib/providers/index.js';
 import { createTasks } from './lib/tasks.js';
 import { createOutboxPublisher } from './lib/publish.js';
 import { resolvePublisherAuthority, resolvePublisherConfig } from './lib/pds.js';
-import { ensureSupportSchema } from './lib/setup.js';
+import { clearStaleGraphileLocks, ensureSupportSchema } from './lib/setup.js';
 import { createCoverMetrics } from './lib/cover-metrics.js';
 import { startMetricsServer } from './lib/metrics.js';
 import { startAdminServer } from './lib/admin.js';
@@ -51,6 +51,21 @@ const concurrency = Number.parseInt(process.env.GRAPHILE_WORKER_CONCURRENCY ?? '
 
 const pool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
 await ensureSupportSchema(pool);
+
+// A stop that outlives graphile's abort window (or a kill) leaves job and queue
+// locks held for four hours, and a locked queue stops that task entirely. The
+// packaged unit runs exactly one worker against the database, so any lock seen
+// at boot is stale by definition; WORKER_CLEAR_STALE_LOCKS=1 (set by that
+// unit) clears them here instead of asking an operator to run SQL after a
+// restart. Never enable it where a second worker shares the database.
+if ((process.env.WORKER_CLEAR_STALE_LOCKS ?? '').trim() === '1') {
+  const cleared = await clearStaleGraphileLocks(pool);
+  if (cleared.jobs > 0 || cleared.queues > 0) {
+    console.log(
+      `worker: cleared stale graphile locks (jobs=${cleared.jobs}, queues=${cleared.queues})`
+    );
+  }
+}
 
 // Operator entry point for the one-off entity rollout:
 //
@@ -175,6 +190,14 @@ if (publisherConfig.configured) {
   );
 }
 
+// A graceful stop is announced before graphile aborts in-flight jobs: the pool
+// emits `pool:gracefulShutdown` the moment SIGTERM lands, and only aborts after
+// `gracefulShutdownAbortTimeout`. The long tasks watch this signal, so they
+// return at their next checkpoint *inside* the window — which is what lets
+// graphile complete them cleanly instead of abandoning their job and queue
+// locks for four hours.
+const shutdown = new AbortController();
+
 const taskList = createTasks({
   pool,
   providers,
@@ -184,7 +207,8 @@ const taskList = createTasks({
   coversCacheDir,
   coversBaseUrl,
   coverMetrics,
-  bookhiveMetrics
+  bookhiveMetrics,
+  signal: shutdown.signal
 });
 
 // One publisher at a time: the task queue serializes the jobs, so two batches
@@ -239,7 +263,19 @@ const runner = await run({
   concurrency: Number.isFinite(concurrency) && concurrency > 0 ? concurrency : 5,
   taskList,
   parsedCronItems,
-  logger: undefined
+  logger: undefined,
+  // Graphile stops fetching on SIGTERM, then aborts in-flight jobs after this
+  // window and only then force-terminates. Default is 5s, which a batched
+  // drain or a catalog walk cannot observe; 30s lets both reach their next
+  // checkpoint (a claim boundary, a page boundary) and settle cleanly.
+  gracefulShutdownAbortTimeout: 30_000
+});
+
+runner.events.on('pool:gracefulShutdown', ({ message }) => {
+  shutdown.abort(new Error(message));
+});
+runner.events.on('pool:gracefulShutdown:complete', () => {
+  console.log('worker: graceful shutdown complete');
 });
 
 // Report the repo authority, configured or not: it is the identity catalog URIs

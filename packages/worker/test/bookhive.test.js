@@ -524,3 +524,24 @@ test('parseCatalogBook reads Bookhive series blobs and strips HTML descriptions'
   assert.deepEqual(noPosition.series, { name: 'B.P.R.D.' });
   assert.equal(parseCatalogBook(catalogBook({ series: '{not json}' }), { languages }).series, undefined);
 });
+
+test('the walk stops between pages when the shutdown signal aborts', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const fetcher = pageFetcher([{ records: [catalogBook()], cursor: 'more' }]);
+  const summary = await importBookhiveCatalog({
+    pool: fakePool(),
+    fetchImpl: fetcher.fetch,
+    pdsUrl: 'https://pds.example',
+    pages: 100,
+    logger: { warn() {} },
+    signal: controller.signal,
+    async ingest() {
+      throw new Error('an aborted walk must not ingest');
+    }
+  });
+
+  // Nothing fetched, nothing written: the idempotent walk resumes from page 1.
+  assert.deepEqual(fetcher.urls, []);
+  assert.deepEqual(summary, { pages: 0, seen: 0, skipped: 0, created: 0, updated: 0, failed: 0 });
+});

@@ -145,9 +145,20 @@ export function createTasks({
   coverMetrics = createCoverMetrics(),
   // Same contract for the Bookhive walk: the counters are process-local, so
   // the endpoint must be handed the instance the task writes to.
-  bookhiveMetrics = createBookhiveMetrics()
+  bookhiveMetrics = createBookhiveMetrics(),
+  // Aborted when the process is asked to stop, before graphile's per-job abort
+  // fires. Combined with `helpers.abortSignal` below.
+  signal = null
 }) {
   const ingest = createIngest({ pool, publisherDid, publisherHost });
+
+  // One signal for both stop paths: the process-wide one (SIGTERM, announced by
+  // `pool:gracefulShutdown`) and graphile's per-job abort. Either one means the
+  // long tasks should return at their next checkpoint.
+  const stopSignal = (helpers) =>
+    helpers?.abortSignal && signal
+      ? AbortSignal.any([signal, helpers.abortSignal])
+      : (helpers?.abortSignal ?? signal);
   const coversDir = coversCacheDir.trim();
   const coverCacheEnabled = coversDir !== '';
   // `coversBaseUrl` may arrive unset (tests, older callers); derive it from the
@@ -258,7 +269,10 @@ export function createTasks({
         ingest,
         pages: Number(payload?.pages) || 5000,
         logger: helpers.logger,
-        metrics: bookhiveMetrics
+        metrics: bookhiveMetrics,
+        // Stopping at the next page keeps the walk's place instead of losing it
+        // to a killed process.
+        signal: stopSignal(helpers)
       });
       helpers.logger.info(`catalog.bookhive ${JSON.stringify(summary)}`);
     },
@@ -812,7 +826,11 @@ export function createTasks({
     'pds-publish': async (payload, helpers) => {
       if (!outbox) throw publisherConfigError(resolvePublisherConfig());
       const limit = Number.isInteger(payload?.limit) ? payload.limit : DEFAULT_BATCH;
-      const result = await outbox.drain({ limit, logger: helpers.logger });
+      const result = await outbox.drain({
+        limit,
+        logger: helpers.logger,
+        signal: stopSignal(helpers)
+      });
       helpers.logger.info(
         `pds-publish: ${result.published} published, ${result.failed} failed, ` +
           `${result.batches} batch(es)`

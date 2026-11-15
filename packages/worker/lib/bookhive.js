@@ -410,7 +410,10 @@ export async function importBookhiveCatalog({
   pages = 100,
   pdsUrl = bookhivePdsUrl(),
   logger = console,
-  metrics = null
+  metrics = null,
+  // A graceful shutdown stops between pages: the walk is idempotent, so the
+  // next run re-reads from page 1 and skips what is already stored.
+  signal = null
 } = {}) {
   if (typeof ingest !== 'function') {
     throw new Error('importing the catalog needs an ingest() function');
@@ -439,6 +442,7 @@ export async function importBookhiveCatalog({
   };
 
   while (summary.pages < pageBudget) {
+    if (signal?.aborted === true) break;
     const page = await fetchCatalogPage({ cursor, fetchImpl, pdsUrl });
     count('pages');
     summary.seen += page.records.length;
@@ -460,6 +464,9 @@ export async function importBookhiveCatalog({
     );
 
     for (const candidate of candidates) {
+      // A page is ~100 books and each ingest is a transaction, so a shutdown
+      // must be able to land mid-page as well as between pages.
+      if (signal?.aborted === true) break;
       const existing = known.get(candidate.hiveId);
       if (alreadyImported(existing, candidate)) {
         count('skipped');

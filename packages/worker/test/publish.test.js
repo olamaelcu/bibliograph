@@ -932,3 +932,20 @@ test('deletes and creates share a call without losing their operations', async (
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [removed.uri]);
   assert.equal(cids.rowCount, 0, 'a delete drops the recorded CID');
 });
+
+test('an aborted shutdown stops the drain before the next claim', async () => {
+  const fixtures = [await makeEdition(), await makeEdition()];
+  const publisher = createOutboxPublisher({ pool, config: validConfig(stub.url) });
+  const controller = new AbortController();
+  controller.abort();
+
+  const result = await publisher.drain({ limit: 10, signal: controller.signal, logger: silent });
+
+  assert.deepEqual(result, { published: 0, failed: 0, batches: 0, calls: 0 });
+  assert.equal(applyWriteRequests().length, 0, 'no write is started after the abort');
+  // The rows stay claimable: nothing was claimed, nothing was published twice.
+  const rows = await pool.query('SELECT uri FROM pds_outbox WHERE uri = ANY($1::text[])', [
+    fixtures.map((fixture) => fixture.uri)
+  ]);
+  assert.equal(rows.rowCount, 2);
+});

@@ -458,7 +458,11 @@ export function createOutboxPublisher({ pool, config, fetchImpl, coversBaseUrl =
     // Records per `applyWrites` call. 200 is the atproto cap and the cheapest
     // per record on the local PDS at this record size, but a host whose PDS
     // spends too long on one large transaction can lower it.
-    chunkSize = MAX_WRITES_PER_CALL
+    chunkSize = MAX_WRITES_PER_CALL,
+    // A graceful shutdown stops between claims: a batch is short work, and
+    // finishing one means its rows are settled (published or backed off)
+    // instead of being abandoned mid-flight.
+    signal = null
   } = {}) {
     const chunk = Math.max(1, Math.min(chunkSize, MAX_WRITES_PER_CALL));
     let published = 0;
@@ -467,6 +471,7 @@ export function createOutboxPublisher({ pool, config, fetchImpl, coversBaseUrl =
     let calls = 0;
 
     while (batches < maxBatches) {
+      if (signal?.aborted === true) break;
       const entries = await claimBatch(pool, { limit, publisherDid: resolved.publisherDid });
       if (entries.length === 0) break;
       batches += 1;

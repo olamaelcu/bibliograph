@@ -512,6 +512,34 @@ UPDATE pds_outbox SET attempts = 0, next_at = now(), last_error = NULL
  WHERE uri = 'at://…';
 ```
 
+### Stopping the worker
+
+`systemctl stop bibliograph-worker` sends SIGTERM, which graphile answers itself:
+it stops fetching, lets in-flight handlers finish, releases its job-queue locks
+and exits (`SuccessExitStatus=143 130` covers the exit code). The unit allows
+60 s (`TimeoutStopSec`) and graphile aborts in-flight jobs after 30 s
+(`gracefulShutdownAbortTimeout`, set in `index.js`) — a window the default 5 s
+cannot span for a task that walks a catalog.
+
+The two long-running tasks cooperate with that window instead of being aborted:
+`index.js` owns an `AbortController` that `pool:gracefulShutdown` aborts the
+moment SIGTERM lands, and `createTasks` combines it with graphile's per-job
+`abortSignal`. `pds-publish` checks it before each claim (so a batch is either
+finished or never started) and `catalog.bookhive` checks it between pages and
+between books inside a page; both return their partial summary, which is what
+keeps the walk's place and leaves no half-published batch. Measured on a
+scratch database: a SIGTERM in the middle of a 5000-page walk returned in ~2 s
+with the queue lock released, where an aborted job used to keep the
+`pds-publish` queue locked for four hours.
+
+Two things still need care after an unclean stop. graphile's job and queue locks
+are only reclaimed after four hours, so the packaged unit sets
+`WORKER_CLEAR_STALE_LOCKS=1`: on boot the worker clears any lock it finds
+(`clearStaleGraphileLocks`), which is safe only where one worker owns the
+database — never set it when a second worker points at the same database.
+`deploy.sh` performs the same two `UPDATE`s before starting the worker, so a
+host upgrading from an older package is healed either way.
+
 Publishing authenticates as an account on `PDS_URL`, not with a repository
 signing key: the PDS already owns that key. Set `PDS_ACCOUNT_DID` and
 `PDS_ACCOUNT_PASSWORD` (an app password) for a `com.atproto.server.createSession`
