@@ -11,6 +11,14 @@ HAPPYVIEW_DATABASE_URL = "postgres://happyview_app:happyview@localhost:5432/bibl
 # packaged units get this from their conffiles (/var/cache/bibliograph-covers);
 # local development keeps it inside the repo so nothing writes to /var/cache.
 COVERS_CACHE_DIR = "{{config_root}}/.cache/covers"
+# The feed generator identity: advertised by com.atproto.feed.describeFeedGenerator
+# and the authority of every feed URI. Required — both feed methods answer 503
+# without it. Local development must name a DID the private PLC resolves
+# (`PLC_URL` in .env), and the local PDS serves no `/.well-known/did.json`, so a
+# `did:web` value would name an identity nothing here can resolve: the
+# deployment account is the local `did:plc`. Installed hosts set their own value
+# in web.env (the production did:web).
+FEED_GENERATOR_DID = "${HAPPYVIEW_ACCOUNT_DID}"
 
 [tasks.sql]
 description = "Open a psql shell against the local bibliograph database"

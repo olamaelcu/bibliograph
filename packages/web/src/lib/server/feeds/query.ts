@@ -9,6 +9,23 @@
 export const REVIEW_COLLECTION = 'community.lexicon.media.book.review';
 export const BOOK_STATUS_COLLECTION = 'net.olamaelcu.livtet.biblio.bookStatus';
 export const FOLLOW_COLLECTION = 'net.olamaelcu.livtet.biblio.follow';
+/**
+ * Bookhive's per-book record. Not a Bibliograph collection, but its records
+ * shelve (and, with review text, review) a catalog edition, so the feed
+ * carries them too.
+ */
+export const BUZZ_BOOKHIVE_BOOK = 'buzz.bookhive.book';
+
+/**
+ * Bookhive's reading statuses, spelled the way the Livtet client expects in a
+ * `bookhive:` reason (its `BIBLIO_READING_STATUSES` keys).
+ */
+const BOOKHIVE_SHELF: Record<string, string> = {
+  'buzz.bookhive.defs#reading': 'reading',
+  'buzz.bookhive.defs#finished': 'read',
+  'buzz.bookhive.defs#wantToRead': 'to-read',
+  'buzz.bookhive.defs#abandoned': 'dnf'
+};
 
 export const FEED_KINDS = ['public', 'following', 'extended', 'dynamic'] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
@@ -27,7 +44,14 @@ export type FeedSkeleton = { feed: FeedSkeletonItem[]; cursor?: string };
 /** A follow set is bounded so one account cannot ask for an unbounded `ANY` list. */
 export const MAX_FEED_DIDS = 500;
 
-type FeedRow = { uri: string; collection: string; record: unknown; created_at: string | null };
+type FeedRow = {
+  uri: string;
+  collection: string;
+  record: unknown;
+  created_at: string | null;
+  /** The edition a Bookhive record's `hiveId` was imported as; null otherwise. */
+  book_uri: string | null;
+};
 
 /** Opaque base64url JSON `{c,u}`; malformed input is rejected, never silently restarted. */
 export function encodeCursor(cursor: FeedCursor): string {
@@ -52,12 +76,29 @@ export function decodeCursor(value: string): FeedCursor | null {
 /**
  * The book a review or shelving record refers to, when it names one.
  *
- * A review names its edition in `subjectRecord`, else in the first `atproto`
- * identifier of its inline `subject`; a bookStatus names it in `book.uri`.
+ * A Bibliograph review names its edition in `subjectRecord`, else in the first
+ * `atproto` identifier of its inline `subject`; a bookStatus names it in
+ * `book.uri`; a Bookhive record gets it from the edition its `hiveId` resolved
+ * to (`bookUri`), and its reason carries the shelf it was filed under.
  */
-export function reasonFor(collection: string, record: unknown): string | undefined {
+export function reasonFor(
+  collection: string,
+  record: unknown,
+  bookUri: string | null = null
+): string | undefined {
   if (record === null || typeof record !== 'object' || Array.isArray(record)) return undefined;
   const value = record as Record<string, unknown>;
+
+  // Bookhive's own record shape: the shelf comes from `status`, the book from
+  // the edition the row's `hiveId` resolved to. This `bookhive:<shelf>|<uri>`
+  // spelling is what Livtet's `parseBookhiveReason` reads; with no known status
+  // the prefix is empty and the client falls back to the record's own status.
+  if (collection === BUZZ_BOOKHIVE_BOOK) {
+    const status = value.status;
+    const shelf = typeof status === 'string' ? BOOKHIVE_SHELF[status] : undefined;
+    const prefix = `bookhive:${shelf ?? ''}`;
+    return bookUri === null ? prefix : `${prefix}|${bookUri}`;
+  }
 
   if (collection === REVIEW_COLLECTION) {
     if (typeof value.subjectRecord === 'string' && value.subjectRecord !== '') {
@@ -97,7 +138,8 @@ function asFeedRow(row: unknown): FeedRow | null {
     uri: value.uri,
     collection: typeof value.collection === 'string' ? value.collection : '',
     record: value.record,
-    created_at: typeof value.created_at === 'string' ? value.created_at : null
+    created_at: typeof value.created_at === 'string' ? value.created_at : null,
+    book_uri: typeof value.book_uri === 'string' ? value.book_uri : null
   };
 }
 
@@ -215,7 +257,7 @@ export type FeedPageOptions = {
 };
 
 /**
- * Page the two activity collections newest first by the record's own
+ * Page the three activity collections newest first by the record's own
  * `createdAt`, then `uri` descending. `limit + 1` rows decide whether another
  * page exists; the cursor is built from the last emitted row.
  */
@@ -235,13 +277,20 @@ export async function fetchFeedPage(
   }
   if (dids !== null && dids.length === 0) return { feed: [] };
 
-  const values: unknown[] = [REVIEW_COLLECTION, BOOK_STATUS_COLLECTION];
+  const values: unknown[] = [REVIEW_COLLECTION, BOOK_STATUS_COLLECTION, BUZZ_BOOKHIVE_BOOK];
+  // A Bookhive record names no edition: `appview_bookhive_lua` resolves its
+  // `hiveId` to the edition the catalog import minted, and that edition is the
+  // entry's reason. A row whose hive id is not imported yet still feeds (the
+  // reason keeps its `bookhive:<shelf>` prefix).
   let sql = `SELECT uri,
                     collection,
                     record::jsonb AS record,
-                    record::jsonb->>'createdAt' AS created_at
+                    record::jsonb->>'createdAt' AS created_at,
+                    m.edition_uri AS book_uri
                FROM happyview.happyview_records
-              WHERE collection IN ($1, $2)`;
+               LEFT JOIN public.appview_bookhive_lua m
+                      ON m.hive_id = record::jsonb->>'hiveId'
+              WHERE collection IN ($1, $2, $3)`;
 
   if (dids !== null) {
     values.push(dids);
@@ -279,7 +328,7 @@ export async function fetchFeedPage(
 
   const feed = rows.map((row) => {
     const item: FeedSkeletonItem = { post: row.uri };
-    const reason = reasonFor(row.collection, row.record);
+    const reason = reasonFor(row.collection, row.record, row.book_uri);
     if (reason !== undefined) item.reason = reason;
     return item;
   });

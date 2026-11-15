@@ -32,3 +32,10 @@ CREATE INDEX IF NOT EXISTS happyview_record_review_identifiers_idx
 CREATE INDEX IF NOT EXISTS happyview_record_follow_subject_idx
   ON happyview.happyview_records (((record::jsonb)->>'subject'))
   WHERE collection = 'net.olamaelcu.livtet.biblio.follow';
+
+-- The join key from a Bookhive per-book record to the edition its hive id was
+-- imported as (`appview_bookhive_lua`). Recency ordering is already covered by
+-- 0003-feed-read.sql's `(collection, record->>'createdAt' DESC, uri DESC)`.
+CREATE INDEX IF NOT EXISTS happyview_record_bookhive_hive_idx
+  ON happyview.happyview_records (((record::jsonb)->>'hiveId'))
+  WHERE collection = 'buzz.bookhive.book';

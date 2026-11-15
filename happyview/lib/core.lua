@@ -8,6 +8,9 @@ local BOOK_STATUS = 'net.olamaelcu.livtet.biblio.bookStatus'
 local SHELF_ITEM = 'net.olamaelcu.livtet.biblio.shelfItem'
 local FOLLOW_COLLECTION = 'net.olamaelcu.livtet.biblio.follow'
 local REVIEW_COLLECTION = 'community.lexicon.media.book.review'
+-- Bookhive keeps its review inside its per-book record; a non-empty `review`
+-- makes that record a review of the edition its `hiveId` was imported as.
+local BOOKHIVE_BOOK = 'buzz.bookhive.book'
 local READING_GOAL = 'net.olamaelcu.livtet.biblio.readingGoal'
 local PROFILE_COLLECTION = 'net.olamaelcu.livtet.actor.profile'
 

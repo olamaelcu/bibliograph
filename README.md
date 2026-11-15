@@ -63,6 +63,15 @@ records written straight to a PDS arrive through Jetstream or a backfill.
 | `net.olamaelcu.livtet.biblio.readingGoal` | literal `current` | reader / `readingGoal.set` | reader PDS |
 | `net.olamaelcu.livtet.actor.profile` | literal `self` | reader / `profile.set` | reader PDS |
 | `community.lexicon.media.book.review` | `tid` | reader / `review.*` | reader PDS |
+| `buzz.bookhive.book` | Bookhive's own (`any`) | the reader's Bookhive client | reader PDS |
+
+`buzz.bookhive.book` is not a Bibliograph record; it is indexed because the reader's review lives
+inside it. A record whose `review` text is non-empty is served as a review by `getReviewsByBook`
+and `listReviewsByActor` (`rating = stars * 2`), and every Bookhive `hiveId` is imported as a
+`(bookhive.buzz, bk_…)` identifier on an edition (`catalog.bookhive`), which is how the record
+resolves to a book at all. The import also carries what the catalog book knows — description, page
+count, language, publication year, publisher and series — and attaches those claims to the
+`bookhive.buzz` identifier, so an edition that already had an ISBN keeps its own provider's data.
 
 Catalog identifiers are exact `(issuer, value)` pairs in
 `edition_identifiers`; an ingest updates an existing edition when any incoming

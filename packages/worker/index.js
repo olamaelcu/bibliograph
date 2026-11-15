@@ -13,6 +13,7 @@ import { prepareEntityRecords } from './lib/prepare-entities.js';
 import { createIngest } from './lib/ingest.js';
 import { createGutenberg } from './lib/providers/gutenberg.js';
 import { seedCatalogFromProvider } from './lib/seed.js';
+import { createBookhiveMetrics, importBookhiveCatalog } from './lib/bookhive.js';
 import { coversBaseUrlFromEnv } from './lib/cover-cache.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -32,6 +33,10 @@ const coversCacheDir = (process.env.COVERS_CACHE_DIR ?? '').trim();
 const coversBaseUrl = coversBaseUrlFromEnv(process.env, publisherHost);
 // One counter instance: the cover jobs increment it, the scrape reports it.
 const coverMetrics = createCoverMetrics();
+// Same for the Bookhive walk: the `catalog.bookhive` task increments it and the
+// scrape reports it; the durable total is the gauge read from
+// `edition_identifiers`.
+const bookhiveMetrics = createBookhiveMetrics();
 if (coversCacheDir === '') {
   console.error(
     'worker: cover caching is DISABLED — COVERS_CACHE_DIR is not set. ' +
@@ -97,6 +102,34 @@ if (process.argv.some((arg) => arg.startsWith('--seed-gutenberg'))) {
   process.exit(exitCode);
 }
 
+// Operator entry point for the Bookhive join:
+//
+//   node index.js --import-bookhive=100   # walk 100 catalog pages
+//
+// Every Bookhive reader record names a book by hive id and nothing else, so the
+// catalog books have to exist as editions before those records can be read. The
+// walk is idempotent (a book whose identifier set is already present is
+// skipped), so a partial run resumes by starting from the first page again.
+if (process.argv.some((arg) => arg.startsWith('--import-bookhive'))) {
+  const pagesArg = process.argv.find((arg) => arg.startsWith('--import-bookhive='));
+  const pages = pagesArg ? pagesArg.slice('--import-bookhive='.length) : '100';
+  let exitCode = 0;
+  try {
+    const summary = await importBookhiveCatalog({
+      pool,
+      ingest: createIngest({ pool, publisherDid, publisherHost }),
+      pages: Number(pages)
+    });
+    console.log(`worker: catalog.bookhive ${JSON.stringify(summary)}`);
+  } catch (error) {
+    console.error(`worker: catalog.bookhive failed — ${error.message}`);
+    exitCode = 1;
+  } finally {
+    await pool.end();
+  }
+  process.exit(exitCode);
+}
+
 const isbndbDailyLimit = parseDailyLimit(process.env.ISBNDB_DAILY_LIMIT);
 const providers = createProviders({ pool, isbndbDailyLimit });
 
@@ -118,6 +151,7 @@ try {
     limit: isbndbDailyLimit,
     providerMetrics: providers.metrics,
     coverMetrics,
+    bookhiveMetrics,
     // Outbox gauges count the rows this publisher can claim; a database shared
     // with another identity must not inflate this worker's backlog.
     publisherDid
@@ -149,7 +183,8 @@ const taskList = createTasks({
   publisher,
   coversCacheDir,
   coversBaseUrl,
-  coverMetrics
+  coverMetrics,
+  bookhiveMetrics
 });
 
 // One publisher at a time: the task queue serializes the jobs, so two batches
@@ -186,6 +221,15 @@ cronItems.push({
     queueName: 'covers-sweep',
     jobKey: 'catalog.covers.sweep:cron',
     maxAttempts: 3
+  }
+});
+cronItems.push({
+  task: 'catalog.bookhive',
+  match: '0 3 * * 1',
+  options: {
+    queueName: 'bookhive',
+    jobKey: 'catalog.bookhive:cron',
+    maxAttempts: 2
   }
 });
 const parsedCronItems = parseCronItems(cronItems);

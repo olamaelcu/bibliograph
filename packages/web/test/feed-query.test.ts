@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   BOOK_STATUS_COLLECTION,
+  BUZZ_BOOKHIVE_BOOK,
   FEED_KINDS,
   REVIEW_COLLECTION,
   decodeCursor,
@@ -37,9 +38,10 @@ function row(
   uri: string,
   collection: string,
   record: Record<string, unknown>,
-  created_at: string | null
+  created_at: string | null,
+  book_uri: string | null = null
 ) {
-  return { uri, collection, record, created_at };
+  return { uri, collection, record, created_at, book_uri };
 }
 
 test('pages public records and emits a cursor only when the probe row exists', async () => {
@@ -117,6 +119,72 @@ test('reason prefers subjectRecord, then the first atproto identifier', () => {
   assert.equal(reasonFor(BOOK_STATUS_COLLECTION, { book: {} }), undefined);
 });
 
+test('a Bookhive entry carries its shelf and the edition its hive id resolved to', async () => {
+  const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/abc';
+  const pool = queuedPool([
+    [
+      row(
+        'at://did:plc:r/buzz.bookhive.book/1',
+        BUZZ_BOOKHIVE_BOOK,
+        { status: 'buzz.bookhive.defs#finished' },
+        '2026-03-03T00:00:00.000Z',
+        edition
+      ),
+      row(
+        'at://did:plc:r/buzz.bookhive.book/2',
+        BUZZ_BOOKHIVE_BOOK,
+        { status: 'buzz.bookhive.defs#wantToRead' },
+        '2026-03-02T00:00:00.000Z',
+        edition
+      )
+    ]
+  ]);
+
+  const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
+
+  assert.deepEqual(page.feed, [
+    { post: 'at://did:plc:r/buzz.bookhive.book/1', reason: `bookhive:read|${edition}` },
+    { post: 'at://did:plc:r/buzz.bookhive.book/2', reason: `bookhive:to-read|${edition}` }
+  ]);
+  const values = pool.calls[0]!.values ?? [];
+  assert.deepEqual(values.slice(0, 3), [
+    REVIEW_COLLECTION,
+    BOOK_STATUS_COLLECTION,
+    BUZZ_BOOKHIVE_BOOK
+  ]);
+  assert.match(pool.calls[0]!.sql, /LEFT JOIN public\.appview_bookhive_lua/);
+});
+
+test('a Bookhive entry with no imported edition still feeds with its shelf', async () => {
+  const pool = queuedPool([
+    [
+      row(
+        'at://did:plc:r/buzz.bookhive.book/1',
+        BUZZ_BOOKHIVE_BOOK,
+        { status: 'buzz.bookhive.defs#abandoned' },
+        '2026-03-03T00:00:00.000Z'
+      )
+    ]
+  ]);
+
+  const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
+
+  assert.deepEqual(page.feed, [
+    { post: 'at://did:plc:r/buzz.bookhive.book/1', reason: 'bookhive:dnf' }
+  ]);
+});
+
+test('a Bookhive status outside the known shelves still names the book', () => {
+  const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/abc';
+  assert.equal(
+    reasonFor(BUZZ_BOOKHIVE_BOOK, { status: 'buzz.bookhive.defs#paused' }, edition),
+    `bookhive:|${edition}`
+  );
+  assert.equal(reasonFor(BUZZ_BOOKHIVE_BOOK, {}, null), 'bookhive:');
+  // The two Bibliograph collections are unaffected by the third branch.
+  assert.equal(reasonFor(BUZZ_BOOKHIVE_BOOK, null), undefined);
+});
+
 test('skeleton items omit reason when the record names no book', async () => {
   const pool = queuedPool([
     [row('at://a/review/1', REVIEW_COLLECTION, {}, '2026-03-01T00:00:00.000Z')]
@@ -139,7 +207,8 @@ test('following scopes the page to the viewer follow set', async () => {
 
   assert.equal(page.feed.length, 1);
   assert.match(pool.calls[0]!.sql, /did <> \$1/);
-  assert.deepEqual(pool.calls[1]!.values?.[2], ['did:plc:one', 'did:plc:two']);
+  // The page query's params are the three collections, then the follow set.
+  assert.deepEqual(pool.calls[1]!.values?.[3], ['did:plc:one', 'did:plc:two']);
 });
 
 test('normalizes bare and at:// follow subjects without a migration', async () => {
@@ -172,7 +241,7 @@ test('extended adds the followees of followees with the 500-DID cap', async () =
   assert.match(pool.calls[0]!.sql, /r\.record::jsonb->>'subject' LIKE 'at:\/\/%'/);
   assert.match(pool.calls[0]!.sql, /substr\(r\.record::jsonb->>'subject', 6\)/);
   assert.equal(pool.calls[0]!.values?.[2], 500);
-  assert.deepEqual(pool.calls[1]!.values?.[2], ['did:plc:one', 'did:plc:two']);
+  assert.deepEqual(pool.calls[1]!.values?.[3], ['did:plc:one', 'did:plc:two']);
 });
 
 test('dynamic is the viewer plus the follow set', async () => {

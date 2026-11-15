@@ -11,6 +11,7 @@ import http from 'node:http';
 
 import { renderProviderMetrics } from './providers/resilience.js';
 import { DEFAULT_LEASE_MS, MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from './publish.js';
+import { BOOKHIVE_ISSUER } from './bookhive.js';
 import {
   DEFAULT_ISBNDB_DAILY_LIMIT,
   ISBNDB_SOFT_LIMIT_RATIO,
@@ -72,6 +73,22 @@ export async function readOutboxStats(pool, { publisherDid, leaseMs = DEFAULT_LE
 }
 
 /**
+ * How many catalog books Bookhive's hive ids currently name.
+ *
+ * One indexed count over `edition_identifiers` on every scrape: the durable
+ * record of the import, independent of which process ran it and across
+ * restarts. The issuer is a fixed token, so `edition_identifiers_lookup_idx`
+ * serves the count.
+ */
+export async function readBookhiveStats(pool) {
+  const result = await pool.query(
+    'SELECT count(*) AS editions FROM edition_identifiers WHERE issuer = $1',
+    [BOOKHIVE_ISSUER]
+  );
+  return { editions: Math.trunc(nonNegative(result.rows[0]?.editions)) };
+}
+
+/**
  * Process gauges for one scrape. Read live (not cached) so uptime, CPU and
  * memory reflect the worker at scrape time; injectable for tests.
  */
@@ -93,6 +110,30 @@ export function readProcessMetrics(source = process) {
  */
 function labelValue(value) {
   return String(value).replace(/[^A-Za-z0-9_.-]/g, '');
+}
+
+/**
+ * What the Bookhive walk did in this process, one series per outcome.
+ *
+ * `result` is `run` (a walk started), `pages` (catalog pages fetched) or one of
+ * the per-record outcomes (`created`, `updated`, `skipped`, `failed`). Every
+ * label comes from `importBookhiveCatalog`'s own branches, so the series count
+ * stays bounded. The totals restart with the process; the durable count is the
+ * `bibliograph_catalog_bookhive_editions` gauge.
+ */
+function renderBookhiveMetrics(bookhiveMetrics) {
+  const rows = bookhiveMetrics?.snapshot?.() ?? [];
+  const lines = [
+    '# HELP bibliograph_catalog_bookhive_total Bookhive catalog walk events since this process started, by result.',
+    '# TYPE bibliograph_catalog_bookhive_total counter'
+  ];
+  for (const row of rows) {
+    lines.push(
+      `bibliograph_catalog_bookhive_total{result="${labelValue(row.result)}"} ` +
+        `${Math.trunc(nonNegative(row.count))}`
+    );
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -125,6 +166,8 @@ export function renderMetrics({
   limit = DEFAULT_ISBNDB_DAILY_LIMIT,
   providerMetrics,
   coverMetrics,
+  bookhiveMetrics,
+  bookhive = { editions: 0 },
   outbox = { ready: 0, parked: 0, oldestAgeSeconds: 0 },
   runtime = readProcessMetrics()
 }) {
@@ -176,6 +219,10 @@ export function renderMetrics({
     '# HELP bibliograph_pds_outbox_oldest_age_seconds Age of the oldest claimable row, or 0 when none.',
     '# TYPE bibliograph_pds_outbox_oldest_age_seconds gauge',
     `bibliograph_pds_outbox_oldest_age_seconds ${nonNegative(outbox.oldestAgeSeconds)}`,
+    '# HELP bibliograph_catalog_bookhive_editions Catalog books imported from Bookhive, counted by hive id.',
+    '# TYPE bibliograph_catalog_bookhive_editions gauge',
+    `bibliograph_catalog_bookhive_editions ${Math.trunc(nonNegative(bookhive.editions))}`,
+    renderBookhiveMetrics(bookhiveMetrics),
     renderCoverMetrics(coverMetrics),
     renderProviderMetrics(providerMetrics),
     ''
@@ -202,6 +249,7 @@ export function createMetricsServer({
   limit = DEFAULT_ISBNDB_DAILY_LIMIT,
   providerMetrics,
   coverMetrics,
+  bookhiveMetrics,
   publisherDid,
   logger = console
 } = {}) {
@@ -224,9 +272,10 @@ export function createMetricsServer({
     }
 
     try {
-      const [calls, outbox] = await Promise.all([
+      const [calls, outbox, bookhive] = await Promise.all([
         readDailyCalls(pool),
-        readOutboxStats(pool, { publisherDid })
+        readOutboxStats(pool, { publisherDid }),
+        readBookhiveStats(pool)
       ]);
       response.writeHead(200, {
         'content-type': CONTENT_TYPE,
@@ -235,7 +284,15 @@ export function createMetricsServer({
       response.end(
         request.method === 'HEAD'
           ? undefined
-          : renderMetrics({ calls, limit, providerMetrics, coverMetrics, outbox })
+          : renderMetrics({
+              calls,
+              limit,
+              providerMetrics,
+              coverMetrics,
+              bookhiveMetrics,
+              bookhive,
+              outbox
+            })
       );
     } catch (error) {
       // A metrics scrape must never take the worker down; report the failure to
@@ -256,6 +313,7 @@ export async function startMetricsServer({
   limit = DEFAULT_ISBNDB_DAILY_LIMIT,
   providerMetrics,
   coverMetrics,
+  bookhiveMetrics,
   publisherDid,
   host,
   port,
@@ -268,6 +326,7 @@ export async function startMetricsServer({
     limit,
     providerMetrics,
     coverMetrics,
+    bookhiveMetrics,
     publisherDid,
     logger
   });

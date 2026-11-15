@@ -235,3 +235,54 @@ local function review_view(row)
     record = record_value(row.record),
   }
 end
+
+-- `defs#reviewView` for one `buzz.bookhive.book` row, translated into the
+-- shared review record the query surface speaks. Bookhive keeps the review
+-- inside its per-book record: `review` is the text, `stars` (1-10) the grade,
+-- and the book is the `hiveId` the catalog carries as a `bookhive.buzz`
+-- identifier, which the caller has already resolved to `edition_uri`.
+--
+-- Returns nil for a row that is not a review (empty or whitespace-only text, no
+-- `createdAt`) or whose edition is missing: the caller drops it rather than
+-- emitting a review nothing can be placed on.
+local function bookhive_review_view(row, edition_uri, cache)
+  local record = record_value(row.record)
+  local text = type(record.review) == 'string'
+    and string.match(record.review, '^%s*(.-)%s*$') or nil
+  local created = record.createdAt
+  -- The record itself decides whether it is a review at all, before the
+  -- edition lookup: a shelving-only row must not cost a catalog query.
+  if text == nil or text == '' or type(created) ~= 'string' then return nil end
+  local edition = edition_view(edition_uri, cache)
+  if edition == nil then return nil end
+
+  local synthesized = {
+    ['$type'] = REVIEW_COLLECTION,
+    subjectRecord = edition_uri,
+    textContent = text,
+    createdAt = created,
+  }
+  -- The lexicon wants a non-empty identifier array; an edition always has one,
+  -- but a view without it is still placeable by `subjectRecord` alone.
+  local identifiers = edition.identifiers
+  if type(identifiers) == 'table' and #identifiers > 0 then
+    synthesized.subject = {
+      title = edition.title,
+      identifiers = identifiers,
+      contributors = edition.contributors,
+    }
+    if edition.coverUrl ~= nil then synthesized.subject.coverUrl = edition.coverUrl end
+  end
+
+  -- 1-10 stars map onto the shared 1-20 rating scale; an out-of-range or
+  -- non-integer grade is dropped rather than emitted as an invalid rating.
+  local stars = integer_field(record.stars)
+  if stars ~= nil and stars >= 1 and stars <= 10 then synthesized.rating = stars * 2 end
+
+  return {
+    ['$type'] = 'net.olamaelcu.livtet.biblio.defs#reviewView',
+    uri = row.uri,
+    did = row.did,
+    record = synthesized,
+  }
+end

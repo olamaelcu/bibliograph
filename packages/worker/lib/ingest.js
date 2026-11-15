@@ -273,6 +273,26 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
     const identifiers = normalizedIdentifiers(candidate);
     if (identifiers.length === 0) return undefined;
 
+    // A candidate may name the identifier it came through: its claims and its
+    // publisher credit then describe that identifier alone. A third-party
+    // catalog (or a provider answering for one of several identifiers) knows
+    // nothing about the other pairs in the bag, so attributing its data to them
+    // would let one source's publisher overwrite another's on a shared edition.
+    const source = candidate.sourceIdentifier ?? null;
+    if (source !== null) {
+      const known = identifiers.some(
+        (identifier) => identifier.issuer === source.issuer && identifier.value === source.value
+      );
+      if (!known) {
+        throw new Error(
+          `sourceIdentifier ${source.issuer}:${source.value} is not one of the candidate's identifiers`
+        );
+      }
+    }
+    const scoped = (identifier) =>
+      source === null ||
+      (identifier.issuer === source.issuer && identifier.value === source.value);
+
     // Each identifier carries its own shape claim: the edition's public shape is
     // their union, so a provider fill must never overwrite another identifier's
     // claim (or a curator's edit).
@@ -314,11 +334,13 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
            VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
           [uri, identifier.issuer, identifier.value]
         );
-        if (hasClaims) await fillIdentifierClaims(client, uri, identifier, claims);
+        if (hasClaims && scoped(identifier)) {
+          await fillIdentifierClaims(client, uri, identifier, claims);
+        }
       }
 
       await linkContributors(client, uri, candidate.contributors, authority);
-      await linkPublisher(client, uri, candidate.publisher, identifiers, authority);
+      await linkPublisher(client, uri, candidate.publisher, identifiers.filter(scoped), authority);
 
       await client.query('COMMIT');
       return { uri, created };

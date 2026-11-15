@@ -54,6 +54,10 @@ RECORD_LEXICONS = [
     "net.olamaelcu.livtet.biblio.readingGoal",
     "net.olamaelcu.livtet.actor.profile",
     "community.lexicon.media.book.review",
+    # Bookhive's own per-book record, indexed so the `review` text it carries
+    # can be served as a review. The lexicon is Bookhive's, copied verbatim
+    # into lexicons/buzz/bookhive/; only the collection is registered here.
+    "buzz.bookhive.book",
 ]
 
 QUERY_LEXICONS = [
@@ -98,6 +102,8 @@ PROCEDURE_LEXICONS = [
 DEFS_LEXICONS = [
     "net.olamaelcu.livtet.biblio.defs",
     "community.lexicon.media.book.defs",
+    # Referenced by buzz.bookhive.book (bookIdentifiers, bookProgress, …).
+    "buzz.bookhive.defs",
 ]
 
 TIMESTAMP_SQL = "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')"

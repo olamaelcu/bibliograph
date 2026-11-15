@@ -360,6 +360,7 @@ return {
   shelf_item_view = shelf_item_view,
   shelf_entry_view = shelf_entry_view,
   review_view = review_view,
+  bookhive_review_view = bookhive_review_view,
   shelf_ref = shelf_ref,
   owned_shelf = owned_shelf,
   edition_ref = edition_ref,
@@ -1091,6 +1092,159 @@ test('getReviewsByBook reads the appview_book_lua identifier bag', function()
     end,
   }
   helpers.edition_view('at://edition/1')
+end)
+
+local EDITION = 'at://did:plc:catalog/community.lexicon.media.book.edition/abc'
+
+-- The catalog row `edition_view` reads, and how to tell that lookup apart from
+-- the review page it accompanies (whose SQL also names `appview_book_lua`).
+local function is_edition_lookup(sql)
+  return sql:find('FROM appview_book_lua WHERE uri = $1', 1, true) ~= nil
+end
+
+local function edition_row(uri)
+  return {
+    uri = uri,
+    title = 'Test Title',
+    identifiers = '[{"issuer":"isbn13","value":"9780441013593"}]',
+    contributors = '[{"name":"A. Author","role":"A01"}]',
+    created_at = '2026-01-01T00:00:00.000Z',
+  }
+end
+
+local function bookhive_row(review, stars)
+  return {
+    uri = 'at://did:plc:r/buzz.bookhive.book/1',
+    did = 'did:plc:r',
+    record = '{"review":"' .. review .. '","stars":' .. tostring(stars)
+      .. ',"status":"buzz.bookhive.defs#finished","createdAt":"2026-11-14T00:00:00.000Z"}',
+    created_at = '2026-11-14T00:00:00.000Z',
+    source = 'bookhive',
+    edition_uri = EDITION,
+  }
+end
+
+test('getReviewsByBook serves a Bookhive review beside a shared one', function()
+  local rows = {
+    bookhive_row('  A bookhive review  ', 9),
+    {
+      uri = 'at://did:plc:r/community.lexicon.media.book.review/2',
+      did = 'did:plc:r',
+      record = '{"subjectRecord":"' .. EDITION
+        .. '","textContent":"shared","createdAt":"2026-11-13T00:00:00.000Z"}',
+      created_at = '2026-11-13T00:00:00.000Z',
+      source = 'community',
+      edition_uri = nil,
+    },
+  }
+
+  local response, calls = run_endpoint('query', 'getReviewsByBook', {
+    params = { book = EDITION },
+    responder = function(sql)
+      if is_edition_lookup(sql) then return { edition_row(EDITION) } end
+      return rows
+    end,
+  })
+
+  assert_equal(#response.reviews, 2, 'both sources land on one page')
+  local bookhive = response.reviews[1]
+  assert_equal(bookhive.uri, 'at://did:plc:r/buzz.bookhive.book/1')
+  assert_equal(bookhive.did, 'did:plc:r')
+  assert_equal(bookhive.record['$type'], 'community.lexicon.media.book.review')
+  assert_equal(bookhive.record.textContent, 'A bookhive review', 'the text is trimmed')
+  assert_equal(bookhive.record.rating, 18, 'stars 1-10 map onto the 1-20 scale')
+  assert_equal(bookhive.record.subjectRecord, EDITION)
+  assert_equal(bookhive.record.createdAt, '2026-11-14T00:00:00.000Z')
+  assert_equal(bookhive.record.subject.title, 'Test Title')
+  assert_equal(bookhive.record.subject.identifiers[1].value, '9780441013593')
+  assert_equal(bookhive.record.subject.contributors[1].displayName, 'A. Author')
+  assert_equal(response.reviews[2].record.textContent, 'shared')
+
+  local sql = calls[1].sql
+  assert_contains(sql, 'UNION ALL')
+  assert_contains(sql, 'appview_bookhive_lua')
+  assert_contains(sql, "btrim(COALESCE((r.record::jsonb)->>'review', '')) <> ''")
+  assert_equal(calls[1].args[4], 'buzz.bookhive.book')
+end)
+
+test('a Bookhive row with blank review text is not a review', function()
+  for _, review in ipairs({ '', '   ' }) do
+    local response, calls = run_endpoint('query', 'getReviewsByBook', {
+      params = { book = EDITION },
+      responder = function(sql)
+        if is_edition_lookup(sql) then return { edition_row(EDITION) } end
+        return { bookhive_row(review, 5) }
+      end,
+    })
+    assert_equal(#response.reviews, 0, 'shelving-only rows stay off the review page')
+    assert_equal(#calls, 1, 'a blank review costs no catalog lookup')
+  end
+end)
+
+test('listReviewsByActor pages both review sources for one DID', function()
+  local rows = {
+    bookhive_row('bookhive text', 8),
+    {
+      uri = 'at://did:plc:r/community.lexicon.media.book.review/2',
+      did = 'did:plc:r',
+      record = '{"textContent":"shared","rating":12,"createdAt":"2026-11-13T00:00:00.000Z"}',
+      created_at = '2026-11-13T00:00:00.000Z',
+      source = 'community',
+      edition_uri = nil,
+    },
+  }
+
+  local response, calls = run_endpoint('query', 'listReviewsByActor', {
+    params = { did = 'did:plc:r' },
+    responder = function(sql)
+      if is_edition_lookup(sql) then return { edition_row(EDITION) } end
+      return rows
+    end,
+  })
+
+  assert_equal(#response.reviews, 2)
+  assert_equal(response.reviews[1].record.rating, 16)
+  assert_equal(response.reviews[1].record.subjectRecord, EDITION)
+  assert_equal(response.reviews[2].record.rating, 12)
+  assert_equal(calls[1].args[2], 'did:plc:r')
+  assert_equal(calls[1].args[4], 'buzz.bookhive.book')
+end)
+
+test('bookhive_review_view drops an unusable grade, a missing grade and a missing edition', function()
+  helpers_env.db = {
+    raw = function(sql, args)
+      -- Only the known edition resolves, so the missing-edition case below is real.
+      if is_edition_lookup(sql) and args[1] == EDITION then return { edition_row(EDITION) } end
+      return {}
+    end,
+  }
+  local cache = helpers.view_cache()
+  local view = helpers.bookhive_review_view(bookhive_row('x', 11), EDITION, cache)
+  assert_true(view ~= nil)
+  assert_nil(view.record.rating, 'a grade outside 1-10 is dropped, never emitted invalid')
+  assert_equal(view.record.subjectRecord, EDITION)
+
+  -- No `stars` at all is a text-only review.
+  local text_only = {
+    uri = 'at://did:plc:r/buzz.bookhive.book/1',
+    did = 'did:plc:r',
+    record = '{"review":"x","createdAt":"2026-11-14T00:00:00.000Z"}',
+  }
+  assert_nil(helpers.bookhive_review_view(text_only, EDITION, cache).record.rating)
+
+  -- No `createdAt` is not a review the shared record can carry.
+  assert_nil(helpers.bookhive_review_view(
+    { uri = text_only.uri, did = text_only.did, record = '{"review":"x","stars":5}' },
+    EDITION,
+    helpers.view_cache()
+  ))
+
+  -- An edition the catalog does not have is dropped rather than half-rendered.
+  assert_nil(helpers.bookhive_review_view(
+    text_only,
+    'at://did:plc:catalog/community.lexicon.media.book.edition/missing',
+    helpers.view_cache()
+  ))
 end)
 
 test('edition_view selects explicit columns', function()

@@ -1,6 +1,8 @@
 import { createOutboxPublisher, DEFAULT_BATCH } from './publish.js';
 import { publisherConfigError, resolvePublisherConfig } from './pds.js';
 import { createIngest } from './ingest.js';
+import { importBookhiveCatalog } from './bookhive.js';
+import { createBookhiveMetrics } from './bookhive.js';
 import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
 import { prepareEntityRecords } from './prepare-entities.js';
 import { mergeGenres } from './genres.js';
@@ -140,7 +142,10 @@ export function createTasks({
   coverFetch = fetch,
   // Shared with the metrics endpoint so a scrape reports what the jobs saw; a
   // bare caller (a test, a script) gets its own counter.
-  coverMetrics = createCoverMetrics()
+  coverMetrics = createCoverMetrics(),
+  // Same contract for the Bookhive walk: the counters are process-local, so
+  // the endpoint must be handed the instance the task writes to.
+  bookhiveMetrics = createBookhiveMetrics()
 }) {
   const ingest = createIngest({ pool, publisherDid, publisherHost });
   const coversDir = coversCacheDir.trim();
@@ -242,6 +247,20 @@ export function createTasks({
       helpers.logger.info(
         `catalog.isbn ${isbn}: ${candidates.length} candidate(s), ${ingested} ingested`
       );
+    },
+
+    // Bookhive's catalog is the only join its reader records have: every hive
+    // id a `buzz.bookhive.book` carries has to resolve to an edition before
+    // that record can be read as a review or a feed entry.
+    'catalog.bookhive': async (payload, helpers) => {
+      const summary = await importBookhiveCatalog({
+        pool,
+        ingest,
+        pages: Number(payload?.pages) || 5000,
+        logger: helpers.logger,
+        metrics: bookhiveMetrics
+      });
+      helpers.logger.info(`catalog.bookhive ${JSON.stringify(summary)}`);
     },
 
     // Hydrates one edition's genres from the providers that actually have

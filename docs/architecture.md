@@ -83,6 +83,29 @@ an ISBN. Identity is the identifier bag: an ingest first looks up
 `(issuer, value)` pairs in place, adding the new pairs. Two different identifier
 bags therefore mint two different TIDs, while re-resolving the same identifier
 always lands on the same edition URI.
+Each identifier carries its own *shape claim*: `edition_identifier_info` rows
+hold `format`, `language`, `publishedDate`, `pages`, `description` and
+`durationSeconds`, and the published record takes each field from the
+best-ranked identifier that has one (`identifier_shape_rank`: isbn13 → isbn10 →
+asin → any other issuer, then issuer/value order). That is why a candidate may
+name its `sourceIdentifier` (`{issuer, value}`): a source that knows only one of
+the pairs in the bag writes its claims and its publisher credit to that pair
+alone instead of attributing them to identifiers it never saw. `catalog.bookhive`
+uses it for Bookhive's `hiveId`, and carries what the catalog book knows: title,
+author list, description, page count (`numPages`), language (Bookhive writes an
+English name — `English`, `Dutch; Flemish` — mapped to a BCP 47 tag from the
+codes in `language_aliases` via `Intl.DisplayNames`, so the list stays derived),
+publication year as `publishedDate: "YYYY"`, publisher as a scoped credit, and
+`series` on the edition itself (a work's placement is shared by every
+identifier). Values that cannot be published as-is — an unknown language name, a
+zero page count, a year past 9999 — are dropped rather than emitted invalid.
+Idempotence is therefore per field, not per book: the walk skips a book only
+when its identifier set is complete *and* the hive row already carries every
+claim the record has, so a field a later importer version starts carrying still
+lands on an edition that was imported before. A value that changed upstream does
+not: ingest fills a missing claim and never overwrites a stored one (a curator's
+edit and another provider's answer both outrank a re-import), so correcting a
+stored claim is a curation action, not an import side effect.
 
 ## Entity records
 
@@ -219,9 +242,11 @@ turn the catalog's thin spots into unbounded provider spend.
 
 `com.atproto.feed.describeFeedGenerator` and `com.atproto.feed.getFeedSkeleton` are served by the
 edge (`packages/web/src/lib/server/feeds/`), not HappyView: a skeleton is one SQL query over
-`happyview.happyview_records` for `community.lexicon.media.book.review` and
-`net.olamaelcu.livtet.biblio.bookStatus`, ordered newest first by the record's own `createdAt` and
-then `uri`. There is no worker task and no Lua script for feeds.
+`happyview.happyview_records` for `community.lexicon.media.book.review`,
+`net.olamaelcu.livtet.biblio.bookStatus` and `buzz.bookhive.book`, ordered newest first by the
+record's own `createdAt` and then `uri`. A Bookhive entry's reason names the shelf and the edition
+its `hiveId` was imported as (`appview_bookhive_lua`). There is no worker task and no Lua script for
+feeds.
 
 The generator DID is `FEED_GENERATOR_DID`; it is required configuration with no code default, and
 its feed URIs are `at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/<kind>` for
@@ -256,6 +281,7 @@ one anonymous call cannot turn its full identifier list into paid provider work.
 | `catalog.search` | edge on a search whose first-page `total` is below `SEARCH_HYDRATION_THRESHOLD` (`job_key` deduped, 1 h TTL, ≤120 enqueues per rolling hour) | provider search → ingest up to 50 candidates |
 | `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to 50 candidates; falls back to the resolve chain when ISBNdb is unconfigured or returns nothing |
 | `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
+| `catalog.bookhive` | graphile cron weekly (`0 3 * * 1`), or `node index.js --import-bookhive[=<pages>]` | walk Bookhive's `buzz.bookhive.catalogBook` (100 books per page, 5000 pages at most) and ingest each book so its `hiveId` names an edition |
 
 Provider precedence is ISBNdb → Google Books → Goodreads → OpenLibrary, for
 both ISBN lookups and text searches, stopping at the first provider that
@@ -411,7 +437,13 @@ attempt/retry/request counters and breaker states are rendered by the same
 worker, as is `bibliograph_cover_downloads_total{result,status}` (cover
 download outcomes: `cached`, `rejected` for a URL that will never retry, and
 `retry` for a provider failure), so a provider refusing cover images is visible
-without reading the journal. A scrape that cannot query the database answers
+without reading the journal. The Bookhive catalog import is visible twice:
+`bibliograph_catalog_bookhive_editions` is read from `edition_identifiers` on
+every scrape — the durable count of catalog books whose hive id names an
+edition, so it survives restarts and shows whether the weekly walk is still
+making progress — and `bibliograph_catalog_bookhive_total{result}` counts the
+walk's `run`, `pages`, `created`, `updated`, `skipped` and `failed` events in
+the process that ran them. A scrape that cannot query the database answers
 `500`; a port that
 cannot be bound is logged and leaves the worker running. The default loopback
 bind keeps the endpoint off the network;
@@ -493,7 +525,10 @@ package-worker-deb` builds `bibliograph-worker`, which installs the payload at
 ## Activity
 
 Indexed collections: `net.olamaelcu.livtet.biblio.{bookStatus,shelf,shelfItem,follow,readingGoal}`,
-`net.olamaelcu.livtet.actor.profile` and `community.lexicon.media.book.review`.
+`net.olamaelcu.livtet.actor.profile`, `community.lexicon.media.book.review` and Bookhive's
+`buzz.bookhive.book` (a reader's review lives inside it). Bookhive's catalog
+(`buzz.bookhive.catalogBook`) is not indexed: `catalog.bookhive` imports it into editions instead,
+recording each `hiveId` as a `(bookhive.buzz, bk_…)` identifier (`appview_bookhive_lua`).
 Query and procedure scripts live in `happyview/scripts/xrpc/`; `mise run hv-deploy`
 runs `happyview/bin/hv-deploy` to upload the lexicons and scripts through
 HappyView's admin API and apply the activity indexes (see `docs/happyview.md`).

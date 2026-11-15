@@ -428,24 +428,40 @@ descending, `{ bookShelves, cursor? }`. It takes no DID parameter and is not sco
 
 ### Reviews
 
-Reviews are `community.lexicon.media.book.review` records; `reviewView` returns the raw record.
+Reviews come from two collections; `reviewView` always returns the shared
+`community.lexicon.media.book.review` shape.
+
+* A `community.lexicon.media.book.review` record is returned as written.
+* A `buzz.bookhive.book` record whose `review` text is non-empty **is** a review. Bookhive keeps
+  the text and the 1–10 `stars` grade inside its per-book record and names the book only by
+  `hiveId` (`bk_…`), so the row is translated on read: `subjectRecord` is the edition that hive id
+  was imported as (`appview_bookhive_lua`), `textContent` is the trimmed `review`, `rating` is
+  `stars * 2` (the shared scale is 1–20, and an out-of-range grade is dropped rather than emitted
+  invalid), `subject` is that edition's title/identifiers/contributors, and `createdAt` is the
+  record's own. The `uri`/`did` stay Bookhive's, so a permalink resolves to the record the reader
+  wrote. A row with empty or whitespace-only `review` text is shelving, not a review: it is not
+  returned by either review query (it still appears in the feed).
 
 #### `getReviewsByBook`
 
-Pages reviews that either name the book in `subjectRecord` or share an identifier with the edition's
-`identifiers` bag in `appview_book_lua`, ordered `created_at` descending, `uri` descending, offset
-cursor. Returns `{ reviews, cursor? }`. The activity plane reads no other catalog table. The lexicon
-declares `NotFound`; the handler returns an empty page.
+Pages both sources in one feed: reviews that either name the book in `subjectRecord` or share an
+identifier with the edition's `identifiers` bag in `appview_book_lua`, plus `buzz.bookhive.book`
+rows whose hive id maps to that edition. Ordered `created_at` descending, `uri` descending, offset
+cursor. Returns `{ reviews, cursor? }`. The activity plane reads no catalog table other than the two
+read models (`appview_book_lua`, `appview_bookhive_lua`). The lexicon declares `NotFound`; the
+handler returns an empty page.
 
 #### `listReviewsByActor`
 
-Pages one DID's reviews, same ordering and cursor. Returns `{ reviews, cursor? }`.
+Pages one DID's reviews from both collections, same ordering and cursor. Returns
+`{ reviews, cursor? }`.
 
 ### Feed generator (edge)
 
 Both `com.atproto.feed.*` methods are answered by the edge from `happyview.happyview_records`,
-over exactly `community.lexicon.media.book.review` and `net.olamaelcu.livtet.biblio.bookStatus`.
-They never call HappyView, the PDS or a worker task, and they read no catalog table.
+over exactly `community.lexicon.media.book.review`, `net.olamaelcu.livtet.biblio.bookStatus` and
+`buzz.bookhive.book`. They never call HappyView, the PDS or a worker task; the only catalog read is
+the `appview_bookhive_lua` join that turns a Bookhive `hiveId` into the edition it was imported as.
 
 #### `com.atproto.feed.describeFeedGenerator`
 
@@ -458,7 +474,12 @@ Params: `feed` (required, one of the four URIs), `limit` (20, clamped 1–100) a
 feed's own opaque `{c,u}`). Skeleton items are `{ post, reason? }`: `post` is the record URI (`cid`
 is omitted) and `reason` is the book URI when the record names one — a review's `subjectRecord`,
 else the first `subject.identifiers[]` entry with `issuer: "atproto"`; a `bookStatus`'s
-`book.uri`. `reason` is omitted when it cannot be resolved.
+`book.uri`. A `buzz.bookhive.book` entry's reason is `bookhive:<shelf>|<book-uri>` instead: the
+shelf is the record's `status` mapped onto the fixed reading-status keys
+(`#reading`→`reading`, `#finished`→`read`, `#wantToRead`→`to-read`, `#abandoned`→`dnf`) and the
+book URI is the edition its `hiveId` maps to through `appview_bookhive_lua`; an unknown status or
+an un-imported hive id leaves that half empty (`bookhive:` / `bookhive:<shelf>`), and the Livtet
+client falls back to the record's own status. `reason` is omitted when it cannot be resolved.
 
 Ordering is newest first by the record's own `record::jsonb->>'createdAt'` as text, then `uri`
 descending; `limit + 1` rows decide whether a cursor is returned. A missing, malformed or foreign
@@ -467,7 +488,7 @@ query is `503 ServiceUnavailable`.
 
 | Feed | Auth | Records |
 | --- | --- | --- |
-| `public` | none | every indexed review and `bookStatus` |
+| `public` | none | every indexed review, `bookStatus` and Bookhive per-book record |
 | `following` | service JWT | records by DIDs the viewer follows, excluding the viewer |
 | `extended` | service JWT | followed DIDs plus their followees, capped at 500 DIDs, excluding the viewer |
 | `dynamic` | service JWT | the viewer plus followed DIDs (the per-viewer ladder) |
@@ -486,7 +507,8 @@ run HappyView's existing `/admin/backfill` for that DID and collection; the next
 for collection in \
   community.lexicon.media.book.review \
   net.olamaelcu.livtet.biblio.bookStatus \
-  net.olamaelcu.livtet.biblio.follow
+  net.olamaelcu.livtet.biblio.follow \
+  buzz.bookhive.book
 do
   curl -sS -X POST "$HAPPYVIEW_URL/admin/backfill" \
     -H "Authorization: Bearer $HAPPYVIEW_ADMIN_KEY" \
@@ -787,7 +809,10 @@ cannot see.
 ## What the surface does not do
 
 - No PDS reads on the query path, no Constellation, no tiered cursors (`tap:`/`con:`/`pds:`), no
-  Bookhive branches: the index is the only activity source.
+  provider calls inside a read handler: the index is the only activity source. `buzz.bookhive.book`
+  is read straight from the index (its `review`/`stars` are a review, see §Reviews); nothing is
+  mirrored into a Bibliograph collection, so a Bookhive review's permalink stays Bookhive's record
+  URI.
 - No `com.atproto.*` writes are handled here. The edge serves only the two read-only PDS proxies
   (`repo.getRecord`, `repo.listRecords`), the two `com.atproto.feed.*` methods, and the two books-wg
   catalog procedures; every other `com.atproto.*` call is forwarded to HappyView. No

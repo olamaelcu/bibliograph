@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
   createMetricsServer,
+  readBookhiveStats,
   readOutboxStats,
   readProcessMetrics,
   renderMetrics
 } from '../lib/metrics.js';
 import { createCoverMetrics } from '../lib/cover-metrics.js';
 import { MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from '../lib/publish.js';
+import { createBookhiveMetrics } from '../lib/bookhive.js';
 
 
 /**
@@ -20,6 +22,41 @@ import { MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from '../lib/publish.js';
 
 const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
 
+
+test('the bookhive gauge counts imported books and the counters explain them', async () => {
+  // The gauge is durable (read from the catalog on each scrape); the counters
+  // are this process's walk history. Both must survive a scrape unchanged.
+  const pool = {
+    async query(sql, values) {
+      assert.match(sql, /FROM edition_identifiers WHERE issuer = \$1/);
+      assert.deepEqual(values, ['bookhive.buzz']);
+      return { rows: [{ editions: '100' }] };
+    }
+  };
+  const stats = await readBookhiveStats(pool);
+  assert.deepEqual(stats, { editions: 100 });
+
+  const bookhiveMetrics = createBookhiveMetrics();
+  for (const result of ['run', 'pages', 'pages', 'created', 'created', 'updated', 'skipped', 'failed']) {
+    bookhiveMetrics.record(result);
+  }
+
+  const text = renderMetrics({ calls: 0, limit: 100, bookhive: stats, bookhiveMetrics });
+  assert.match(text, /^bibliograph_catalog_bookhive_editions 100$/m);
+  assert.match(text, /# TYPE bibliograph_catalog_bookhive_total counter/);
+  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="created"\} 2$/m);
+  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="updated"\} 1$/m);
+  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="skipped"\} 1$/m);
+  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="failed"\} 1$/m);
+  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="pages"\} 2$/m);
+  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="run"\} 1$/m);
+});
+
+test('a scrape with no bookhive import still exposes both families', () => {
+  const text = renderMetrics({});
+  assert.match(text, /^bibliograph_catalog_bookhive_editions 0$/m);
+  assert.match(text, /# TYPE bibliograph_catalog_bookhive_total counter/);
+});
 
 test('cover download outcomes render by result and status', () => {
   // The endpoint is the only place an operator can see the 403s that never
@@ -211,6 +248,9 @@ test('the metrics endpoint renders the outbox aggregate', async () => {
     assert.match(body, /^bibliograph_pds_outbox_ready 5$/m);
     assert.match(body, /^bibliograph_pds_outbox_parked 1$/m);
     assert.match(body, /^bibliograph_pds_outbox_oldest_age_seconds 12$/m);
+    // The scrape also reads the Bookhive import: the fake pool answers the quota
+    // query shape, so the gauge renders as 0 rather than breaking the scrape.
+    assert.match(body, /^bibliograph_catalog_bookhive_editions \d+$/m);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
