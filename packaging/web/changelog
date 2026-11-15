@@ -1,3 +1,32 @@
+bibliograph-web (0.2.19-1) unstable; urgency=medium
+
+  * 0.2.19 release: per-identifier format claims, and a filtered contributor
+    listing.
+
+    - New anonymous query
+      `net.olamaelcu.livtet.biblio.getIdentifiedFormats` (`uri`, an edition
+      at-uri) answers `{ uri, chapters?, identifiers }`: one claim per
+      identifier in the catalog's own rank order (isbn13, isbn10, asin, then
+      any other issuer; ties by issuer then value). The edition record's
+      `format`, `pages` and `duration_seconds` are independent rank unions, so
+      three winners can describe a product no identifier claims; a reading
+      position needs the medium and extent of one product. A missing or
+      malformed `uri` is `InvalidRequest`, an unknown edition `RecordNotFound`.
+
+    - `listEditionsByContributor` accepts the `sort`, `order` and `language`
+      parameters `searchEditions` already takes, built from the same
+      `editionOrderBy` / `editionLanguageClause` helpers: `title` sorts
+      alphabetically, `publishedYear` by the shape claim's year with unknown
+      years last, `relevance` keeps the listing's own newest-first order, and
+      `total` counts what the filters returned.
+
+    - Lexicons: `getIdentifiedFormats.json` and the `readingProgress` record
+      schema are new, and `listEditionsByContributor.json` declares the new
+      parameters. The edge build regenerates `xrpc-catalog.json` from them; the
+      HappyView payload ships them and its deploy oneshot uploads them.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 01:19:19 +0000
+
 bibliograph-web (0.2.17-1) unstable; urgency=medium
 
   * 0.2.17 release: the edge serves cached covers, and thin searches hydrate.

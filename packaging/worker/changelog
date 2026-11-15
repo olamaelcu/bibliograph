@@ -1,3 +1,15 @@
+bibliograph-worker (0.2.19-1) unstable; urgency=medium
+
+  * 0.2.19 release: no worker payload change since 0.2.18.
+
+    - The ESM, the production `node_modules` and `sql/` are identical to
+      `0.2.18-1`; the newest migration is still
+      `0013-edition-identifier-extent.sql`. The release number moves with the
+      edge so both Node packages share one, and the reinstall restarts the unit
+      and re-applies the schema.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 01:19:19 +0000
+
 bibliograph-worker (0.2.18-1) unstable; urgency=medium
 
   * 0.2.18 release: a refused cover URL is terminal, and downloads are counted.
