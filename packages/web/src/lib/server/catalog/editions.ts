@@ -1,5 +1,5 @@
 
-import { likePattern } from './sql.ts';
+import { encodeKeysetCursor, likePattern } from './sql.ts';
 import {
   EDITION_COLUMNS,
   EDITION_COVERS_JOIN,
@@ -181,6 +181,56 @@ export async function resolveEditions(input: {
     items,
     hasMore: page.rows.length > input.limit,
     ...(input.offset === 0 ? { total: counted ? counted.rows[0]?.n ?? 0 : rows.length } : {})
+  };
+}
+
+/**
+ * A page of the catalog's editions, in at-uri order.
+ *
+ * This is the enumeration surface: `searchEditions` needs a term and
+ * `resolveEditions` needs an identifier, so neither can answer "give me
+ * everything", which is what a crawl (a sitemap, a mirror) asks for. A page is
+ * served by `editions_pkey` alone — no shape or cover join, no hydration — so a
+ * whole-catalogue walk is a handful of index scans instead of one query per
+ * edition. The keyset cursor resumes after the last uri returned, so inserting
+ * a row mid-walk cannot shift a page boundary and make the crawl skip one.
+ */
+export type EditionListing = { uri: string; title: string; indexedAt: string };
+
+export async function listEditions(
+  input: { after: string | null; limit: number },
+  pool: EditionQueryable
+): Promise<{ items: EditionListing[]; cursor?: string }> {
+  const params: Array<string | number> = [];
+  const push = (value: string | number): string => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  const after = input.after === null ? null : push(input.after);
+  const limit = push(input.limit + 1);
+  const where = after === null ? '' : `WHERE uri > ${after}`;
+
+  const page = await pool.query<{ uri: string; title: string; indexed_at: Date }>(
+    `SELECT uri, title, indexed_at
+       FROM editions
+       ${where}
+      ORDER BY uri
+      LIMIT ${limit}`,
+    params
+  );
+
+  const items = page.rows.slice(0, input.limit).map((row) => ({
+    uri: row.uri,
+    title: row.title,
+    indexedAt: new Date(row.indexed_at).toISOString()
+  }));
+  const last = items.at(-1);
+  return {
+    items,
+    ...(page.rows.length > input.limit && last !== undefined
+      ? { cursor: encodeKeysetCursor(last.uri) }
+      : {})
   };
 }
 

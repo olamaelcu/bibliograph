@@ -20,6 +20,7 @@ export const GET_IDENTIFIED_FORMATS =
   'net.olamaelcu.livtet.biblio.getIdentifiedFormats';
 export const LIST_EDITIONS_BY_CONTRIBUTOR =
   'net.olamaelcu.livtet.biblio.listEditionsByContributor';
+export const LIST_EDITIONS = 'net.olamaelcu.livtet.biblio.listEditions';
 export const RESOLVE_CONTRIBUTORS = 'net.olamaelcu.livtet.biblio.resolveContributors';
 export const RESOLVE_PUBLISHERS = 'net.olamaelcu.livtet.biblio.resolvePublishers';
 export const SEARCH_CONTRIBUTORS = 'net.olamaelcu.livtet.biblio.searchContributors';
@@ -31,6 +32,7 @@ export const ENTITY_QUERIES = new Set([
   GET_IDENTIFIED_FORMATS,
   GET_PUBLISHER,
   LIST_EDITIONS_BY_CONTRIBUTOR,
+  LIST_EDITIONS,
   RESOLVE_CONTRIBUTORS,
   RESOLVE_PUBLISHERS,
   SEARCH_CONTRIBUTORS,

@@ -17,6 +17,7 @@ import {
   resolveEditions,
   parseEditionOrder,
   searchEditions,
+  listEditions,
   type Identifier,
 } from "$lib/server/catalog/editions";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
@@ -52,6 +53,7 @@ import {
   GET_IDENTIFIED_FORMATS,
   GET_PUBLISHER,
   LIST_EDITIONS_BY_CONTRIBUTOR,
+  LIST_EDITIONS,
   RESOLVE_CONTRIBUTORS,
   RESOLVE_EDITIONS,
   RESOLVE_PUBLISHERS,
@@ -59,7 +61,7 @@ import {
   SEARCH_EDITIONS,
   SEARCH_PUBLISHERS,
 } from "$lib/server/catalog/entity-methods";
-import { decodeOffsetCursor } from "$lib/server/catalog/sql";
+import { decodeKeysetCursor, decodeOffsetCursor } from "$lib/server/catalog/sql";
 import { EDITION_COLLECTION, getEditionGenres } from "$lib/server/catalog/genres";
 import { getEditionIdentifiedFormats } from "$lib/server/catalog/identified-formats";
 import {
@@ -75,6 +77,13 @@ import { coversBaseUrl } from "$lib/server/covers/config";
 
 // Catalog discovery is anonymous, so bound the work a body can request.
 const MAX_IDENTIFIERS = 100;
+
+/**
+ * The largest page `listEditions` serves. One page is one `editions_pkey`
+ * index scan — 5 000 uris measured at ~180 ms — so a full crawl of the
+ * catalogue is 57 requests at this size and 283 at the 1 000 default.
+ */
+const MAX_EDITION_PAGE = 5000;
 
 // The editor's own bound on a language value (`EDITION_EDIT_LIMITS.language`).
 const MAX_LANGUAGE_LENGTH = 35;
@@ -412,6 +421,17 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       const publisher = await getPublisher(pool, uri);
       if (publisher === null) return fail(404, "RecordNotFound", "no publisher has that URI");
       return json({ publisher });
+    }
+
+    if (method === LIST_EDITIONS) {
+      const limit = queryInteger(params.get("limit"), 1000, 1, MAX_EDITION_PAGE);
+      if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+      return json(
+        await listEditions(
+          { after: decodeKeysetCursor(params.get("cursor")), limit },
+          pool,
+        ),
+      );
     }
 
     if (method === LIST_EDITIONS_BY_CONTRIBUTOR) {

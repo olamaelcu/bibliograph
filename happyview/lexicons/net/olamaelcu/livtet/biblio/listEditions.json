@@ -1,0 +1,65 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.listEditions",
+  "description": "Enumerate every catalog edition in at-uri order, one page at a time. Anonymous and read-only, served by the bibliograph edge from `editions` alone: no identifiers, no contributors, no covers, and no PDS. Built for a crawler that needs the whole corpus (a sitemap, a mirror), which the search surface cannot serve because a search needs a term.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "description": "Enumerate every catalog edition in at-uri order, one page at a time. Anonymous and read-only, served by the bibliograph edge from `editions` alone: no identifiers, no contributors, no covers, and no PDS. Built for a crawler that needs the whole corpus (a sitemap, a mirror), which the search surface cannot serve because a search needs a term.",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5000,
+            "default": 1000,
+            "description": "Maximum number of editions to return in this page. The default covers the whole catalogue in 283 requests; 5000 covers it in 57, each an index scan measured at ~180 ms. Requesting a larger page is the intended way to make a full crawl cheaper."
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "Opaque pagination cursor from a previous response. A malformed cursor restarts at the beginning rather than erroring."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["items"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "description": "Editions in ascending at-uri order. Two pages never overlap, so a cursor walk over a growing catalogue revisits nothing.",
+              "items": {
+                "type": "object",
+                "required": ["uri", "title", "indexedAt"],
+                "properties": {
+                  "uri": {
+                    "type": "string",
+                    "format": "at-uri",
+                    "description": "The edition's at-uri, in the authority the catalog currently publishes under."
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "The edition's title, as catalogued."
+                  },
+                  "indexedAt": {
+                    "type": "string",
+                    "format": "datetime",
+                    "description": "When the catalog last indexed this edition. A sitemap's `lastmod` is this value."
+                  }
+                }
+              }
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque cursor for the next page; absent when the catalogue is exhausted."
+            }
+          }
+        }
+      }
+    }
+  }
+}

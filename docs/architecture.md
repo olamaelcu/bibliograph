@@ -217,20 +217,35 @@ creates the `appview_book`/`appview_book_lua` read models. See
 [`operations/fresh-database.md`](operations/fresh-database.md).
 
 The public `/xrpc` gateway serves the two read-only books-wg procedures
-(`resolveEditions`, `searchEditions`) and the nine entity methods
+(`resolveEditions`, `searchEditions`) and the ten entity methods
 (`getContributor`, `getPublisher`, `getGenresOfBook`, `getIdentifiedFormats`,
-`listEditionsByContributor`, `resolveContributors`, `resolvePublishers`,
-`searchContributors`, `searchPublishers`) anonymously from the catalog tables;
+`listEditions`, `listEditionsByContributor`, `resolveContributors`,
+`resolvePublishers`, `searchContributors`, `searchPublishers`) anonymously from
+the catalog tables;
 every `editionView` they return carries the edition's atproto URI as an
 `atproto` identifier. The entity methods are all `GET`; the two resolvers take
 repeated `identifiers=issuer:value` parameters rather than a JSON body.
 Entity reads include the last published CID on the two getters and never read a
 PDS.
+`listEditions` is the one enumeration read: a keyset walk over `editions_pkey`
+(`cursor` is encoded from the last uri of the page, `limit` up to 5 000) that
+covers the whole catalogue in 57 requests without touching identifiers, covers
+or a PDS. It exists because the search surface cannot answer "give me
+everything" — `searchEditions` needs a term — and a crawler built out of
+per-edition reads is what put the catalogue under load in the first place.
 GET
 `com.atproto.repo.getRecord` and `com.atproto.repo.listRecords` are proxied to
 `PDS_URL`, so clients read publisher records through the edge. Everything else
 is forwarded to HappyView, including the remaining `com.atproto.*` methods
 (HappyView's own com.atproto proxy is authority-bound).
+Both proxied reads stop waiting at 4 s and answer `504 UpstreamTimeout`; any
+other failed hop answers `502 UpstreamUnavailable`. The bound sits under the
+budget the caller applies — Livtet's biblio client caps an ordinary upstream
+read at 5 s and its catalog health probe at 2.5 s — because a response arriving
+after the client gave up is pure waste, and waiting past it is what turned PDS
+stalls into `499`s at the proxy. Both statuses are recorded by
+`bibliograph_pds_proxy_requests_total` like any PDS status; the dashboard's PDS
+panel groups by `outcome`, so the `504` is queried by `status="504"`.
 
 CORS covers the whole gateway, not just the edge-served reads: every valid
 NSID gets a `204` preflight on `OPTIONS` (`Authorization`, `DPoP`, `content-type`
@@ -458,10 +473,11 @@ re-download shows as one write and one removal and an already-cached hit as
 neither. The durable footprint is measured from the host instead, by
 `textfile_bibliograph_covers_files` / `_bytes` in `prometheus-textfile-metrics`.
 The Bookhive catalog import is visible twice:
-`bibliograph_catalog_bookhive_editions` is read from `edition_identifiers` on
-every scrape — the durable count of catalog books whose hive id names an
-edition, so it survives restarts and shows whether the weekly walk is still
-making progress — and `bibliograph_catalog_bookhive_total{result}` counts the
+`bibliograph_catalog_bookhive_editions` is read from `edition_identifiers` at
+most once a minute — the count costs 0.7–1.4 s, and one per 15 s scrape was pure
+waste against a walk that moves far slower; it is the durable count of catalog
+books whose hive id names an edition, so it survives restarts and shows whether
+the weekly walk is still making progress — and `bibliograph_catalog_bookhive_total{result}` counts the
 walk's `run`, `pages`, `created`, `updated`, `skipped` and `failed` events in
 the process that ran them. A scrape that cannot query the database answers
 `500`; a port that

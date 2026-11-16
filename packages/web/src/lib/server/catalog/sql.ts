@@ -42,3 +42,30 @@ export function decodeOffsetCursor(cursor: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return 0;
   return Math.min(Math.floor(value), MAX_OFFSET);
 }
+
+/**
+ * Keyset cursors are base64url JSON `{ "after": <uri> }`.
+ *
+ * A keyset page resumes strictly after a row instead of at an offset, so a walk
+ * over a catalogue that is still growing never skips a row that an insertion
+ * shifted across a page boundary — which is what a crawler would otherwise do
+ * at the page it takes next. A malformed cursor decodes to null, i.e. start at
+ * the beginning rather than error, matching the offset cursor's contract.
+ */
+export function encodeKeysetCursor(after: string): string {
+  return Buffer.from(JSON.stringify({ after }), 'utf8').toString('base64url');
+}
+
+export function decodeKeysetCursor(cursor: unknown): string | null {
+  if (typeof cursor !== 'string' || cursor === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (!('after' in parsed)) return null;
+  const value = parsed.after;
+  return typeof value === 'string' && value !== '' ? value : null;
+}

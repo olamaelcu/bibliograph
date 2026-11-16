@@ -281,6 +281,7 @@ const XRPC_METHODS: Record<string, true> = {
   'net.olamaelcu.livtet.biblio.graph.isFollowing': true,
   'net.olamaelcu.livtet.biblio.graph.listFollowees': true,
   'net.olamaelcu.livtet.biblio.listEditionsByContributor': true,
+  'net.olamaelcu.livtet.biblio.listEditions': true,
   'net.olamaelcu.livtet.biblio.listBooksOnShelf': true,
   'net.olamaelcu.livtet.biblio.listShelves': true,
   'net.olamaelcu.livtet.biblio.resolveContributors': true,
