@@ -294,7 +294,20 @@ async function knownEditions(pool, hiveIds) {
     // edition already hold: a complete identifier set is not enough to skip a
     // book whose metadata the catalog has since gained (or corrected), or the
     // first version of the importer would freeze an edition forever.
-    `SELECT i.edition_uri, i.issuer, i.value,
+    //
+    // The hive ids resolve to editions in a `MATERIALIZED` CTE, not through an
+    // `IN (subquery)`. The planner estimates `value = ANY($1)` at a handful of
+    // rows whatever the array holds — measured on 500 ids: 4 planned, 500
+    // actual — and that estimate propagates into the joins below, which then
+    // nested-loop 1 265 times. Materialising forces the set to be built once
+    // with its real cardinality, which cut a 500-id page from 1 025 ms to
+    // 300 ms and planning from 129 ms to 6 ms. `DISTINCT` keeps one row per
+    // edition, so the join cannot duplicate a page's identifiers.
+    `WITH ids AS MATERIALIZED (
+       SELECT DISTINCT edition_uri FROM edition_identifiers
+        WHERE issuer = $2 AND value = ANY($1::text[])
+     )
+     SELECT i.edition_uri, i.issuer, i.value,
             info.description, info.language, info.published_date, info.pages,
             e.series->>'name' AS series_name,
             EXISTS (
@@ -304,15 +317,13 @@ async function knownEditions(pool, hiveIds) {
                  AND p.value = i.value
             ) AS has_publisher
        FROM edition_identifiers i
+       JOIN ids ON ids.edition_uri = i.edition_uri
        JOIN editions e ON e.uri = i.edition_uri
        LEFT JOIN edition_identifier_info info
               ON info.edition_uri = i.edition_uri
              AND info.issuer = i.issuer
              AND info.value = i.value
-      WHERE i.edition_uri IN (
-        SELECT edition_uri FROM edition_identifiers
-         WHERE issuer = $2 AND value = ANY($1::text[])
-      )`,
+      `,
     [hiveIds, BOOKHIVE_ISSUER]
   );
 
