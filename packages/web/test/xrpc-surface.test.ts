@@ -4,7 +4,7 @@ import { readdir } from 'node:fs/promises';
 
 import {
   EDGE_PROCEDURES,
-  ENTITY_METHODS
+  ENTITY_QUERIES
 } from '../src/lib/server/catalog/entity-methods.ts';
 import {
   DESCRIBE_FEED_GENERATOR,
@@ -66,7 +66,6 @@ function mocked(): { dependencies: XrpcDependencies; calls: string[] } {
     entityGet: record('entityGet'),
     resolveEditions: record('resolveEditions'),
     searchEditions: record('searchEditions'),
-    entityResolve: record('entityResolve'),
     proxyPdsRead: record('proxyPdsRead'),
     forward: record('forward')
   };
@@ -92,7 +91,7 @@ test('the described surface is exactly the registries it is built from', () => {
     DESCRIBE_FEED_GENERATOR,
     GET_FEED_SKELETON,
     ...EDGE_PROCEDURES,
-    ...ENTITY_METHODS,
+    ...ENTITY_QUERIES,
     ...PDS_READS,
     ...FORWARDED_QUERIES,
     ...FORWARDED_PROCEDURES

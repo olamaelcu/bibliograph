@@ -25,18 +25,14 @@ export const RESOLVE_PUBLISHERS = 'net.olamaelcu.livtet.biblio.resolvePublishers
 export const SEARCH_CONTRIBUTORS = 'net.olamaelcu.livtet.biblio.searchContributors';
 export const SEARCH_PUBLISHERS = 'net.olamaelcu.livtet.biblio.searchPublishers';
 
-/** GET-only, parameter-in-query methods. */
 export const ENTITY_QUERIES = new Set([
   GET_CONTRIBUTOR,
   GET_GENRES_OF_BOOK,
   GET_IDENTIFIED_FORMATS,
   GET_PUBLISHER,
   LIST_EDITIONS_BY_CONTRIBUTOR,
+  RESOLVE_CONTRIBUTORS,
+  RESOLVE_PUBLISHERS,
   SEARCH_CONTRIBUTORS,
   SEARCH_PUBLISHERS
 ]);
-
-/** POST-only methods: the identifier array travels as a JSON body. */
-export const ENTITY_PROCEDURES = new Set([RESOLVE_CONTRIBUTORS, RESOLVE_PUBLISHERS]);
-
-export const ENTITY_METHODS = new Set([...ENTITY_QUERIES, ...ENTITY_PROCEDURES]);

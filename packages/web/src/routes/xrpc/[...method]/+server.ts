@@ -20,6 +20,7 @@ import {
   type Identifier,
 } from "$lib/server/catalog/editions";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
+import { parseIdentifierParams } from "$lib/server/xrpc/identifiers";
 import {
   searchHydrationDecision,
   searchHydrationThreshold,
@@ -451,6 +452,34 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       return json(page);
     }
 
+    // Identifier lookups: exact pairs repeated as `issuer:value` parameters,
+    // paged and bounded like the books-wg `resolveEditions` body.
+    if (method === RESOLVE_CONTRIBUTORS || method === RESOLVE_PUBLISHERS) {
+      const identifiers = parseIdentifierParams(params.getAll("identifiers"));
+      if (identifiers === null) {
+        return fail(
+          400,
+          "InvalidRequest",
+          "each `identifiers` value must be issuer:value",
+        );
+      }
+      if (identifiers.length === 0) {
+        return fail(400, "InvalidRequest", "`identifiers` is required");
+      }
+      if (identifiers.length > MAX_IDENTIFIERS) {
+        return fail(400, "InvalidRequest", `at most ${MAX_IDENTIFIERS} identifiers per request`);
+      }
+      const offset = queryInteger(params.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+      if (offset === null) return fail(400, "InvalidRequest", "`offset` must be an integer");
+      const limit = queryInteger(params.get("limit"), 25, 1, 100);
+      if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+      const results =
+        method === RESOLVE_CONTRIBUTORS
+          ? await resolveContributors(pool, { identifiers, offset, limit })
+          : await resolvePublishers(pool, { identifiers, offset, limit });
+      return json(results);
+    }
+
     const q = (params.get("q") ?? "").trim();
     if (q === "") return fail(400, "InvalidQuery", "`q` is required");
     if (q.length > 256) return fail(400, "InvalidRequest", "`q` is limited to 256 characters");
@@ -465,36 +494,6 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
   } catch (error) {
     if (error instanceof EntityUriError) return fail(400, "InvalidRequest", error.message);
     if (error instanceof EntityQueryError) return fail(400, "InvalidQuery", error.message);
-    return catalogFailure(error);
-  }
-}
-
-/** Identifier lookups: exact pairs in a JSON body, paged like resolveEditions. */
-async function handleEntityResolve(request: Request, method: string): Promise<Response> {
-  const body = await readBody(request);
-  if (body === null) return fail(400, "InvalidRequest", "the request body must be a JSON object");
-
-  const identifiers = parseIdentifiers(body.identifiers);
-  if (identifiers === null || identifiers.length === 0 || identifiers.length > MAX_IDENTIFIERS) {
-    return fail(
-      400,
-      "InvalidRequest",
-      `identifiers must be a non-empty array of at most ${MAX_IDENTIFIERS} issuer/value pairs`,
-    );
-  }
-  const offset = boundedInteger(body.offset, 0, 0, Number.MAX_SAFE_INTEGER);
-  const limit = boundedInteger(body.limit, 25, 1, 100);
-  if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
-  if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
-
-  try {
-    const pool = catalogPool();
-    const results =
-      method === RESOLVE_CONTRIBUTORS
-        ? await resolveContributors(pool, { identifiers, offset, limit })
-        : await resolvePublishers(pool, { identifiers, offset, limit });
-    return json(results);
-  } catch (error) {
     return catalogFailure(error);
   }
 }
@@ -551,7 +550,6 @@ const dependencies: XrpcDependencies = {
   entityGet: timed("catalog", handleEntityGet, (_request, method) => method),
   resolveEditions: timed("catalog", handleResolve, () => RESOLVE_EDITIONS),
   searchEditions: timed("catalog", handleSearch, () => SEARCH_EDITIONS),
-  entityResolve: timed("catalog", handleEntityResolve, (_request, method) => method),
   proxyPdsRead: timed("pds", proxyPdsRead, (method) => method),
   forward: timed("happyview", forward, (method) => method),
 };

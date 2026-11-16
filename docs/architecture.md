@@ -217,11 +217,13 @@ creates the `appview_book`/`appview_book_lua` read models. See
 [`operations/fresh-database.md`](operations/fresh-database.md).
 
 The public `/xrpc` gateway serves the two read-only books-wg procedures
-(`resolveEditions`, `searchEditions`) and the seven entity methods
-(`getContributor`, `getPublisher`, `listEditionsByContributor`,
-`resolveContributors`, `resolvePublishers`, `searchContributors`,
-`searchPublishers`) anonymously from the catalog tables; every `editionView`
-they return carries the edition's atproto URI as an `atproto` identifier.
+(`resolveEditions`, `searchEditions`) and the nine entity methods
+(`getContributor`, `getPublisher`, `getGenresOfBook`, `getIdentifiedFormats`,
+`listEditionsByContributor`, `resolveContributors`, `resolvePublishers`,
+`searchContributors`, `searchPublishers`) anonymously from the catalog tables;
+every `editionView` they return carries the edition's atproto URI as an
+`atproto` identifier. The entity methods are all `GET`; the two resolvers take
+repeated `identifiers=issuer:value` parameters rather than a JSON body.
 Entity reads include the last published CID on the two getters and never read a
 PDS.
 GET

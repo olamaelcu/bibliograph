@@ -12,7 +12,7 @@
  * and its tests can load it.
  */
 
-import { EDGE_PROCEDURES, ENTITY_METHODS } from '../catalog/entity-methods.ts';
+import { EDGE_PROCEDURES, ENTITY_QUERIES } from '../catalog/entity-methods.ts';
 import { DESCRIBE_FEED_GENERATOR, GET_FEED_SKELETON } from '../feeds/methods.ts';
 import { PDS_READS } from '../pds-methods.ts';
 
@@ -77,7 +77,7 @@ export function serviceMethods(): string[] {
       DESCRIBE_FEED_GENERATOR,
       GET_FEED_SKELETON,
       ...EDGE_PROCEDURES,
-      ...ENTITY_METHODS,
+      ...ENTITY_QUERIES,
       ...PDS_READS,
       ...FORWARDED_QUERIES,
       ...FORWARDED_PROCEDURES

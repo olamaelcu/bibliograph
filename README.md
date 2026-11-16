@@ -89,7 +89,7 @@ them.
 
 ## XRPC surface
 
-The lexicon set is **22 queries, 19 procedures and 10 record types**. Nine
+The lexicon set is **27 queries, 17 procedures and 27 record types**. Eleven
 methods are anonymous, edge-served catalog reads:
 
 - `community.lexicon.media.book.resolveEditions` and `searchEditions` — the
@@ -97,11 +97,11 @@ methods are anonymous, edge-served catalog reads:
 - `net.olamaelcu.livtet.biblio.getContributor`, `getPublisher`,
   `listEditionsByContributor`, `resolveContributors`, `resolvePublishers`,
   `searchContributors` and `searchPublishers` — the contributor/publisher
-  methods added with entity records. The getters and listings/searches are
-  `GET`; the resolvers are `POST`. They read catalog tables (the two getters
-  also read `pds_cids`) and never a PDS.
+  methods added with entity records, all `GET` (the resolvers take repeated
+  `identifiers=issuer:value` parameters). They read catalog tables (the two
+  getters also read `pds_cids`) and never a PDS.
 
-CORS covers the whole XRPC gateway, not only those nine methods. Any valid
+CORS covers the whole XRPC gateway, not only those eleven methods. Any valid
 NSID answers `OPTIONS` with a `204` preflight allowing `content-type`,
 `authorization`, `dpop` and `accept`, exposing `dpop-nonce`, and every response
 — catalog, feed generator, PDS proxy, forwarded HappyView call, or an error —

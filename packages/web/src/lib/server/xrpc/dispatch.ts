@@ -10,7 +10,6 @@
 
 import {
   EDGE_PROCEDURES,
-  ENTITY_PROCEDURES,
   ENTITY_QUERIES,
   RESOLVE_EDITIONS,
   SEARCH_EDITIONS
@@ -38,7 +37,6 @@ export type XrpcDependencies = {
   entityGet: (request: Request, method: string) => Response | Promise<Response>;
   resolveEditions: (request: Request) => Response | Promise<Response>;
   searchEditions: (request: Request) => Response | Promise<Response>;
-  entityResolve: (request: Request, method: string) => Response | Promise<Response>;
   proxyPdsRead: (method: string, request: Request) => Response | Promise<Response>;
   forward: (method: string, request: Request) => Response | Promise<Response>;
 };
@@ -72,8 +70,8 @@ export function dispatchGet(
   if (method === DESCRIBE_FEED_GENERATOR) return dependencies.describeFeedGenerator();
   if (method === GET_FEED_SKELETON) return dependencies.getFeedSkeleton(request);
   if (ENTITY_QUERIES.has(method)) return dependencies.entityGet(request, method);
-  // The books-wg and entity procedures are POST-only.
-  if (EDGE_PROCEDURES.has(method) || ENTITY_PROCEDURES.has(method)) return methodNotAllowed();
+  // The books-wg procedures are POST-only.
+  if (EDGE_PROCEDURES.has(method)) return methodNotAllowed();
   // Publisher-record reads go to the PDS; other com.atproto methods still go
   // to HappyView below.
   if (isPdsRead(method)) return dependencies.proxyPdsRead(method, request);
@@ -92,8 +90,7 @@ export function dispatchPost(
   }
   if (method === RESOLVE_EDITIONS) return dependencies.resolveEditions(request);
   if (method === SEARCH_EDITIONS) return dependencies.searchEditions(request);
-  if (ENTITY_PROCEDURES.has(method)) return dependencies.entityResolve(request, method);
-  // Entity getters and searches are GET-only.
+  // Every entity method is a getter, search or resolver: GET-only.
   if (ENTITY_QUERIES.has(method)) return methodNotAllowed();
   return dependencies.forward(method, request);
 }

@@ -9,12 +9,12 @@ It is drawn from the deployed lexicons in `happyview/lexicons` and the handler s
 The surface is the set of uploaded lexicons plus the book lexicons imported from
 [lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest) into
 `happyview/lexicons/community/lexicon/media/book/` and the edge-served entity lexicons under
-`happyview/lexicons/net/olamaelcu/livtet/biblio/`: **22 queries, 19 procedures and 10 record
-types**. Nine methods are anonymous catalog reads served by the edge in `packages/web`: the two
+`happyview/lexicons/net/olamaelcu/livtet/biblio/`: **27 queries, 17 procedures and 27 record
+types**. Eleven methods are anonymous catalog reads served by the edge in `packages/web`: the two
 books-wg procedures (`community.lexicon.media.book.resolveEditions` and `searchEditions`) and the
-seven entity methods under `net.olamaelcu.livtet.biblio.*` (`getContributor`, `getPublisher`,
-`listEditionsByContributor`, `resolveContributors`, `resolvePublishers`, `searchContributors`,
-`searchPublishers`). The other 15
+nine entity queries under `net.olamaelcu.livtet.biblio.*` (`getContributor`, `getPublisher`,
+`getGenresOfBook`, `getIdentifiedFormats`, `listEditionsByContributor`, `resolveContributors`,
+`resolvePublishers`, `searchContributors`, `searchPublishers`). The other 15
 procedures are HappyView procedures that write to a caller's PDS. Everything except the review and
 edition record types lives under
 `net.olamaelcu.livtet.biblio.*`. HappyView's built-in `com.atproto.*` routes are not part of this
@@ -82,12 +82,12 @@ from the catalog tables (`editions`, `edition_identifiers`, `edition_contributor
 They never write catalog rows; when the local catalog cannot answer, they may queue a hydration job
 and mark it in `catalog_enqueue_marks`.
 
-The seven entity methods never reach HappyView either. They read `contributors` / `publishers` /
+The nine entity methods never reach HappyView either. They read `contributors` / `publishers` /
 `edition_contributors` (plus `pds_cids` for the last published CID on the two getters) and never
-read a PDS or write a row. The two getters, the editions-by-contributor listing and the two searches
-are `GET`; the two resolvers are `POST` because the identifier array travels in a JSON body. A wrong
-verb is `405 MethodNotAllowed`. They do not queue hydration: contributor and publisher rows are only
-populated by ingest and catalog curation.
+read a PDS or write a row. All nine are `GET`; the two resolvers take their identifier pairs as
+repeated `identifiers=issuer:value` parameters (`?identifiers=isbn13:9780441478125`), split on the
+first colon so a value may contain colons. A wrong verb is `405 MethodNotAllowed`. They do not queue
+hydration: contributor and publisher rows are only populated by ingest and catalog curation.
 
 The feed generator is also served at the edge, from `happyview.happyview_records`, never from
 HappyView. `GET com.atproto.feed.describeFeedGenerator` is anonymous and advertises exactly four
@@ -106,7 +106,7 @@ proxied to the caller's PDS. Without a session those 15 procedures answer `401` 
 `caller_did`; every procedure that names an existing review or shelf compares it against
 `caller_did` and answers `403 Forbidden` on a mismatch.
 
-The nine catalog methods are the exception: they are read-only and anonymous, and they never
+The eleven catalog methods are the exception: they are read-only and anonymous, and they never
 require or read a session. They also need `DATABASE_URL`; when it is unset or the catalog is
 unreachable they answer `503 ServiceUnavailable` instead of proxying anywhere.
 
@@ -182,12 +182,12 @@ back to the default. The feed generator defaults to 20 and clamps to 1–100; a 
 | 403 | `Forbidden` | the named review or shelf belongs to another DID |
 | 404 | `NotFound` | a procedure targets a follow, review, shelf, `bookStatus` or `shelfItem` that does not exist |
 | 404 | `RecordNotFound` | `getShelf` / `getBookOnShelf` record missing; `getBookOnShelf` also when the catalog edition is missing; `getContributor` / `getPublisher` / `listEditionsByContributor` when no catalog row has the URI |
-| 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST/OPTIONS, for `POST` on the two feed methods, and for `GET` on the two books-wg procedures and the two entity resolvers |
+| 405 | `MethodNotAllowed` | the edge, for any verb other than GET/POST/OPTIONS, for `POST` on the two feed methods and every entity method, and for `GET` on the two books-wg procedures |
 | 502 | `UpstreamFailure` | any procedure when the PDS rejects a save, delete or batch |
 | 502 | `UpstreamUnavailable` | the edge, when HappyView is unreachable, or when a PDS-proxied read fails or times out |
-| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (the two books-wg procedures, the seven entity methods, `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
+| 503 | `ServiceUnavailable` | the edge, when `DATABASE_URL` is unset or the catalog query fails (the two books-wg procedures, the nine entity methods, `getFeedSkeleton`), or when `PDS_URL` is unset (`repo.getRecord` / `listRecords` only) |
 
-Queries, the nine catalog methods, `community.lexicon.service.describe` and the `public` feed never
+Queries, the eleven catalog methods, `community.lexicon.service.describe` and the `public` feed never
 answer `401`. Missing optional records are not errors: `getActorProfile` and `getReadingGoal`
 answer `200` with `null`.
 
@@ -263,10 +263,12 @@ signal. Queued work is not a promise that anything will be found.
 | `listEditionsByContributor` | `contributor` (at-uri), `limit` 25 (≤100), `cursor`, `sort`, `order`, `language` | `{ items, cursor?, total? }` |
 | `searchContributors` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |
 | `searchPublishers` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |
+| `resolveContributors` | `identifiers[]` as repeated `issuer:value` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
+| `resolvePublishers` | `identifiers[]` as repeated `issuer:value` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
 
 ### Procedures
 
-The nine catalog methods are anonymous reads over the catalog tables. The other fifteen require a
+The eleven catalog methods are anonymous reads over the catalog tables. The other fifteen require a
 DPoP session and write to the caller's PDS, then index the accepted record in `happyview_records` in
 the same request.
 
@@ -274,8 +276,6 @@ the same request.
 | --- | --- | --- |
 | `community.lexicon.media.book.resolveEditions` | `identifiers[]` (required), `offset` 0, `limit` 25 (≤100) | `editionResults` |
 | `community.lexicon.media.book.searchEditions` | `q?`, `title?`, `author?`, `identifiers[]?`, `language?` (≤35), `offset` 0, `limit` 25 (≤100), `sort` `relevance`\|`title`\|`publishedYear`, `order` `asc`\|`desc` | `editionResults` |
-| `resolveContributors` | `identifiers[]` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
-| `resolvePublishers` | `identifiers[]` (required, ≤100), `offset` 0, `limit` 25 (≤100) | `{ items, hasMore, total? }` |
 | `graph.follow` | `subject` (DID) | `{ uri, created }` |
 | `graph.unfollow` | `subject` (DID) | `{ uri }` |
 | `profile.set` | `displayName?` (≤640), `description?` (≤256), `avatarCid?` | `{ uri }` |
@@ -624,14 +624,13 @@ clients learn of new editions only by re-calling later.
 
 ### Entity records (edge)
 
-The seven entity methods are anonymous catalog reads like the books-wg pair: the edge
+The nine entity methods are anonymous catalog reads like the books-wg pair: the edge
 dispatches them on NSID, they read `contributors` / `publishers` (never a PDS), and they answer
 `503 ServiceUnavailable` when `DATABASE_URL` is unset or the query fails. They never queue
 hydration — contributor and publisher rows are populated by ingest and catalog curation, not by a
-provider lookup — and they never write a row. `getContributor`, `getPublisher`,
-`listEditionsByContributor`, `searchContributors` and
-`searchPublishers` are `GET`; `resolveContributors` / `resolvePublishers` are `POST` because the
-identifier array travels in a JSON body.
+provider lookup — and they never write a row. All nine are `GET` queries, so none of them needs a
+session: the two resolvers carry no JSON body, only repeated `identifiers` parameters (see
+**Resolvers** below).
 
 **Identity.** The only accepted URI is
 `at://<did>/net.olamaelcu.livtet.biblio.contributor/<rkey>` (or `.publisher`). A missing, malformed
@@ -641,8 +640,12 @@ can build a strongRef without a second read; list items omit it. Empty optional 
 from the view rather than sent as `null`. Dates are the stored strict `YYYY-MM-DD` values; the
 method does not re-validate them, because the builder rejected an invalid one at publish time.
 
-**Resolvers.** `identifiers[]` is required, capped at 100 pairs, and each pair matches by exact
-`(issuer, value)` containment in the row's identifier array — no normalization. A row matching
+**Resolvers.** `identifiers` is required, capped at 100 pairs, and travels as one repeated
+`issuer:value` parameter per pair (`?identifiers=isbn13:9780441478125&identifiers=isni:0000…`).
+Each entry splits on its **first** colon: an issuer never contains one, a value may. A pair with no
+colon, an empty issuer or an empty value is `400 InvalidRequest` rather than a silently dropped
+match; duplicate pairs collapse. Each pair matches by exact `(issuer, value)` containment in the
+row's identifier array — no normalization, no trimming. A row matching
 several pairs appears once. Results are ordered `lower(name), uri`, paged by `offset`/`limit`, with
 `LIMIT limit + 1` deciding `hasMore`; `total` is counted on the first page only. No match is an
 empty page (the lexicon declares no `RecordNotFound` for a resolver). Because identifiers are

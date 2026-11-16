@@ -19,11 +19,7 @@ import {
   CatalogUnavailableError,
   catalogFailure
 } from '../src/lib/server/catalog/errors.ts';
-import {
-  ENTITY_METHODS,
-  ENTITY_PROCEDURES,
-  ENTITY_QUERIES
-} from '../src/lib/server/catalog/entity-methods.ts';
+import { ENTITY_QUERIES } from '../src/lib/server/catalog/entity-methods.ts';
 import { decodeOffsetCursor, encodeOffsetCursor, likePattern } from '../src/lib/server/catalog/sql.ts';
 
 const AUTHORITY = 'did:plc:entitytest';
@@ -249,18 +245,19 @@ test('identifiers stored as JSON text are decoded', async () => {
   ]);
 });
 
-test('the nine entity methods split into seven GET queries and two POST procedures', () => {
-  assert.equal(ENTITY_METHODS.size, 9);
-  assert.equal(ENTITY_QUERIES.size, 7);
-  assert.equal(ENTITY_PROCEDURES.size, 2);
-  assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.getIdentifiedFormats'));
-  assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.getContributor'));
-  assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.getGenresOfBook'));
-  assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.searchPublishers'));
-  assert.ok(ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.listEditionsByContributor'));
-  assert.ok(ENTITY_PROCEDURES.has('net.olamaelcu.livtet.biblio.resolveContributors'));
-  assert.ok(ENTITY_PROCEDURES.has('net.olamaelcu.livtet.biblio.resolvePublishers'));
-  assert.ok(!ENTITY_QUERIES.has('net.olamaelcu.livtet.biblio.resolvePublishers'));
+test('all nine entity methods are GET queries, resolvers included', () => {
+  assert.equal(ENTITY_QUERIES.size, 9);
+  for (const method of [
+    'net.olamaelcu.livtet.biblio.getIdentifiedFormats',
+    'net.olamaelcu.livtet.biblio.getContributor',
+    'net.olamaelcu.livtet.biblio.getGenresOfBook',
+    'net.olamaelcu.livtet.biblio.searchPublishers',
+    'net.olamaelcu.livtet.biblio.listEditionsByContributor',
+    'net.olamaelcu.livtet.biblio.resolveContributors',
+    'net.olamaelcu.livtet.biblio.resolvePublishers'
+  ]) {
+    assert.ok(ENTITY_QUERIES.has(method), `${method} is served as a query`);
+  }
 });
 
 test('likePattern wraps and escapes in one place', () => {

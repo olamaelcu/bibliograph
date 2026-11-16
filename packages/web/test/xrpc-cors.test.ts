@@ -81,10 +81,6 @@ function mocked(): Mocked {
       calls.push({ handler: 'searchEditions', method: CATALOG_SEARCH });
       return respond('searchEditions');
     },
-    entityResolve: (_request, method) => {
-      calls.push({ handler: 'entityResolve', method });
-      return respond('entityResolve');
-    },
     proxyPdsRead: (method) => {
       calls.push({ handler: 'proxyPdsRead', method });
       return respond('proxyPdsRead');
@@ -156,6 +152,7 @@ test('every GET branch carries CORS, including forwarded and proxied reads', asy
     { method: DESCRIBE_FEED_GENERATOR, handler: 'describe' },
     { method: GET_FEED_SKELETON, handler: 'skeleton' },
     { method: CATALOG_GET, handler: 'entityGet' },
+    { method: ENTITY_RESOLVE, handler: 'entityGet' },
     { method: PDS_READ, handler: 'proxyPdsRead' },
     { method: FORWARDED, handler: 'forward' }
   ];
@@ -173,7 +170,6 @@ test('every POST branch carries CORS, including forwarded writes', async () => {
   const cases: Array<{ method: string; handler: string }> = [
     { method: CATALOG_POST, handler: 'resolveEditions' },
     { method: CATALOG_SEARCH, handler: 'searchEditions' },
-    { method: ENTITY_RESOLVE, handler: 'entityResolve' },
     { method: FORWARDED, handler: 'forward' }
   ];
 
@@ -186,17 +182,19 @@ test('every POST branch carries CORS, including forwarded writes', async () => {
 });
 
 test('wrong-verb 405s carry CORS', async () => {
-  for (const method of [
-    CATALOG_POST,
-    'net.olamaelcu.livtet.biblio.resolveContributors'
-  ]) {
+  for (const method of [CATALOG_POST]) {
     const { response: viaGet } = await invoke(dispatchGet, method);
     assertCors(viaGet);
     assert.equal(viaGet.status, 405);
     assert.deepEqual(await viaGet.json(), { error: 'MethodNotAllowed' });
   }
 
-  for (const method of [CATALOG_GET, 'net.olamaelcu.livtet.biblio.searchPublishers']) {
+  for (const method of [
+    CATALOG_GET,
+    'net.olamaelcu.livtet.biblio.searchPublishers',
+    'net.olamaelcu.livtet.biblio.resolveContributors',
+    ENTITY_RESOLVE
+  ]) {
     const { response: viaPost } = await invoke(dispatchPost, method);
     assertCors(viaPost);
     assert.equal(viaPost.status, 405);

@@ -4,36 +4,33 @@
   "description": "Resolve catalog publishers by exact (issuer, value) identifiers. Read-only, anonymous, and served by the bibliograph edge from the catalog tables; a miss is an empty page rather than an error.",
   "defs": {
     "main": {
-      "type": "procedure",
-      "input": {
-        "encoding": "application/json",
-        "schema": {
-          "type": "object",
-          "required": ["identifiers"],
-          "properties": {
-            "identifiers": {
-              "type": "array",
-              "minLength": 1,
-              "maxLength": 100,
-              "description": "Identifier pairs to match. Duplicate pairs are collapsed; matching compares issuer and value exactly, without normalization.",
-              "items": {
-                "type": "ref",
-                "ref": "community.lexicon.media.book.defs#identifier"
-              }
-            },
-            "offset": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "description": "Number of matching publishers to skip."
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 25,
-              "description": "Maximum number of publishers to return."
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["identifiers"],
+        "properties": {
+          "identifiers": {
+            "type": "array",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Identifier pairs to match, repeated once per pair as `issuer:value` (`?identifiers=isbn13:9780441478125&identifiers=isni:0000000121032683`). Each pair splits on its first colon, so a value may contain colons. Duplicate pairs are collapsed; matching compares issuer and value exactly, without normalization.",
+            "items": {
+              "type": "string",
+              "description": "One `issuer:value` pair."
             }
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "default": 0,
+            "description": "Number of matching publishers to skip."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 25,
+            "description": "Maximum number of publishers to return."
           }
         }
       },
@@ -64,7 +61,7 @@
       "errors": [
         {
           "name": "InvalidRequest",
-          "description": "identifiers is missing, empty, over 100 entries, or contains a malformed pair."
+          "description": "identifiers is missing, empty, over 100 entries, or contains an entry with no colon or an empty issuer or value."
         }
       ]
     }

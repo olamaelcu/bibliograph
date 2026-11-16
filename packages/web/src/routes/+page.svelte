@@ -130,6 +130,8 @@
       if (field.type.includes('strongRef')) {
         return [{ uri: 'at://did:plc:example/collection/rkey', cid: 'bafy…' }];
       }
+      // The resolvers' query form: one `issuer:value` per repeated parameter.
+      if (field.name === 'identifiers') return 'isbn13:9780441478125';
       return [];
     }
     if (field.type.includes('strongRef')) {
