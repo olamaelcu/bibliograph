@@ -28,8 +28,25 @@ function catalogBook(overrides = {}) {
 /** A pool that answers the identifier-set query from a fixture map. */
 function fakePool(editions = {}) {
   const calls = [];
-  return {
+  const pool = {
     calls,
+    // One entry per `connect()`: a test can assert the page transaction.
+    clients: [],
+    async connect() {
+      const client = {
+        queries: [],
+        released: false,
+        async query(sql) {
+          client.queries.push(sql);
+          return { rows: [] };
+        },
+        release() {
+          client.released = true;
+        }
+      };
+      pool.clients.push(client);
+      return client;
+    },
     async query(sql, values) {
       calls.push({ sql, values });
       // The walk reads the catalog's language codes once, before the first page.
@@ -59,6 +76,7 @@ function fakePool(editions = {}) {
       return { rows };
     }
   };
+  return pool;
 }
 
 /** A fetch stub that answers one page per queued body. */
@@ -329,6 +347,77 @@ test('importBookhiveCatalog keeps walking after a failing record and stops at th
   assert.deepEqual(summary, { pages: 2, seen: 3, skipped: 0, created: 2, updated: 0, failed: 1 });
   assert.equal(fetcher.urls.length, 2);
   assert.equal(new URL(fetcher.urls[1]).searchParams.get('cursor'), 'page2');
+});
+
+test('a page is one transaction, with a savepoint per record', async () => {
+  const pool = fakePool();
+  const summary = await importBookhiveCatalog({
+    pool,
+    fetchImpl: pageFetcher([
+      {
+        records: [
+          { value: catalogBook({ id: 'bk_aaa111' }) },
+          { value: catalogBook({ id: 'bk_bbb222' }) }
+        ]
+      }
+    ]).fetch,
+    pdsUrl: 'https://pds.example',
+    pages: 1,
+    logger: { warn() {} },
+    async ingest(candidate, options) {
+      // The import hands its page transaction down, so a whole page commits once.
+      assert.ok(options.client, 'ingest runs inside the page transaction');
+      return { uri: `at://edition/${candidate.hiveId}`, created: true };
+    }
+  });
+
+  assert.equal(summary.created, 2);
+  const [client] = pool.clients;
+  assert.deepEqual(client.queries, [
+    'BEGIN',
+    'SAVEPOINT record',
+    'RELEASE SAVEPOINT record',
+    'SAVEPOINT record',
+    'RELEASE SAVEPOINT record',
+    'COMMIT'
+  ]);
+  assert.equal(client.released, true);
+});
+
+test('a failing record rolls back to its savepoint and the page still commits', async () => {
+  const pool = fakePool();
+  const summary = await importBookhiveCatalog({
+    pool,
+    fetchImpl: pageFetcher([
+      {
+        records: [
+          { value: catalogBook({ id: 'bk_aaa111' }) },
+          { value: catalogBook({ id: 'bk_bbb222' }) }
+        ]
+      }
+    ]).fetch,
+    pdsUrl: 'https://pds.example',
+    pages: 1,
+    logger: { warn() {} },
+    async ingest(candidate) {
+      if (candidate.hiveId === 'bk_aaa111') throw new Error('catalog exploded');
+      return { uri: `at://edition/${candidate.hiveId}`, created: true };
+    }
+  });
+
+  assert.deepEqual(
+    { created: summary.created, failed: summary.failed },
+    { created: 1, failed: 1 }
+  );
+  const [client] = pool.clients;
+  assert.deepEqual(client.queries, [
+    'BEGIN',
+    'SAVEPOINT record',
+    'ROLLBACK TO SAVEPOINT record',
+    'SAVEPOINT record',
+    'RELEASE SAVEPOINT record',
+    'COMMIT'
+  ]);
 });
 
 test('importBookhiveCatalog honours the page budget and reports the resume cursor', async () => {

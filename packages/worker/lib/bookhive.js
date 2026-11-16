@@ -474,26 +474,50 @@ export async function importBookhiveCatalog({
       candidates.map((candidate) => candidate.hiveId)
     );
 
-    for (const candidate of candidates) {
-      // A page is ~100 books and each ingest is a transaction, so a shutdown
-      // must be able to land mid-page as well as between pages.
-      if (signal?.aborted === true) break;
-      const existing = known.get(candidate.hiveId);
-      if (alreadyImported(existing, candidate)) {
-        count('skipped');
-        continue;
-      }
-      try {
-        const result = await ingest(candidate);
-        if (!result) {
+    // One transaction per page, with a savepoint per record.
+    //
+    // A record used to be its own transaction, so a page of ~100 books paid 100
+    // commits and its writes reached other sessions one commit at a time. The
+    // page now commits once. The record boundary survives as a savepoint: a
+    // record that throws is rolled back alone, so the page still lands the rest
+    // and counts one failure, which is what the per-record loop promised.
+    //
+    // A shutdown may land mid-page as well as between pages; a partial page
+    // commits what it already wrote rather than discarding it.
+    const client = await pool.connect();
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      for (const candidate of candidates) {
+        if (signal?.aborted === true) break;
+        const existing = known.get(candidate.hiveId);
+        if (alreadyImported(existing, candidate)) {
           count('skipped');
           continue;
         }
-        count(result.created ? 'created' : 'updated');
-      } catch (error) {
-        count('failed');
-        logger?.warn?.(`catalog.bookhive ${candidate.hiveId} failed — ${error.message}`);
+        await client.query('SAVEPOINT record');
+        try {
+          const result = await ingest(candidate, { client });
+          await client.query('RELEASE SAVEPOINT record');
+          if (!result) {
+            count('skipped');
+            continue;
+          }
+          count(result.created ? 'created' : 'updated');
+        } catch (error) {
+          // A failed statement aborts the whole transaction, so the savepoint is
+          // what keeps one bad record from poisoning the page. If even the
+          // rollback fails the transaction is gone and the page rolls back below.
+          await client.query('ROLLBACK TO SAVEPOINT record').catch(() => undefined);
+          count('failed');
+          logger?.warn?.(`catalog.bookhive ${candidate.hiveId} failed — ${error.message}`);
+        }
       }
+      await client.query('COMMIT');
+      committed = true;
+    } finally {
+      if (!committed) await client.query('ROLLBACK').catch(() => undefined);
+      client.release();
     }
 
     cursor = page.cursor;

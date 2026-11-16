@@ -269,9 +269,62 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
     );
   }
 
-  return async function ingest(candidate) {
+  /**
+   * One candidate on a client the caller already owns.
+   *
+   * It opens no transaction of its own: the Bookhive import wraps a whole page
+   * in one, so a 100-book page costs one commit instead of 100, and a candidate
+   * that throws is rolled back to the caller's savepoint rather than taking the
+   * page's other records with it.
+   */
+  async function ingestOn(client, candidate, prepared) {
+    const { identifiers, scoped, claims, hasClaims } = prepared;
+
+    let uri = await existingByIdentifiers(client, identifiers);
+    let created = false;
+
+    if (!uri) {
+      // Identity is the identifier bag, never the rkey: every new edition
+      // mints a TID. A retry only covers the astronomically unlikely TID
+      // collision, where the microsecond/sequence pair is already taken.
+      for (let attempt = 0; !uri && attempt < 5; attempt += 1) {
+        const rkey = await nextTid(client);
+        uri = editionUri(authority, rkey);
+        created = await insertEdition(client, uri, rkey, candidate);
+        if (!created) uri = undefined;
+      }
+      if (!uri) throw new Error('could not mint a unique edition rkey (TID collision)');
+    }
+
+    if (!created) await fillMissingFields(client, uri, candidate);
+
+    for (const identifier of identifiers) {
+      await client.query(
+        `INSERT INTO edition_identifiers (edition_uri, issuer, value)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [uri, identifier.issuer, identifier.value]
+      );
+      if (hasClaims && scoped(identifier)) {
+        await fillIdentifierClaims(client, uri, identifier, claims);
+      }
+    }
+
+    await linkContributors(client, uri, candidate.contributors, authority);
+    await linkPublisher(client, uri, candidate.publisher, identifiers.filter(scoped), authority);
+
+    return { uri, created };
+  }
+
+  /**
+   * What one candidate resolves to, validated — no connection, no writes.
+   *
+   * Split out so a malformed candidate is rejected before a transaction is
+   * opened: the scope check on `sourceIdentifier` is a candidate-shape rule, and
+   * the import must be able to drop such a candidate without paying for a client.
+   */
+  function prepare(candidate) {
     const identifiers = normalizedIdentifiers(candidate);
-    if (identifiers.length === 0) return undefined;
+    if (identifiers.length === 0) return null;
 
     // A candidate may name the identifier it came through: its claims and its
     // publisher credit then describe that identifier alone. A third-party
@@ -305,47 +358,29 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
       durationSeconds: candidate.durationSeconds ?? null
     };
     const hasClaims = Object.values(claims).some((value) => value !== null && value !== '');
+    return { identifiers, scoped, claims, hasClaims };
+  }
 
+  /**
+   * One candidate on its own transaction, for the callers that write a single
+   * edition (`admin.js`, `seed.js`).
+   */
+  return async function ingest(candidate, options = {}) {
+    // Validated before a connection is taken, so a malformed candidate never
+    // opens a transaction at all.
+    const prepared = prepare(candidate);
+    if (prepared === null) return undefined;
+    if (options !== undefined && options !== null && options.client) {
+      return ingestOn(options.client, candidate, prepared);
+    }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-
-      let uri = await existingByIdentifiers(client, identifiers);
-      let created = false;
-
-      if (!uri) {
-        // Identity is the identifier bag, never the rkey: every new edition
-        // mints a TID. A retry only covers the astronomically unlikely TID
-        // collision, where the microsecond/sequence pair is already taken.
-        for (let attempt = 0; !uri && attempt < 5; attempt += 1) {
-          const rkey = await nextTid(client);
-          uri = editionUri(authority, rkey);
-          created = await insertEdition(client, uri, rkey, candidate);
-          if (!created) uri = undefined;
-        }
-        if (!uri) throw new Error('could not mint a unique edition rkey (TID collision)');
-      }
-
-      if (!created) await fillMissingFields(client, uri, candidate);
-
-      for (const identifier of identifiers) {
-        await client.query(
-          `INSERT INTO edition_identifiers (edition_uri, issuer, value)
-           VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-          [uri, identifier.issuer, identifier.value]
-        );
-        if (hasClaims && scoped(identifier)) {
-          await fillIdentifierClaims(client, uri, identifier, claims);
-        }
-      }
-
-      await linkContributors(client, uri, candidate.contributors, authority);
-      await linkPublisher(client, uri, candidate.publisher, identifiers.filter(scoped), authority);
-
+      const result = await ingestOn(client, candidate, prepared);
       await client.query('COMMIT');
-      return { uri, created };
+      return result;
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => undefined);
       throw error;
     } finally {
       client.release();
