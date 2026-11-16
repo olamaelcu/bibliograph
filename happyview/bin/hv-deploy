@@ -52,7 +52,7 @@ RECORD_LEXICONS = [
     "net.olamaelcu.livtet.biblio.shelfItem",
     "net.olamaelcu.livtet.biblio.follow",
     "net.olamaelcu.livtet.biblio.readingGoal",
-    "net.olamaelcu.livtet.actor.profile",
+    "net.olamaelcu.livtet.biblio.actor.profile",
     "community.lexicon.media.book.review",
     # Bookhive's own per-book record, indexed so the `review` text it carries
     # can be served as a review. The lexicon is Bookhive's, copied verbatim
@@ -65,7 +65,7 @@ QUERY_LEXICONS = [
     ("net.olamaelcu.livtet.biblio.graph.listFollowers", "net.olamaelcu.livtet.biblio.follow"),
     ("net.olamaelcu.livtet.biblio.graph.listFollowees", "net.olamaelcu.livtet.biblio.follow"),
     ("net.olamaelcu.livtet.biblio.getReadingGoal", "net.olamaelcu.livtet.biblio.readingGoal"),
-    ("net.olamaelcu.livtet.biblio.getActorProfile", "net.olamaelcu.livtet.actor.profile"),
+    ("net.olamaelcu.livtet.biblio.getActorProfile", "net.olamaelcu.livtet.biblio.actor.profile"),
     ("net.olamaelcu.livtet.biblio.getShelf", "net.olamaelcu.livtet.biblio.shelf"),
     ("net.olamaelcu.livtet.biblio.listShelves", "net.olamaelcu.livtet.biblio.shelf"),
     ("net.olamaelcu.livtet.biblio.listShelvesWithBooks", "net.olamaelcu.livtet.biblio.shelf"),
@@ -92,7 +92,7 @@ PROCEDURE_LEXICONS = [
     ("net.olamaelcu.livtet.biblio.status.set", "net.olamaelcu.livtet.biblio.bookStatus"),
     ("net.olamaelcu.livtet.biblio.status.clear", "net.olamaelcu.livtet.biblio.bookStatus"),
     ("net.olamaelcu.livtet.biblio.readingGoal.set", "net.olamaelcu.livtet.biblio.readingGoal"),
-    ("net.olamaelcu.livtet.biblio.profile.set", "net.olamaelcu.livtet.actor.profile"),
+    ("net.olamaelcu.livtet.biblio.profile.set", "net.olamaelcu.livtet.biblio.actor.profile"),
     ("net.olamaelcu.livtet.biblio.review.create", "community.lexicon.media.book.review"),
     ("net.olamaelcu.livtet.biblio.review.update", "community.lexicon.media.book.review"),
     ("net.olamaelcu.livtet.biblio.review.delete", "community.lexicon.media.book.review"),
