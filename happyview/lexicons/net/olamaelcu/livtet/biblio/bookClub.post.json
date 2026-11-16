@@ -4,21 +4,27 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "A post in a book club discussion, stored in the author's repo inside the club's space. Threading follows the aggregator-forum shape: every post carries a root (the bookClub.thread) and a parent; a top-level post is its own parent (parent == root), while a reply's parent is another post in the same thread. Linear readers can ignore parent beyond the root; tree readers can rebuild the tree. The space, not the record, is the access boundary.",
+      "description": "A post in a book club discussion, stored in the author's repo inside the club's space. Threading follows the shared threads draft: every post names the `thread` it belongs to, and a reply also names the post it answers in `replyTo`. A top-level post carries no `replyTo`, which is how a reader tells the opening and the later top-level posts from the answers. Linear readers ignore `replyTo` beyond the root; tree readers rebuild the tree from it. The space, not the record, is the access boundary.",
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["text", "reply", "createdAt"],
+        "required": ["thread", "textContent", "createdAt"],
         "properties": {
-          "text": {
+          "thread": {
             "type": "string",
-            "maxLength": 10000,
-            "maxGraphemes": 2000,
-            "description": "The post body. Empty is allowed when the post is only a reply marker, though a discussion post normally has text."
+            "format": "at-uri",
+            "description": "The net.olamaelcu.livtet.biblio.bookClub.thread this post belongs to — the root of the discussion. A plain at-uri rather than a strongRef: grouping compares the uri, so an edited thread keeps one discussion."
           },
-          "reply": {
-            "type": "ref",
-            "ref": "#replyRef"
+          "replyTo": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The net.olamaelcu.livtet.biblio.bookClub.post this one answers, in the same thread and space. Absent on a top-level post."
+          },
+          "textContent": {
+            "type": "string",
+            "maxLength": 1000000,
+            "maxGraphemes": 100000,
+            "description": "The post body, as plain text. Empty is allowed only when the post is a reply marker; a discussion post normally has text."
           },
           "langs": {
             "type": "array",
@@ -34,21 +40,6 @@
             "format": "datetime",
             "description": "Client-declared timestamp when the post was created."
           }
-        }
-      }
-    },
-    "replyRef": {
-      "type": "object",
-      "description": "Thread position. `root` MUST be a net.olamaelcu.livtet.bookClub.thread record in the same space. `parent` MUST be that thread (for a top-level post, where parent == root) or another net.olamaelcu.livtet.bookClub.post in the same space whose own root matches. StrongRefs pin the revision being answered, as app.bsky.feed.post does; grouping compares `root.uri`, so an edited thread keeps one discussion.",
-      "required": ["root", "parent"],
-      "properties": {
-        "root": {
-          "type": "ref",
-          "ref": "com.atproto.repo.strongRef"
-        },
-        "parent": {
-          "type": "ref",
-          "ref": "com.atproto.repo.strongRef"
         }
       }
     }

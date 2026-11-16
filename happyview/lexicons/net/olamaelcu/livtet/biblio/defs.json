@@ -440,6 +440,32 @@
         }
       }
     },
+    "reactionView": {
+      "type": "object",
+      "description": "An emoji reaction with its author.",
+      "required": ["uri", "did", "emoji", "createdAt"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the reaction record."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "DID of the reacting account."
+        },
+        "emoji": {
+          "type": "string",
+          "maxGraphemes": 1,
+          "description": "The emoji, carrying whatever skin-tone modifier the reactor's profile applied. One grapheme, so a toned emoji is still one character."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime"
+        }
+      }
+    },
     "contributorView": {
       "type": "object",
       "description": "A contributor record with the address it is published at.",

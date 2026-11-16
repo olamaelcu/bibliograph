@@ -1,0 +1,43 @@
+{
+  "lexicon": 1,
+  "id": "community.lexicon.interaction.reaction",
+  "description": "A reaction to a record: one emoji, one subject, written into the reactor's own repo. This app writes it for book reviews (in the reactor's public repo) and for club posts (inside the club's space, where the post's own access rule applies).",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["createdAt", "subject", "value"],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "subject": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The record being reacted to. A strongRef rather than a plain at-uri: a reaction is about one revision of the subject, and a reader's reaction to a post that was rewritten is not a reaction to the new text."
+          },
+          "value": {
+            "type": "union",
+            "refs": ["#unicodeEmoji"],
+            "closed": false,
+            "description": "What the reaction says. Open on purpose: a later revision adds reaction kinds (an image, a label) without invalidating the records written today."
+          }
+        }
+      }
+    },
+    "unicodeEmoji": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "maxGraphemes": 1,
+          "description": "The emoji itself. One grapheme, so a skin-tone modifier stays part of the same cluster."
+        }
+      }
+    }
+  }
+}

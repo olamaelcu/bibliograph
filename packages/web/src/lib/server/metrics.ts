@@ -300,6 +300,7 @@ const XRPC_METHODS: Record<string, true> = {
   'net.olamaelcu.livtet.biblio.graph.listFollowers': true,
   'net.olamaelcu.livtet.biblio.graph.unfollow': true,
   'net.olamaelcu.livtet.biblio.listRecentShelving': true,
+  'net.olamaelcu.livtet.biblio.listReactions': true,
   'net.olamaelcu.livtet.biblio.listReviewsByActor': true,
   'net.olamaelcu.livtet.biblio.listShelfItems': true,
   'net.olamaelcu.livtet.biblio.listShelfItemsByBook': true,

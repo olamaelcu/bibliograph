@@ -33,6 +33,12 @@ CREATE INDEX IF NOT EXISTS happyview_record_follow_subject_idx
   ON happyview.happyview_records (((record::jsonb)->>'subject'))
   WHERE collection = 'net.olamaelcu.livtet.biblio.follow';
 
+-- One record's reactions, newest first: the subject is what a reaction page
+-- filters on, and `(created_at DESC, uri DESC)` is the order it pages in.
+CREATE INDEX IF NOT EXISTS happyview_record_reaction_subject_idx
+  ON happyview.happyview_records (((record::jsonb)->'subject'->>'uri'))
+  WHERE collection = 'community.lexicon.interaction.reaction';
+
 -- The join key from a Bookhive per-book record to the edition its hive id was
 -- imported as (`appview_bookhive_lua`). Recency ordering is already covered by
 -- 0003-feed-read.sql's `(collection, record->>'createdAt' DESC, uri DESC)`.

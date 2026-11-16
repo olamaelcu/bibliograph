@@ -23,6 +23,18 @@
             "type": "string",
             "description": "CID of the avatar blob uploaded via com.atproto.repo.uploadBlob."
           },
+          "skinTone": {
+            "type": "string",
+            "knownValues": [
+              "none",
+              "light",
+              "medium-light",
+              "medium",
+              "medium-dark",
+              "dark"
+            ],
+            "description": "Preferred emoji skin-tone modifier for reactions this account writes. Absent means none. It travels with the profile so the choice reaches every device; records hold the toned emoji, while counts group on the base emoji."
+          },
           "createdAt": {
             "type": "string",
             "format": "datetime"

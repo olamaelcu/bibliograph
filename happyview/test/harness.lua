@@ -477,6 +477,7 @@ test('every offset endpoint advances by limit, not limit + 1', function()
   local cases = {
     { name = 'getReviewsByBook', params = { book = 'at://did:plc:x/community.lexicon.media.book.edition/abc' } },
     { name = 'listReviewsByActor', params = { did = 'did:plc:x' } },
+    { name = 'listReactions', params = { subject = 'at://did:plc:x/community.lexicon.media.book.review/abc' } },
     { name = 'listShelfItems', params = { shelf = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelf/read' } },
     { name = 'listShelfItemsByBook', params = { book = 'at://did:plc:x/community.lexicon.media.book.edition/abc', did = 'did:plc:x' } },
     { name = 'getShelvingOfBook', params = { book = 'at://did:plc:x/community.lexicon.media.book.edition/abc', did = 'did:plc:x' } },
@@ -1208,6 +1209,38 @@ test('listReviewsByActor pages both review sources for one DID', function()
   assert_equal(response.reviews[2].record.rating, 12)
   assert_equal(calls[1].args[2], 'did:plc:r')
   assert_equal(calls[1].args[4], 'buzz.bookhive.book')
+end)
+
+test('listReactions keeps only the emoji union member for the named subject', function()
+  local subject = 'at://did:plc:r/community.lexicon.media.book.review/3k'
+  local rows = {
+    {
+      uri = 'at://did:plc:r/community.lexicon.interaction.reaction/1',
+      did = 'did:plc:r',
+      record = '{"subject":{"uri":"' .. subject .. '","cid":"bafy"},"value":{"$type":"community.lexicon.interaction.reaction#unicodeEmoji","value":"👍🏽"},"createdAt":"2026-11-16T00:00:00.000Z"}',
+      created_at = '2026-11-16T00:00:00.000Z',
+    },
+    {
+      -- The union is open: a later reaction kind is not an emoji, and is skipped
+      -- rather than rendered as an empty button.
+      uri = 'at://did:plc:r/community.lexicon.interaction.reaction/2',
+      did = 'did:plc:r',
+      record = '{"subject":{"uri":"' .. subject .. '","cid":"bafy"},"value":{"$type":"community.lexicon.interaction.reaction#image"},"createdAt":"2026-11-16T00:00:00.000Z"}',
+      created_at = '2026-11-16T00:00:00.000Z',
+    },
+  }
+
+  local response, calls = run_endpoint('query', 'listReactions', {
+    params = { subject = subject },
+    responder = function() return rows end,
+  })
+
+  assert_equal(#response.reactions, 1)
+  assert_equal(response.reactions[1].emoji, '👍🏽')
+  assert_equal(response.reactions[1].did, 'did:plc:r')
+  assert_equal(response.reactions[1].createdAt, '2026-11-16T00:00:00.000Z')
+  assert_equal(calls[1].args[1], 'community.lexicon.interaction.reaction')
+  assert_equal(calls[1].args[2], subject)
 end)
 
 test('bookhive_review_view drops an unusable grade, a missing grade and a missing edition', function()

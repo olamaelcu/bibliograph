@@ -4,7 +4,7 @@
   "defs": {
     "main": {
       "type": "space",
-      "description": "A book club's discussion and reading state. The club links to one reading list and mirrors that list's access; public lists allow direct access, protected lists require list membership. Club records live in the owner's repo inside the space, while threads and posts live in their authors' repos inside the same space.",
+      "description": "A book club's discussion and reading state. The club links to one reading list and mirrors that list's access; public lists allow direct access, protected lists require list membership. Club records live in the owner's repo inside the space, while threads, posts and reactions to them live in their authors' repos inside the same space.",
       "key": "tid",
       "name": "Book club",
       "collections": [
@@ -13,6 +13,7 @@
         "net.olamaelcu.livtet.biblio.bookClub.activeRead",
         "net.olamaelcu.livtet.biblio.bookClub.thread",
         "net.olamaelcu.livtet.biblio.bookClub.post",
+        "community.lexicon.interaction.reaction",
         "community.lexicon.calendar.event",
         "net.olamaelcu.livtet.biblio.bookClub.role",
         "net.olamaelcu.livtet.biblio.bookClub.roleAssignment"

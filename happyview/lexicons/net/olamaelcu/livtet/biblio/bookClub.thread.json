@@ -4,11 +4,11 @@
   "defs": {
     "main": {
       "type": "record",
-      "description": "The container a book club discussion hangs from: one book read cycle, one thread, one stable URI. Every post in the thread names this record as its root, so editing the title or description does not split the discussion across CIDs.",
+      "description": "The container a book club discussion hangs from: one book read cycle, one thread, one stable URI. Every post in the thread names this record's uri in its `thread`, so editing the title or description does not split the discussion across CIDs. The discussion itself is made of posts, not of this record: the opening text is the thread's first top-level post.",
       "key": "tid",
       "record": {
         "type": "object",
-        "required": ["book", "read", "title", "createdAt"],
+        "required": ["book", "read", "title", "publishedAt"],
         "properties": {
           "book": {
             "type": "string",
@@ -16,9 +16,9 @@
             "description": "The edition record being discussed, e.g. a community.lexicon.book.edition at-uri. A plain at-uri rather than a strongRef: the thread follows the edition, it does not pin one revision of it."
           },
           "read": {
-            "type": "ref",
-            "ref": "com.atproto.repo.strongRef",
-            "description": "The bookClub.read cycle this thread belongs to. A thread never carries into a later read of the same book."
+            "type": "string",
+            "format": "at-uri",
+            "description": "The net.olamaelcu.livtet.biblio.bookClub.read cycle this thread belongs to. A plain at-uri: a thread never carries into a later read of the same book, and the cycle is identified by its uri, not by a revision."
           },
           "title": {
             "type": "string",
@@ -28,11 +28,12 @@
           "description": {
             "type": "string",
             "maxGraphemes": 2000,
-            "description": "Optional framing for the discussion: spoiler policy, chapters covered, reading window."
+            "description": "Optional summary of the discussion: spoiler policy, chapters covered, reading window. The opening post carries the text the author wrote."
           },
-          "createdAt": {
+          "publishedAt": {
             "type": "string",
-            "format": "datetime"
+            "format": "datetime",
+            "description": "When the thread was published. Ordering key for the club's thread list."
           }
         }
       }
