@@ -12,6 +12,10 @@ bibliograph-worker (0.2.23-1) unstable; urgency=medium
     - Shipped as part of the full deploy because the lexicon tree and the
       HappyView scripts move in the same release, so the ordered restart set
       runs anyway.
+    - A full deploy re-queues the Bookhive import and its publish backlog
+      (`deploy.sh` does this on every run, to 5000 pages). This release accepts
+      that: the edge, the lexicons and the Lua scripts move together, which is
+      exactly the case the per-package path cannot serve.
 
  -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 05:50:00 +0000
 
