@@ -1,3 +1,37 @@
+bibliograph-web (0.2.24-1) unstable; urgency=medium
+
+  * 0.2.24: the two entity resolvers are queries, so nothing about them reads
+    as an authenticated write.
+
+    - `net.olamaelcu.livtet.biblio.resolveContributors` and
+      `resolvePublishers` were declared `"type": "procedure"` with a JSON body.
+      A procedure is an authenticated write in atproto, so every client — and
+      the docs page, which tagged them `DPoP` while describing them as
+      read-only and anonymous — treated an anonymous catalog read as one that
+      needs a DPoP session. The edge never required one (both NSIDs are
+      dispatched to `handleEntityGet`, never proxied to HappyView), so the
+      declaration was the only thing to fix.
+    - Both are now `query` with `parameters`, and their identifier pairs travel
+      as repeated `identifiers=issuer:value` parameters
+      (`?identifiers=isbn13:9780441478125&identifiers=isni:0000000121032683`).
+      Each entry splits on its **first** colon: an issuer never contains one, a
+      value may. A pair with no colon, an empty issuer or an empty value is
+      `400 InvalidRequest` rather than a silently dropped match, duplicates
+      collapse, and the 100-pair cap is unchanged. `offset`/`limit` parse from
+      the query string.
+    - The POST path is gone, not deprecated: `dispatchPost` no longer has an
+      entity branch, the `entityResolve` dependency and `handleEntityResolve`
+      are deleted, and `POST` on either NSID is `405 MethodNotAllowed` like
+      every other query. `ENTITY_PROCEDURES` was empty afterwards and is
+      removed; `ENTITY_METHODS` was a copy of `ENTITY_QUERIES` and is removed
+      too. The parsed-pair contract lives in `lib/server/xrpc/identifiers.ts`,
+      free of SvelteKit imports so the review of the colon rule is a unit test.
+    - `community.lexicon.service.describe` still names 49 methods: the two moved
+      between the registries, they did not join or leave the surface. The
+      lexicons report 27 queries and 17 procedures now instead of 25 and 19.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 06:10:00 +0000
+
 bibliograph-web (0.2.23-1) unstable; urgency=medium
 
   * 0.2.23: the published lexicon tree is Livtet's own surface, the reader's
