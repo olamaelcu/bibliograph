@@ -1,3 +1,28 @@
+bibliograph-web (0.2.22-6) unstable; urgency=medium
+
+  * 0.2.22-6: the public feed stops repeating a post, and the edge waits for
+    PostgreSQL before it starts.
+
+    - `appview_bookhive_lua` is a view over `edition_identifiers` keyed
+      `(edition_uri, issuer, value)`, so one Bookhive `hiveId` can name several
+      editions once a re-import mints another. The feed page joined that view
+      row-for-row and served the same record twice; Livtet's landing page keys
+      its discover band by `post`, so Svelte's keyed `each` threw
+      `each_key_duplicate` and the page rendered and then went blank. The
+      lookup is now grouped over the page's own hive ids and joined once, the
+      page dedupes by `uri` before it is cut to length, and the `limit + 1`
+      probe row is counted after the collapse, so a duplicate no longer reads
+      as "there is another page".
+    - `bibliograph-web.service` orders `After=postgresql.service`, order-only
+      and deliberately without `Wants=`: the catalog routes query Postgres
+      directly, and on the boot after the `/var/cache` move the edge's follow-up
+      units raced the cluster. Requiring a local unit would break a deployment
+      pointed at a remote `DATABASE_URL`, so only the ordering is added. The
+      HappyView package carries the same ordering for the client seeder at its
+      unchanged 2.17.4-2, which is the supported path for a unit-only change.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 00:35:00 +0000
+
 bibliograph-web (0.2.22-5) unstable; urgency=medium
 
   * 0.2.22-5: every XRPC call is timed, by NSID and by the backend that
