@@ -1,3 +1,31 @@
+bibliograph-web (0.2.25-1) unstable; urgency=medium
+
+  * 0.2.25: the catalog gains an enumeration read, and the PDS proxy stops
+    working past the caller's budget.
+
+    - `net.olamaelcu.livtet.biblio.listEditions` (new, `GET`, edge-served):
+      a keyset walk over `editions_pkey` with `cursor` (the last uri of the
+      previous page, opaque) and `limit` up to 5 000, returning
+      `{items: [{uri, title, indexedAt}], cursor?}`. Nothing else could
+      enumerate the catalog: `searchEditions` needs a term and
+      `resolveEditions` an identifier, so a crawler had no way in. One page is
+      one index scan — 5 000 uris in 180 ms — so 57 pages cover all 282 103
+      editions. A malformed cursor restarts at the beginning.
+      `community.lexicon.service.describe` lists it; 50 methods now.
+    - The PDS proxy bound drops from 15 s to 4 s, under the 5 s a Livtet biblio
+      read allows (`REQUEST_TIMEOUT_MS`; its catalog health probe allows
+      2.5 s). Past that point the edge was reading for a caller that had
+      already aborted — during a PDS stall that is how 446 `getRecord`s became
+      `499`s at nginx in six hours. A timeout now answers
+      `504 UpstreamTimeout` rather than `502 UpstreamUnavailable`, so
+      `bibliograph_pds_proxy_requests_total{status="504"}` separates the two;
+      any other failed hop stays `502`.
+    - Nothing else changes for callers: the forwarded surface, the HappyView
+      dependency and the nginx vhost are untouched, and no migration is
+      involved.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 17:30:00 +0000
+
 bibliograph-web (0.2.24-1) unstable; urgency=medium
 
   * 0.2.24: the two entity resolvers are queries, so nothing about them reads

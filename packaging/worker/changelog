@@ -1,3 +1,22 @@
+bibliograph-worker (0.2.25-1) unstable; urgency=medium
+
+  * 0.2.25: the Bookhive editions gauge is refreshed once a minute, not on
+    every scrape.
+
+    - `readBookhiveStats` ran an indexed count over `edition_identifiers` per
+      `/metrics` scrape. The Postgres log puts one run at 697–1399 ms and the
+      scrape is every 15 s — roughly 7 % of a core, four times a minute, on a
+      2-vCPU host that also serves the catalog and the PDS. The gauge records a
+      weekly walk, so a 60 s cache is enough: it is a `WeakMap` keyed on the
+      pool, cold after a restart, and the gauge now lags an import by at most a
+      minute.
+    - The ESM, the production `node_modules` and `sql/` otherwise match
+      `0.2.24-1`; the newest migration is still
+      `0019-entity-fanout-guard.sql` (it arrived in `1f452a5`, before this
+      release), so installing this package re-applies the schema as a no-op.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 17:30:00 +0000
+
 bibliograph-worker (0.2.24-1) unstable; urgency=medium
 
   * 0.2.24 release: no worker payload change since 0.2.23.
