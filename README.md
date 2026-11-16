@@ -61,7 +61,7 @@ records written straight to a PDS arrive through Jetstream or a backfill.
 | `net.olamaelcu.livtet.biblio.bookStatus` | `tid`; one status per (reader, edition), found by `record.book.uri` | reader / `status.set` | reader PDS |
 | `net.olamaelcu.livtet.biblio.follow` | `tid`; unique by `subject` | reader / `graph.follow` | reader PDS |
 | `net.olamaelcu.livtet.biblio.readingGoal` | literal `current` | reader / `readingGoal.set` | reader PDS |
-| `net.olamaelcu.livtet.actor.profile` | literal `self` | reader / `profile.set` | reader PDS |
+| `net.olamaelcu.livtet.biblio.actor.profile` | literal `self` | reader / `profile.set` | reader PDS |
 | `community.lexicon.media.book.review` | `tid` | reader / `review.*` | reader PDS |
 | `buzz.bookhive.book` | Bookhive's own (`any`) | the reader's Bookhive client | reader PDS |
 

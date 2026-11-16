@@ -241,7 +241,7 @@ signal. Queued work is not a promise that anything will be found.
 | NSID | Params | Returns |
 | --- | --- | --- |
 | `community.lexicon.service.describe` | — | `{ roles, methods }` — every NSID this deployment answers, shaped `{ $type, value }` |
-| `getActorProfile` | `did` | `{ profile }` — raw `net.olamaelcu.livtet.actor.profile` record or `null` |
+| `getActorProfile` | `did` | `{ profile }` — raw `net.olamaelcu.livtet.biblio.actor.profile` record or `null` |
 | `getReadingGoal` | `did` | `{ goal }` — raw `readingGoal` record or `null` |
 | `getShelf` | `uri` | `{ shelf }` |
 | `listShelves` | `did`, `limit` 50 (≤100), `cursor` | `{ shelves, cursor? }` |
@@ -298,7 +298,7 @@ the same request.
 
 #### `getActorProfile`
 
-Reads the index at `at://<did>/net.olamaelcu.livtet.actor.profile/self` and returns the decoded record
+Reads the index at `at://<did>/net.olamaelcu.livtet.biblio.actor.profile/self` and returns the decoded record
 object as `profile`. A missing (or unparseable) record is `200 { profile: null }`; no PDS read
 happens, so a profile the index has not seen is reported missing. `did` is required and may not be
 an empty string. The lexicon's optional `handle` is not served today: the handler emits only
@@ -683,7 +683,7 @@ exist is `404 NotFound`, not a silent success.
 
 #### `profile.set`
 
-Merge-patch of `net.olamaelcu.livtet.actor.profile/self`: `displayName` (≤640), `description`
+Merge-patch of `net.olamaelcu.livtet.biblio.actor.profile/self`: `displayName` (≤640), `description`
 (≤256) and `avatarCid` are validated and copied; fields the input omits keep their stored value, and
 the create path stamps `createdAt`/`updatedAt`. At least one field is required (`400`). Returns
 `{ uri }`.
@@ -794,7 +794,7 @@ Deletes an owned review. Wrong collection or non-AT-URI: `400`; another DID's re
 | `net.olamaelcu.livtet.biblio.bookStatus` | `tid` — a fresh TID per (reader, edition); legacy rows may carry the edition rkey | no record-level `required`; the view needs `metadata.status` (`to-read`/`reading`/`read`/`dnf`) plus a resolvable `book` and `shelf`; `book` is a strongRef; optional `startedAt`, `finishedAt`, `position`, `notes`, `emoji` | `status.set` |
 | `net.olamaelcu.livtet.biblio.follow` | `tid` — a fresh TID minted by `graph.follow`; legacy rows may use the subject DID | `subject` (DID), `createdAt` | `graph.follow` |
 | `net.olamaelcu.livtet.biblio.readingGoal` | `literal:current` | `period` (`weekly`/`monthly`/`annual`), `year` 1900–9999, `booksGoal` ≥ 1, `createdAt`, `updatedAt` | `readingGoal.set` |
-| `net.olamaelcu.livtet.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
+| `net.olamaelcu.livtet.biblio.actor.profile` | `literal:self` | `createdAt`, `updatedAt`; optional `displayName` (≤640), `description` (≤256), `avatarCid` | `profile.set` |
 | `community.lexicon.media.book.review` | `tid` | `subject` (`editionRef`; contributors have `displayName` + ONIX `role`), `createdAt`; optional `rating` 1–20, `textContent` (≥1), `subjectRecord` (AT-URI), `content` (union), `flags` | `review.create`, `review.update` |
 | `community.lexicon.media.book.edition` | `tid` — always a TID minted by `editions_next_tid()`; never provider-prefixed | `title`, `identifiers`, `contributors` (`displayName` + ONIX `role`), `createdAt`; optional subtitle/language/publishedDate/publisher/format/pages/durationSeconds/chapters/series/bookEdition/description/cover/coverUrl | catalog publisher (outbox worker); no write procedure |
 

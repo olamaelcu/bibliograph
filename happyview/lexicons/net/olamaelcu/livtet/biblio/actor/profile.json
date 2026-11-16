@@ -1,6 +1,6 @@
 {
   "lexicon": 1,
-  "id": "net.olamaelcu.livtet.actor.profile",
+  "id": "net.olamaelcu.livtet.biblio.actor.profile",
   "description": "User profile record stored on the user's PDS at rkey 'self'.",
   "defs": {
     "main": {

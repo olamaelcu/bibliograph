@@ -156,7 +156,7 @@ from Postgres. Per account:
 
 | Collection | Records |
 | --- | --- |
-| `net.olamaelcu.livtet.actor.profile` | 1 (`self`) |
+| `net.olamaelcu.livtet.biblio.actor.profile` | 1 (`self`) |
 | `app.bsky.actor.profile` | 1 (`self`) |
 | `net.olamaelcu.livtet.biblio.shelf` | 5 (the four fixed shelves + one custom) |
 | `net.olamaelcu.livtet.biblio.bookStatus` | 6 (edition rkeys from the fixture, TIDs from the app) |

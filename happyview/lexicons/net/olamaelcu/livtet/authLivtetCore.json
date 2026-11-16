@@ -11,7 +11,7 @@
           "type": "permission",
           "resource": "repo",
           "collection": [
-            "net.olamaelcu.livtet.actor.profile",
+            "net.olamaelcu.livtet.biblio.actor.profile",
             "net.olamaelcu.livtet.biblio.readingGoal",
             "net.olamaelcu.livtet.biblio.shelf",
             "net.olamaelcu.livtet.biblio.bookStatus",

@@ -642,7 +642,7 @@ test('at_uri_parts validates DID, NSID and rkey', function()
   assert_equal(coll, 'net.olamaelcu.livtet.biblio.shelf')
   assert_equal(rkey, 'read')
 
-  assert_true(helpers.at_uri_parts('at://did:web:pds.127-0-0-1.sslip.io/net.olamaelcu.livtet.actor.profile/self') ~= nil)
+  assert_true(helpers.at_uri_parts('at://did:web:pds.127-0-0-1.sslip.io/net.olamaelcu.livtet.biblio.actor.profile/self') ~= nil)
   assert_true(helpers.at_uri_parts('at://did:plc:abc/net.olamaelcu.livtet.biblio.shelfItem/3abc-e1') ~= nil)
   assert_true(helpers.at_uri_parts('at://did:plc:abc/net.olamaelcu.livtet.biblio.bookStatus/3abc') ~= nil)
   assert_true(helpers.at_uri_parts('at://did:plc:abc/net.olamaelcu.livtet.biblio.readingGoal/current') ~= nil)

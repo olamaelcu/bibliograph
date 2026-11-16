@@ -581,7 +581,7 @@ package-worker-deb` builds `bibliograph-worker`, which installs the payload at
 ## Activity
 
 Indexed collections: `net.olamaelcu.livtet.biblio.{bookStatus,shelf,shelfItem,follow,readingGoal}`,
-`net.olamaelcu.livtet.actor.profile`, `community.lexicon.media.book.review` and Bookhive's
+`net.olamaelcu.livtet.biblio.actor.profile`, `community.lexicon.media.book.review` and Bookhive's
 `buzz.bookhive.book` (a reader's review lives inside it). Bookhive's catalog
 (`buzz.bookhive.catalogBook`) is not indexed: `catalog.bookhive` imports it into editions instead,
 recording each `hiveId` as a `(bookhive.buzz, bk_…)` identifier (`appview_bookhive_lua`).

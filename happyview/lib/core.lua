@@ -12,7 +12,7 @@ local REVIEW_COLLECTION = 'community.lexicon.media.book.review'
 -- makes that record a review of the edition its `hiveId` was imported as.
 local BOOKHIVE_BOOK = 'buzz.bookhive.book'
 local READING_GOAL = 'net.olamaelcu.livtet.biblio.readingGoal'
-local PROFILE_COLLECTION = 'net.olamaelcu.livtet.actor.profile'
+local PROFILE_COLLECTION = 'net.olamaelcu.livtet.biblio.actor.profile'
 
 local FIXED_SHELVES = {
   ['reading'] = 'Currently Reading',
