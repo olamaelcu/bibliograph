@@ -1,3 +1,39 @@
+bibliograph-web (0.2.23-1) unstable; urgency=medium
+
+  * 0.2.23: the published lexicon tree is Livtet's own surface, the reader's
+    profile lives under `biblio.`, and reactions are indexed and served.
+
+    - Twenty documents arrive from `livtet-ecosystem/platform` byte-identically
+      (`bookClub` +8 records, `readingList` +4, `clubInvite` +2,
+      `clubBookmarks`, `topBook`, `authLivtetCore`); the five group declarations
+      and their thirteen records move from `net.olamaelcu.livtet.*` to
+      `net.olamaelcu.livtet.biblio.*`, whose authority names the publisher DID.
+      The retired `biblio.bookReview` document leaves the tree; `authLivtetCore`
+      keeps it in its scopes because the sign-in migration still deletes those
+      records. The edge regenerates `xrpc-catalog.json` from this tree, so the
+      surface it serves moves with it.
+    - `net.olamaelcu.livtet.biblio.actor.profile` replaces
+      `net.olamaelcu.livtet.actor.profile`, the last app-written record outside
+      `biblio.`. `biblio.getActorProfile` returns it as `profile`, and the
+      published record is a create plus the deletion of the old NSID, which the
+      PDS now answers `RecordNotFound` for. `hv-deploy` posts an explicit
+      lexicon list rather than walking the tree, so its three stale
+      `…livtet.actor.profile` entries would have failed the oneshot with
+      `FileNotFoundError` after the package dropped the file; they are updated
+      in the same release.
+    - `net.olamaelcu.livtet.biblio.listReactions` answers the reactions on one
+      subject at-uri, newest first with an offset cursor, filtered on
+      `subject.uri` and emitting only the union's `#unicodeEmoji` member: the
+      union is open, so a later reaction kind is skipped rather than rendered as
+      an empty value. A partial index on `(record->'subject'->>'uri')` over
+      `community.lexicon.interaction.reaction` covers the read, so reactions are
+      counted without a per-request repo scan.
+    - The edge forwards `listReactions` and allows it in the metrics
+      allow-list; without either the query is uploaded to HappyView but never
+      served.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 05:50:00 +0000
+
 bibliograph-web (0.2.22-6) unstable; urgency=medium
 
   * 0.2.22-6: the public feed stops repeating a post, and the edge waits for

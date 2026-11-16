@@ -1,3 +1,20 @@
+bibliograph-worker (0.2.23-1) unstable; urgency=medium
+
+  * 0.2.23 release: no worker payload change since 0.2.22.
+
+    - The ESM, the production `node_modules` and `sql/` are identical to
+      `0.2.22-1`; the newest migration is still
+      `0018-feed-order-nulls-last.sql`, and this release adds no schema file —
+      the reaction index is `happyview/sql/indexes.sql`, applied by the
+      HappyView deploy oneshot. The release number moves with the edge so both
+      Node packages share one; installing this package restarts the unit and
+      re-applies the schema, which is a no-op on a host already at `0.2.22-1`.
+    - Shipped as part of the full deploy because the lexicon tree and the
+      HappyView scripts move in the same release, so the ordered restart set
+      runs anyway.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 05:50:00 +0000
+
 bibliograph-worker (0.2.22-1) unstable; urgency=medium
 
   * 0.2.22 release: no worker payload change since 0.2.21.
