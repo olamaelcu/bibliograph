@@ -1,0 +1,24 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookClub.roleAssignment",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One club member's role, written in the club owner's repo inside the club space. The record key is the subject's DID, so a member holds at most one role: assigning again replaces it. `Owner` is never a value here — the club authority is the owner.",
+      "key": "any",
+      "record": {
+        "type": "object",
+        "required": ["subject", "role", "updatedAt"],
+        "properties": {
+          "subject": { "type": "string", "format": "did" },
+          "role": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "A role name from the effective set. A name with no definition falls back to Member."
+          },
+          "updatedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

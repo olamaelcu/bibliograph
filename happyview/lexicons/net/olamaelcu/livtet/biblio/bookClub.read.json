@@ -1,0 +1,73 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookClub.read",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One read cycle for one book on the club's linked reading list, stored in the owner's repo inside the club's space. A new cycle is created when a club reads a book again, so threads never overlap between reads.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["book", "entry", "status", "createdAt", "updatedAt"],
+        "properties": {
+          "book": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The edition being read."
+          },
+          "entry": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The readingList.entry this read belongs to."
+          },
+          "status": {
+            "type": "string",
+            "knownValues": ["reading", "read", "abandoned"]
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "checkpoint": {
+            "type": "ref",
+            "ref": "#checkpoint"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": ["unit", "current"],
+      "properties": {
+        "unit": {
+          "type": "string",
+          "knownValues": ["pages", "percent", "other"]
+        },
+        "current": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "label": {
+          "type": "string",
+          "maxGraphemes": 120
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.readingList.meta",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "The title and description of one reading list, stored in the owner's repo inside the list's space. The space itself is the visibility boundary, so there is no per-record ACL here.",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["title", "createdAt"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxGraphemes": 200
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 2000
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

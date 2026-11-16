@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.readingList.entry",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One book on a reading list, stored in the owner's repo inside the list's space.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["book", "addedAt"],
+        "properties": {
+          "book": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The edition record, as a community.lexicon.book.edition at-uri."
+          },
+          "note": {
+            "type": "string",
+            "maxGraphemes": 2000,
+            "description": "Why this book is on the list, in the owner's words."
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional manual order; absent means append by addedAt."
+          },
+          "addedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

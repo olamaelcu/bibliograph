@@ -1,0 +1,51 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.topBook",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A reader's ranked favourite books. At most four distinct editions, in rank order, each with the accent its profile tile is drawn with.",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["books", "createdAt"],
+        "properties": {
+          "books": {
+            "type": "array",
+            "description": "The ranked picks, first place first.",
+            "maxLength": 4,
+            "items": {
+              "type": "ref",
+              "ref": "#topBook"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    },
+    "topBook": {
+      "type": "object",
+      "required": ["book", "color"],
+      "properties": {
+        "book": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "The ranked edition, as a community.lexicon.book.edition at-uri."
+        },
+        "color": {
+          "type": "string",
+          "minGraphemes": 7,
+          "maxGraphemes": 7,
+          "description": "The accent drawn around this pick's tile, as #rrggbb."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookClub",
+  "defs": {
+    "main": {
+      "type": "space",
+      "description": "A book club's discussion and reading state. The club links to one reading list and mirrors that list's access; public lists allow direct access, protected lists require list membership. Club records live in the owner's repo inside the space, while threads and posts live in their authors' repos inside the same space.",
+      "key": "tid",
+      "name": "Book club",
+      "collections": [
+        "net.olamaelcu.livtet.biblio.bookClub.meta",
+        "net.olamaelcu.livtet.biblio.bookClub.read",
+        "net.olamaelcu.livtet.biblio.bookClub.activeRead",
+        "net.olamaelcu.livtet.biblio.bookClub.thread",
+        "net.olamaelcu.livtet.biblio.bookClub.post",
+        "community.lexicon.calendar.event",
+        "net.olamaelcu.livtet.biblio.bookClub.role",
+        "net.olamaelcu.livtet.biblio.bookClub.roleAssignment"
+      ]
+    }
+  }
+}

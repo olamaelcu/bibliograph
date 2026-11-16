@@ -1,0 +1,35 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.readingList.role",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "An owner-defined role for one reading list, written in the list owner's repo inside the list space. The record key is a slug of `name`, so renaming is create-new plus delete-old. The three built-ins (Owner, Moderator, Member) exist without a record; `Owner` can never have one.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["name", "permissions", "rank", "updatedAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "Display name. Immutable for the life of the record."
+          },
+          "permissions": {
+            "type": "array",
+            "maxLength": 64,
+            "items": { "type": "string", "maxLength": 64 },
+            "description": "Permission keys from the list catalogue."
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99,
+            "description": "Ordering for management. 100 is the owner's alone."
+          },
+          "updatedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

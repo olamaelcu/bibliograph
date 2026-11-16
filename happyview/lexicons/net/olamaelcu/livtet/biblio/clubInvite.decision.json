@@ -1,0 +1,32 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.clubInvite.decision",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A club owner's answer to one submission, written inside the requester's invitation space. `request` names the exact version answered, so a submission that arrived while the owner was deciding is visibly unanswered. A denial is a decision too: the requester reads it and may re-apply.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": [
+          "status",
+          "decidedAt",
+          "requestSubmittedAt",
+          "request",
+          "decidedBy"
+        ],
+        "properties": {
+          "status": { "type": "string", "knownValues": ["approved", "denied"] },
+          "decidedAt": { "type": "string", "format": "datetime" },
+          "requestSubmittedAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "The answered request's own timestamp, so the pair reads without resolving the ref."
+          },
+          "request": { "type": "ref", "ref": "com.atproto.repo.strongRef" },
+          "decidedBy": { "type": "string", "format": "did" }
+        }
+      }
+    }
+  }
+}

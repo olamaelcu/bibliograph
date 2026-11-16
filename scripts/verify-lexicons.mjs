@@ -43,6 +43,11 @@ const ALLOWED_FIELDS = {
   token: ['description'],
   ref: ['description', 'ref'],
   union: ['description', 'refs', 'closed'],
+  // rsky's space declaration (`com.atproto.simplespace`). It is absent from the
+  // Lexicon v1 field tables, but this deployment runs rsky's PDS and serves
+  // spaces, and the club and reading-list documents the app ships are declared
+  // this way, so refusing the type would reject a document the PDS accepts.
+  space: ['description', 'key', 'name', 'collections'],
   unknown: ['description'],
   record: ['description', 'key', 'record'],
   query: ['description', 'parameters', 'output', 'errors'],
@@ -222,6 +227,27 @@ function checkSchema(node, where, doc, documents, errors) {
     else {
       checkSchema(node.record, `${where}.record`, doc, documents, errors);
       if (node.record.type !== 'object') errors.push(`${where}: record.record must be an object`);
+    }
+  }
+  if (type === 'space') {
+    if (typeof node.key !== 'string' || node.key === '') {
+      errors.push(`${where}: space has no key type`);
+    } else if (node.key !== 'tid' && node.key !== 'any' && !node.key.startsWith('literal:')) {
+      errors.push(`${where}: space key ${JSON.stringify(node.key)} is not tid, any or literal:`);
+    }
+    if (typeof node.name !== 'string' || node.name === '') {
+      errors.push(`${where}: space has no name`);
+    }
+    if (!Array.isArray(node.collections) || node.collections.length === 0) {
+      errors.push(`${where}: space has no collections array`);
+    } else {
+      for (const collection of node.collections) {
+        if (typeof collection !== 'string' || !NSID_RE.test(collection)) {
+          errors.push(
+            `${where}: space collection ${JSON.stringify(collection)} is not a valid NSID`
+          );
+        }
+      }
     }
   }
   for (const field of ['parameters', 'input', 'output']) {

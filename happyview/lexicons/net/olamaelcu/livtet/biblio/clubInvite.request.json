@@ -1,0 +1,73 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.clubInvite.request",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One submission of a club's join form, written by the requester inside their invitation space. Each submission is a new record: the answers a moderator is looking at never change underneath them, and the club can see every version. The field type and label are copied in so a decision still reads correctly after the club edits or removes the field.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["club", "answers", "submittedAt"],
+        "properties": {
+          "club": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The club space this request is for. A record naming a different club is ignored."
+          },
+          "answers": {
+            "type": "array",
+            "maxLength": 10,
+            "items": { "type": "ref", "ref": "#answer" }
+          },
+          "submittedAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "description": "One answer, carrying exactly one value whose shape matches `type`.",
+      "required": ["fieldId", "label", "type"],
+      "properties": {
+        "fieldId": { "type": "string", "maxLength": 64 },
+        "label": { "type": "string", "maxLength": 120 },
+        "type": {
+          "type": "string",
+          "knownValues": [
+            "text",
+            "longText",
+            "select",
+            "multiSelect",
+            "checkbox",
+            "number",
+            "date",
+            "file"
+          ]
+        },
+        "text": { "type": "string", "maxLength": 2000 },
+        "selected": {
+          "type": "array",
+          "maxLength": 20,
+          "items": { "type": "string", "maxLength": 120 }
+        },
+        "number": {
+          "type": "integer",
+          "description": "Lexicon has no floating-point number type; a numeric answer is a whole number."
+        },
+        "date": { "type": "string", "maxLength": 10 },
+        "checked": { "type": "boolean" },
+        "blob": {
+          "type": "blob",
+          "accept": [
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ],
+          "maxSize": 5242880
+        },
+        "fileName": { "type": "string", "maxLength": 255 }
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.authLivtetCore",
+  "defs": {
+    "main": {
+      "type": "permission-set",
+      "title": "Your Livtet library on the web",
+      "detail": "Read and update your Livtet profile, shelves, reading goal, reading progress, follows, reviews, and top books. This is what the Livtet web app asks for when you sign in.",
+      "permissions": [
+        {
+          "type": "permission",
+          "resource": "repo",
+          "collection": [
+            "net.olamaelcu.livtet.actor.profile",
+            "net.olamaelcu.livtet.biblio.readingGoal",
+            "net.olamaelcu.livtet.biblio.shelf",
+            "net.olamaelcu.livtet.biblio.bookStatus",
+            "net.olamaelcu.livtet.biblio.bookShelving",
+            "net.olamaelcu.livtet.biblio.shelfItem",
+            "net.olamaelcu.livtet.biblio.follow",
+            "net.olamaelcu.livtet.biblio.bookReview",
+            "net.olamaelcu.livtet.biblio.readingProgress",
+            "net.olamaelcu.livtet.biblio.topBook",
+            "net.olamaelcu.livtet.bookReview"
+          ]
+        }
+      ]
+    }
+  }
+}

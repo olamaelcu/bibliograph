@@ -1,0 +1,56 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookClub.post",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "A post in a book club discussion, stored in the author's repo inside the club's space. Threading follows the aggregator-forum shape: every post carries a root (the bookClub.thread) and a parent; a top-level post is its own parent (parent == root), while a reply's parent is another post in the same thread. Linear readers can ignore parent beyond the root; tree readers can rebuild the tree. The space, not the record, is the access boundary.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["text", "reply", "createdAt"],
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 10000,
+            "maxGraphemes": 2000,
+            "description": "The post body. Empty is allowed when the post is only a reply marker, though a discussion post normally has text."
+          },
+          "reply": {
+            "type": "ref",
+            "ref": "#replyRef"
+          },
+          "langs": {
+            "type": "array",
+            "description": "Human language of the text, BCP 47 tags.",
+            "maxLength": 3,
+            "items": {
+              "type": "string",
+              "format": "language"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Client-declared timestamp when the post was created."
+          }
+        }
+      }
+    },
+    "replyRef": {
+      "type": "object",
+      "description": "Thread position. `root` MUST be a net.olamaelcu.livtet.bookClub.thread record in the same space. `parent` MUST be that thread (for a top-level post, where parent == root) or another net.olamaelcu.livtet.bookClub.post in the same space whose own root matches. StrongRefs pin the revision being answered, as app.bsky.feed.post does; grouping compares `root.uri`, so an edited thread keeps one discussion.",
+      "required": ["root", "parent"],
+      "properties": {
+        "root": {
+          "type": "ref",
+          "ref": "com.atproto.repo.strongRef"
+        },
+        "parent": {
+          "type": "ref",
+          "ref": "com.atproto.repo.strongRef"
+        }
+      }
+    }
+  }
+}

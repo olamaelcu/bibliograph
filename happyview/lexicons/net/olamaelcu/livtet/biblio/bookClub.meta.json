@@ -1,0 +1,151 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookClub.meta",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "The club's metadata, stored in the owner's repo inside the club's space. The linked reading list is the access source: club membership mirrors that list, so no separate membership record exists.",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["title", "readingList", "createdAt"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxGraphemes": 200
+          },
+          "description": {
+            "type": "string",
+            "maxGraphemes": 2000
+          },
+          "links": {
+            "type": "array",
+            "description": "Links the club shows as pills under its description. The icon is the site's own favicon, derived by the client from `url`; no icon is stored.",
+            "items": {
+              "type": "ref",
+              "ref": "#link"
+            }
+          },
+          "readingList": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The readingList space this club follows. The club's visibility and membership mirror this list."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "banner": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg", "image/webp"],
+            "maxSize": 5242880
+          },
+          "accent": {
+            "type": "string",
+            "knownValues": ["mint", "blue", "amber", "rose", "violet", "slate"]
+          },
+          "avatar": {
+            "type": "blob",
+            "accept": ["image/png", "image/jpeg", "image/webp"],
+            "maxSize": 5242880
+          },
+          "listed": {
+            "type": "boolean",
+            "description": "Whether the club appears in the public directory. Absent means the linked list's visibility decides."
+          },
+          "join": {
+            "type": "ref",
+            "ref": "#join"
+          }
+        }
+      }
+    },
+    "link": {
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2048
+        },
+        "name": {
+          "type": "string",
+          "maxGraphemes": 100
+        }
+      }
+    },
+    "join": {
+      "type": "object",
+      "description": "How a reader asks to join. 'open' means the linked list decides; 'request' means the reader submits this form and the club decides.",
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "knownValues": ["open", "request"]
+        },
+        "fields": {
+          "type": "array",
+          "maxLength": 10,
+          "items": {
+            "type": "ref",
+            "ref": "#joinField"
+          }
+        }
+      }
+    },
+    "joinField": {
+      "type": "object",
+      "required": ["id", "label", "type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "type": {
+          "type": "string",
+          "knownValues": [
+            "text",
+            "longText",
+            "select",
+            "multiSelect",
+            "checkbox",
+            "number",
+            "date",
+            "file"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        },
+        "options": {
+          "type": "array",
+          "maxLength": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 120
+          }
+        },
+        "min": {
+          "type": "integer"
+        },
+        "max": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

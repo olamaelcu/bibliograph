@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.bookClub.activeRead",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "The club's current read cycle, stored in the owner's repo inside the club's space. Literal:self guarantees one active read per club.",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["read", "updatedAt"],
+        "properties": {
+          "read": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The current bookClub.read record."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}
