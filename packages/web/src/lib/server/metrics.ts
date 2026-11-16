@@ -254,7 +254,9 @@ export function normalizeStatus(status: number): string {
 
 /**
  * XRPC methods the edge is expected to see. Everything else is `other`, so a
- * caller cannot mint a new time series by inventing an NSID.
+ * caller cannot mint a new time series by inventing an NSID. The list is pinned
+ * against `serviceMethods()` by `test/metrics.test.ts`: a method added to the
+ * surface fails there instead of silently collapsing into `other`.
  */
 const XRPC_METHODS: Record<string, true> = {
   'com.atproto.feed.describeFeedGenerator': true,
@@ -284,7 +286,37 @@ const XRPC_METHODS: Record<string, true> = {
   'net.olamaelcu.livtet.biblio.resolveContributors': true,
   'net.olamaelcu.livtet.biblio.resolvePublishers': true,
   'net.olamaelcu.livtet.biblio.searchContributors': true,
-  'net.olamaelcu.livtet.biblio.searchPublishers': true
+  'net.olamaelcu.livtet.biblio.searchPublishers': true,
+  'net.olamaelcu.livtet.biblio.getActorProfile': true,
+  'net.olamaelcu.livtet.biblio.getBookOnShelf': true,
+  'net.olamaelcu.livtet.biblio.getGenresOfBook': true,
+  'net.olamaelcu.livtet.biblio.getIdentifiedFormats': true,
+  'net.olamaelcu.livtet.biblio.getReadingGoal': true,
+  'net.olamaelcu.livtet.biblio.getReviewsByBook': true,
+  'net.olamaelcu.livtet.biblio.getShelf': true,
+  'net.olamaelcu.livtet.biblio.getShelversOfBook': true,
+  'net.olamaelcu.livtet.biblio.getShelvingOfBook': true,
+  'net.olamaelcu.livtet.biblio.graph.follow': true,
+  'net.olamaelcu.livtet.biblio.graph.listFollowers': true,
+  'net.olamaelcu.livtet.biblio.graph.unfollow': true,
+  'net.olamaelcu.livtet.biblio.listRecentShelving': true,
+  'net.olamaelcu.livtet.biblio.listReviewsByActor': true,
+  'net.olamaelcu.livtet.biblio.listShelfItems': true,
+  'net.olamaelcu.livtet.biblio.listShelfItemsByBook': true,
+  'net.olamaelcu.livtet.biblio.listShelvesWithBooks': true,
+  'net.olamaelcu.livtet.biblio.profile.set': true,
+  'net.olamaelcu.livtet.biblio.readingGoal.set': true,
+  'net.olamaelcu.livtet.biblio.review.create': true,
+  'net.olamaelcu.livtet.biblio.review.delete': true,
+  'net.olamaelcu.livtet.biblio.review.update': true,
+  'net.olamaelcu.livtet.biblio.shelf.addBooks': true,
+  'net.olamaelcu.livtet.biblio.shelf.addItem': true,
+  'net.olamaelcu.livtet.biblio.shelf.create': true,
+  'net.olamaelcu.livtet.biblio.shelf.delete': true,
+  'net.olamaelcu.livtet.biblio.shelf.removeItem': true,
+  'net.olamaelcu.livtet.biblio.shelf.update': true,
+  'net.olamaelcu.livtet.biblio.status.clear': true,
+  'net.olamaelcu.livtet.biblio.status.set': true
 };
 
 export function normalizeXrpcMethod(method: string): string {
@@ -302,6 +334,21 @@ export function normalizeCatalogOperation(operation: string): string {
 }
 
 const PROXY_OUTCOMES: Record<string, true> = { ok: true, error: true, exception: true };
+
+/** The four places an XRPC call can be served from. */
+const XRPC_BACKENDS: Record<string, true> = {
+  catalog: true,
+  feed: true,
+  happyview: true,
+  pds: true
+};
+
+/** The two upstreams the edge calls on a caller's behalf. */
+const XRPC_UPSTREAMS: Record<string, true> = { happyview: true, pds: true };
+
+export type XrpcBackend = 'catalog' | 'feed' | 'happyview' | 'pds';
+
+export type XrpcUpstream = 'happyview' | 'pds';
 
 const FEED_KINDS: Record<string, true> = {
   public: true,
@@ -425,6 +472,8 @@ export interface WebMetrics {
   readonly httpRequestDuration: Histogram;
   readonly happyviewRequests: Counter;
   readonly pdsProxyRequests: Counter;
+  readonly xrpcRequestDuration: Histogram;
+  readonly upstreamRequestDuration: Histogram;
   readonly catalogQueries: Counter;
   readonly catalogQueryDuration: Histogram;
   readonly catalogHydration: Counter;
@@ -464,6 +513,14 @@ export function createWebMetrics(): WebMetrics {
     pdsProxyRequests: registry.counter(
       'bibliograph_pds_proxy_requests_total',
       'Publisher-record reads proxied to the PDS, by normalized method, outcome and status.'
+    ),
+    xrpcRequestDuration: registry.histogram(
+      'bibliograph_xrpc_request_duration_seconds',
+      'Wall time of one XRPC call at the edge, by normalized method, backend and outcome.'
+    ),
+    upstreamRequestDuration: registry.histogram(
+      'bibliograph_upstream_request_duration_seconds',
+      'Time spent in the outbound hop to HappyView or the PDS, by upstream, normalized method and outcome.'
     ),
     catalogQueries: registry.counter(
       'bibliograph_catalog_queries_total',
@@ -583,15 +640,26 @@ export function recordHttpRequest(
   m.httpRequestDuration.observe({ method, route }, request.durationSeconds);
 }
 
+/**
+ * `ok`, `error` (an upstream said no) and `exception` (the call threw) are the
+ * only proxy outcomes; a missing one is derived from the status the caller saw.
+ */
+function proxyOutcome(request: {
+  status: number;
+  outcome?: 'ok' | 'error' | 'exception';
+}): string {
+  const outcome =
+    request.outcome ?? (request.status >= 200 && request.status < 400 ? 'ok' : 'error');
+  return PROXY_OUTCOMES[outcome] === true ? outcome : 'error';
+}
+
 function recordProxy(
   counter: Counter,
   request: { method: string; status: number; outcome?: 'ok' | 'error' | 'exception' }
 ): void {
-  const outcome =
-    request.outcome ?? (request.status >= 200 && request.status < 400 ? 'ok' : 'error');
   counter.inc({
     method: normalizeXrpcMethod(request.method),
-    outcome: PROXY_OUTCOMES[outcome] === true ? outcome : 'error',
+    outcome: proxyOutcome(request),
     status: normalizeStatus(request.status)
   });
 }
@@ -608,6 +676,55 @@ export function recordPdsProxyRequest(
   request: { method: string; status: number; outcome?: 'ok' | 'error' | 'exception' }
 ): void {
   recordProxy(m.pdsProxyRequests, request);
+}
+
+/**
+ * One XRPC call timed end to end at the edge, labelled with the backend that
+ * answered it. Recorded by the route's dependency wrapper, so every call lands
+ * in exactly one series whatever `dispatchGet`/`dispatchPost` chose.
+ */
+export function recordXrpcRequest(
+  m: WebMetrics,
+  request: {
+    method: string;
+    backend: XrpcBackend;
+    status: number;
+    outcome?: 'ok' | 'error' | 'exception';
+    durationSeconds: number;
+  }
+): void {
+  m.xrpcRequestDuration.observe(
+    {
+      method: normalizeXrpcMethod(request.method),
+      backend: XRPC_BACKENDS[request.backend] === true ? request.backend : 'catalog',
+      outcome: proxyOutcome(request)
+    },
+    request.durationSeconds
+  );
+}
+
+/**
+ * The outbound hop alone: `xrpc − upstream` is this edge's own overhead, and
+ * `upstream` is what HappyView (or the PDS) cost the caller.
+ */
+export function recordUpstreamRequest(
+  m: WebMetrics,
+  request: {
+    method: string;
+    upstream: XrpcUpstream;
+    status: number;
+    outcome?: 'ok' | 'error' | 'exception';
+    durationSeconds: number;
+  }
+): void {
+  m.upstreamRequestDuration.observe(
+    {
+      method: normalizeXrpcMethod(request.method),
+      upstream: XRPC_UPSTREAMS[request.upstream] === true ? request.upstream : 'happyview',
+      outcome: proxyOutcome(request)
+    },
+    request.durationSeconds
+  );
 }
 
 /**

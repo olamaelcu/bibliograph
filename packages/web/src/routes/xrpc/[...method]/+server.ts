@@ -6,6 +6,8 @@ import {
   recordCatalogQuery,
   recordCatalogSearchDecision,
   recordCatalogSearchMatches,
+  recordXrpcRequest,
+  type XrpcBackend,
 } from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
 import { proxyPdsRead } from "$lib/server/pds";
@@ -29,7 +31,7 @@ import {
   dispatchPost,
   type XrpcDependencies,
 } from "$lib/server/xrpc/dispatch";
-import { describeService } from "$lib/server/xrpc/surface";
+import { SERVICE_DESCRIBE, describeService } from "$lib/server/xrpc/surface";
 import {
   EntityQueryError,
   EntityUriError,
@@ -50,8 +52,10 @@ import {
   GET_PUBLISHER,
   LIST_EDITIONS_BY_CONTRIBUTOR,
   RESOLVE_CONTRIBUTORS,
+  RESOLVE_EDITIONS,
   RESOLVE_PUBLISHERS,
   SEARCH_CONTRIBUTORS,
+  SEARCH_EDITIONS,
   SEARCH_PUBLISHERS,
 } from "$lib/server/catalog/entity-methods";
 import { decodeOffsetCursor } from "$lib/server/catalog/sql";
@@ -65,6 +69,7 @@ import {
 } from "$lib/server/catalog/jobs";
 import { isbn13sFromIdentifiers } from "$lib/server/catalog/isbn";
 import { describeFeedGenerator, getFeedSkeleton } from "$lib/server/feeds";
+import { DESCRIBE_FEED_GENERATOR, GET_FEED_SKELETON } from "$lib/server/feeds/methods";
 import { coversBaseUrl } from "$lib/server/covers/config";
 
 // Catalog discovery is anonymous, so bound the work a body can request.
@@ -495,6 +500,41 @@ async function handleEntityResolve(request: Request, method: string): Promise<Re
 }
 
 /**
+ * Time one XRPC call and label it with the backend that answered it. Wrapping
+ * the dependency table is what makes the metric count every call exactly once:
+ * `dispatchGet`/`dispatchPost` pick the handler, and this records whichever one
+ * they picked without the route re-classifying the NSID a second time.
+ */
+function timed<Args extends unknown[]>(
+  backend: XrpcBackend,
+  run: (...args: Args) => Response | Promise<Response>,
+  methodOf: (...args: Args) => string,
+): (...args: Args) => Promise<Response> {
+  return async (...args: Args) => {
+    const started = performance.now();
+    try {
+      const response = await run(...args);
+      recordXrpcRequest(metrics, {
+        method: methodOf(...args),
+        backend,
+        status: response.status,
+        durationSeconds: (performance.now() - started) / 1000,
+      });
+      return response;
+    } catch (error) {
+      recordXrpcRequest(metrics, {
+        method: methodOf(...args),
+        backend,
+        status: 0,
+        outcome: "exception",
+        durationSeconds: (performance.now() - started) / 1000,
+      });
+      throw error;
+    }
+  };
+}
+
+/**
  * Catalog discovery is served here, from the deployment's own catalog tables,
  * because the books-wg lexicons call them read-only procedures that must stay
  * anonymous. HappyView's procedure path requires a DPoP session for a PDS
@@ -505,15 +545,15 @@ async function handleEntityResolve(request: Request, method: string): Promise<Re
  */
 const dependencies: XrpcDependencies = {
   // Static: no database, no auth, no FEED_GENERATOR_DID, so it never 503s.
-  serviceDescribe: () => json(describeService()),
-  describeFeedGenerator,
-  getFeedSkeleton,
-  entityGet: handleEntityGet,
-  resolveEditions: handleResolve,
-  searchEditions: handleSearch,
-  entityResolve: handleEntityResolve,
-  proxyPdsRead,
-  forward,
+  serviceDescribe: timed("catalog", () => json(describeService()), () => SERVICE_DESCRIBE),
+  describeFeedGenerator: timed("feed", describeFeedGenerator, () => DESCRIBE_FEED_GENERATOR),
+  getFeedSkeleton: timed("feed", getFeedSkeleton, () => GET_FEED_SKELETON),
+  entityGet: timed("catalog", handleEntityGet, (_request, method) => method),
+  resolveEditions: timed("catalog", handleResolve, () => RESOLVE_EDITIONS),
+  searchEditions: timed("catalog", handleSearch, () => SEARCH_EDITIONS),
+  entityResolve: timed("catalog", handleEntityResolve, (_request, method) => method),
+  proxyPdsRead: timed("pds", proxyPdsRead, (method) => method),
+  forward: timed("happyview", forward, (method) => method),
 };
 
 const handleGet: RequestHandler = ({ params, request }) =>

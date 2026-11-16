@@ -26,8 +26,11 @@ import {
   recordHappyViewRequest,
   recordHttpRequest,
   recordPdsProxyRequest,
+  recordUpstreamRequest,
+  recordXrpcRequest,
   renderWebMetrics
 } from '../src/lib/server/metrics.ts';
+import { serviceMethods } from '../src/lib/server/xrpc/surface.ts';
 
 /**
  * The registry is the contract infra scrapes: exact family names, label names,
@@ -293,6 +296,8 @@ test('an untouched registry still exposes every contracted family header', () =>
     ['bibliograph_http_request_duration_seconds', 'histogram'],
     ['bibliograph_happyview_requests_total', 'counter'],
     ['bibliograph_pds_proxy_requests_total', 'counter'],
+    ['bibliograph_xrpc_request_duration_seconds', 'histogram'],
+    ['bibliograph_upstream_request_duration_seconds', 'histogram'],
     ['bibliograph_catalog_queries_total', 'counter'],
     ['bibliograph_catalog_query_duration_seconds', 'histogram'],
     ['bibliograph_feed_requests_total', 'counter'],
@@ -311,4 +316,61 @@ test('an untouched registry still exposes every contracted family header', () =>
     assert.match(text, new RegExp(`^# TYPE ${name} ${type}$`, 'm'));
   }
   assert.match(text, /^$/m);
+});
+test('XRPC and upstream histograms are labelled by method, backend and outcome', () => {
+  const metrics = createWebMetrics();
+  recordXrpcRequest(metrics, {
+    method: 'community.lexicon.media.book.searchEditions',
+    backend: 'catalog',
+    status: 200,
+    durationSeconds: 0.02
+  });
+  recordXrpcRequest(metrics, {
+    method: 'net.olamaelcu.livtet.biblio.getReviewsByBook',
+    backend: 'happyview',
+    status: 502,
+    durationSeconds: 0.3
+  });
+  recordXrpcRequest(metrics, {
+    method: 'invented.method',
+    backend: 'pds',
+    status: 0,
+    outcome: 'exception',
+    durationSeconds: 4
+  });
+  recordUpstreamRequest(metrics, {
+    method: 'net.olamaelcu.livtet.biblio.getReviewsByBook',
+    upstream: 'happyview',
+    status: 502,
+    durationSeconds: 0.28
+  });
+
+  const text = renderWebMetrics(metrics);
+  // The backend that answered is the split the dashboard needs: the same NSID
+  // must never share a series between the edge and the proxied AppView.
+  assert.match(
+    text,
+    /^bibliograph_xrpc_request_duration_seconds_bucket\{method="community\.lexicon\.media\.book\.searchEditions",backend="catalog",outcome="ok",le="0\.025"\} 1$/m
+  );
+  assert.match(
+    text,
+    /^bibliograph_xrpc_request_duration_seconds_bucket\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",backend="happyview",outcome="error",le="0\.5"\} 1$/m
+  );
+  // An NSID outside the allowlist collapses instead of minting a series.
+  assert.match(
+    text,
+    /^bibliograph_xrpc_request_duration_seconds_bucket\{method="other",backend="pds",outcome="exception",le="\+Inf"\} 1$/m
+  );
+  assert.match(
+    text,
+    /^bibliograph_upstream_request_duration_seconds_bucket\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",upstream="happyview",outcome="error",le="0\.5"\} 1$/m
+  );
+  assert.match(text, /^bibliograph_upstream_request_duration_seconds_count\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",upstream="happyview",outcome="error"\} 1$/m);
+});
+
+test('every NSID the deployment answers keeps its own series', () => {
+  // Pins the allowlist to the surface: a method added to `serviceMethods()`
+  // fails here instead of quietly reporting as `other` forever.
+  const collapsed = serviceMethods().filter((method) => normalizeXrpcMethod(method) !== method);
+  assert.deepEqual(collapsed, []);
 });

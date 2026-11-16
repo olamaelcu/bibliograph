@@ -1,6 +1,7 @@
 import { env } from "$env/dynamic/private";
 
 import { metrics, recordHappyViewRequest } from "$lib/server/metrics";
+import { recordUpstreamRequest } from "$lib/server/metrics";
 
 /** Upstream request headers worth relaying; everything else is hop-by-hop. */
 const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "authorization", "dpop"] as const;
@@ -154,12 +155,26 @@ async function forwardRequest(method: string, request: Request): Promise<Respons
  * counted as an exception before propagating.
  */
 export async function forward(method: string, request: Request): Promise<Response> {
+  const started = performance.now();
   try {
     const response = await forwardRequest(method, request);
     recordHappyViewRequest(metrics, { method, status: response.status });
+    recordUpstreamRequest(metrics, {
+      method,
+      upstream: "happyview",
+      status: response.status,
+      durationSeconds: (performance.now() - started) / 1000,
+    });
     return response;
   } catch (error) {
     recordHappyViewRequest(metrics, { method, status: 0, outcome: "exception" });
+    recordUpstreamRequest(metrics, {
+      method,
+      upstream: "happyview",
+      status: 0,
+      outcome: "exception",
+      durationSeconds: (performance.now() - started) / 1000,
+    });
     throw error;
   }
 }

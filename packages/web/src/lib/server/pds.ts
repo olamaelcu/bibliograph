@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/private';
 
 import { metrics, recordPdsProxyRequest } from '$lib/server/metrics';
+import { recordUpstreamRequest } from '$lib/server/metrics';
 
 /** Request headers worth relaying; everything else is hop-by-hop. */
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'] as const;
@@ -66,12 +67,26 @@ async function proxyPdsReadRequest(method: string, request: Request): Promise<Re
 
 /** Count one publisher-record read and relay it, with the status the caller saw. */
 export async function proxyPdsRead(method: string, request: Request): Promise<Response> {
+  const started = performance.now();
   try {
     const response = await proxyPdsReadRequest(method, request);
     recordPdsProxyRequest(metrics, { method, status: response.status });
+    recordUpstreamRequest(metrics, {
+      method,
+      upstream: 'pds',
+      status: response.status,
+      durationSeconds: (performance.now() - started) / 1000
+    });
     return response;
   } catch (error) {
     recordPdsProxyRequest(metrics, { method, status: 0, outcome: 'exception' });
+    recordUpstreamRequest(metrics, {
+      method,
+      upstream: 'pds',
+      status: 0,
+      outcome: 'exception',
+      durationSeconds: (performance.now() - started) / 1000
+    });
     throw error;
   }
 }

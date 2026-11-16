@@ -1,3 +1,25 @@
+bibliograph-web (0.2.22-5) unstable; urgency=medium
+
+  * 0.2.22-5: every XRPC call is timed, by NSID and by the backend that
+    answered it.
+
+    - `bibliograph_xrpc_request_duration_seconds{method, backend, outcome}` is
+      recorded around the handler dispatch actually runs, so one series per
+      call whichever of `catalog`, `feed`, `happyview` or `pds` served it. The
+      HTTP histogram could not answer this: `route` is the id
+      `/xrpc/[...method]`, so every NSID shares one series.
+    - `bibliograph_upstream_request_duration_seconds{method, upstream,
+      outcome}` times the HappyView and PDS hops alone, so `xrpc - upstream` is
+      this edge's own cost and `upstream` is what the caller waited on beyond
+      it.
+    - The NSID allowlist was missing 30 of the 48 methods this deployment
+      answers — `getGenresOfBook` and `getIdentifiedFormats` among them — so
+      those calls were reported as `method="other"`. It now matches
+      `serviceMethods()`, and a test fails when a method is added to the
+      surface without being added to the allowlist.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Sun, 15 Nov 2026 23:56:00 +0000
+
 bibliograph-web (0.2.22-1) unstable; urgency=medium
 
   * 0.2.22 release: the docs page and `/api/stats` stop counting the catalog on
