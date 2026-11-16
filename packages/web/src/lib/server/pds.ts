@@ -6,8 +6,18 @@ import { recordUpstreamRequest } from '$lib/server/metrics';
 /** Request headers worth relaying; everything else is hop-by-hop. */
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type'] as const;
 
-/** A hung PDS becomes a `502` rather than holding the caller open forever. */
-const PDS_TIMEOUT_MS = 15_000;
+/**
+ * A hung PDS becomes a `504` rather than holding the caller open forever.
+ *
+ * The bound sits under the budget the caller applies to these reads, since a
+ * response that arrives after the client gave up is pure waste — the edge would
+ * be holding a socket and a PDS read for nobody, which is how a stalled PDS
+ * turned into a pile of `499`s at the proxy. Livtet's biblio client bounds an
+ * ordinary upstream read at 5 s (`REQUEST_TIMEOUT_MS`) and its catalog health
+ * probe at 2.5 s, so 4 s leaves a second for the response to travel and be
+ * parsed. It is still forty times the healthy PDS median of 50–100 ms.
+ */
+const PDS_TIMEOUT_MS = 4_000;
 
 function failure(status: number, error: string, message?: string): Response {
   return new Response(JSON.stringify(message === undefined ? { error } : { error, message }), {
@@ -51,7 +61,10 @@ async function proxyPdsReadRequest(method: string, request: Request): Promise<Re
       headers,
       signal: AbortSignal.timeout(PDS_TIMEOUT_MS)
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      return failure(504, 'UpstreamTimeout');
+    }
     return failure(502, 'UpstreamUnavailable');
   }
 
