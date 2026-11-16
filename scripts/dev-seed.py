@@ -4,8 +4,9 @@
 Two subcommands share one account path:
 
   accounts  create (or report) the fixed fixture accounts on the local PDS
-  fixtures  ensure the accounts, write deterministic social + Livtet records,
-            backfill HappyView, and verify a few queries return the seeded data
+  fixtures  ensure the accounts, write deterministic social + Livtet + Semble
+            records, backfill HappyView, and verify a few queries return the
+            seeded data
 
 The network is hermetic: the PDS is `https://pds.127-0-0-1.sslip.io` (Caddy's
 internal CA), DIDs are registered in the local PLC, and nothing is announced to
@@ -74,6 +75,15 @@ BSKY_FOLLOW = "app.bsky.graph.follow"
 BSKY_POST = "app.bsky.feed.post"
 BSKY_LIKE = "app.bsky.feed.like"
 
+# Semble's records. A URL card names the page it saves; a collection is what
+# a reader files it into; a link joins the two. Livtet's "Featured in Semble"
+# sections read them through the same query Semble's appview answers
+# (`network.cosmik.collection.getForUrl`), so the fixtures below make those
+# sections show real collections in development.
+COSMIK_COLLECTION = "network.cosmik.collection"
+COSMIK_CARD = "network.cosmik.card"
+COSMIK_LINK = "network.cosmik.collectionLink"
+
 # Collections HappyView indexes. One `{did}` backfill walks the repo and keeps
 # only these, so a single job per account is enough.
 INDEXED_COLLECTIONS = [
@@ -91,6 +101,9 @@ SEEDED_COLLECTIONS = INDEXED_COLLECTIONS + [
     BSKY_FOLLOW,
     BSKY_POST,
     BSKY_LIKE,
+    COSMIK_COLLECTION,
+    COSMIK_CARD,
+    COSMIK_LINK,
 ]
 
 FIXED_SHELVES = [
@@ -148,6 +161,37 @@ FIXTURE_EPOCH = datetime(2026, 10, 5, 8, 0, 0, tzinfo=timezone.utc)
 # TID alphabet: rkeys for `key: tid` collections must look like real record
 # keys even though the local PDS is permissive.
 TID_ALPHABET = "234567abcdefghijklmnopqrstuvwxyz"
+
+
+def _origins() -> list[str]:
+    raw = os.environ.get("LIVTET_ORIGINS") or "http://127.0.0.1:6010,http://localhost:6010"
+    return [origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()]
+
+
+# Sorted by what a reader would actually curate: two open shelves and one the
+# group keeps closed, so a page shows the "Collaborators only" label too.
+SEMBLE_COLLECTIONS = [
+    (
+        "Books I press into hands",
+        "The ones I buy a second copy of so I can lend without losing mine.",
+        "OPEN",
+    ),
+    (
+        "Winter reading",
+        "Long, cold-weather novels. Best started in November.",
+        "OPEN",
+    ),
+    (
+        "Reading group picks",
+        "Only the group adds here; ask before you link something.",
+        "CLOSED",
+    ),
+]
+
+# Rkeys are reserved per (account, page, origin slot) from a fixed stride, so
+# adding or dropping an origin never shifts an existing record's key: the other
+# origins' cards simply stop being written (and stop matching anything).
+SEMBLE_ORIGIN_SLOTS = 4
 
 
 class ApiError(RuntimeError):
@@ -470,16 +514,32 @@ def reconcile_follows(did: str, token: str, records: list[dict]) -> None:
         print(f"{did} {FOLLOW}: removed {len(deletes)} legacy/duplicate follows")
 
 
-def apply_writes(did: str, token: str, writes: list[dict]) -> dict[str, str]:
+def apply_writes(
+    did: str, token: str, writes: list[dict], attempts: int = 3
+) -> dict[str, str]:
     """Send applyWrites in batches; return uri -> cid for the written records."""
     cids: dict[str, str] = {}
     for start in range(0, len(writes), 100):
-        data = http(
-            "POST",
-            f"{PDS}/xrpc/com.atproto.repo.applyWrites",
-            {"repo": did, "writes": writes[start : start + 100]},
-            token=token,
-        )
+        batch = writes[start : start + 100]
+        data = None
+        # The local PDS answers InternalServerError instead of a 4xx for a write
+        # it dislikes, so a 5xx is retried before the caller gives up on the
+        # batch (and `--reset` means a half-written run leaves only an empty
+        # network behind).
+        for attempt in range(1, attempts + 1):
+            try:
+                data = http(
+                    "POST",
+                    f"{PDS}/xrpc/com.atproto.repo.applyWrites",
+                    {"repo": did, "writes": batch},
+                    token=token,
+                )
+                break
+            except ApiError as err:
+                if err.status < 500 or attempt == attempts:
+                    raise
+                print(f"{did}: applyWrites returned {err.status}; retrying ({attempt}/{attempts - 1})")
+                time.sleep(2 * attempt)
         for result in data.get("results", []):
             uri, cid = result.get("uri"), result.get("cid")
             if uri and cid:
@@ -500,7 +560,26 @@ def upsert_writes(did: str, token: str, records: list[dict], existing: dict[str,
                 "value": value,
             }
         )
-    return apply_writes(did, token, writes)
+    try:
+        return apply_writes(did, token, writes)
+    except ApiError as err:
+        if err.status < 500:
+            raise
+        # One record the PDS will not take aborts the batch with a 500, and the
+        # batch is the account's whole record set. Retrying record by record
+        # seeds everything else and names what it had to skip, instead of
+        # leaving the account empty and the run dead.
+        print(f"{did}: applyWrites failed ({err.status}); writing one record at a time")
+        cids: dict[str, str] = {}
+        for record, write in zip(records, writes):
+            try:
+                cids.update(apply_writes(did, token, [write], attempts=1))
+            except ApiError as record_error:
+                print(
+                    f"  skipped {record['collection']}/{record['rkey']}: "
+                    f"HTTP {record_error.status}"
+                )
+        return cids
 
 
 def fixture_records(
@@ -674,6 +753,115 @@ def fixture_records(
     )
 
     return records
+
+
+def split_at_uri(uri: str) -> tuple[str, str, str] | None:
+    """`(did, collection, rkey)` for an at-uri, or None when it is not one."""
+    if not uri.startswith("at://"):
+        return None
+    parts = uri[len("at://") :].split("/")
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
+
+
+def semble_page_paths(index: int, did: str, editions: list[dict]) -> list[str]:
+    """The Livtet pages one fixture account files into its collection.
+
+    Two editions shared by every account are what makes a book page show a list
+    of collections rather than just its curator's; the rest are the account's
+    own shelf, one of its reviews, and a contributor it shares with the
+    catalog — so all three permalink routes have fixture backlinks.
+    """
+    count = len(editions)
+    paths: list[str] = []
+
+    def add(path: str | None) -> None:
+        if path and path not in paths:
+            paths.append(path)
+
+    def book_path(edition: dict) -> str | None:
+        parts = split_at_uri(edition["uri"])
+        return f"/book/{parts[0]}/{parts[2]}" if parts else None
+
+    chosen = [editions[0], editions[1]] if count >= 2 else list(editions)
+    chosen += [editions[(index - 1 + slot) % count] for slot in range(2)]
+    for edition in chosen:
+        add(book_path(edition))
+
+    # The first review `fixture_records` writes for this account, and the first
+    # contributor that edition names.
+    add(f"/review/{did}/{tid(9000 + index * 10)}")
+    contributor = next(
+        (
+            entry.get("ref")
+            for edition in chosen
+            for entry in edition.get("contributors", [])
+            if entry.get("ref")
+        ),
+        None,
+    )
+    parts = split_at_uri(contributor) if contributor else None
+    if parts:
+        add(f"/contributor/{parts[0]}/{parts[2]}")
+    return paths
+
+
+def semble_records(index: int, did: str, editions: list[dict]) -> dict:
+    """One account's Semble collection, its URL cards, and the links to write.
+
+    A `collectionLink` is a strongRef to both the card and the collection, so
+    its CIDs only exist after those records are written. The caller writes
+    `records` first, then builds the link values from the returned CIDs; the
+    tuples here are `(link_rkey, collection_rkey, card_rkey, added_at)`.
+    """
+    day = (index - 1) * 1440
+    name, description, access = SEMBLE_COLLECTIONS[(index - 1) % len(SEMBLE_COLLECTIONS)]
+    collection_rkey = tid(11000 + index * 10)
+    records = [
+        {
+            "collection": COSMIK_COLLECTION,
+            "rkey": collection_rkey,
+            "value": {
+                "$type": COSMIK_COLLECTION,
+                "name": name,
+                "description": description,
+                "accessType": access,
+                "createdAt": stamp(day + 480),
+                "updatedAt": stamp(day + 520),
+            },
+        }
+    ]
+
+    origins = _origins()
+    links: list[tuple[str, str, str, str]] = []
+    if len(origins) > SEMBLE_ORIGIN_SLOTS:
+        raise SystemExit(
+            f"ERROR: LIVTET_ORIGINS names {len(origins)} origins; "
+            f"the fixtures reserve {SEMBLE_ORIGIN_SLOTS}"
+        )
+    stride = SEMBLE_ORIGIN_SLOTS
+    for slot, path in enumerate(semble_page_paths(index, did, editions)):
+        added = stamp(day + 500 + slot)
+        for origin_index, origin in enumerate(origins):
+            card_rkey = tid(12000 + index * 100 + slot * stride + origin_index)
+            link_rkey = tid(15000 + index * 100 + slot * stride + origin_index)
+            if not is_tid(card_rkey) or not is_tid(link_rkey):
+                raise SystemExit(f"ERROR: Semble fixture rkey is not a TID: {card_rkey}")
+            url = origin + path
+            records.append(
+                {
+                    "collection": COSMIK_CARD,
+                    "rkey": card_rkey,
+                    "value": {
+                        "$type": COSMIK_CARD,
+                        "type": "URL",
+                        "url": url,
+                        "content": {"url": url},
+                        "createdAt": added,
+                    },
+                }
+            )
+            links.append((link_rkey, collection_rkey, card_rkey, added))
+    return {"records": records, "links": links}
 
 
 def reset_account(did: str, token: str) -> None:
@@ -927,6 +1115,51 @@ def command_fixtures(args: argparse.Namespace) -> int:
         for record in records:
             totals[record["collection"]] = totals.get(record["collection"], 0) + 1
         print(f"{accounts[index][0]}: wrote {len(records)} records")
+
+    # Phase 1b: Semble's records — one collection per account, a URL card per
+    # Livtet page, and the link that files each card into that collection. The
+    # links are strongRefs, so they are written once the cards' cids exist.
+    semble_totals = {COSMIK_COLLECTION: 0, COSMIK_CARD: 0, COSMIK_LINK: 0}
+    for index, (_handle, did) in accounts.items():
+        token = sessions[index]["token"]
+        semble = semble_records(index, did, editions)
+        existing = {
+            collection: fetch_record_keys(did, collection, token)
+            for collection in (COSMIK_COLLECTION, COSMIK_CARD, COSMIK_LINK)
+        }
+        written = upsert_writes(did, token, semble["records"], existing)
+
+        links = []
+        for rkey, collection_rkey, card_rkey, added in semble["links"]:
+            card_uri = f"at://{did}/{COSMIK_CARD}/{card_rkey}"
+            collection_uri = f"at://{did}/{COSMIK_COLLECTION}/{collection_rkey}"
+            card_cid = written.get(card_uri)
+            collection_cid = written.get(collection_uri)
+            if not card_cid or not collection_cid:
+                continue
+            links.append(
+                {
+                    "collection": COSMIK_LINK,
+                    "rkey": rkey,
+                    "value": {
+                        "$type": COSMIK_LINK,
+                        "collection": {"uri": collection_uri, "cid": collection_cid},
+                        "card": {"uri": card_uri, "cid": card_cid},
+                        "addedBy": did,
+                        "addedAt": added,
+                        "createdAt": added,
+                    },
+                }
+            )
+        upsert_writes(did, token, links, existing)
+
+        cards = len(semble["records"]) - 1
+        semble_totals[COSMIK_COLLECTION] += 1
+        semble_totals[COSMIK_CARD] += cards
+        semble_totals[COSMIK_LINK] += len(links)
+        print(f"{accounts[index][0]}: 1 collection, {cards} cards, {len(links)} links")
+    for collection, seeded in semble_totals.items():
+        totals[collection] = totals.get(collection, 0) + seeded
 
     # Phase 2: one like per account, on the next account's first post.
     likes = 0
