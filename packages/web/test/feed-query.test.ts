@@ -152,7 +152,72 @@ test('a Bookhive entry carries its shelf and the edition its hive id resolved to
     BOOK_STATUS_COLLECTION,
     BUZZ_BOOKHIVE_BOOK
   ]);
-  assert.match(pool.calls[0]!.sql, /LEFT JOIN public\.appview_bookhive_lua/);
+  // One edition per hive id: the lookup is grouped, then joined on the page's
+  // own ids, so a hive id that names several editions cannot multiply the row.
+  assert.match(pool.calls[0]!.sql, /JOIN public\.appview_bookhive_lua m ON m\.hive_id = p\.hive_id/);
+  assert.match(pool.calls[0]!.sql, /LEFT JOIN mapped ON mapped\.hive_id = p\.hive_id/);
+});
+
+test('a page never repeats a post, even when the row comes back twice', async () => {
+  // Production served `buzz.bookhive.book/3n2f3…` twice — same cid, same
+  // createdAt — every copy of it under a different edition: the lookup joined
+  // one hive id to several imported editions. A repeat is not a second entry:
+  // the client keys its rows by `post`, and Svelte's keyed each throws on the
+  // collision, blanking the page. One row per post, and the probe row counted
+  // after the collapse.
+  const twice = row(
+    'at://did:plc:r/buzz.bookhive.book/1',
+    BUZZ_BOOKHIVE_BOOK,
+    { createdAt: '2026-03-03T00:00:00.000Z', status: 'buzz.bookhive.defs#reading' },
+    '2026-03-03T00:00:00.000Z',
+    'at://did:plc:pub/community.lexicon.media.book.edition/a'
+  );
+  const other = row(
+    'at://did:plc:r/buzz.bookhive.book/2',
+    BUZZ_BOOKHIVE_BOOK,
+    { createdAt: '2026-03-02T00:00:00.000Z', status: 'buzz.bookhive.defs#reading' },
+    '2026-03-02T00:00:00.000Z',
+    'at://did:plc:pub/community.lexicon.media.book.edition/b'
+  );
+  const pool = queuedPool([[twice, { ...twice, book_uri: 'at://did:plc:pub/community.lexicon.media.book.edition/other' }, other]]);
+
+  const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
+
+  assert.deepEqual(
+    page.feed.map((item) => item.post),
+    ['at://did:plc:r/buzz.bookhive.book/1', 'at://did:plc:r/buzz.bookhive.book/2']
+  );
+  // The first copy's reason stands: the duplicate editions collapsed to one
+  // pick, not to a second row.
+  assert.equal(page.feed[0]!.reason, 'bookhive:reading|at://did:plc:pub/community.lexicon.media.book.edition/a');
+});
+
+test('a duplicate row does not fake a next page', async () => {
+  const only = row(
+    'at://did:plc:r/review/1',
+    REVIEW_COLLECTION,
+    { createdAt: '2026-03-03T00:00:00.000Z' },
+    '2026-03-03T00:00:00.000Z'
+  );
+  const pool = queuedPool([[only, only]]);
+
+  const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 1 });
+
+  assert.equal(page.feed.length, 1);
+  assert.equal(page.cursor, undefined);
+});
+
+test('the page query groups the edition lookup and dedupes by post', async () => {
+  const pool = queuedPool([[]]);
+  await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 5 });
+
+  const sql = pool.calls[0]!.sql;
+  // One edition per hive id: the view is many-to-one over `edition_identifiers`.
+  assert.match(sql, /mapped AS \(\s*SELECT p\.hive_id, min\(m\.edition_uri\)/);
+  assert.match(sql, /GROUP BY p\.hive_id/);
+  assert.match(sql, /LEFT JOIN mapped ON mapped\.hive_id = p\.hive_id/);
+  // The skeleton's contract, enforced where the page is built.
+  assert.match(sql, /DISTINCT ON \(uri\)/);
 });
 
 test('a Bookhive entry with no imported edition still feeds with its shelf', async () => {

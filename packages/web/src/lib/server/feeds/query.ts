@@ -330,13 +330,38 @@ export async function fetchFeedPage(
   // reason keeps its `bookhive:<shelf>` prefix). Materialised so the lookup runs
   // for the emitted page only, never as a join input the sorted scan has to
   // walk.
+  //
+  // One edition per hive id, because the lookup cannot be a plain join: the
+  // view is `edition_identifiers` filtered to `bookhive.buzz`, keyed
+  // `(edition_uri, issuer, value)`, so one `bk_…` may name several editions —
+  // the import mints one per catalog book and a re-import mints another — and
+  // joining it row-for-row emitted the same post once per edition. `min()` is
+  // the deterministic pick; grouping over the page's own hive ids costs a
+  // handful of index lookups, not a scan of the view.
+  //
+  // `DISTINCT ON (uri)` is the skeleton's contract: a page never repeats a
+  // `post`. A repeat is not a second entry — the client keys its rows by it —
+  // and both the extra editions above and an index that holds a record twice
+  // collapse here, before the page is cut to length.
   const sql = `WITH page AS MATERIALIZED (
                  ${branches.join('\n                 UNION ALL\n                 ')}
+               ), mapped AS (
+                 SELECT p.hive_id, min(m.edition_uri) AS edition_uri
+                   FROM page p
+                   JOIN public.appview_bookhive_lua m ON m.hive_id = p.hive_id
+                  GROUP BY p.hive_id
+               ), joined AS (
+                 SELECT p.uri, p.collection, p.record, p.created_at, mapped.edition_uri AS book_uri
+                   FROM page p
+                   LEFT JOIN mapped ON mapped.hive_id = p.hive_id
+               ), distinct_posts AS (
+                 SELECT DISTINCT ON (uri) uri, collection, record, created_at, book_uri
+                   FROM joined
+                  ORDER BY uri, created_at DESC NULLS LAST
                )
-               SELECT p.uri, p.collection, p.record, p.created_at, m.edition_uri AS book_uri
-                 FROM page p
-                 LEFT JOIN public.appview_bookhive_lua m ON m.hive_id = p.hive_id
-                ORDER BY p.created_at DESC NULLS LAST, p.uri DESC
+               SELECT uri, collection, record, created_at, book_uri
+                 FROM distinct_posts
+                ORDER BY created_at DESC NULLS LAST, uri DESC
                 LIMIT ${limitParam}`;
 
   const pageStarted = performance.now();
@@ -346,11 +371,20 @@ export async function fetchFeedPage(
     kind: options.kind,
     durationSeconds: (performance.now() - pageStarted) / 1000
   });
-  const rows = result.rows
-    .map(asFeedRow)
-    .filter((row): row is FeedRow => row !== null)
-    .slice(0, options.limit);
+  // One row per `post`, before the page is cut: the SQL says the same, and this
+  // keeps the contract here so a future change to the query cannot hand a
+  // client a page that repeats an entry it keys by. The probe row is counted
+  // after the collapse, so a duplicate never masquerades as "there is more".
+  const seen = new Set<string>();
+  const distinct: FeedRow[] = [];
+  for (const raw of result.rows) {
+    const row = asFeedRow(raw);
+    if (row === null || seen.has(row.uri)) continue;
+    seen.add(row.uri);
+    distinct.push(row);
+  }
 
+  const rows = distinct.slice(0, options.limit);
   const feed = rows.map((row) => {
     const item: FeedSkeletonItem = { post: row.uri };
     const reason = reasonFor(row.collection, row.record, row.book_uri);
@@ -360,7 +394,7 @@ export async function fetchFeedPage(
 
   const last = rows.at(-1);
   const page: FeedSkeleton = { feed };
-  if (result.rows.length > options.limit && last) {
+  if (distinct.length > options.limit && last) {
     page.cursor = encodeCursor({ c: last.created_at, u: last.uri });
   }
   return page;
