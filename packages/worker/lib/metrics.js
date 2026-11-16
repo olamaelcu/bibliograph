@@ -73,19 +73,34 @@ export async function readOutboxStats(pool, { publisherDid, leaseMs = DEFAULT_LE
 }
 
 /**
+ * The Bookhive count is a durable gauge, not a live one: one count per minute is
+ * enough. The walk that moves it runs far slower than that, and a scrape every
+ * 15 s multiplied by a count costing 0.7–1.4 s was pure waste on a 2-vCPU box.
+ */
+const BOOKHIVE_STATS_TTL_MS = 60_000;
+
+/** Keyed on the pool object so a restarted worker starts cold. */
+const bookhiveStatsCache = new WeakMap();
+
+/**
  * How many catalog books Bookhive's hive ids currently name.
  *
- * One indexed count over `edition_identifiers` on every scrape: the durable
- * record of the import, independent of which process ran it and across
- * restarts. The issuer is a fixed token, so `edition_identifiers_lookup_idx`
- * serves the count.
+ * One indexed count over `edition_identifiers`, refreshed at most once a
+ * minute: the durable record of the import, independent of which process ran it
+ * and across restarts. The issuer is a fixed token, so
+ * `edition_identifiers_lookup_idx` serves the count.
  */
 export async function readBookhiveStats(pool) {
+  const cached = bookhiveStatsCache.get(pool);
+  if (cached !== undefined && Date.now() - cached.at < BOOKHIVE_STATS_TTL_MS) return cached.value;
+
   const result = await pool.query(
     'SELECT count(*) AS editions FROM edition_identifiers WHERE issuer = $1',
     [BOOKHIVE_ISSUER]
   );
-  return { editions: Math.trunc(nonNegative(result.rows[0]?.editions)) };
+  const value = { editions: Math.trunc(nonNegative(result.rows[0]?.editions)) };
+  bookhiveStatsCache.set(pool, { at: Date.now(), value });
+  return value;
 }
 
 /**
