@@ -43,6 +43,14 @@ mkdir -p .cache
 docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$OUT" >/dev/null
 chmod 644 "$OUT"
 
+# The PDS resolves a `did:web` document through Caddy, so it has to trust the
+# root this deployment signs with. The rsky image carries no anchor directory
+# for a mounted CA, so the whole store is replaced by this bundle: the machine's
+# own anchors plus Caddy's. Built from the *host* store — a dev stack's outbound
+# TLS already goes through it — and read by the `pds` compose service.
+cat /etc/ssl/certs/ca-certificates.crt "$OUT" > .cache/pds-ca-bundle.crt
+chmod 644 .cache/pds-ca-bundle.crt
+
 # Every NSS database on this machine that exists. certutil needs the `sql:`
 # prefix on modern profiles; older ones use the legacy Berkeley DB layout.
 nss_databases() {

@@ -124,6 +124,12 @@ services:
       # rsky's SQLite stores (account, sequencer, did cache), the per-actor
       # repos under `actors/`, and blobs under `blobs/` on first upload.
       - pdsdata:/data
+      # The system anchors plus Caddy's root, written by `mise run hv-ca`.
+      # The PDS resolves a `did:web` document by fetching it — through Caddy,
+      # whose internal CA the image does not carry — and its client may verify
+      # against the platform store, which ignores `SSL_CERT_FILE`. Replacing the
+      # store covers both verification flavours.
+      - ./.cache/pds-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
     ports:
       - "2583:3000"
 
@@ -172,6 +178,11 @@ services:
           # without depending on public DNS.
           - pds.127-0-0-1.sslip.io
           - alice.pds.127-0-0-1.sslip.io
+          # The Livtet dev app's `did:web` host. Inside the network that name
+          # answers from Caddy itself (the host's published :443 is not
+          # reachable from a container), while on the host it resolves through
+          # sslip.io to the same Caddy — one name, both sides.
+          - 172-17-0-1.sslip.io
     healthcheck:
       test: ["CMD-SHELL", "test -f /data/caddy/pki/authorities/local/root.crt"]
       interval: 2s

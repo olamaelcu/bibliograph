@@ -33,3 +33,14 @@ https://*.pds.127-0-0-1.sslip.io {
 		redir https://pds.127-0-0-1.sslip.io{uri} permanent
 	}
 }
+
+# The Livtet dev app's own `did:web` host. `172-17-0-1.sslip.io` resolves to
+# the docker0 gateway (172.17.0.1), so a container reaches the app running on
+# the host at :6010, and a `managedspace` policy naming
+# `did:web:172-17-0-1.sslip.io#livtet_space_manager` resolves its document and
+# calls `checkUserAccess` back through here. `tls internal`, like every other
+# site in this file — the PDS trusts this CA.
+https://172-17-0-1.sslip.io {
+	tls internal
+	reverse_proxy 172.17.0.1:6010
+}
