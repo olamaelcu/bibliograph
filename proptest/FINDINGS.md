@@ -40,9 +40,11 @@ present/blank/absent, collation-equivalent name pairs.
   same way, which is what makes `(lower(name), identifiers)` a set key rather
   than a byte-order coincidence". Two catalog rows recording the same identifier
   set in a different insert order get different JSON for the same set key.
-- **Branch**: `proptest/fix-canonical-identifiers` — regression test in
-  `packages/worker/test/record-fields.test.js`, comparator replaced with a
-  code-unit total order.
+- **Branch**: `proptest/fix-canonical-identifiers` @ `702a836` — regression test
+  in `packages/worker/test/record-fields.test.js`, comparator replaced with a
+  code-unit total order. The regression fails on `main` for the stated reason
+  in a clean worktree and passes on the branch. Merged into `proptest/discovery`
+  @ `3c31f54`.
 - Not security-relevant: no authz, no denial of service, no cache poisoning.
 
 ## Target 2 — `packages/web/src/lib/server/covers/rate-limit.ts`
