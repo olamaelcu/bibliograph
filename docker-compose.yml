@@ -81,6 +81,12 @@ services:
       # retried if the sandbox is not listening yet.
       mailtrap:
         condition: service_started
+      # The trust store below is written from Caddy's CA, which exists only once
+      # Caddy has started. Composing it here rather than mounting a file from
+      # the host is what makes a bare clone work: no generated file has to exist
+      # before `docker compose up -d`.
+      pds-ca:
+        condition: service_completed_successfully
     environment:
       # Keep the compose-network port the rest of the stack already speaks:
       # Caddy's reverse_proxy, HappyView's RELAY_URL and hv-backfill's PDS_URL
@@ -124,18 +130,39 @@ services:
       # rsky's SQLite stores (account, sequencer, did cache), the per-actor
       # repos under `actors/`, and blobs under `blobs/` on first upload.
       - pdsdata:/data
-      # The system anchors plus Caddy's root, written by `mise run hv-ca`.
       # The PDS resolves a `did:web` document by fetching it — through Caddy,
-      # whose internal CA the image does not carry — and its client may verify
-      # against the platform store, which ignores `SSL_CERT_FILE`. Replacing the
-      # store covers both verification flavours.
-      - ./.cache/pds-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      # whose internal CA the image does not carry. Its client may verify
+      # against the platform store, which ignores `SSL_CERT_FILE`, so the store
+      # itself is replaced (see `pds-ca`). Nothing in this stack is reached over
+      # a public HTTPS host: the PLC is plain http on the compose network and
+      # every account is local, so Caddy's root is the whole anchor set needed.
+      - pds_ca:/etc/ssl/certs:ro
     ports:
       - "2583:3000"
 
   # Mailtrap Local: a self-contained SMTP sink, web inbox and JSON API with no
   # account, credentials or external service. The PDS relays every notification
   # it sends here instead of the internet (see `PDS_EMAIL_SMTP_URL` on `pds`).
+
+  # The trust store the PDS verifies outbound TLS with.
+  #
+  # It exists because the PDS resolves a `managedspace`'s `managingApp` by
+  # fetching that host's `/.well-known/did.json`, and the host is Caddy — whose
+  # internal CA the runtime image does not carry. The store holds exactly that
+  # root: this stack reaches nothing else over public HTTPS.
+  pds-ca:
+    image: alpine:3
+    depends_on:
+      caddy:
+        condition: service_healthy
+    volumes:
+      - caddy_data:/caddy:ro
+      - pds_ca:/store
+    command:
+      - sh
+      - -c
+      - cp /caddy/caddy/pki/authorities/local/root.crt /store/ca-certificates.crt
+    restart: "no"
   mailtrap:
     # mailtrap/mailtrap-local:0.5.0, pinned by index digest.
     image: mailtrap/mailtrap-local@sha256:6bada103dffdec9a86e6f2fcb7631f173f0ff3af65f8c5ec80f10becb1469316
@@ -294,6 +321,8 @@ volumes:
   pgdata:
   pdsdata:
   mailtrapdata:
+  # Caddy's root, in the one filename the PDS's TLS client reads.
+  pds_ca:
   caddy_data:
   promdata:
   # Last-seen repo heads, so a pass backfills only what changed.
