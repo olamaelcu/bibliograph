@@ -133,9 +133,8 @@ services:
       # The PDS resolves a `did:web` document by fetching it — through Caddy,
       # whose internal CA the image does not carry. Its client may verify
       # against the platform store, which ignores `SSL_CERT_FILE`, so the store
-      # itself is replaced (see `pds-ca`). Nothing in this stack is reached over
-      # a public HTTPS host: the PLC is plain http on the compose network and
-      # every account is local, so Caddy's root is the whole anchor set needed.
+      # itself is replaced (see `pds-ca`) with the image's anchors plus Caddy's:
+      # a policy that names a host outside this stack still has to resolve.
       - pds_ca:/etc/ssl/certs:ro
     ports:
       - "2583:3000"
@@ -147,11 +146,20 @@ services:
   # The trust store the PDS verifies outbound TLS with.
   #
   # It exists because the PDS resolves a `managedspace`'s `managingApp` by
-  # fetching that host's `/.well-known/did.json`, and the host is Caddy — whose
-  # internal CA the runtime image does not carry. The store holds exactly that
-  # root: this stack reaches nothing else over public HTTPS.
+  # fetching that host's `/.well-known/did.json`. When that host is this stack's
+  # Caddy, the document is signed by a CA the runtime image does not carry; when
+  # it is somewhere else, the image's own anchors are what verify it. The store
+  # therefore holds both.
+  #
+  # The file is regenerated on every `up` so a rotated or recreated Caddy CA is
+  # followed without a manual step.
   pds-ca:
-    image: alpine:3
+    # The PDS's own image, so the bundle starts from the anchors the runtime
+    # actually ships. An alpine base would drop them, and a `did:web` naming a
+    # host outside this stack (a policy that still points at production, say)
+    # would then fail to resolve — which reads as a space nobody can open.
+    image: bibliograph/pds:rsky-1.14.18
+    entrypoint: ["/bin/sh", "-c"]
     depends_on:
       caddy:
         condition: service_healthy
@@ -159,9 +167,7 @@ services:
       - caddy_data:/caddy:ro
       - pds_ca:/store
     command:
-      - sh
-      - -c
-      - cp /caddy/caddy/pki/authorities/local/root.crt /store/ca-certificates.crt
+      - cat /etc/ssl/certs/ca-certificates.crt /caddy/caddy/pki/authorities/local/root.crt > /store/ca-certificates.crt
     restart: "no"
   mailtrap:
     # mailtrap/mailtrap-local:0.5.0, pinned by index digest.
