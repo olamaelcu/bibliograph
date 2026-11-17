@@ -25,6 +25,14 @@
       "skillPath": "skills/atproto-publish-lexicon/SKILL.md",
       "computedHash": "c1888d8c9c3c81dbe3e61bb156bf300efd891210b373fe855796bdcb0342e13f"
     },
+    "proptest-praxis": {
+      "source": "inanna-malick/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/proptest-praxis/SKILL.md",
+      "ref": "main",
+      "commit": "ee03a7bcc316dfbaed56cfda16006ac10840d78a",
+      "computedHash": "b56343a1849a78720d62b7df235b9bc8fc1a564129c30411ab7713f9791c6d34"
+    },
     "tanstack-query": {
       "source": "tanstack-skills/tanstack-skills",
       "sourceType": "github",

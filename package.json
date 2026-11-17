@@ -15,5 +15,8 @@
   "engines": {
     "node": "26.3.0"
   },
-  "packageManager": "pnpm@11.13.1"
+  "packageManager": "pnpm@11.13.1",
+  "devDependencies": {
+    "fast-check": "^4.10.2"
+  }
 }
