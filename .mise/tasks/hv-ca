@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Export Caddy's root CA and install it into the trust stores (system + Chrome/Firefox NSS)"
+#MISE description="Export Caddy's root CA, install it into the trust stores, then verify the PDS trusts it"
 # Caddy's internal CA signs the PDS certificate: an explicit cert for
 # pds.127-0-0-1.sslip.io and a wildcard for *.pds.127-0-0-1.sslip.io, which is
 # what handle hosts like alice.pds.127-0-0-1.sslip.io resolve to. Trusting the
@@ -18,6 +18,13 @@
 # Idempotent: the certificate is removed under its nickname before being added,
 # so re-running does not stack duplicates. `mise run hv-ca --uninstall` removes
 # it from every store it was installed into.
+#
+# Verifies what it wrote instead of printing instructions: every NSS database
+# it touched is read back for the nickname, and the PDS's describeServer is
+# fetched with the exported root as --cacert (proving that file is the signing
+# root) and, under --system, once more through the store curl reads by default.
+# A failed check prints FAIL and the task exits 1. The TLS checks need the `pds`
+# service running; the browser entries do not.
 
 set -euo pipefail
 
@@ -27,10 +34,11 @@ cd "$ROOT"
 NICKNAME="Caddy Local Dev CA"
 OUT=".cache/caddy-root.crt"
 SYSTEM_ANCHOR="/usr/local/share/ca-certificates/caddy-local-dev.crt"
+ENDPOINT="https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.describeServer"
 MODE="${1:-}"
 
 if [[ "$MODE" == "--help" || "$MODE" == "-h" ]]; then
-  sed -n '2,22p' "${BASH_SOURCE[0]}" | grep -v '^#MISE' | sed 's/^# \{0,1\}//'
+  sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | grep -v '^#MISE' | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
@@ -54,33 +62,127 @@ nss_databases() {
   return 0
 }
 
-if [[ "$MODE" == "--uninstall" ]]; then
-  while read -r db; do
-    certutil -D -d "$db" -n "$NICKNAME" 2>/dev/null && echo "removed from $db"
-  done < <(nss_databases)
-  if [[ -f "$SYSTEM_ANCHOR" ]]; then
-    sudo rm -f "$SYSTEM_ANCHOR" && sudo update-ca-certificates --fresh >/dev/null && echo "removed from the system store"
+DBS=()
+while IFS= read -r db; do
+  [[ -n "$db" ]] && DBS+=("$db")
+done < <(nss_databases)
+
+failures=0
+pass() { printf '  PASS  %s\n' "$*"; }
+fail_check() { printf '  FAIL  %s\n' "$*"; failures=$((failures + 1)); }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+
+verify_nss() { # present|absent
+  local want="$1" db
+  if ! command -v certutil >/dev/null 2>&1; then
+    warn "certutil (libnss3-tools) is missing; the browser stores cannot be verified"
+    return 0
   fi
+  if [[ "${#DBS[@]}" -eq 0 ]]; then
+    warn "no NSS database found; the browser stores cannot be verified"
+    return 0
+  fi
+  for db in ${DBS[@]+"${DBS[@]}"}; do
+    if certutil -L -d "$db" -n "$NICKNAME" >/dev/null 2>&1; then
+      if [[ "$want" == present ]]; then
+        pass "$db holds '$NICKNAME'"
+      else
+        fail_check "$db still holds '$NICKNAME'"
+      fi
+    else
+      if [[ "$want" == present ]]; then
+        fail_check "$db does not hold '$NICKNAME'"
+      else
+        pass "$db no longer holds '$NICKNAME'"
+      fi
+    fi
+  done
+}
+
+verify_tls() { # label [curl args...]
+  local label="$1" detail
+  shift
+  if ! command -v curl >/dev/null 2>&1; then
+    warn "curl is missing; skipped: $label"
+    return 0
+  fi
+  if detail="$(curl -sS --fail --max-time 10 "$@" "$ENDPOINT" 2>&1 >/dev/null)"; then
+    pass "$label"
+  else
+    fail_check "$label"
+    # curl's own reason, so a stale leaf ("certificate has expired") is not
+    # read as a trust-store problem.
+    if [[ -n "$detail" ]]; then
+      printf '        %s\n' "${detail%%$'\n'*}"
+    fi
+  fi
+}
+
+report() {
+  echo
+  if [[ "$failures" -gt 0 ]]; then
+    printf 'Verification failed: %d check(s).\n' "$failures" >&2
+    cat >&2 <<'HINTS'
+  - is the stack up?         docker compose ps
+  - does the name resolve?   getent hosts pds.127-0-0-1.sslip.io
+  - is the leaf stale?       openssl s_client -connect 127.0.0.1:443 \
+                               -servername pds.127-0-0-1.sslip.io | openssl x509 -noout -dates
+                             Caddy's internal leaves last 12h; `docker compose restart caddy`
+                             reissues one if it was not renewed in time
+  - is this the right root?  compare .cache/caddy-root.crt with caddy's
+                             /data/caddy/pki/authorities/local/root.crt
+HINTS
+    exit 1
+  fi
+  echo "All checks passed. Restart the browser once; it caches trust decisions per session."
+}
+
+if [[ "$MODE" == "--uninstall" ]]; then
+  if command -v certutil >/dev/null 2>&1; then
+    for db in ${DBS[@]+"${DBS[@]}"}; do
+      certutil -D -d "$db" -n "$NICKNAME" 2>/dev/null && echo "removed from $db"
+    done
+  fi
+  system_removed=0
+  if [[ -f "$SYSTEM_ANCHOR" ]]; then
+    if sudo rm -f "$SYSTEM_ANCHOR" && sudo update-ca-certificates --fresh >/dev/null; then
+      echo "removed from the system store"
+      system_removed=1
+    else
+      warn "$SYSTEM_ANCHOR could not be removed; sudo needs a terminal"
+    fi
+  fi
+  echo
+  echo "Verifying:"
+  verify_nss absent
+  if [[ -f "$SYSTEM_ANCHOR" ]]; then
+    fail_check "$SYSTEM_ANCHOR is still present"
+  elif [[ "$system_removed" == 1 ]]; then
+    pass "$SYSTEM_ANCHOR is gone"
+  fi
+  report
   exit 0
 fi
 
 installed=0
 if command -v certutil >/dev/null 2>&1; then
-  while read -r db; do
-    [[ -z "$db" ]] && continue
+  for db in ${DBS[@]+"${DBS[@]}"}; do
     certutil -D -d "$db" -n "$NICKNAME" >/dev/null 2>&1 || true
     certutil -A -d "$db" -n "$NICKNAME" -t "C,," -i "$OUT"
     echo "installed into $db"
     installed=$((installed + 1))
-  done < <(nss_databases)
-else
-  echo "WARN: certutil (libnss3-tools) is missing; browsers were not configured" >&2
+  done
 fi
 
 if [[ "$installed" -eq 0 ]]; then
-  echo "WARN: no NSS database found; open Chrome or Firefox once, or run 'certutil -N -d sql:\$HOME/.pki/nssdb'" >&2
+  if ! command -v certutil >/dev/null 2>&1; then
+    warn "certutil (libnss3-tools) is missing; browsers were not configured"
+  else
+    warn "no NSS database found; open Chrome or Firefox once, or run 'certutil -N -d sql:\$HOME/.pki/nssdb'"
+  fi
 fi
 
+system_store=0
 if [[ "$MODE" == "--system" ]]; then
   # Debian/Ubuntu anchor directory first; p11-kit's `trust` covers the rest.
   if command -v update-ca-certificates >/dev/null 2>&1; then
@@ -92,6 +194,7 @@ if [[ "$MODE" == "--system" ]]; then
     echo "ERROR: neither update-ca-certificates nor trust is available" >&2
     exit 1
   fi
+  system_store=1
   echo "installed into the system store"
 else
   echo
@@ -100,8 +203,14 @@ else
 fi
 
 echo
-echo "Verify:"
-echo "  curl -sS https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.server.describeServer"
-echo "  certutil -L -d sql:\$HOME/.pki/nssdb -n '$NICKNAME'"
-echo
-echo "Restart the browser once; it caches trust decisions per session."
+echo "Verifying:"
+verify_nss present
+verify_tls "the exported root signs $ENDPOINT" --cacert "$OUT"
+if [[ "$system_store" == 1 ]]; then
+  verify_tls "the system store trusts $ENDPOINT"
+elif [[ -f "$SYSTEM_ANCHOR" ]]; then
+  # A `--system` run happened earlier; this run did not touch that store, but
+  # curl/wget still go through it, so it is worth watching.
+  verify_tls "the system anchor left by --system still trusts $ENDPOINT"
+fi
+report
