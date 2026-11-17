@@ -151,7 +151,7 @@ and answers `400 InvalidRequest` when it is not the expected `{c,u}` object.
 
 | Encoding | Meaning | Methods |
 | --- | --- | --- |
-| `{ "o": <offset> }` | offset, advanced by the number of **emitted** rows (`limit`); the `limit + 1` probe row only decides whether another page exists | `getReviewsByBook`, `listReviewsByActor`, `listShelfItems`, `listShelfItemsByBook`, `getShelvingOfBook` |
+| `{ "o": <offset> }` | offset, advanced by the number of **emitted** rows (`limit`); the `limit + 1` probe row only decides whether another page exists | `getReviewsByBook`, `listReviewsByActor`, `listReactions`, `listShelfItems`, `listShelfItemsByBook`, `getShelvingOfBook` |
 | `{ "t": <created_at>, "u": <uri> }` | keyset over `(created_at, uri)`, descending | `listBooksOnShelf`, `listRecentShelving` |
 | `{ "u": <uri> }` | keyset over `uri`, ascending; for `getShelversOfBook` it is the smallest URI seen per DID | `listShelves`, `listShelvesWithBooks`, `getShelversOfBook` |
 | `{ "o": <offset> }` | offset, advanced by the emitted page size | `listEditionsByContributor`, `searchContributors`, `searchPublishers` |
@@ -255,6 +255,7 @@ signal. Queued work is not a promise that anything will be found.
 | `listShelfItemsByBook` | `book`, `did`, `limit` 50 (≤100), `cursor` | `{ items, cursor? }` |
 | `getReviewsByBook` | `book`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
 | `listReviewsByActor` | `did`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
+| `listReactions` | `subject` (at-uri), `limit` 50 (≤100), `cursor` | `{ reactions, cursor? }` |
 | `graph.isFollowing` | `follower`, `followed` | `{ following }` |
 | `graph.listFollowers` | `did`, `limit` 100 (≤1000), `cursor` | `{ followers, total, cursor? }` |
 | `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total, cursor? }` |
@@ -455,6 +456,33 @@ handler returns an empty page.
 
 Pages one DID's reviews from both collections, same ordering and cursor. Returns
 `{ reviews, cursor? }`.
+
+### Reactions
+
+`community.lexicon.interaction.reaction` is a shared collection across the network, not a
+Bibliograph one: the records live in the reactor's repo and this surface only reads them from the
+index. Club reactions are deliberately absent — they live inside the club's space and are read
+through the club, under its own access rule, not through this public index.
+
+#### `listReactions`
+
+Params: `subject` (required AT-URI of the record whose reactions to list), `limit` (50, clamped
+1–100) and `cursor`. The subject is a strongRef, so the filter is on its `uri`
+(`(record::jsonb)->'subject'->>'uri'`, covered by `happyview_record_reaction_subject_idx`), ordered
+`created_at` descending then `uri` descending, with the offset cursor above. Returns
+`{ reactions, cursor? }`, each item a `net.olamaelcu.livtet.biblio.defs#reactionView`
+(`{ uri, did, emoji, createdAt }`); `emoji` is one grapheme, so a skin-tone modifier is still one
+character.
+
+Only the open union's `#unicodeEmoji` member is emitted: a row whose `value.$type` is anything else
+(an image, or a member a later revision adds) is skipped rather than rendered as an empty button.
+So the page filters, it does not count — a page can return fewer than `limit` reactions while its
+`cursor` is present, because discarded rows still consumed offsets. Follow the cursor; never stop
+on a short page.
+
+A missing or malformed `subject` is `400 InvalidRequest`; a valid subject with no reactions is
+`200 { reactions: [] }`. The query is anonymous: the subject is caller-chosen, and nothing about a
+reactor is exposed beyond the `did` already in the record they wrote.
 
 ### Feed generator (edge)
 
