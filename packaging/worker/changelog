@@ -1,3 +1,25 @@
+bibliograph-worker (0.4.0-1) unstable; urgency=medium
+
+  * 0.4.0: the feed's order index follows the activity time the edge now
+    orders by.
+
+    - `0020-feed-popfeed.sql` replaces `happyview_records_feed_order_idx` with
+      `(collection, COALESCE(record->>'createdAt', record->>'addedAt') DESC
+      NULLS LAST, uri DESC)`. Popfeed's shelf entries carry `addedAt` and no
+      `createdAt`, so the coalesced expression is what the feed orders, paces
+      and pages by. The index is dropped only when the old definition is
+      still in place, so a converged host keeps its index.
+    - The same file grants `bibliograph-web` `SELECT` on
+      `public.edition_identifiers`: the feed query now resolves a Popfeed
+      record's ISBN/ASIN to a catalog edition, and `0001` grants the catalog
+      tables to `happyview_app` only.
+    - `deploy.sh` re-applies `0003-feed-read.sql` and `0020-feed-popfeed.sql`
+      in order once HappyView has migrated, instead of `0003` alone — on a
+      fresh host that would have left the index on the old expression. The
+      worker payload is otherwise unchanged.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 17 Nov 2026 22:28:46 +0000
+
 bibliograph-worker (0.3.0-1) unstable; urgency=medium
 
   * 0.3.0: an entity's identity bag is stored canonically, whatever order it

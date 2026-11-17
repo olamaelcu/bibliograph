@@ -1,3 +1,21 @@
+bibliograph-happyview (2.17.4-3) unstable; urgency=medium
+
+  * Packaging revision 3: carry Popfeed's book lexicons and register their
+    collections. The HappyView binary is unchanged at 2.17.4.
+
+    - `happyview/lexicons/social/popfeed/` adds `feed.review`, `feed.listItem`
+      and `richtext.facet`, the document `feed.review.facets` refs. Three
+      fields are loosened from Popfeed's published schemas because live
+      records violate them: `mainCreditRole` becomes `knownValues` ("Written
+      by"), and `genres.items.maxLength` and `releaseDate.format` are dropped.
+      Nothing is published under our DID: the namespace is Popfeed's, so
+      `publish-lexicons.mjs` skips it.
+    - The deploy oneshot registers both record collections and the `defs`
+      document, and asks HappyView for a network backfill on the first upload:
+      the records predate the upload, and Jetstream only carries new activity.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 17 Nov 2026 22:28:46 +0000
+
 bibliograph-happyview (2.17.4-2) unstable; urgency=medium
 
   * Packaging revision 2: carry the lexicon.community PR #18 book lexicons.

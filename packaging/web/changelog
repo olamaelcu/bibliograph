@@ -1,3 +1,25 @@
+bibliograph-web (0.4.0-1) unstable; urgency=medium
+
+  * 0.4.0: the discover feed carries Popfeed's book reviews and shelves.
+
+    - `social.popfeed.feed.review` (a 0-10 rating plus text) and
+      `social.popfeed.feed.listItem` (a `listType` shelf membership) are two
+      more paged collections, filtered to `creativeWorkType = 'book'` and, for
+      shelf entries, to the three book shelves. `status` is never written in
+      the wild, so it is not read.
+    - A Popfeed record names no edition at all: its `isbn13`/`isbn10`/`asin`
+      is joined against `public.edition_identifiers` and the reason carries
+      the edition — `popfeed:review|<uri>`, `popfeed:to-read|<uri>` — keeping
+      only its prefix when the catalog holds no matching edition, the same
+      degradation a Bookhive row with an unimported `hiveId` has. The client
+      then falls back to the record's own `title`/`posterUrl`.
+    - The order, the keyset cursor and the page's `created_at` all read
+      `COALESCE(createdAt, addedAt)`: a shelf entry has no `createdAt`, and
+      without the fallback it sorted as a NULL tail and never reached a page.
+      The grant the lookup needs rides with the worker's `0020`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 17 Nov 2026 22:28:46 +0000
+
 bibliograph-web (0.3.0-1) unstable; urgency=medium
 
   * 0.3.0: the edge forwards a review's conversation, and its admin editor keys
