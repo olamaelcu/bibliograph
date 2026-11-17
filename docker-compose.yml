@@ -25,6 +25,12 @@
 # never has to trust HappyView.
 name: bibliograph
 
+# The image both PDS services share: rsky at the vendored commit, built from
+# `vendor/rsky` with `vendor/patches` applied (see `docker/pds.Dockerfile`).
+# One anchor so the one-shot certificate service cannot drift onto a different
+# binary than the server it prepares.
+x-pds-image: &pds_image bibliograph/pds:rsky-1.14.18-livtet1
+
 services:
   postgres:
     image: postgres:18.4
@@ -68,11 +74,15 @@ services:
   # volume still carries).
   pds:
     build:
-      # BuildKit clones the commit and builds rsky-pds/Dockerfile from the
-      # workspace root; the Dockerfile's cache mounts make rebuilds cheap.
-      context: https://github.com/blacksky-algorithms/rsky.git#80f41a3d98a22a3ba2563d461460ef9a35adbc68
-      dockerfile: rsky-pds/Dockerfile
-    image: bibliograph/pds:rsky-1.14.18
+      # Built from the vendored tree — the same commit the pinned image came
+      # from — so `vendor/patches` can apply. Both live in this repository, so
+      # building the stack never reaches outside it.
+      context: .
+      dockerfile: docker/pds.Dockerfile
+      additional_contexts:
+        rsky: vendor/rsky
+        patches: vendor/patches
+    image: *pds_image
     restart: unless-stopped
     depends_on:
       plc:
@@ -158,7 +168,7 @@ services:
     # actually ships. An alpine base would drop them, and a `did:web` naming a
     # host outside this stack (a policy that still points at production, say)
     # would then fail to resolve — which reads as a space nobody can open.
-    image: bibliograph/pds:rsky-1.14.18
+    image: *pds_image
     entrypoint: ["/bin/sh", "-c"]
     depends_on:
       caddy:

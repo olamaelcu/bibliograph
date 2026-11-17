@@ -1,3 +1,6 @@
 [submodule "vendor/books-wg-lexicons"]
 	path = vendor/books-wg-lexicons
 	url = https://tangled.org/books-wg.tngl.sh/lexicons
+[submodule "vendor/rsky"]
+	path = vendor/rsky
+	url = https://github.com/blacksky-algorithms/rsky.git

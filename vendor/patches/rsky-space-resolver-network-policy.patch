@@ -1,0 +1,48 @@
+--- a/rsky-pds/src/apis/com/atproto/space/mod.rs
++++ b/rsky-pds/src/apis/com/atproto/space/mod.rs
+@@ -404,7 +404,8 @@
+         timeout: None,
+         plc_url: Some(plc_url.to_string()),
+         did_cache: Arc::new(MemoryCache::new(None, None)),
+-    });
++    })
++    .with_network(crate::outbound::policy());
+     let doc = resolver
+         .ensure_resolve(&authority.to_string(), None)
+         .await?;
+--- a/rsky-pds/src/apis/com/atproto/space/register_notify.rs
++++ b/rsky-pds/src/apis/com/atproto/space/register_notify.rs
+@@ -29,7 +29,8 @@
+         timeout: None,
+         plc_url: Some(plc_url.to_string()),
+         did_cache: Arc::new(MemoryCache::new(None, None)),
+-    });
++    })
++    .with_network(crate::outbound::policy());
+     let doc = resolver
+         .ensure_resolve(&did.to_string(), None)
+         .await
+--- a/rsky-pds/src/apis/com/atproto/space/host.rs
++++ b/rsky-pds/src/apis/com/atproto/space/host.rs
+@@ -119,7 +119,8 @@
+                     plc_url: Some(plc_url.to_string()),
+                     did_cache: Arc::new(rsky_identity::types::MemoryCache::new(None, None)),
+                 },
+-            );
++            )
++            .with_network(crate::outbound::policy());
+             Ok(Policy::ManagingApp {
+                 service_id: service_id.clone(),
+                 client: Arc::new(HttpManagingApp::new(
+--- a/rsky-pds/src/permission_set.rs
++++ b/rsky-pds/src/permission_set.rs
+@@ -472,7 +472,8 @@
+         timeout: None,
+         plc_url: Some(plc_url),
+         did_cache: Arc::new(MemoryCache::new(None, None)),
+-    });
++    })
++    .with_network(crate::outbound::policy());
+     let doc = resolver.ensure_resolve(&did.to_string(), None).await?;
+     doc.service
+         .as_deref()

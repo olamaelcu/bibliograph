@@ -262,17 +262,23 @@ not a denial.
 
 The Livtet app is the manager in this ecosystem, and locally it is a host
 process on `:6010`. Three pieces make that resolvable from a container, and all
-three live in this repo's compose file:
+three live in this repo:
 
 | Piece | Why |
 | --- | --- |
 | the `caddy` service aliases `172-17-0-1.sslip.io` | a container resolves the name to Caddy inside the network; the host's published `:443` is not reachable from one |
 | a Caddy site for that host, proxying `host.docker.internal:6010` | the name lands on the app, from the host's browser and from a container |
 | the `pds-ca` service | the PDS fetches the document over TLS from Caddy's internal CA, which the image does not carry; the service writes that root into a volume the PDS reads as its trust store |
+| `vendor/patches/rsky-space-resolver-network-policy.patch` | rsky's space paths resolve a peer with a hard-coded `PUBLIC` network policy, so a `did:web` on a private address is refused even with `PDS_DEV_MODE=true`. The patch threads `outbound::policy()` through them, and `docker/pds.Dockerfile` applies it while building from `vendor/rsky` |
 
-The app names the same identity through `LIVTET_DID_HOSTNAME` (set in
-`livtet-ecosystem/platform/mise.toml`) and serves the document only for that
-host. Verify the whole path with the PDS's own resolver:
+`vendor/rsky` is a submodule pinned to the commit the release image was built
+from; the patch is applied at build time, never as an edit inside the submodule.
+The platform's E2E harness keeps its own pin of the same upstream for the `rsky`
+arm, so the two move independently — bump both when either is updated.
+
+The app names the same identity through `LIVTET_DID_HOSTNAME` (set on the
+platform's `service-dev` task) and serves the document only for that host.
+Verify the whole path with the PDS's own resolver:
 
 ```bash
 curl -s --cacert .cache/caddy-root.crt \
