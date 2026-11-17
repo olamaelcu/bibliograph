@@ -1,0 +1,38 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.reviewReply",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["subject", "textContent", "createdAt"],
+        "properties": {
+          "subject": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The review this reply answers — the at-uri of a community.lexicon.media.book.review record. A plain at-uri rather than a strongRef: an edited review keeps one conversation."
+          },
+          "replyTo": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Another net.olamaelcu.livtet.biblio.reviewReply in the same conversation. Absent on a top-level reply."
+          },
+          "textContent": {
+            "type": "string",
+            "maxLength": 10000,
+            "description": "The reply body as plain text — the fallback, and what a conversation list previews. A spoiler run is written as an ellipsis."
+          },
+          "content": {
+            "type": "union",
+            "refs": [],
+            "closed": false,
+            "description": "Optional structured body; see net.olamaelcu.livtet.biblio.bookClub.post#content."
+          },
+          "createdAt": { "type": "string", "format": "datetime" }
+        }
+      }
+    }
+  }
+}

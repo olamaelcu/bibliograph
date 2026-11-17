@@ -70,6 +70,10 @@ FOLLOW = "net.olamaelcu.livtet.biblio.follow"
 READING_GOAL = "net.olamaelcu.livtet.biblio.readingGoal"
 PROFILE = "net.olamaelcu.livtet.actor.profile"
 REVIEW = "community.lexicon.media.book.review"
+# A reply in a review's conversation: a public record in the replier's own
+# repo, naming the review it answers, and the reaction that bar reads.
+REVIEW_REPLY = "net.olamaelcu.livtet.biblio.reviewReply"
+REACTION = "community.lexicon.interaction.reaction"
 BSKY_PROFILE = "app.bsky.actor.profile"
 BSKY_FOLLOW = "app.bsky.graph.follow"
 BSKY_POST = "app.bsky.feed.post"
@@ -94,6 +98,8 @@ INDEXED_COLLECTIONS = [
     READING_GOAL,
     PROFILE,
     REVIEW,
+    REVIEW_REPLY,
+    REACTION,
 ]
 # Everything the fixtures write; `--reset` deletes all of it.
 SEEDED_COLLECTIONS = INDEXED_COLLECTIONS + [
@@ -136,6 +142,11 @@ REVIEW_TEXTS = [
     "{title} is the rare book that earns its slow middle. I underlined more than I meant to.",
     "Read {title} in two sittings. The prose is spare and the ending lands.",
     "Not for me, but I see why people love {title}: the voice never wavers.",
+]
+REPLY_TEXTS = [
+    "Agreed — the middle third is where it earns the ending.",
+    "You read it faster than I did. Did the last chapter land for you?",
+    "Adding this to the pile. Thanks for the warning about the slow part.",
 ]
 
 # The reading statuses each account carries, in order. Every fixed shelf gets
@@ -339,6 +350,11 @@ def is_tid(value: str) -> bool:
 
 def stamp(minutes: int) -> str:
     return (FIXTURE_EPOCH + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def ring(value: int, people: int) -> int:
+    """Wrap a one-based account index onto the fixture ring."""
+    return ((value - 1) % people) + 1
 
 
 def psql_json(query: str):
@@ -695,6 +711,42 @@ def fixture_records(
             },
         )
 
+    # Review conversations: each account answers the reviews of the two accounts
+    # before it, and leaves one nested reply in each — a two-level discussion,
+    # which is what the review permalink renders.
+    for back in (1, 2):
+        owner = ring(index - back, people)
+        if owner == index:
+            continue
+        review_uri = f"at://{dids[owner]}/{REVIEW}/{tid(9000 + owner * 10)}"
+        add(
+            REVIEW_REPLY,
+            tid(9500 + index * 10 + (back - 1) * 2),
+            {
+                "$type": REVIEW_REPLY,
+                "subject": review_uri,
+                "textContent": REPLY_TEXTS[(index + back) % len(REPLY_TEXTS)],
+                "createdAt": stamp(day + 240 + back * 20),
+            },
+        )
+        sibling = ring(owner + (3 - back), people)
+        if sibling in (owner, index):
+            continue
+        add(
+            REVIEW_REPLY,
+            tid(9500 + index * 10 + (back - 1) * 2 + 1),
+            {
+                "$type": REVIEW_REPLY,
+                "subject": review_uri,
+                "replyTo": (
+                    f"at://{dids[sibling]}/{REVIEW_REPLY}/"
+                    f"{tid(9500 + sibling * 10 + (2 - back) * 2)}"
+                ),
+                "textContent": REPLY_TEXTS[(index + back + 1) % len(REPLY_TEXTS)],
+                "createdAt": stamp(day + 260 + back * 20),
+            },
+        )
+
     # Ring + a third hop: everybody follows two people, so every account has a
     # populated graph in both the generic and the Livtet collections.
     targets = []
@@ -1004,12 +1056,17 @@ def verify(accounts: dict[int, tuple[str, str]], editions: list[dict]) -> None:
     items = xrpc_query(
         "net.olamaelcu.livtet.biblio.listShelfItems", {"shelf": custom_shelf, "limit": 5}
     )
+    conversation = xrpc_query(
+        "net.olamaelcu.livtet.biblio.listReviewReplies",
+        {"subject": f"at://{accounts[1][1]}/{REVIEW}/{tid(9010)}", "limit": 10},
+    )
 
     shelf_rows = shelves.get("shelves") or []
     book_rows = recent.get("bookShelves") or []
     review_rows = reviews.get("reviews") or []
     follow_rows = followees.get("followees") or []
     item_rows = items.get("items") or []
+    reply_rows = conversation.get("replies") or []
 
     checks = [
         ("listShelvesWithBooks", len(shelf_rows), 5),
@@ -1017,7 +1074,13 @@ def verify(accounts: dict[int, tuple[str, str]], editions: list[dict]) -> None:
         ("listRecentShelving", len(book_rows), 5),
         ("getReviewsByBook", len(review_rows), 1),
         ("graph.listFollowees", len(follow_rows), 2),
+        ("listReviewReplies", len(reply_rows), 2),
     ]
+    if not any(reply.get("reactions") for reply in reply_rows):
+        raise SystemExit(
+            "ERROR: the seeded conversation carries no reactions; the index did "
+            f"not take the reaction phase: {json.dumps(conversation)[:400]}"
+        )
     failed = [name for name, actual, minimum in checks if actual < minimum]
     if failed or "booksGoal" not in json.dumps(goal):
         raise SystemExit(
@@ -1049,6 +1112,7 @@ def verify(accounts: dict[int, tuple[str, str]], editions: list[dict]) -> None:
     show(f"graph.listFollowees?did={first_did}", followees, limit=3)
     show(f"listShelfItems?shelf={custom_shelf}", items, limit=1)
     show(f"getReadingGoal?did={last_did}", goal)
+    show(f"listReviewReplies?subject=<account 1's first review>", conversation, limit=2)
 
 
 # --------------------------------------------------------------------------
@@ -1193,6 +1257,43 @@ def command_fixtures(args: argparse.Namespace) -> int:
         )
         likes += 1
     totals[BSKY_LIKE] = likes
+
+    # Phase 3: one reaction per account on the first reply its review received.
+    # A reaction names its subject with a strongRef, so it can only be written
+    # once phase 1's record cids exist.
+    reactions = 0
+    for index, (_handle, did) in accounts.items():
+        token = sessions[index]["token"]
+        target = ring(index + 1, count)
+        reply_uri = f"at://{dids[target]}/{REVIEW_REPLY}/{tid(9500 + target * 10)}"
+        reply_cid = record_cids.get(reply_uri)
+        if not reply_cid:
+            continue
+        rkey = tid(9700 + index * 10)
+        existing = fetch_record_keys(did, REACTION, token)
+        apply_writes(
+            did,
+            token,
+            [
+                {
+                    "$type": "com.atproto.repo.applyWrites#"
+                    + ("update" if rkey in existing else "create"),
+                    "collection": REACTION,
+                    "rkey": rkey,
+                    "value": {
+                        "$type": REACTION,
+                        "subject": {"uri": reply_uri, "cid": reply_cid},
+                        "value": {
+                            "$type": f"{REACTION}#unicodeEmoji",
+                            "value": "❤️",
+                        },
+                        "createdAt": stamp((index - 1) * 1440 + 30),
+                    },
+                }
+            ],
+        )
+        reactions += 1
+    totals[REACTION] = reactions
 
     print("\nrecords written by collection:")
     for collection in sorted(totals):

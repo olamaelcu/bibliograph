@@ -303,6 +303,7 @@ const XRPC_METHODS: Record<string, true> = {
   'net.olamaelcu.livtet.biblio.listRecentShelving': true,
   'net.olamaelcu.livtet.biblio.listReactions': true,
   'net.olamaelcu.livtet.biblio.listReviewsByActor': true,
+  'net.olamaelcu.livtet.biblio.listReviewReplies': true,
   'net.olamaelcu.livtet.biblio.listShelfItems': true,
   'net.olamaelcu.livtet.biblio.listShelfItemsByBook': true,
   'net.olamaelcu.livtet.biblio.listShelvesWithBooks': true,

@@ -478,6 +478,7 @@ test('every offset endpoint advances by limit, not limit + 1', function()
     { name = 'getReviewsByBook', params = { book = 'at://did:plc:x/community.lexicon.media.book.edition/abc' } },
     { name = 'listReviewsByActor', params = { did = 'did:plc:x' } },
     { name = 'listReactions', params = { subject = 'at://did:plc:x/community.lexicon.media.book.review/abc' } },
+    { name = 'listReviewReplies', params = { subject = 'at://did:plc:x/community.lexicon.media.book.review/abc' } },
     { name = 'listShelfItems', params = { shelf = 'at://did:plc:x/net.olamaelcu.livtet.biblio.shelf/read' } },
     { name = 'listShelfItemsByBook', params = { book = 'at://did:plc:x/community.lexicon.media.book.edition/abc', did = 'did:plc:x' } },
     { name = 'getShelvingOfBook', params = { book = 'at://did:plc:x/community.lexicon.media.book.edition/abc', did = 'did:plc:x' } },
@@ -1267,6 +1268,80 @@ test('listReactions accepts the Bookhive record a review lives in', function()
 
   assert_equal(#response.reactions, 0)
   assert_equal(calls[1].args[2], subject)
+end)
+
+test('listReviewReplies carries each reply\'s reactions and pages oldest first', function()
+  local subject = 'at://did:plc:r/community.lexicon.media.book.review/3k'
+  local first = 'at://did:plc:a/net.olamaelcu.livtet.biblio.reviewReply/1'
+  local rows = {
+    {
+      uri = first,
+      did = 'did:plc:a',
+      record = '{"subject":"' .. subject .. '","textContent":"agreed","createdAt":"2026-11-16T00:00:00.000Z"}',
+      created_at = '2026-11-16T00:00:00.000Z',
+    },
+    {
+      uri = 'at://did:plc:a/net.olamaelcu.livtet.biblio.reviewReply/2',
+      did = 'did:plc:a',
+      record = '{"subject":"' .. subject .. '","textContent":"and again","createdAt":"2026-11-16T01:00:00.000Z"}',
+      created_at = '2026-11-16T01:00:00.000Z',
+    },
+  }
+  local reactions = {
+    {
+      uri = 'at://did:plc:b/community.lexicon.interaction.reaction/1',
+      did = 'did:plc:b',
+      record = '{"subject":{"uri":"' .. first .. '","cid":"bafy"},"value":{"$type":"community.lexicon.interaction.reaction#unicodeEmoji","value":"❤️"},"createdAt":"2026-11-16T00:05:00.000Z"}',
+      created_at = '2026-11-16T00:05:00.000Z',
+    },
+  }
+
+  local response, calls = run_endpoint('query', 'listReviewReplies', {
+    params = { subject = subject, limit = '1' },
+    responder = function(_, _, count)
+      if count == 1 then return rows end
+      return reactions
+    end,
+  })
+
+  assert_equal(#response.replies, 1)
+  assert_equal(response.replies[1].did, 'did:plc:a')
+  assert_equal(response.replies[1].record.textContent, 'agreed')
+  assert_equal(#response.replies[1].reactions, 1)
+  assert_equal(response.replies[1].reactions[1].emoji, '❤️')
+  assert_equal(response.cursor ~= nil, true)
+  assert_equal(helpers.decode_cursor(response.cursor).o, 1)
+  assert_equal(calls[1].args[1], 'net.olamaelcu.livtet.biblio.reviewReply')
+  assert_equal(calls[1].args[2], subject)
+  -- Oldest first: a conversation reads top to bottom.
+  assert_contains(calls[1].sql, 'ORDER BY created_at ASC')
+  assert_equal(calls[2].args[1], 'community.lexicon.interaction.reaction')
+  assert_equal(calls[2].args[2], first)
+end)
+
+test('listReviewReplies ships no reactions on a page past 20 replies', function()
+  local subject = 'at://did:plc:r/community.lexicon.media.book.review/3k'
+  local rows = {}
+  for i = 1, 21 do
+    rows[i] = {
+      uri = 'at://did:plc:a/net.olamaelcu.livtet.biblio.reviewReply/' .. i,
+      did = 'did:plc:a',
+      record = '{"subject":"' .. subject .. '","textContent":"r' .. i .. '","createdAt":"2026-11-16T00:00:00.000Z"}',
+      created_at = '2026-11-16T00:00:00.000Z',
+    }
+  end
+
+  local response, calls = run_endpoint('query', 'listReviewReplies', {
+    params = { subject = subject, limit = '25' },
+    responder = function() return rows end,
+  })
+
+  assert_equal(#response.replies, 21)
+  assert_equal(#calls, 1, 'no per-reply reaction query past 20 replies')
+  for i = 1, #response.replies do
+    assert_equal(#response.replies[i].reactions, 0)
+  end
+  assert_nil(response.cursor)
 end)
 
 test('bookhive_review_view drops an unusable grade, a missing grade and a missing edition', function()

@@ -12,6 +12,10 @@ local REVIEW_COLLECTION = 'community.lexicon.media.book.review'
 -- strongRef, so one collection covers a review, a club post, or any other
 -- record a reader reacts to.
 local REACTION_COLLECTION = 'community.lexicon.interaction.reaction'
+-- A reply in a review's conversation. `subject` names the review, so a
+-- conversation is discovered by the review it answers rather than by walking
+-- every replier's repo.
+local REVIEW_REPLY_COLLECTION = 'net.olamaelcu.livtet.biblio.reviewReply'
 -- Bookhive keeps its review inside its per-book record; a non-empty `review`
 -- makes that record a review of the edition its `hiveId` was imported as.
 local BOOKHIVE_BOOK = 'buzz.bookhive.book'

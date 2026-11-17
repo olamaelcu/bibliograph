@@ -40,6 +40,7 @@ export const FORWARDED_QUERIES = [
   'net.olamaelcu.livtet.biblio.listRecentShelving',
   'net.olamaelcu.livtet.biblio.listReactions',
   'net.olamaelcu.livtet.biblio.listReviewsByActor',
+  'net.olamaelcu.livtet.biblio.listReviewReplies',
   'net.olamaelcu.livtet.biblio.listShelfItems',
   'net.olamaelcu.livtet.biblio.listShelfItemsByBook',
   'net.olamaelcu.livtet.biblio.listShelves',

@@ -58,6 +58,9 @@ RECORD_LEXICONS = [
     # without a per-request repo scan; club reactions live in their space and
     # never reach here.
     "community.lexicon.interaction.reaction",
+    # Replies to a review: written into the replier's own repo, indexed so a
+    # review's conversation is one query rather than a per-author fan-out.
+    "net.olamaelcu.livtet.biblio.reviewReply",
     # Bookhive's own per-book record, indexed so the `review` text it carries
     # can be served as a review. The lexicon is Bookhive's, copied verbatim
     # into lexicons/buzz/bookhive/; only the collection is registered here.
@@ -83,6 +86,7 @@ QUERY_LEXICONS = [
     ("net.olamaelcu.livtet.biblio.getReviewsByBook", "community.lexicon.media.book.review"),
     ("net.olamaelcu.livtet.biblio.listReviewsByActor", "community.lexicon.media.book.review"),
     ("net.olamaelcu.livtet.biblio.listReactions", "community.lexicon.interaction.reaction"),
+    ("net.olamaelcu.livtet.biblio.listReviewReplies", "net.olamaelcu.livtet.biblio.reviewReply"),
 ]
 
 PROCEDURE_LEXICONS = [

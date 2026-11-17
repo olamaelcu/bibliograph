@@ -466,6 +466,33 @@
         }
       }
     },
+    "reviewReplyView": {
+      "type": "object",
+      "description": "One reply in a review's conversation, with its own reactions.",
+      "required": ["uri", "did", "record", "reactions"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "record": {
+          "type": "ref",
+          "ref": "net.olamaelcu.livtet.biblio.reviewReply#main"
+        },
+        "reactions": {
+          "type": "array",
+          "description": "Every reaction record naming this reply, so a bar needs no second call. Empty when the page carries more than 20 replies.",
+          "items": {
+            "type": "ref",
+            "ref": "net.olamaelcu.livtet.biblio.defs#reactionView"
+          }
+        }
+      }
+    },
     "contributorView": {
       "type": "object",
       "description": "A contributor record with the address it is published at.",
