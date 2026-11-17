@@ -69,7 +69,9 @@ export function identifierArray(value) {
  * Deduplicate identifier pairs by `issuer` + `value`, keeping the first `url`,
  * and sort so the array is canonical: the same set always serializes the same
  * way, which is what makes `(lower(name), identifiers)` a set key rather than a
- * byte-order coincidence.
+ * byte-order coincidence. The sort compares code units, not collation:
+ * `localeCompare` returns 0 for distinct strings in one collation class
+ * (`é` precomposed vs decomposed), which leaves their order to the input.
  */
 export function canonicalIdentifiers(value) {
   const seen = new Set();
@@ -80,12 +82,24 @@ export function canonicalIdentifiers(value) {
     seen.add(key);
     bag.push(entry);
   }
-  bag.sort((left, right) =>
-    left.issuer === right.issuer
-      ? left.value.localeCompare(right.value)
-      : left.issuer.localeCompare(right.issuer)
-  );
+  bag.sort((left, right) => {
+    if (left.issuer !== right.issuer) return left.issuer < right.issuer ? -1 : 1;
+    if (left.value === right.value) return 0;
+    return left.value < right.value ? -1 : 1;
+  });
   return bag;
+}
+
+/**
+ * The stored form of an identifier bag: the jsonb that `contributors.identifiers`
+ * and `publishers.identifiers` hold, and therefore what the identity index on
+ * `(lower(name), identifiers)` compares. jsonb arrays compare positionally, so
+ * the row has to carry the canonical array: a caller's bag order is not part of
+ * the entity's identity, and two orders of one set would otherwise mint two
+ * rows that publish the same record. A value that is not an array stores `[]`.
+ */
+export function canonicalIdentifiersJson(value) {
+  return JSON.stringify(canonicalIdentifiers(Array.isArray(value) ? value : []));
 }
 
 export function httpUrl(value) {
