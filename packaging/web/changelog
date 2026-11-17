@@ -1,3 +1,25 @@
+bibliograph-web (0.3.0-1) unstable; urgency=medium
+
+  * 0.3.0: the edge forwards a review's conversation, and its admin editor keys
+    entities on the bag the worker stores.
+
+    - `net.olamaelcu.livtet.biblio.listReviewReplies` joins the forwarded
+      queries and the per-NSID metric registry, so a review's replies are served
+      through `/xrpc` like the rest of the surface and `describeService` lists
+      51 methods. The edge only proxies; the query itself is HappyView's Lua
+      procedure, and the new `reviewReply` record is what it indexes.
+    - The admin edition editor and both merge screens write
+      `canonicalIdentifiersJson(...)` into `contributors.identifiers` and
+      `publishers.identifiers`. The insert and its follow-up lookup now use one
+      string, so the unique index on `(lower(name), identifiers)` — a jsonb
+      comparison, and therefore positional — resolves a reordered bag to the
+      row that exists instead of minting a second `at://` address for the same
+      person or press.
+    - `xrpc-catalog.json` is regenerated from the lexicons that add
+      `reviewReply`, `listReviewReplies` and the `defs` types they share.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 17 Nov 2026 16:53:59 +0000
+
 bibliograph-web (0.2.27-1) unstable; urgency=medium
 
   * 0.2.27: the landing catalogue states what `listReactions` actually serves.

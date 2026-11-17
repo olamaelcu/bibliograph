@@ -1,3 +1,23 @@
+bibliograph-worker (0.3.0-1) unstable; urgency=medium
+
+  * 0.3.0: an entity's identity bag is stored canonically, whatever order it
+    arrives in.
+
+    - `canonicalIdentifiersJson` in `lib/record-fields.js` is the stored form of
+      a bag: trimmed, deduplicated by `(issuer, value)` keeping the first `url`,
+      and ordered by code unit. `lib/ingest.js` writes it for the contributor and
+      the publisher row, which is the value the identity index compares.
+    - `canonicalIdentifiers` sorts by code unit rather than `localeCompare`.
+      Precomposed and decomposed `é`, and ZWJ vs no-ZWJ emoji sequences, collate
+      equal, so the comparator answered 0 for distinct strings and the array's
+      order fell back to whatever the caller supplied.
+    - `lib/record-fields.d.ts` declares the module for the edge's `checkJs`; the
+      worker keeps running the `.js`.
+    - No schema change: the newest migration is still
+      `0019-entity-fanout-guard.sql`, so the schema re-applies as a no-op.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 17 Nov 2026 16:53:59 +0000
+
 bibliograph-worker (0.2.27-1) unstable; urgency=medium
 
   * 0.2.27 release: no worker payload change since 0.2.26.
