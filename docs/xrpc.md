@@ -492,9 +492,11 @@ reactor is exposed beyond the `did` already in the record they wrote.
 ### Feed generator (edge)
 
 Both `com.atproto.feed.*` methods are answered by the edge from `happyview.happyview_records`,
-over exactly `community.lexicon.media.book.review`, `net.olamaelcu.livtet.biblio.bookStatus` and
-`buzz.bookhive.book`. They never call HappyView, the PDS or a worker task; the only catalog read is
-the `appview_bookhive_lua` join that turns a Bookhive `hiveId` into the edition it was imported as.
+over exactly `community.lexicon.media.book.review`, `net.olamaelcu.livtet.biblio.bookStatus`,
+`buzz.bookhive.book`, `social.popfeed.feed.review` and `social.popfeed.feed.listItem`. They never
+call HappyView, the PDS or a worker task; the only catalog reads are the `appview_bookhive_lua`
+join that turns a Bookhive `hiveId` into the edition it was imported as, and the
+`edition_identifiers` lookup that turns a Popfeed record's ISBN/ASIN into one.
 
 #### `com.atproto.feed.describeFeedGenerator`
 
@@ -514,14 +516,25 @@ book URI is the edition its `hiveId` maps to through `appview_bookhive_lua`; an 
 an un-imported hive id leaves that half empty (`bookhive:` / `bookhive:<shelf>`), and the Livtet
 client falls back to the record's own status. `reason` is omitted when it cannot be resolved.
 
-Ordering is newest first by the record's own `record::jsonb->>'createdAt'` as text, then `uri`
+Popfeed's two book records are named by their collection instead. A review's reason is
+`popfeed:review|<book-uri>`, and a shelf entry's is `popfeed:<shelf>|<book-uri>` with `listType`
+mapped onto the same reading-status keys (`read_books`→`read`, `currently_reading_books`→`reading`,
+`to_read_books`→`to-read`); `listType` is what Popfeed writes — the schema's `status` tokens never
+appear in real records. The record names no edition: `<book-uri>` is the edition its `isbn13`,
+`isbn10` or `asin` identifies, picked as `min(edition_uri)` when one identifier names several. With
+no catalog match the reason keeps its prefix (`popfeed:review`, `popfeed:to-read`) and the client
+falls back to the record's own `title`/`posterUrl`. Only `creativeWorkType: "book"` rows page, and
+only the three shelves above; anything else is filtered out at SQL and consumes no page slot.
+
+Ordering is newest first by the record's own activity time — `record::jsonb->>'createdAt'`, else
+Popfeed's `record::jsonb->>'addedAt'`, which the shelf entries carry instead — as text, then `uri`
 descending; `limit + 1` rows decide whether a cursor is returned. A missing, malformed or foreign
 `feed`, and a malformed cursor, are `400 InvalidRequest`. An unavailable `DATABASE_URL` or a failed
 query is `503 ServiceUnavailable`.
 
 | Feed | Auth | Records |
 | --- | --- | --- |
-| `public` | none | every indexed review, `bookStatus` and Bookhive per-book record |
+| `public` | none | every indexed review, `bookStatus`, Bookhive per-book record and Popfeed book review/shelf entry |
 | `following` | service JWT | records by DIDs the viewer follows, excluding the viewer |
 | `extended` | service JWT | followed DIDs plus their followees, capped at 500 DIDs, excluding the viewer |
 | `dynamic` | service JWT | the viewer plus followed DIDs (the per-viewer ladder) |
@@ -541,7 +554,9 @@ for collection in \
   community.lexicon.media.book.review \
   net.olamaelcu.livtet.biblio.bookStatus \
   net.olamaelcu.livtet.biblio.follow \
-  buzz.bookhive.book
+  buzz.bookhive.book \
+  social.popfeed.feed.review \
+  social.popfeed.feed.listItem
 do
   curl -sS -X POST "$HAPPYVIEW_URL/admin/backfill" \
     -H "Authorization: Bearer $HAPPYVIEW_ADMIN_KEY" \

@@ -18,7 +18,13 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
 
-import { fetchFeedPage, BUZZ_BOOKHIVE_BOOK } from '../src/lib/server/feeds/query.ts';
+import {
+  encodeCursor,
+  fetchFeedPage,
+  BUZZ_BOOKHIVE_BOOK,
+  POPFEED_LIST_ITEM_COLLECTION,
+  POPFEED_REVIEW_COLLECTION
+} from '../src/lib/server/feeds/query.ts';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph';
@@ -29,6 +35,18 @@ const EDITION_ONE = `at://${AUTHORITY}/community.lexicon.media.book.edition/feed
 const EDITION_TWO = `at://${AUTHORITY}/community.lexicon.media.book.edition/feedprobe-b-${RUN}`;
 const PROBE_DID = `did:plc:feedprobe${RUN}`;
 const POST_URI = `at://${PROBE_DID}/buzz.bookhive.book/3kfeedprobe`;
+
+// Popfeed names no edition: its records carry ISBN/ASIN identifiers, and the
+// page resolves them through `edition_identifiers`. A run-unique ISBN keeps the
+// lookup to this fixture alone, so `min(edition_uri)` cannot depend on a
+// production edition that happens to share a real ISBN.
+const POPFEED_DID = `did:plc:feedprobe${RUN}popfeed`;
+const POPFEED_ISBN = `979${RUN.replace(/\D/g, '').slice(-10)}`;
+const POPFEED_EDITION = `at://${AUTHORITY}/community.lexicon.media.book.edition/feedprobe-pf-${RUN}`;
+const REVIEW_URI = `at://${POPFEED_DID}/${POPFEED_REVIEW_COLLECTION}/3kfeedprobe`;
+const LIST_ITEM_URI = `at://${POPFEED_DID}/${POPFEED_LIST_ITEM_COLLECTION}/3kfeedprobe`;
+const REVIEW_TIME = new Date(Date.now() - 60_000).toISOString();
+const LIST_ITEM_TIME = new Date().toISOString();
 
 let pool: pg.Pool | undefined;
 let ready = false;
@@ -84,6 +102,66 @@ before(async () => {
         new Date().toISOString()
       ]
     );
+
+    // One edition, reachable only through the Popfeed record's ISBN.
+    await pool.query(
+      `INSERT INTO editions (uri, title, created_at)
+       VALUES ($1, $2, now())
+       ON CONFLICT (uri) DO NOTHING`,
+      [POPFEED_EDITION, `Popfeed probe ${RUN}`]
+    );
+    await pool.query(
+      `INSERT INTO edition_identifiers (edition_uri, issuer, value)
+       VALUES ($1, 'isbn13', $2)
+       ON CONFLICT (edition_uri, issuer, value) DO NOTHING`,
+      [POPFEED_EDITION, POPFEED_ISBN]
+    );
+
+    // A review and a shelf entry. The review carries `createdAt`; the shelf
+    // entry carries only `addedAt` — what Popfeed actually writes — and it is
+    // the newer of the two.
+    await pool.query(
+      `INSERT INTO happyview.happyview_records (uri, did, collection, rkey, record, cid, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (uri) DO NOTHING`,
+      [
+        REVIEW_URI,
+        POPFEED_DID,
+        POPFEED_REVIEW_COLLECTION,
+        '3kfeedprobe',
+        JSON.stringify({
+          $type: POPFEED_REVIEW_COLLECTION,
+          creativeWorkType: 'book',
+          rating: 9,
+          text: 'Popfeed probe',
+          identifiers: { isbn13: POPFEED_ISBN },
+          createdAt: REVIEW_TIME
+        }),
+        `bafyfeedprobe-pf-review${RUN}`,
+        REVIEW_TIME
+      ]
+    );
+    await pool.query(
+      `INSERT INTO happyview.happyview_records (uri, did, collection, rkey, record, cid, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (uri) DO NOTHING`,
+      [
+        LIST_ITEM_URI,
+        POPFEED_DID,
+        POPFEED_LIST_ITEM_COLLECTION,
+        '3kfeedprobe',
+        JSON.stringify({
+          $type: POPFEED_LIST_ITEM_COLLECTION,
+          creativeWorkType: 'book',
+          listType: 'read_books',
+          listUri: `at://${POPFEED_DID}/social.popfeed.feed.list/books`,
+          identifiers: { isbn13: POPFEED_ISBN },
+          addedAt: LIST_ITEM_TIME
+        }),
+        `bafyfeedprobe-pf-listitem${RUN}`,
+        LIST_ITEM_TIME
+      ]
+    );
   } catch {
     await candidate.end().catch(() => undefined);
     pool = undefined;
@@ -94,13 +172,19 @@ before(async () => {
 after(async () => {
   if (pool) {
     await pool
-      .query('DELETE FROM happyview.happyview_records WHERE uri = $1', [POST_URI])
+      .query('DELETE FROM happyview.happyview_records WHERE uri = ANY($1::text[])', [
+        [POST_URI, REVIEW_URI, LIST_ITEM_URI]
+      ])
       .catch(() => undefined);
     await pool
-      .query('DELETE FROM edition_identifiers WHERE value = $1', [HIVE_ID])
+      .query('DELETE FROM edition_identifiers WHERE value = ANY($1::text[])', [
+        [HIVE_ID, POPFEED_ISBN]
+      ])
       .catch(() => undefined);
     await pool
-      .query('DELETE FROM editions WHERE uri = ANY($1::text[])', [[EDITION_ONE, EDITION_TWO]])
+      .query('DELETE FROM editions WHERE uri = ANY($1::text[])', [
+        [EDITION_ONE, EDITION_TWO, POPFEED_EDITION]
+      ])
       .catch(() => undefined);
   }
   await pool?.end().catch(() => undefined);
@@ -133,4 +217,25 @@ test('the duplicated editions cannot fake a next page', async (t) => {
 
   assert.deepEqual(first.feed.map((item) => item.post), [POST_URI]);
   assert.equal(first.cursor, undefined);
+});
+
+test('Popfeed records resolve their ISBN to an edition and page by addedAt', async (t) => {
+  const live = requiredPool(t);
+  if (!live) return;
+
+  const page = await fetchFeedPage(live, { kind: 'dynamic', viewerDid: POPFEED_DID, limit: 20 });
+
+  // The shelf entry is newer by `addedAt` alone, so it sorts above the review:
+  // an `addedAt`-only row is not a NULL-tail row.
+  assert.deepEqual(page.feed, [
+    { post: LIST_ITEM_URI, reason: `popfeed:read|${POPFEED_EDITION}` },
+    { post: REVIEW_URI, reason: `popfeed:review|${POPFEED_EDITION}` }
+  ]);
+
+  // One row out, one cursor: the keyset carries the `addedAt` time, so the
+  // continuation pages from the same expression the order used.
+  const first = await fetchFeedPage(live, { kind: 'dynamic', viewerDid: POPFEED_DID, limit: 1 });
+
+  assert.deepEqual(first.feed.map((item) => item.post), [LIST_ITEM_URI]);
+  assert.equal(first.cursor, encodeCursor({ c: LIST_ITEM_TIME, u: LIST_ITEM_URI }));
 });

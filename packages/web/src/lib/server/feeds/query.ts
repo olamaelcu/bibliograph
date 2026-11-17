@@ -15,6 +15,13 @@ export const FOLLOW_COLLECTION = 'net.olamaelcu.livtet.biblio.follow';
  * carries them too.
  */
 export const BUZZ_BOOKHIVE_BOOK = 'buzz.bookhive.book';
+/**
+ * Popfeed's book activity: a review (rating 0-10 plus optional text) and a
+ * shelf membership (`listType`). Not Bibliograph collections, but a Livtet
+ * reader's Popfeed activity is book activity, so the feed carries it.
+ */
+export const POPFEED_REVIEW_COLLECTION = 'social.popfeed.feed.review';
+export const POPFEED_LIST_ITEM_COLLECTION = 'social.popfeed.feed.listItem';
 
 /**
  * Bookhive's reading statuses, spelled the way the Livtet client expects in a
@@ -26,6 +33,20 @@ const BOOKHIVE_SHELF: Record<string, string> = {
   'buzz.bookhive.defs#wantToRead': 'to-read',
   'buzz.bookhive.defs#abandoned': 'dnf'
 };
+
+/** Popfeed's shelf vocabulary, mapped onto the Livtet keys a reason carries. */
+const POPFEED_SHELF: Record<string, string> = {
+  read_books: 'read',
+  currently_reading_books: 'reading',
+  to_read_books: 'to-read'
+};
+
+/**
+ * A record's own activity time. Popfeed's shelf entries carry `addedAt` and no
+ * `createdAt`, so the order and the cursor read one expression for every
+ * collection — which is also what 0020-feed-popfeed.sql indexes.
+ */
+const FEED_TIME = `COALESCE(record::jsonb->>'createdAt', record::jsonb->>'addedAt')`;
 
 export const FEED_KINDS = ['public', 'following', 'extended', 'dynamic'] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
@@ -125,6 +146,24 @@ export function reasonFor(
     if (book === null || typeof book !== 'object' || Array.isArray(book)) return undefined;
     const uri = (book as Record<string, unknown>).uri;
     return typeof uri === 'string' && uri !== '' ? uri : undefined;
+  }
+
+  // Popfeed's two book records name no edition: the row's ISBN/ASIN lookup
+  // resolved it (`bookUri`). Without a match the reason keeps its
+  // `popfeed:<token>` prefix — the same degradation a Bookhive record whose
+  // `hiveId` was never imported already has — and the client falls back to the
+  // record's own `title`/`posterUrl`.
+  if (collection === POPFEED_REVIEW_COLLECTION) {
+    const prefix = 'popfeed:review';
+    return bookUri === null ? prefix : `${prefix}|${bookUri}`;
+  }
+
+  if (collection === POPFEED_LIST_ITEM_COLLECTION) {
+    const listType = value.listType;
+    const shelf = typeof listType === 'string' ? POPFEED_SHELF[listType] : undefined;
+    if (shelf === undefined) return undefined;
+    const prefix = `popfeed:${shelf}`;
+    return bookUri === null ? prefix : `${prefix}|${bookUri}`;
   }
 
   return undefined;
@@ -257,9 +296,10 @@ export type FeedPageOptions = {
 };
 
 /**
- * Page the three activity collections newest first by the record's own
- * `createdAt`, then `uri` descending. `limit + 1` rows decide whether another
- * page exists; the cursor is built from the last emitted row.
+ * Page the five activity collections newest first by the record's own activity
+ * time (its `createdAt`, else Popfeed's `addedAt`), then `uri` descending.
+ * `limit + 1` rows decide whether another page exists; the cursor is built from
+ * the last emitted row.
  */
 export async function fetchFeedPage(
   pool: Queryable,
@@ -277,7 +317,25 @@ export async function fetchFeedPage(
   }
   if (dids !== null && dids.length === 0) return { feed: [] };
 
-  const values: unknown[] = [REVIEW_COLLECTION, BOOK_STATUS_COLLECTION, BUZZ_BOOKHIVE_BOOK];
+  // The five paged collections, each with the predicate that keeps a branch to
+  // book activity. A Popfeed record of another work type names no edition and
+  // is not book activity; its shelf lives in `listType` (the schema's `status`
+  // is never set in the wild), and only the three book shelves are paged.
+  const branches: { collection: string; filter: string }[] = [
+    { collection: REVIEW_COLLECTION, filter: '' },
+    { collection: BOOK_STATUS_COLLECTION, filter: '' },
+    { collection: BUZZ_BOOKHIVE_BOOK, filter: '' },
+    {
+      collection: POPFEED_REVIEW_COLLECTION,
+      filter: ` AND record::jsonb->>'creativeWorkType' = 'book'`
+    },
+    {
+      collection: POPFEED_LIST_ITEM_COLLECTION,
+      filter: ` AND record::jsonb->>'creativeWorkType' = 'book'
+        AND record::jsonb->>'listType' IN ('read_books', 'currently_reading_books', 'to_read_books')`
+    }
+  ];
+  const values: unknown[] = branches.map((branch) => branch.collection);
 
   if (dids !== null) {
     values.push(dids);
@@ -288,41 +346,39 @@ export async function fetchFeedPage(
     values.push(options.cursor.c, options.cursor.u);
   }
   const cursorParams = options.cursor
-    ? { createdAt: `$${values.length - 1}`, uri: `$${values.length}` }
+    ? { time: `$${values.length - 1}`, uri: `$${values.length}` }
     : null;
 
   values.push(options.limit + 1);
   const limitParam = `$${values.length}`;
 
   // One ordered branch per collection, unioned. A single `IN` list makes the
-  // planner read every row of the three collections and sort them (measured
-  // 8.5 s on the production catalogue); three ordered branches let it merge the
-  // three index scans and stop after `limit + 1` rows (0.8 ms), because
+  // planner read every row of the five collections and sort them (measured
+  // 8.5 s on the production catalogue); ordered branches let it merge the five
+  // index scans and stop after `limit + 1` rows (0.8 ms), because
   // `happyview_records_feed_order_idx` matches this ORDER BY exactly — see
-  // 0018-feed-order-nulls-last.sql.
-  const branches = [REVIEW_COLLECTION, BOOK_STATUS_COLLECTION, BUZZ_BOOKHIVE_BOOK].map(
-    (_, index) => {
-      let branch = `(SELECT uri,
+  // 0020-feed-popfeed.sql.
+  const unioned = branches.map(({ filter }, index) => {
+    let branch = `(SELECT uri,
                             collection,
                             record::jsonb AS record,
-                            record::jsonb->>'createdAt' AS created_at,
+                            ${FEED_TIME} AS created_at,
                             record::jsonb->>'hiveId' AS hive_id
-                       FROM happyview.happyview_records
-                      WHERE collection = $${index + 1}`;
-      if (didParam !== null) branch += ` AND did = ANY(${didParam}::text[])`;
-      if (cursorParams !== null) {
-        branch += ` AND (
-        CASE WHEN ${cursorParams.createdAt}::text IS NULL
-          THEN record::jsonb->>'createdAt' IS NULL AND uri < ${cursorParams.uri}
-          ELSE record::jsonb->>'createdAt' IS NULL
-            OR record::jsonb->>'createdAt' < ${cursorParams.createdAt}
-            OR (record::jsonb->>'createdAt' = ${cursorParams.createdAt} AND uri < ${cursorParams.uri})
+                      FROM happyview.happyview_records
+                      WHERE collection = $${index + 1}${filter}`;
+    if (didParam !== null) branch += ` AND did = ANY(${didParam}::text[])`;
+    if (cursorParams !== null) {
+      branch += ` AND (
+        CASE WHEN ${cursorParams.time}::text IS NULL
+          THEN ${FEED_TIME} IS NULL AND uri < ${cursorParams.uri}
+          ELSE ${FEED_TIME} IS NULL
+            OR ${FEED_TIME} < ${cursorParams.time}
+            OR (${FEED_TIME} = ${cursorParams.time} AND uri < ${cursorParams.uri})
         END
       )`;
-      }
-      return `${branch} ORDER BY record::jsonb->>'createdAt' DESC NULLS LAST, uri DESC LIMIT ${limitParam})`;
     }
-  );
+    return `${branch} ORDER BY ${FEED_TIME} DESC NULLS LAST, uri DESC LIMIT ${limitParam})`;
+  });
 
   // A Bookhive record names no edition: `appview_bookhive_lua` resolves its
   // `hiveId` to the edition the catalog import minted, and that edition is the
@@ -343,17 +399,41 @@ export async function fetchFeedPage(
   // `post`. A repeat is not a second entry — the client keys its rows by it —
   // and both the extra editions above and an index that holds a record twice
   // collapse here, before the page is cut to length.
+  //
+  // A Popfeed record names no edition at all — it carries `identifiers`
+  // (`isbn13`/`isbn10`/`asin`) — so the edition comes from a join on
+  // `public.edition_identifiers (issuer, value)`, one index lookup per
+  // identifier over the page's own Popfeed rows. `min()` is the same
+  // deterministic pick as the Bookhive branch above, and both CTEs are grouped
+  // by their key so neither can fan a page row out.
   const sql = `WITH page AS MATERIALIZED (
-                 ${branches.join('\n                 UNION ALL\n                 ')}
+                 ${unioned.join('\n                 UNION ALL\n                 ')}
                ), mapped AS (
                  SELECT p.hive_id, min(m.edition_uri) AS edition_uri
                    FROM page p
                    JOIN public.appview_bookhive_lua m ON m.hive_id = p.hive_id
                   GROUP BY p.hive_id
+               ), popfeed_keys AS (
+                 SELECT p.uri, k.issuer, k.value
+                   FROM page p
+                   CROSS JOIN LATERAL (VALUES
+                     ('isbn13', p.record->'identifiers'->>'isbn13'),
+                     ('isbn10', p.record->'identifiers'->>'isbn10'),
+                     ('asin',   p.record->'identifiers'->>'asin')
+                   ) AS k(issuer, value)
+                  WHERE p.collection IN ('${POPFEED_REVIEW_COLLECTION}', '${POPFEED_LIST_ITEM_COLLECTION}')
+                    AND k.value IS NOT NULL
+               ), popfeed AS (
+                 SELECT k.uri, min(e.edition_uri) AS edition_uri
+                   FROM popfeed_keys k
+                   JOIN public.edition_identifiers e ON e.issuer = k.issuer AND e.value = k.value
+                  GROUP BY k.uri
                ), joined AS (
-                 SELECT p.uri, p.collection, p.record, p.created_at, mapped.edition_uri AS book_uri
+                 SELECT p.uri, p.collection, p.record, p.created_at,
+                        COALESCE(mapped.edition_uri, f.edition_uri) AS book_uri
                    FROM page p
                    LEFT JOIN mapped ON mapped.hive_id = p.hive_id
+                   LEFT JOIN popfeed f ON f.uri = p.uri
                ), distinct_posts AS (
                  SELECT DISTINCT ON (uri) uri, collection, record, created_at, book_uri
                    FROM joined

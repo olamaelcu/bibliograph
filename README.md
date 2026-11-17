@@ -64,6 +64,8 @@ records written straight to a PDS arrive through Jetstream or a backfill.
 | `net.olamaelcu.livtet.biblio.actor.profile` | literal `self` | reader / `profile.set` | reader PDS |
 | `community.lexicon.media.book.review` | `tid` | reader / `review.*` | reader PDS |
 | `buzz.bookhive.book` | Bookhive's own (`any`) | the reader's Bookhive client | reader PDS |
+| `social.popfeed.feed.review` | Popfeed's own (`tid`) | the reader's Popfeed client | reader PDS |
+| `social.popfeed.feed.listItem` | Popfeed's own (`tid`) | the reader's Popfeed client | reader PDS |
 
 `buzz.bookhive.book` is not a Bibliograph record; it is indexed because the reader's review lives
 inside it. A record whose `review` text is non-empty is served as a review by `getReviewsByBook`
@@ -78,6 +80,12 @@ dispatch the collection, but it is never published as a `com.atproto.lexicon.sch
 `buzz.bookhive` is Bookhive's namespace (`_lexicon.bookhive.buzz` names
 `did:plc:enu2j5xjlqsjaylv3du4myh4`), and `scripts/publish-lexicons.mjs` both skips it and deletes a
 record an earlier publish left behind.
+
+Popfeed's two book records are the same kind of input: a book review and a shelf membership
+(`listType`), with the work named by `isbn13`/`isbn10`/`asin` rather than by an edition URI. HappyView
+registers them (vendored at `happyview/lexicons/social/popfeed/`) so the discover feed can page them,
+and `scripts/publish-lexicons.mjs` skips them for the same reason it skips Bookhive's: `popfeed.social`
+is Popfeed's namespace.
 
 The imported `community.lexicon.*` book and interaction lexicons are treated the same way: they
 stay in `happyview/lexicons/` for dispatch and ingest, and are never published, because that

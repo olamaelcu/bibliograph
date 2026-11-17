@@ -270,11 +270,16 @@ turn the catalog's thin spots into unbounded provider spend.
 
 `com.atproto.feed.describeFeedGenerator` and `com.atproto.feed.getFeedSkeleton` are served by the
 edge (`packages/web/src/lib/server/feeds/`), not HappyView: a skeleton is one SQL query over
-`happyview.happyview_records` for `community.lexicon.media.book.review`,
-`net.olamaelcu.livtet.biblio.bookStatus` and `buzz.bookhive.book`, ordered newest first by the
-record's own `createdAt` and then `uri`. A Bookhive entry's reason names the shelf and the edition
-its `hiveId` was imported as (`appview_bookhive_lua`). There is no worker task and no Lua script for
-feeds.
+`happyview.happyview_records` for five collections — `community.lexicon.media.book.review`,
+`net.olamaelcu.livtet.biblio.bookStatus`, `buzz.bookhive.book` and Popfeed's
+`social.popfeed.feed.review` and `social.popfeed.feed.listItem` — ordered newest first by the
+record's own activity time (`createdAt`, else Popfeed's `addedAt`) and then `uri`. A Bookhive
+entry's reason names the shelf and the edition its `hiveId` was imported as
+(`appview_bookhive_lua`); a Popfeed record names no edition, so its ISBN/ASIN identifiers are
+joined against `edition_identifiers` and its reason is `popfeed:<shelf>|<book-uri>`. Only Popfeed
+records whose `creativeWorkType` is `book` page, and a shelf entry only for the three book
+`listType`s (`read_books`, `currently_reading_books`, `to_read_books`). There is no worker task and
+no Lua script for feeds.
 
 The generator DID is `FEED_GENERATOR_DID`; it is required configuration with no code default, and
 its feed URIs are `at://<FEED_GENERATOR_DID>/net.olamaelcu.livtet.biblio.feed.generator/<kind>` for
@@ -290,10 +295,13 @@ A missing or invalid token is `401`, never a silent public page. `following` pag
 by DIDs the viewer follows (excluding the viewer), `extended` adds their followees (capped at 500
 DIDs), and `dynamic` is the viewer plus their follow set.
 
-`packages/worker/sql/0003-feed-read.sql` adds the
-`(collection, (record::jsonb->>'createdAt') DESC, uri DESC)` and follow-subject indexes and grants
-the web role `USAGE`/`SELECT`; it is conditional on HappyView having created the table, so a fresh
-catalog-only database skips it.
+`packages/worker/sql/0003-feed-read.sql` adds the follow-subject index and grants the web role
+`USAGE`/`SELECT`; `0018` and `0020` replace the order index under the same name —
+`(collection, COALESCE(record::jsonb->>'createdAt', record::jsonb->>'addedAt') DESC NULLS LAST, uri DESC)`, the
+expression the page orders by — and `0020` also grants the web role `SELECT` on
+`public.edition_identifiers` for the Popfeed ISBN lookup. All three are conditional on HappyView
+having created the table, so a fresh catalog-only database skips them, and `deploy.sh` re-applies
+`0003` and `0020` after HappyView has migrated.
 
 ## Catalog worker
 
@@ -600,7 +608,9 @@ package-worker-deb` builds `bibliograph-worker`, which installs the payload at
 
 Indexed collections: `net.olamaelcu.livtet.biblio.{bookStatus,shelf,shelfItem,follow,readingGoal}`,
 `net.olamaelcu.livtet.biblio.actor.profile`, `community.lexicon.media.book.review` and Bookhive's
-`buzz.bookhive.book` (a reader's review lives inside it). Bookhive's catalog
+`buzz.bookhive.book` (a reader's review lives inside it), plus Popfeed's
+`social.popfeed.feed.review` and `social.popfeed.feed.listItem` — its two book records, which name the
+work by ISBN/ASIN. Bookhive's catalog
 (`buzz.bookhive.catalogBook`) is not indexed: `catalog.bookhive` imports it into editions instead,
 recording each `hiveId` as a `(bookhive.buzz, bk_…)` identifier (`appview_bookhive_lua`).
 Query and procedure scripts live in `happyview/scripts/xrpc/`; `mise run hv-deploy`

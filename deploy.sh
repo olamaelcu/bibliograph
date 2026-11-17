@@ -524,12 +524,14 @@ if [ "$SKIP_DB" = 0 ]; then
   [ -n "$worker_url" ] \
     || fail "DATABASE_URL is empty in /etc/bibliograph/worker.env; cannot apply the feed read path"
   sql_dir=/usr/lib/bibliograph-worker/sql
-  feed_sql="$sql_dir/0003-feed-read.sql"
-  [ -f "$feed_sql" ] \
-    || fail "the installed bibliograph-worker has no $feed_sql; rebuild it with 'mise run package-worker-deb'"
-  say "Feed read path: re-applying $(basename "$feed_sql") after HappyView migrated"
-  psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -f "$feed_sql" \
-    || fail "feed read schema failed at 0003-feed-read.sql; the edge feed generator answers 503 without it. Fix the grant/index error and re-run (idempotent)."
+  for feed_file in 0003-feed-read.sql 0020-feed-popfeed.sql; do
+    feed_sql="$sql_dir/$feed_file"
+    [ -f "$feed_sql" ] \
+      || fail "the installed bibliograph-worker has no $feed_sql; rebuild it with 'mise run package-worker-deb'"
+    say "Feed read path: re-applying $feed_file after HappyView migrated"
+    psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -f "$feed_sql" \
+      || fail "feed read schema failed at $feed_file; the edge feed generator answers 503 without it. Fix the grant/index error and re-run (idempotent)."
+  done
   note "Feed read path applied (indexes and grants only; idempotent)"
 else
   note "--skip-db: feed read schema re-apply skipped"

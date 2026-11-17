@@ -5,6 +5,8 @@ import {
   BOOK_STATUS_COLLECTION,
   BUZZ_BOOKHIVE_BOOK,
   FEED_KINDS,
+  POPFEED_LIST_ITEM_COLLECTION,
+  POPFEED_REVIEW_COLLECTION,
   REVIEW_COLLECTION,
   decodeCursor,
   encodeCursor,
@@ -68,6 +70,9 @@ test('pages public records and emits a cursor only when the probe row exists', a
   assert.equal(pool.calls.length, 1);
   assert.equal(pool.calls[0]!.values?.[0], REVIEW_COLLECTION);
   assert.equal(pool.calls[0]!.values?.[1], BOOK_STATUS_COLLECTION);
+  assert.equal(pool.calls[0]!.values?.[2], BUZZ_BOOKHIVE_BOOK);
+  assert.equal(pool.calls[0]!.values?.[3], POPFEED_REVIEW_COLLECTION);
+  assert.equal(pool.calls[0]!.values?.[4], POPFEED_LIST_ITEM_COLLECTION);
   assert.equal(pool.calls[0]!.values?.at(-1), 3);
 });
 
@@ -79,7 +84,7 @@ test('does not emit a cursor when the page is not full', async () => {
   assert.equal(page.cursor, undefined);
 });
 
-test('passes the keyset cursor values and keeps a null createdAt tail reachable', async () => {
+test('passes the keyset cursor values and keeps the null-time tail reachable', async () => {
   const cursor = { c: '2026-03-02T00:00:00.000Z', u: 'at://a/status/2' };
   const pool = queuedPool([
     [row('at://a/review/1', REVIEW_COLLECTION, {}, '2026-03-01T00:00:00.000Z')]
@@ -89,7 +94,14 @@ test('passes the keyset cursor values and keeps a null createdAt tail reachable'
 
   const values = pool.calls[0]!.values ?? [];
   assert.deepEqual(values.slice(-3), [cursor.c, cursor.u, 6]);
-  assert.match(pool.calls[0]!.sql, /createdAt' IS NULL AND uri </);
+  // One expression orders, paces and reads the record's own activity time, so
+  // an `addedAt`-only Popfeed row sorts with the rest of the page and a null
+  // tail stays reachable on the next keyset step.
+  assert.match(
+    pool.calls[0]!.sql,
+    /COALESCE\(record::jsonb->>'createdAt', record::jsonb->>'addedAt'\) IS NULL AND uri </
+  );
+  assert.match(pool.calls[0]!.sql, /ORDER BY COALESCE\(record::jsonb->>'createdAt', record::jsonb->>'addedAt'\) DESC NULLS LAST, uri DESC/);
 });
 
 test('reason prefers subjectRecord, then the first atproto identifier', () => {
@@ -258,6 +270,87 @@ test('skeleton items omit reason when the record names no book', async () => {
   assert.deepEqual(page.feed, [{ post: 'at://a/review/1' }]);
 });
 
+test('a Popfeed review carries the edition its ISBN resolved to', () => {
+  const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/pf';
+  assert.equal(
+    reasonFor(POPFEED_REVIEW_COLLECTION, { creativeWorkType: 'book', rating: 9 }, edition),
+    `popfeed:review|${edition}`
+  );
+  // No catalog edition matched: the prefix stays, as it does for a Bookhive
+  // record whose hive id was never imported, and the client falls back to the
+  // record's own title and poster.
+  assert.equal(reasonFor(POPFEED_REVIEW_COLLECTION, { creativeWorkType: 'book' }), 'popfeed:review');
+  assert.equal(reasonFor(POPFEED_REVIEW_COLLECTION, null), undefined);
+});
+
+test('a Popfeed shelf entry carries its listType as a Livtet shelf', () => {
+  const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/pf';
+  assert.equal(
+    reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'read_books' }, edition),
+    `popfeed:read|${edition}`
+  );
+  assert.equal(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'to_read_books' }), 'popfeed:to-read');
+  assert.equal(
+    reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'currently_reading_books' }, edition),
+    `popfeed:reading|${edition}`
+  );
+  // The schema's `status` tokens are not what Popfeed writes, and a shelf the
+  // feed does not page gets no reason.
+  assert.equal(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { status: '#finished' }), undefined);
+  assert.equal(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'favorite_movies' }), undefined);
+});
+
+test('a Popfeed page resolves ISBN/ASIN to an edition and keeps its own time', async () => {
+  const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/pf';
+  const unknown = 'at://did:plc:r/social.popfeed.feed.review/2';
+  const pool = queuedPool([
+    [
+      row(
+        'at://did:plc:r/social.popfeed.feed.listItem/1',
+        POPFEED_LIST_ITEM_COLLECTION,
+        { creativeWorkType: 'book', listType: 'read_books', identifiers: { isbn13: '9780306406157' } },
+        '2026-03-03T00:00:00.000Z',
+        edition
+      ),
+      // No edition matched the ISBN this record named.
+      row(
+        unknown,
+        POPFEED_REVIEW_COLLECTION,
+        { creativeWorkType: 'book', rating: 9, identifiers: { isbn13: '9780441478125' } },
+        '2026-03-02T00:00:00.000Z'
+      )
+    ]
+  ]);
+
+  const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
+
+  assert.deepEqual(page.feed, [
+    { post: 'at://did:plc:r/social.popfeed.feed.listItem/1', reason: `popfeed:read|${edition}` },
+    { post: unknown, reason: 'popfeed:review' }
+  ]);
+
+  const sql = pool.calls[0]!.sql;
+  // Both Popfeed branches page book activity only, and the shelf branch reads
+  // `listType` (never `status`) against the three book shelves.
+  assert.match(sql, /AND record::jsonb->>'creativeWorkType' = 'book'/);
+  assert.match(
+    sql,
+    /AND record::jsonb->>'listType' IN \('read_books', 'currently_reading_books', 'to_read_books'\)/
+  );
+  // The edition comes from `edition_identifiers` for the page's own Popfeed
+  // rows, grouped so one ISBN naming several editions cannot fan a row out.
+  assert.match(sql, /popfeed_keys AS \(/);
+  assert.match(sql, /\('isbn13', p\.record->'identifiers'->>'isbn13'\)/);
+  assert.match(sql, /\('isbn10', p\.record->'identifiers'->>'isbn10'\)/);
+  assert.match(sql, /\('asin',   p\.record->'identifiers'->>'asin'\)/);
+  assert.match(
+    sql,
+    /JOIN public\.edition_identifiers e ON e\.issuer = k\.issuer AND e\.value = k\.value/
+  );
+  assert.match(sql, /COALESCE\(mapped\.edition_uri, f\.edition_uri\) AS book_uri/);
+  assert.match(sql, /LEFT JOIN popfeed f ON f\.uri = p\.uri/);
+});
+
 test('following scopes the page to the viewer follow set', async () => {
   const pool = queuedPool([
     [{ did: 'did:plc:one' }, { did: 'did:plc:two' }],
@@ -272,8 +365,8 @@ test('following scopes the page to the viewer follow set', async () => {
 
   assert.equal(page.feed.length, 1);
   assert.match(pool.calls[0]!.sql, /did <> \$1/);
-  // The page query's params are the three collections, then the follow set.
-  assert.deepEqual(pool.calls[1]!.values?.[3], ['did:plc:one', 'did:plc:two']);
+  // The page query's params are the five collections, then the follow set.
+  assert.deepEqual(pool.calls[1]!.values?.[5], ['did:plc:one', 'did:plc:two']);
 });
 
 test('normalizes bare and at:// follow subjects without a migration', async () => {
@@ -306,7 +399,7 @@ test('extended adds the followees of followees with the 500-DID cap', async () =
   assert.match(pool.calls[0]!.sql, /r\.record::jsonb->>'subject' LIKE 'at:\/\/%'/);
   assert.match(pool.calls[0]!.sql, /substr\(r\.record::jsonb->>'subject', 6\)/);
   assert.equal(pool.calls[0]!.values?.[2], 500);
-  assert.deepEqual(pool.calls[1]!.values?.[3], ['did:plc:one', 'did:plc:two']);
+  assert.deepEqual(pool.calls[1]!.values?.[5], ['did:plc:one', 'did:plc:two']);
 });
 
 test('dynamic is the viewer plus the follow set', async () => {
