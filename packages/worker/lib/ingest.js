@@ -3,7 +3,7 @@
 // resolvable through `com.atproto.repo.getRecord`.
 import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
 import { CONTRIBUTOR_COLLECTION, PUBLISHER_COLLECTION } from './entity-record.js';
-import { clippedText } from './record-fields.js';
+import { canonicalIdentifiersJson, clippedText } from './record-fields.js';
 
 const COLLECTION = 'community.lexicon.media.book.edition';
 
@@ -191,9 +191,7 @@ async function linkContributors(client, uri, contributors, authority) {
         ? contributor.nameInverted
         : null;
     const description = clippedText(contributor.description, DESCRIPTION_LIMITS) ?? null;
-    const identifiers = JSON.stringify(
-      Array.isArray(contributor.identifiers) ? contributor.identifiers : []
-    );
+    const identifiers = canonicalIdentifiersJson(contributor.identifiers);
     const inserted = await client.query(
       `INSERT INTO contributors (name, name_inverted, description, identifiers, at_uri)
        VALUES ($1, $2, $3, $4::jsonb, 'at://' || $5 || '/' || $6 || '/' || editions_next_tid())
@@ -230,9 +228,7 @@ async function linkContributors(client, uri, contributors, authority) {
 // per-edition list (`edition_publishers_shape`) is what the record publishes.
 async function linkPublisher(client, uri, publisher, identifiers, authority) {
   if (typeof publisher?.name !== 'string' || publisher.name.trim() === '') return;
-  const identifiersJson = JSON.stringify(
-    Array.isArray(publisher.identifiers) ? publisher.identifiers : []
-  );
+  const identifiersJson = canonicalIdentifiersJson(publisher.identifiers);
   const inserted = await client.query(
     `INSERT INTO publishers (name, identifiers, at_uri)
      VALUES ($1, $2::jsonb, 'at://' || $3 || '/' || $4 || '/' || editions_next_tid())

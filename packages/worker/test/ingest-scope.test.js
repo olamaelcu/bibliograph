@@ -17,7 +17,13 @@ const AUTHORITY = 'did:plc:scopeprobe';
 const EDITION = `at://${AUTHORITY}/community.lexicon.media.book.edition/3probe`;
 
 function fakeClient() {
-  const written = { claims: [], publishers: [], identifiers: [] };
+  const written = {
+    claims: [],
+    publishers: [],
+    identifiers: [],
+    contributorBags: [],
+    publisherBags: []
+  };
   const statements = [];
   const client = {
     async query(sql, params = []) {
@@ -25,7 +31,9 @@ function fakeClient() {
       statements.push(text);
       if (/^(BEGIN|COMMIT|ROLLBACK)$/.test(text)) return { rows: [], rowCount: 0 };
       if (text.includes('FROM edition_identifiers i')) return { rows: [] };
-      if (text.includes('editions_next_tid()')) return { rows: [{ rkey: '3probe' }] };
+      // Only the TID query. The entity inserts call `editions_next_tid()` too,
+      // to mint their `at_uri`, so a loose match would answer for them.
+      if (text.startsWith('SELECT editions_next_tid()')) return { rows: [{ rkey: '3probe' }] };
       if (text.startsWith('INSERT INTO editions')) return { rows: [{ uri: EDITION }], rowCount: 1 };
       if (text.startsWith('UPDATE editions')) return { rows: [], rowCount: 0 };
       if (text.startsWith('INSERT INTO edition_identifiers')) {
@@ -37,10 +45,12 @@ function fakeClient() {
         return { rows: [], rowCount: 1 };
       }
       if (text.startsWith('INSERT INTO contributors')) {
+        written.contributorBags.push(params[3]);
         return { rows: [{ id: written.identifiers.length, at_uri: 'at://contributor/1' }], rowCount: 1 };
       }
       if (text.startsWith('INSERT INTO edition_contributors')) return { rows: [], rowCount: 1 };
       if (text.startsWith('INSERT INTO publishers')) {
+        written.publisherBags.push(params[1]);
         return { rows: [{ id: 7, at_uri: 'at://publisher/7' }], rowCount: 1 };
       }
       if (text.startsWith('INSERT INTO edition_identifier_publishers')) {
@@ -117,4 +127,29 @@ test('a source identifier outside the candidate bag is a rejected candidate', as
   // The check runs before a connection is taken, so a malformed candidate never
   // opens a transaction at all.
   assert.deepEqual(statements, []);
+});
+
+test('the entity identity bag is stored canonically, whatever order it arrives in', async () => {
+  const bag = [BOOKHIVE_PAIR, ISBN_PAIR];
+  const ingestBag = async (identifiers) => {
+    const run = fakeClient();
+    await createIngest({ pool: run.pool, publisherDid: AUTHORITY })(
+      candidate({
+        contributors: [{ name: 'A. Author', identifiers }],
+        publisher: { name: 'Ace Books', identifiers }
+      })
+    );
+    return run.written;
+  };
+
+  const forward = await ingestBag(bag);
+  const reversed = await ingestBag([...bag].reverse());
+
+  // `(lower(name), identifiers)` is a jsonb comparison, so it is positional:
+  // one identity set has to reach the row as one string, in every order.
+  assert.equal(forward.contributorBags.length, 1);
+  assert.equal(forward.contributorBags[0], reversed.contributorBags[0]);
+  assert.equal(forward.publisherBags[0], reversed.publisherBags[0]);
+  assert.deepEqual(JSON.parse(forward.contributorBags[0]), [BOOKHIVE_PAIR, ISBN_PAIR]);
+  assert.deepEqual(JSON.parse(forward.publisherBags[0]), [BOOKHIVE_PAIR, ISBN_PAIR]);
 });
