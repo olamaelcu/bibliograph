@@ -64,11 +64,16 @@ const NSID_RE =
 //   buzz.bookhive        `_lexicon.bookhive.buzz` -> did:plc:enu2j5xjlqsjaylv3du4myh4
 //   community.lexicon    `_lexicon.*.lexicon.community` -> did:plc:mtr7qrqtcyseedx3jyr5o7db
 //                        (the books-WG documents imported for the review surface)
+//   social.popfeed       `_lexicon.popfeed.social` names no lexicon DID (a
+//                        wildcard CNAME to origin.expo.app) and Popfeed's repo
+//                        holds no schema records, so nothing to defer to — but
+//                        the namespace is still theirs
 //
 // Skipped on publish; deleted from the repo when an earlier run wrote one.
 const FOREIGN_AUTHORITY = [
   ['buzz.bookhive.', 'Bookhive owns _lexicon.bookhive.buzz'],
-  ['community.lexicon.', 'lexicon.community owns the community.lexicon authority']
+  ['community.lexicon.', 'lexicon.community owns the community.lexicon authority'],
+  ['social.popfeed.', 'Popfeed owns _lexicon.popfeed.social']
 ];
 
 function foreignAuthority(id) {

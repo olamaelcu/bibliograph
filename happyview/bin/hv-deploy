@@ -65,7 +65,19 @@ RECORD_LEXICONS = [
     # can be served as a review. The lexicon is Bookhive's, copied verbatim
     # into lexicons/buzz/bookhive/; only the collection is registered here.
     "buzz.bookhive.book",
+    # Popfeed's book records: a review (rating 0-10 + text) and a shelf
+    # membership (`listType`). Not Bibliograph collections; the lexicons are
+    # Popfeed's, copied into lexicons/social/popfeed/, and only the collections
+    # are registered here so the records reach the index the feed pages.
+    "social.popfeed.feed.review",
+    "social.popfeed.feed.listItem",
 ]
+
+# Record collections whose first registration also crawls the network. Popfeed's
+# records predate the upload, so without this the feed only ever sees new
+# activity. HappyView starts a job on the first upload only, so a re-deploy is a
+# no-op.
+BACKFILL_LEXICONS = {"social.popfeed.feed.review", "social.popfeed.feed.listItem"}
 
 QUERY_LEXICONS = [
     ("net.olamaelcu.livtet.biblio.graph.isFollowing", "net.olamaelcu.livtet.biblio.follow"),
@@ -113,6 +125,8 @@ DEFS_LEXICONS = [
     "community.lexicon.media.book.defs",
     # Referenced by buzz.bookhive.book (bookIdentifiers, bookProgress, …).
     "buzz.bookhive.defs",
+    # Referenced by social.popfeed.feed.review's `facets`.
+    "social.popfeed.richtext.facet",
 ]
 
 TIMESTAMP_SQL = "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')"
@@ -216,11 +230,14 @@ def upload(root: str, base: str, key: str) -> tuple[int, int]:
 
     def post_lexicon(nsid: str, target: str | None, label: str) -> None:
         nonlocal lexicons
-        payload = {"lexicon_json": read_lexicon(root, nsid), "backfill": False}
+        payload = {"lexicon_json": read_lexicon(root, nsid), "backfill": nsid in BACKFILL_LEXICONS}
         if target:
             payload["target_collection"] = target
         status, reply = request(base, key, "POST", "/admin/lexicons", payload)
-        print(f"{label} {nsid}: HTTP {status} revision {reply['revision']}")
+        print(
+            f"{label} {nsid}: HTTP {status} revision {reply['revision']}"
+            f" backfill {reply.get('backfill_job_id')}"
+        )
         lexicons += 1
 
     for nsid in RECORD_LEXICONS:
