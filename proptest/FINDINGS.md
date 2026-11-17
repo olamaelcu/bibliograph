@@ -47,6 +47,34 @@ present/blank/absent, collation-equivalent name pairs.
   @ `3c31f54`.
 - Not security-relevant: no authz, no denial of service, no cache poisoning.
 
+### F2 — the entity identity row was keyed on an order-dependent bag
+
+- **Found by**: inspection while checking what keeps catalog rows from
+  duplicating Bookhive's; confirmed by the two regressions below.
+- **Trigger**: the same entity name with the same identifier set arriving in
+  another order — a second provider, or a curator reordering the bag.
+- **First divergence**: `packages/worker/lib/ingest.js` stored
+  `JSON.stringify(candidate.identifiers)`, i.e. the caller's order, into the
+  column the unique index `(lower(name), identifiers)` compares. jsonb arrays
+  compare positionally, so the conflict never fires and a second row is minted
+  with its own `at://` address — while `buildContributorRecord` publishes
+  `canonicalIdentifiers(...)`, so both rows publish the same record.
+- **Contract violated**: the identity an ingest and the admin editor share —
+  `entity-edit.ts` states it as "two spellings of the same identifier bag
+  resolve to one contributor or publisher row".
+- **Branch**: `fix/entity-identity-bag` @ `794fd49` — a `canonicalIdentifiersJson`
+  helper (the stored form of the bag), used by both `ingest.js` entity writes,
+  by `edition-edit.ts` (insert and its follow-up lookup), and by the two merge
+  writers. Regressions: `packages/worker/test/ingest-scope.test.js` (fake
+  client: reordered bag must reach the row as one string) and
+  `packages/web/test/edition-edit-db.test.ts` (real Postgres: the reordered bag
+  must resolve to the existing contributor id). Both fail on `main` for the
+  stated reason and pass on the branch. Merged into `proptest/discovery` @
+  `dfa5d42`.
+- Residual: rows written before this change keep whatever order they carry; no
+  backfill is included, so a reordered bag can still miss an old row once.
+- Not security-relevant.
+
 ## Target 2 — `packages/web/src/lib/server/covers/rate-limit.ts`
 
 **Calibration.** `bucket.tokens -= 1;` deleted from `take` (grant without
