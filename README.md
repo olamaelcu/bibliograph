@@ -73,6 +73,12 @@ resolves to a book at all. The import also carries what the catalog book knows â
 count, language, publication year, publisher and series â€” and attaches those claims to the
 `bookhive.buzz` identifier, so an edition that already had an ISBN keeps its own provider's data.
 
+The lexicon is vendored at `happyview/lexicons/buzz/bookhive/` because HappyView must register it to
+dispatch the collection, but it is never published as a `com.atproto.lexicon.schema` record:
+`buzz.bookhive` is Bookhive's namespace (`_lexicon.bookhive.buzz` names
+`did:plc:enu2j5xjlqsjaylv3du4myh4`), and `scripts/publish-lexicons.mjs` both skips it and deletes a
+record an earlier publish left behind.
+
 Catalog identifiers are exact `(issuer, value)` pairs in
 `edition_identifiers`; an ingest updates an existing edition when any incoming
 pair is already owned, otherwise it mints a new TID. The edition record inlines

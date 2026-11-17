@@ -26,6 +26,14 @@
  * documents are updated; new ones are created. Every write is re-read and the
  * stored value/CID are compared before it counts as published.
  *
+ * Foreign authorities are never written. `happyview/lexicons/buzz/bookhive/`
+ * is vendored so HappyView can dispatch and the worker can index readers'
+ * `buzz.bookhive.book` records, but that authority is Bookhive's
+ * (`_lexicon.bookhive.buzz` names did:plc:enu2j5xjlqsjaylv3du4myh4). Those
+ * documents stay in the tree and keep being uploaded by `hv-deploy`; this
+ * script skips them and deletes a record an earlier run left behind, so the
+ * repo converges on "not ours" instead of holding a claim it cannot back.
+ *
  * Usage:
  *   node scripts/publish-lexicons.mjs [--dry-run] [--no-validate]
  *                                     [--dir happyview/lexicons] [--skip-authority]
@@ -46,6 +54,17 @@ const DNS_TIMEOUT_MS = 5_000;
 // NSID syntax from https://atproto.com/specs/nsid
 const NSID_RE =
   /^[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(\.[a-zA-Z]([a-zA-Z0-9]{0,62})?)$/;
+
+// Documents shipped in the lexicon tree that this repo must not publish. They
+// are inputs, not claims: HappyView registers them so it can dispatch, and the
+// worker reads `buzz.bookhive.book` from readers' repos, but the namespace
+// belongs to Bookhive (`_lexicon.bookhive.buzz` -> did:plc:enu2j5xjlqsjaylv3du4myh4),
+// so a `com.atproto.lexicon.schema` record under our DID is a claim nothing
+// backs. Skipped on publish; deleted from the repo when an earlier run wrote one.
+const FOREIGN_AUTHORITY = new Map([
+  ['buzz.bookhive.book', 'Bookhive owns _lexicon.bookhive.buzz'],
+  ['buzz.bookhive.defs', 'Bookhive owns _lexicon.bookhive.buzz']
+]);
 
 class PdsError extends Error {
   constructor(message, { status, code, body } = {}) {
@@ -374,7 +393,13 @@ function createClient(config) {
     });
   }
 
-  return { getRecord, putRecord };
+  async function deleteRecord(rkey) {
+    return rpc('com.atproto.repo.deleteRecord', {
+      body: { repo: config.accountDid, collection: COLLECTION, rkey }
+    });
+  }
+
+  return { getRecord, putRecord, deleteRecord };
 }
 
 function withTimeout(promise, ms, label) {
@@ -451,7 +476,17 @@ async function main() {
   if (!options.dryRun && config.problems.length > 0) throw configError(config);
 
   const publisherDid = config.accountDid;
-  console.log(`lexicons: ${documents.length} from ${path.relative(REPO_ROOT, root)}/`);
+  // Foreign-authority documents are inputs for HappyView and the worker, not
+  // claims on this repo: they are excluded from every write and their (stale)
+  // records are removed below.
+  const publishable = documents.filter(({ id }) => !FOREIGN_AUTHORITY.has(id));
+  const foreign = documents.filter(({ id }) => FOREIGN_AUTHORITY.has(id));
+
+  console.log(
+    `lexicons: ${documents.length} from ${path.relative(REPO_ROOT, root)}/ ` +
+      `(${publishable.length} to publish, ${foreign.length} foreign authority)`
+  );
+  for (const { id } of foreign) console.log(`  foreign  ${id}  (${FOREIGN_AUTHORITY.get(id)})`);
   console.log(`publisher: ${publisherDid ?? '(unset)'}`);
   if (options.dryRun) {
     console.log('mode: dry-run (no writes)');
@@ -460,7 +495,7 @@ async function main() {
   }
 
   if (!options.skipAuthority && publisherDid) {
-    const authorityProblems = await reportAuthorities(documents, publisherDid);
+    const authorityProblems = await reportAuthorities(publishable, publisherDid);
     if (authorityProblems.length > 0) {
       console.log('authority warnings (repo writes still succeed; consumers need the TXT):');
       for (const problem of authorityProblems) console.log(`  - ${problem}`);
@@ -468,17 +503,43 @@ async function main() {
   }
 
   if (options.dryRun) {
-    for (const { id, relative } of documents) console.log(`  plan ${id}  (${relative})`);
-    console.log(`dry-run: ${documents.length} lexicon(s) would be published as ${COLLECTION} records`);
+    for (const { id, relative } of publishable) console.log(`  plan ${id}  (${relative})`);
+    console.log(
+      `dry-run: ${publishable.length} lexicon(s) would be published as ${COLLECTION} records` +
+        (foreign.length > 0 ? `; ${foreign.length} foreign-authority record(s) would be deleted` : '')
+    );
     return 0;
   }
 
   const client = createClient(config);
-  const counts = { created: 0, updated: 0, skipped: 0, failed: 0 };
+  const counts = { created: 0, updated: 0, skipped: 0, deleted: 0, failed: 0 };
   const samples = [];
   const failures = [];
 
-  for (const { id, relative, document } of documents) {
+  // A record written by an earlier run must not survive the exclusion, or the
+  // repo keeps claiming a namespace the TXT does not point at.
+  for (const { id } of foreign) {
+    const uri = `at://${publisherDid}/${COLLECTION}/${id}`;
+    try {
+      if ((await client.getRecord(id)) === null) {
+        console.log(`  ABSENT  ${uri}`);
+        continue;
+      }
+      await client.deleteRecord(id);
+      if ((await client.getRecord(id)) !== null) {
+        throw new PdsError('record still readable after deleteRecord');
+      }
+      counts.deleted += 1;
+      console.log(`  DELETE  ${uri}`);
+    } catch (error) {
+      counts.failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      failures.push(`${id}: ${message}`);
+      console.error(`  FAIL    ${uri}: ${message}`);
+    }
+  }
+
+  for (const { id, relative, document } of publishable) {
     const record = rkeyOf(document);
     const uri = `at://${publisherDid}/${COLLECTION}/${id}`;
     try {
@@ -524,7 +585,8 @@ async function main() {
 
   console.log(
     `published: ${counts.created} created, ${counts.updated} updated, ` +
-      `${counts.skipped} skipped, ${counts.failed} failed (${documents.length} total)`
+      `${counts.skipped} skipped, ${counts.failed} failed (${publishable.length} total)` +
+      (counts.deleted > 0 ? `; ${counts.deleted} foreign-authority record(s) deleted` : '')
   );
 
   if (samples.length > 0) {
