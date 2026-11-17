@@ -14,6 +14,10 @@ Environment:
                            "docker compose exec -T postgres psql -U bibliograph -d bibliograph"
   HV_DATABASE_URL          used when HV_PSQL is unset: runs plain `psql <dsn>`
   HV_ADMIN_DID             DID recorded for the seeded user (default did:web:<hostname>)
+  HV_BACKFILL_LEXICONS=1   ask HappyView for a network backfill on the first
+                           upload of a collection that has one. Off by default:
+                           the crawl lists every repo writing the collection and
+                           competes with a live host's own queries.
 
 Options:
   --wait SECONDS     wait for /health before talking to the API (default 0)
@@ -73,11 +77,21 @@ RECORD_LEXICONS = [
     "social.popfeed.feed.listItem",
 ]
 
-# Record collections whose first registration also crawls the network. Popfeed's
-# records predate the upload, so without this the feed only ever sees new
-# activity. HappyView starts a job on the first upload only, so a re-deploy is a
-# no-op.
+# Record collections whose first registration can also crawl the network, so a
+# host that registers them late still sees the activity that predates the
+# upload. Popfeed's crawl is not small — its book activity names thousands of
+# repos — and, run unasked on a live host, it crowded out the deploy's own
+# schema pass (89 of 100 Postgres slots, load 50+). So it is opt-in:
+# HV_BACKFILL_LEXICONS=1 ./hv-deploy (or the oneshot's environment). HappyView
+# starts a job on the first upload only, so a re-deploy is a no-op either way.
 BACKFILL_LEXICONS = {"social.popfeed.feed.review", "social.popfeed.feed.listItem"}
+
+BACKFILL_ENABLED = os.environ.get("HV_BACKFILL_LEXICONS", "").strip().lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+)
 
 QUERY_LEXICONS = [
     ("net.olamaelcu.livtet.biblio.graph.isFollowing", "net.olamaelcu.livtet.biblio.follow"),
@@ -230,7 +244,10 @@ def upload(root: str, base: str, key: str) -> tuple[int, int]:
 
     def post_lexicon(nsid: str, target: str | None, label: str) -> None:
         nonlocal lexicons
-        payload = {"lexicon_json": read_lexicon(root, nsid), "backfill": nsid in BACKFILL_LEXICONS}
+        payload = {
+            "lexicon_json": read_lexicon(root, nsid),
+            "backfill": BACKFILL_ENABLED and nsid in BACKFILL_LEXICONS,
+        }
         if target:
             payload["target_collection"] = target
         status, reply = request(base, key, "POST", "/admin/lexicons", payload)

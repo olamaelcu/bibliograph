@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 VERSION="${HAPPYVIEW_VERSION:-2.17.4}"
-REVISION="${HAPPYVIEW_REVISION:-3}"
+REVISION="${HAPPYVIEW_REVISION:-4}"
 ARCH="${HAPPYVIEW_ARCH:-$(dpkg --print-architecture)}"
 PAYLOAD="packaging/payload/happyview"
 LIVE="/usr/lib/bibliograph-happyview"

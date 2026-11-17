@@ -45,7 +45,7 @@ the host sees it.
 | `happyview/bin/**` | HappyView | `hv-deploy`, `hv-client`, `hvlib.py`. Reinstalling restarts the client seeder, HappyView and the deploy oneshot. |
 | `happyview/sql/**` | HappyView | `indexes.sql` is applied by the deploy oneshot; `admin-bootstrap.sql`/`client-bootstrap.sql` back `--seed` and the client oneshot. |
 | `happyview/lexicons/**` | HappyView **and web** | HappyView ships/uploads them. The web build's `packages/web/scripts/generate-catalog.mjs` reads the same tree to generate `packages/web/src/lib/xrpc-catalog.json` (gitignored), so a lexicon change also changes the edge build. Separately, run `mise run publish-lex` if the `com.atproto.lexicon.schema` PDS records must be updated — that is not a Debian package. |
-| `packaging/happyview/**` | HappyView | Unit files, env defaults, nginx examples, `build-deb.sh`. Only an image digest/version change bumps `HAPPYVIEW_VERSION`/`HAPPYVIEW_REVISION`. |
+| `packaging/happyview/**` | HappyView | Unit files, env defaults, nginx examples, `build-deb.sh`. `HAPPYVIEW_VERSION` follows the pinned image digest; `HAPPYVIEW_REVISION` bumps when the package's own payload changes (see below). |
 | `packages/worker/**` (incl. `sql/**`, `scripts/**`) | worker | ESM and production `node_modules`. `packages/worker/sql/*.sql` are applied on the host by `deploy.sh` in lexical order after install; a manual worker install must run them too. |
 | `packaging/worker/**` | worker | Unit, env default, maintainer scripts, changelog, `build-deb.sh`. |
 | `packages/web/**` | web | SvelteKit sources, static assets, configs, and `scripts/generate-catalog.mjs`. Only the adapter-node `build/` is packaged; tests are not shipped. |
@@ -59,11 +59,15 @@ the host sees it.
 Cross-package notes and false assumptions:
 
 - A Bibliograph version bump (`packages/{worker,web}/package.json`) is **not**
-  a HappyView version bump. HappyView tracks the pinned image digest; leave it
-  at `2.17.4-2` unless the extracted image changes.
-- HappyView script/lexicon/lib changes are installed by rebuilding the **same**
-  `2.17.4-2` package and reinstalling it. Same-version reinstalls are normal
-  and expected; `deploy.sh` always uses `apt-get install --reinstall`.
+  a HappyView version bump. `HAPPYVIEW_VERSION` (currently `2.17.4`) tracks the
+  pinned image digest and moves only when the extracted image does.
+- A change to what the happyview package *ships* — `lexicons/`, `scripts/`,
+  `lib/`, `bin/hv-deploy` — takes a new `HAPPYVIEW_REVISION` with a changelog
+  entry (`2.17.4-2` carried the lexicon.community books lexicons, `2.17.4-3`
+  Popfeed's, `2.17.4-4` the opt-in backfill). A rebuild of the same version is
+  also installable — `deploy.sh` always uses `apt-get install --reinstall` —
+  but a revision bump is what makes the host's `dpkg-query` version tell you
+  which payload it has.
 - `mise run deploy` always builds and installs all three packages. Pinning
   `HV_PKG`/`WORKER_PKG`/`WEB_PKG` selects exact debs but does **not** narrow
   the install set, and `HV_PKG` still requires all three files to be present.
@@ -98,13 +102,12 @@ worker metrics `127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
   → `version`, then appends `-${WEB_REVISION:-1}`. `WEB_VERSION` /
   `WEB_REVISION` override.
 - **happyview** — `packaging/happyview/build-deb.sh` uses
-  `${HAPPYVIEW_VERSION:-2.17.4}` + `${HAPPYVIEW_REVISION:-2}`. This tracks the
-  pinned HappyView container image, **not** the Bibliograph release semver.
-  Never "sync" it to the app version; bump it only when the extracted image
-  changes.
-  A Lua/lexicon/lib change rebuilds that same `<version>-<revision>` and is
-  installed with `--reinstall`; that is the supported path and does not imply
-  a revision bump.
+  `${HAPPYVIEW_VERSION:-2.17.4}` + `${HAPPYVIEW_REVISION:-4}`. The version
+  tracks the pinned HappyView container image, **not** the Bibliograph release
+  semver: never "sync" it to the app version. The revision counts packaging
+  payloads for that image — bump it, with a `packaging/happyview/changelog`
+  entry, whenever `lexicons/`, `scripts/`, `lib/` or `bin/` changes, and raise
+  the `HAPPYVIEW_REVISION` default in `build-deb.sh` so the deb name matches.
 - **root** `package.json` — metadata only; no build path reads it.
 - Each split package has a static changelog under `packaging/<name>/changelog`,
   gzipped into the deb as documentation. The build scripts do **not** read it,
@@ -115,8 +118,8 @@ worker metrics `127.0.0.1:9464`, worker admin API `127.0.0.1:9465`.
 So a `0.2.1` release means `packages/{worker,web}/package.json` → `0.2.1`,
 each split changelog gets a `0.2.1-1` entry, and the produced files are
 `dist/bibliograph-worker_0.2.1-1_all.deb` and
-`dist/bibliograph-web_0.2.1-1_all.deb`. HappyView stays at its image version
-(e.g. `2.17.4-2`).
+`dist/bibliograph-web_0.2.1-1_all.deb`. HappyView keeps its image version and
+takes a new packaging revision only if its own payload changed (e.g. `2.17.4-4`).
 
 ## Build
 
@@ -423,8 +426,8 @@ ssh veve@lescayes.ts.olamaelcu.net 'journalctl -u bibliograph-web -n 30 --no-pag
 What each must show:
 
 - `dpkg-query` versions equal the built debs — `0.2.1-1` for worker/web and the
-  HappyView image version (e.g. `2.17.4-2`). A different version means the host
-  installed a different file.
+  HappyView image version plus its packaging revision (e.g. `2.17.4-4`). A
+  different version means the host installed a different file.
 - All five units `active`. The deploy oneshot is `oneshot` with
   `RemainAfterExit=yes`; `inactive (dead)` is not correct for it after a
   successful deploy.
@@ -510,6 +513,16 @@ nginx access/error logs are `/var/log/nginx/bibliograph.access.log` and
   trailing semicolon from `server_name`; current `deploy.sh` does strip it.
   Confirm with the correct `--resolve host:443:127.0.0.1` request before
   treating it as a TLS failure.
+- **A backfill crawl saturates the host** — with `HV_BACKFILL_LEXICONS=1` the
+  deploy oneshot asks HappyView to crawl every repo writing a collection. The
+  symptom is `happyview` holding 80-90 of the 100 Postgres slots, load past 50
+  on a small host, and the deploy's own catalog pass dying with `canceling
+  statement due to lock timeout` on `0001` (`lock_timeout=15000`). Recovery:
+  `systemctl stop happyview`, mark the job `cancelled` in
+  `happyview.happyview_backfill_jobs` (and `id`-scoped rows in
+  `happyview_backfill_repos` stay as they are), `systemctl start happyview`,
+  then re-run the deploy. The `hv-deploy` re-upload does not restart it: the
+  job is started on the first registration of a collection only.
 - **HappyView exits with `AddrInUse` on 127.0.0.1:3000** — another service owns
   that port (livtet on lescayes). Move `PORT` in `happyview.env` (and
   `BASE_PATH`/`PUBLIC_URL`/`HAPPYVIEW_URL` with it) to a free loopback port;

@@ -1,3 +1,20 @@
+bibliograph-happyview (2.17.4-4) unstable; urgency=medium
+
+  * Packaging revision 4: the network backfill a first registration could
+    start is opt-in. The HappyView binary is unchanged at 2.17.4.
+
+    - Revision 3 registered Popfeed's two record collections with
+      `backfill: true`, so the first upload asked HappyView to crawl every repo
+      writing them — thousands on the production network. On a live host that
+      crawl held 89 of 100 Postgres slots with load past 50, and the deploy's
+      own catalog pass died of a lock timeout behind it.
+    - `hv-deploy` now requests the backfill only when `HV_BACKFILL_LEXICONS` is
+      set (`1`/`true`/`yes`). Registering the collections still happens on
+      every run; only the crawl is opt-in, and HappyView starts one on the
+      first upload alone, so a re-deploy requests nothing either way.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 17 Nov 2026 22:53:25 +0000
+
 bibliograph-happyview (2.17.4-3) unstable; urgency=medium
 
   * Packaging revision 3: carry Popfeed's book lexicons and register their
