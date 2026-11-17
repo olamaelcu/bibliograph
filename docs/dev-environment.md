@@ -251,6 +251,35 @@ certificate, `--handle` / `--password` / `--type` / `--skey` for the account and
 space. `PDS_SPACE_OPLOG_WINDOW` bounds how many repo ops each space keeps for
 `space.listRepoOps` (default 10000 rows); the compose file leaves the default.
 
+### A managed space needs a reachable manager
+
+A space whose policy is `managedspace` does not decide access itself: the PDS
+resolves the policy's `managingApp` (`<did>#<fragment>`) by fetching that
+host's `/.well-known/did.json`, matches the service entry by fragment, and calls
+`checkUserAccess` on its endpoint. A space whose manager cannot be resolved is
+unreadable to everyone but its owner — the PDS answers an undecided refusal,
+not a denial.
+
+The Livtet app is the manager in this ecosystem, and locally it is a host
+process on `:6010`. Three pieces make that resolvable from a container, and all
+three live in this repo's compose file:
+
+| Piece | Why |
+| --- | --- |
+| the `caddy` service aliases `172-17-0-1.sslip.io` | a container resolves the name to Caddy inside the network; the host's published `:443` is not reachable from one |
+| a Caddy site for that host, proxying `host.docker.internal:6010` | the name lands on the app, from the host's browser and from a container |
+| the `pds-ca` service | the PDS fetches the document over TLS from Caddy's internal CA, which the image does not carry; the service writes that root into a volume the PDS reads as its trust store |
+
+The app names the same identity through `LIVTET_DID_HOSTNAME` (set in
+`livtet-ecosystem/platform/mise.toml`) and serves the document only for that
+host. Verify the whole path with the PDS's own resolver:
+
+```bash
+curl -s --cacert .cache/caddy-root.crt \
+  'https://pds.127-0-0-1.sslip.io/xrpc/com.atproto.identity.resolveIdentity?identifier=did:web:172-17-0-1.sslip.io'
+# expects 200 and a service entry with id "#livtet_space_manager"
+```
+
 Space records stay outside the AppView: HappyView indexes the account repos it
 walks through `com.atproto.sync.listRepos`, so a space write does not appear in
 the dashboard or in any `/xrpc` query. A space anchored on a community DID
