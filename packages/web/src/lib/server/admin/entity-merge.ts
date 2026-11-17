@@ -36,6 +36,7 @@ import type {
 } from '../../admin/types.ts';
 import { normalizeContributorRole } from '../../contributor-roles.ts';
 import { loadAdminEntity } from './entity-read.ts';
+import { canonicalIdentifiersJson } from '../../../../../worker/lib/record-fields.js';
 
 export class ContributorMergeError extends Error {
   readonly status: number;
@@ -433,7 +434,7 @@ export async function mergeContributors(
     for (const { column, value } of decided.absorbed) set(column, value);
     const targetBag = raw.get(target.id) ?? [];
     if (decided.identifiers.length !== targetBag.length) {
-      params.push(JSON.stringify(decided.identifiers));
+      params.push(canonicalIdentifiersJson(decided.identifiers));
       assignments.push(`identifiers = $${params.length}::jsonb`);
     }
     if (assignments.length > 0) {

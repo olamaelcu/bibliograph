@@ -8,6 +8,7 @@ import {
   loadEditionForEdit,
   updateAdminEdition
 } from '../src/lib/server/admin/edition-edit.ts';
+import type { EditionEditIdentifier } from '../src/lib/admin/edition-edit.ts';
 import type { AdminEdition } from '../src/lib/admin/types.ts';
 
 const DATABASE_URL =
@@ -346,6 +347,47 @@ test('creates a contributor from name and identifiers, then dedupes it', async (
   assert.match(matching.rows[0]?.at_uri ?? '', new RegExp(`^at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/`));
   assert.equal(second.contributors.length, 2);
   assert.equal(second.contributors[0]?.id, created.id);
+});
+
+test('dedupes a contributor whose identifier bag arrives in another order', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const seeded = await seedEdition();
+  const original = await loaded(seeded.rkey);
+  const name = `${RUN} Reordered Person ${seeded.rkey}`;
+  const isni = { issuer: 'isni', value: '0000000987654321' };
+  const viaf = { issuer: 'viaf', value: '987654321' };
+  const credits = (identifiers: EditionEditIdentifier[]) => [
+    { name, identifiers, role: 'B01', ref: null },
+    { id: seeded.contributorId, role: 'A01', ref: null }
+  ];
+
+  const first = await updateAdminEdition(
+    db,
+    seeded.rkey,
+    bodyFrom(original, { contributors: credits([isni, viaf]) })
+  );
+  const created = first.contributors.find((contributor) => contributor.name === name);
+  assert.ok(created);
+
+  // The same identity, bag reversed: `(lower(name), identifiers)` compares the
+  // stored jsonb positionally, so the row must not fork into a second address.
+  const second = await updateAdminEdition(
+    db,
+    seeded.rkey,
+    bodyFrom(first, { contributors: credits([viaf, isni]) })
+  );
+  assert.equal(
+    second.contributors[0]?.id,
+    created.id,
+    'a reordered identity bag minted a second contributor'
+  );
+
+  const rows = await db.query<{ id: string }>(
+    'SELECT id FROM contributors WHERE lower(name) = lower($1)',
+    [name]
+  );
+  assert.equal(rows.rowCount, 1);
 });
 
 test('removes a credit without deleting the shared contributor or publisher', async (t) => {

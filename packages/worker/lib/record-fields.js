@@ -88,6 +88,18 @@ export function canonicalIdentifiers(value) {
   return bag;
 }
 
+/**
+ * The stored form of an identifier bag: the jsonb that `contributors.identifiers`
+ * and `publishers.identifiers` hold, and therefore what the identity index on
+ * `(lower(name), identifiers)` compares. jsonb arrays compare positionally, so
+ * the row has to carry the canonical array: a caller's bag order is not part of
+ * the entity's identity, and two orders of one set would otherwise mint two
+ * rows that publish the same record. A value that is not an array stores `[]`.
+ */
+export function canonicalIdentifiersJson(value) {
+  return JSON.stringify(canonicalIdentifiers(Array.isArray(value) ? value : []));
+}
+
 export function httpUrl(value) {
   const text = nonEmptyString(value);
   if (!text) return undefined;

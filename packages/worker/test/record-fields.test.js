@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { clippedText } from '../lib/record-fields.js';
+import { canonicalIdentifiersJson, clippedText } from '../lib/record-fields.js';
 
 const SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
@@ -31,4 +31,19 @@ test('clippedText keeps a multi-code-point grapheme whole', () => {
   const byBytes = clippedText(text, { maxGraphemes: 1024, maxBytes: 30 });
   assert.equal(byBytes, '👩‍🚀'.repeat(2));
   assert.equal(graphemes(byBytes), 2);
+});
+
+test('canonicalIdentifiersJson stores one identity bag whatever the input order', () => {
+  const hiveId = { issuer: 'bookhive.buzz', value: 'bk_scope' };
+  const isbn = { issuer: 'isbn13', value: '9780441013593' };
+
+  // The identity index compares `(lower(name), identifiers)` as jsonb, which is
+  // positional: one set has to produce one stored string.
+  assert.equal(
+    canonicalIdentifiersJson([isbn, hiveId]),
+    canonicalIdentifiersJson([hiveId, isbn])
+  );
+  assert.deepEqual(JSON.parse(canonicalIdentifiersJson([isbn, hiveId, isbn])), [hiveId, isbn]);
+  assert.equal(canonicalIdentifiersJson(undefined), '[]');
+  assert.equal(canonicalIdentifiersJson({ issuer: 'isbn13', value: '9780441013593' }), '[]');
 });

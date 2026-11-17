@@ -26,6 +26,7 @@ import {
   type EditionEditPublisher
 } from '../../admin/edition-edit.ts';
 import { loadAdminEditionsFrom } from './edition-read.ts';
+import { canonicalIdentifiersJson } from '../../../../../worker/lib/record-fields.js';
 
 const CONTRIBUTOR_COLLECTION = 'net.olamaelcu.livtet.biblio.contributor';
 const PUBLISHER_COLLECTION = 'net.olamaelcu.livtet.biblio.publisher';
@@ -136,7 +137,7 @@ async function resolveEntity(
      VALUES ($1, $2::jsonb, 'at://' || $3 || '/' || $4 || '/' || editions_next_tid())
      ON CONFLICT (lower(name), identifiers) DO NOTHING
      RETURNING id`,
-    [entry.name, JSON.stringify(entry.identifiers), authority, collection]
+    [entry.name, canonicalIdentifiersJson(entry.identifiers), authority, collection]
   );
   if (inserted.rows[0]) return Number(inserted.rows[0].id);
 
@@ -147,7 +148,7 @@ async function resolveEntity(
   const existing = await client.query<{ id: string; at_uri: string | null }>(
     `SELECT id, at_uri FROM ${table}
       WHERE lower(name) = lower($1) AND identifiers = $2::jsonb`,
-    [entry.name, JSON.stringify(entry.identifiers)]
+    [entry.name, canonicalIdentifiersJson(entry.identifiers)]
   );
   const row = existing.rows[0];
   if (!row) {

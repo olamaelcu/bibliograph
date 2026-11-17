@@ -40,6 +40,7 @@ import {
   type RawIdentifier
 } from './entity-merge.ts';
 import { loadAdminEntity } from './entity-read.ts';
+import { canonicalIdentifiersJson } from '../../../../../worker/lib/record-fields.js';
 
 export class PublisherMergeError extends Error {
   readonly status: number;
@@ -388,7 +389,7 @@ export async function mergePublishers(
     for (const { column, value } of decided.absorbed) set(column, value);
     const targetBag = raw.get(target.id) ?? [];
     if (decided.identifiers.length !== targetBag.length) {
-      params.push(JSON.stringify(decided.identifiers));
+      params.push(canonicalIdentifiersJson(decided.identifiers));
       assignments.push(`identifiers = $${params.length}::jsonb`);
     }
     if (assignments.length > 0) {
