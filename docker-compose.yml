@@ -198,6 +198,12 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # The dev app is a host process, so the reverse_proxy target is the host as
+    # this network sees it. Naming it through `host-gateway` keeps the route to
+    # the container's own gateway — a literal `172.17.0.1` reaches docker0,
+    # which a *second* compose project's subnet may not be allowed to reach.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       default:
         aliases:

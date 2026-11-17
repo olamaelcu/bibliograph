@@ -35,12 +35,15 @@ https://*.pds.127-0-0-1.sslip.io {
 }
 
 # The Livtet dev app's own `did:web` host. `172-17-0-1.sslip.io` resolves to
-# the docker0 gateway (172.17.0.1), so a container reaches the app running on
-# the host at :6010, and a `managedspace` policy naming
+# this container on the compose network (an alias below), so a `managedspace`
+# policy naming
 # `did:web:172-17-0-1.sslip.io#livtet_space_manager` resolves its document and
-# calls `checkUserAccess` back through here. `tls internal`, like every other
-# site in this file — the PDS trusts this CA.
+# calls `checkUserAccess` back through here; on the host the same name lands on
+# the published :443. The app is a host process, reached through
+# `host.docker.internal` so the route is this network's own gateway rather than
+# a bridge a second compose project may not reach. `tls internal`, like every
+# other site in this file — the PDS trusts this CA.
 https://172-17-0-1.sslip.io {
 	tls internal
-	reverse_proxy 172.17.0.1:6010
+	reverse_proxy host.docker.internal:6010
 }
