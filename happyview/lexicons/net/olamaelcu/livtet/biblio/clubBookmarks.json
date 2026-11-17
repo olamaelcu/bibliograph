@@ -7,6 +7,7 @@
       "description": "A reader's private bookmark space for clubs they want to return to. Only the owner can read it; the bookmark records point at club spaces rather than copying their contents.",
       "key": "any",
       "name": "Club bookmarks",
+      "title": "Club bookmarks",
       "collections": ["community.lexicon.bookmarks.bookmark"]
     }
   }

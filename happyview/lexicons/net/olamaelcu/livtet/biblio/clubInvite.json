@@ -7,6 +7,7 @@
       "description": "One reader's application to one club. A space is created per (club, requester) pair and owned by the club's authority, so the club can read every submission and the requester can read the decision without either repo being shared. A request is one record per submission (tid key) in the requester's repo inside the space, so editing while pending appends a version instead of overwriting the one a moderator already read. A decision is one record per decision (tid key) in the owner's repo, pointing at the exact request version it answers.",
       "key": "tid",
       "name": "Club invitation",
+      "title": "Club invitation",
       "collections": [
         "net.olamaelcu.livtet.biblio.clubInvite.request",
         "net.olamaelcu.livtet.biblio.clubInvite.decision"

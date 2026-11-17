@@ -7,6 +7,7 @@
       "description": "A book club's discussion and reading state. The club links to one reading list and mirrors that list's access; public lists allow direct access, protected lists require list membership. Club records live in the owner's repo inside the space, while threads, posts and reactions to them live in their authors' repos inside the same space.",
       "key": "tid",
       "name": "Book club",
+      "title": "Book club",
       "collections": [
         "net.olamaelcu.livtet.biblio.bookClub.meta",
         "net.olamaelcu.livtet.biblio.bookClub.read",

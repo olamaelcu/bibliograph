@@ -47,7 +47,10 @@ const ALLOWED_FIELDS = {
   // Lexicon v1 field tables, but this deployment runs rsky's PDS and serves
   // spaces, and the club and reading-list documents the app ships are declared
   // this way, so refusing the type would reject a document the PDS accepts.
-  space: ['description', 'key', 'name', 'collections'],
+  // `title` is proposal 0016's consent-screen field; `name` is what the pinned
+  // spaces-alpha toolchain still requires. The documents carry both, with the
+  // same string, so both generations resolve them.
+  space: ['description', 'key', 'name', 'title', 'collections'],
   unknown: ['description'],
   record: ['description', 'key', 'record'],
   query: ['description', 'parameters', 'output', 'errors'],
@@ -237,6 +240,9 @@ function checkSchema(node, where, doc, documents, errors) {
     }
     if (typeof node.name !== 'string' || node.name === '') {
       errors.push(`${where}: space has no name`);
+    }
+    if (node.title !== undefined && (typeof node.title !== 'string' || node.title === '')) {
+      errors.push(`${where}: space title must be a non-empty string`);
     }
     if (!Array.isArray(node.collections) || node.collections.length === 0) {
       errors.push(`${where}: space has no collections array`);
