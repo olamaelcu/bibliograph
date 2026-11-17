@@ -1,3 +1,19 @@
+bibliograph-web (0.2.26-1) unstable; urgency=medium
+
+  * 0.2.26: no edge payload change; the release number moves with the worker.
+
+    - The adapter-node build is unchanged from `0.2.25-1`. Four space-type
+      declarations gained a consent-screen `title`
+      (`happyview/lexicons/net/olamaelcu/livtet/biblio/{bookClub,clubBookmarks,
+      clubInvite,readingList}.json`), which rebuilds the HappyView package —
+      but the landing page's catalogue renders only queries, procedures and
+      record types, so regenerating `xrpc-catalog.json` from the new tree
+      yields the same file.
+    - Full deploy is still the right unit: the lexicons change what `hv-deploy`
+      uploads, web depends on HappyView, and the rollback set is one version.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 19:40:00 +0000
+
 bibliograph-web (0.2.25-1) unstable; urgency=medium
 
   * 0.2.25: the catalog gains an enumeration read, and the PDS proxy stops

@@ -1,3 +1,31 @@
+bibliograph-worker (0.2.26-1) unstable; urgency=medium
+
+  * 0.2.26: the Bookhive import reads a page's hive ids once and commits a
+    page once, instead of committing every record.
+
+    - `knownEditions` resolved a page's hive ids through
+      `edition_uri IN (SELECT …)`. The planner estimates `value = ANY($1)` at
+      four rows whatever the array holds — measured on 500 ids: 4 planned, 500
+      actual — and that underestimate nested-looped 1 265 times in the joins
+      below. Naming the set in a `MATERIALIZED` CTE builds it once at its real
+      cardinality: a 500-id page drops from 1 025 ms to 300 ms (plan 129 ms →
+      6 ms), the real 100-id page from 46.7 ms to 43.6 ms. `DISTINCT` keeps one
+      row per edition, and the old and new forms returned 253 rows with an
+      identical md5 over the ordered result set for one page.
+    - `createIngest` splits into `prepare` (validation, no connection),
+      `ingestOn` (writes on a caller-owned client) and the unchanged public
+      `ingest`, so the import wraps a page in one `BEGIN`/`COMMIT` with a
+      savepoint per record. A record that throws rolls back to its own
+      savepoint: the page lands the rest and counts one failure, which is what
+      the per-record loop promised. A shutdown mid-page commits what it wrote.
+      A page now pays one commit instead of ~100; the gain lands on the cold
+      backfill (234 000 ingests ≈ 70 s of commit overhead).
+    - The ESM changes; `sql/` does not — the newest migration is still
+      `0019-entity-fanout-guard.sql`, so installing this package re-applies the
+      schema as a no-op.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Mon, 16 Nov 2026 19:40:00 +0000
+
 bibliograph-worker (0.2.25-1) unstable; urgency=medium
 
   * 0.2.25: the Bookhive editions gauge is refreshed once a minute, not on
