@@ -255,7 +255,7 @@ signal. Queued work is not a promise that anything will be found.
 | `listShelfItemsByBook` | `book`, `did`, `limit` 50 (≤100), `cursor` | `{ items, cursor? }` |
 | `getReviewsByBook` | `book`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
 | `listReviewsByActor` | `did`, `limit` 25 (≤100), `cursor` | `{ reviews, cursor? }` |
-| `listReactions` | `subject` (at-uri), `limit` 50 (≤100), `cursor` | `{ reactions, cursor? }` |
+| `listReactions` | `subject` (review at-uri), `limit` 50 (≤100), `cursor` | `{ reactions, cursor? }` |
 | `graph.isFollowing` | `follower`, `followed` | `{ following }` |
 | `graph.listFollowers` | `did`, `limit` 100 (≤1000), `cursor` | `{ followers, total, cursor? }` |
 | `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total, cursor? }` |
@@ -461,13 +461,18 @@ Pages one DID's reviews from both collections, same ordering and cursor. Returns
 
 `community.lexicon.interaction.reaction` is a shared collection across the network, not a
 Bibliograph one: the records live in the reactor's repo and this surface only reads them from the
-index. Club reactions are deliberately absent — they live inside the club's space and are read
-through the club, under its own access rule, not through this public index.
+index. The read is scoped to reviews: it is the reaction bar under a review, and nothing else is
+paged through it. Club reactions are deliberately absent — they live inside the club's space and
+are read through the club, under its own access rule, not through this public index.
 
 #### `listReactions`
 
-Params: `subject` (required AT-URI of the record whose reactions to list), `limit` (50, clamped
-1–100) and `cursor`. The subject is a strongRef, so the filter is on its `uri`
+Params: `subject` (required AT-URI of the **review** whose reactions to list), `limit` (50, clamped
+1–100) and `cursor`. The subject must be in `community.lexicon.media.book.review` or
+`buzz.bookhive.book` — the two collections a review comes from, and the only ones the reaction bar
+asks about; any other record is `400 InvalidRequest` naming both, so a caller that asks about an
+edition or a shelf learns it is asking the wrong question instead of receiving an empty page.
+The subject is a strongRef, so the filter is on its `uri`
 (`(record::jsonb)->'subject'->>'uri'`, covered by `happyview_record_reaction_subject_idx`), ordered
 `created_at` descending then `uri` descending, with the offset cursor above. Returns
 `{ reactions, cursor? }`, each item a `net.olamaelcu.livtet.biblio.defs#reactionView`

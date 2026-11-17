@@ -1243,6 +1243,32 @@ test('listReactions keeps only the emoji union member for the named subject', fu
   assert_equal(calls[1].args[2], subject)
 end)
 
+test('listReactions refuses a subject that is not a review', function()
+  -- The only caller is the reaction bar under a review; an edition or a shelf
+  -- has nothing to page, and an empty page would hide the client's bug.
+  local not_a_review = 'at://did:plc:r/community.lexicon.media.book.edition/3k'
+  local response = run_endpoint('query', 'listReactions', {
+    params = { subject = not_a_review },
+    responder = function() return {} end,
+  })
+
+  assert_equal(response.__bib_http.status, 400)
+  assert_equal(response.__bib_http.body.error, 'InvalidRequest')
+  assert_contains(response.__bib_http.body.message, 'community.lexicon.media.book.review')
+  assert_contains(response.__bib_http.body.message, 'buzz.bookhive.book')
+end)
+
+test('listReactions accepts the Bookhive record a review lives in', function()
+  local subject = 'at://did:plc:r/buzz.bookhive.book/3k'
+  local response, calls = run_endpoint('query', 'listReactions', {
+    params = { subject = subject },
+    responder = function() return {} end,
+  })
+
+  assert_equal(#response.reactions, 0)
+  assert_equal(calls[1].args[2], subject)
+end)
+
 test('bookhive_review_view drops an unusable grade, a missing grade and a missing edition', function()
   helpers_env.db = {
     raw = function(sql, args)

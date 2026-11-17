@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.listReactions",
-  "description": "List the emoji reactions to one record, most recent first. Club reactions are deliberately absent: they live inside the club's space, under the club's own access rule, and are read through it rather than through a public index.",
+  "description": "List the emoji reactions to one review, most recent first. `subject` must name a review: a `community.lexicon.media.book.review` record, or the `buzz.bookhive.book` record a reader's review lives in. Any other record is `InvalidRequest` — the reaction bar under a review is the only thing this query serves. Club reactions are deliberately absent: they live inside the club's space, under the club's own access rule, and are read through it rather than through a public index.",
   "defs": {
     "main": {
       "type": "query",
@@ -12,7 +12,7 @@
           "subject": {
             "type": "string",
             "format": "at-uri",
-            "description": "AT-URI of the record whose reactions to list."
+            "description": "AT-URI of the review whose reactions to list, in `community.lexicon.media.book.review` or `buzz.bookhive.book`."
           },
           "limit": {
             "type": "integer",

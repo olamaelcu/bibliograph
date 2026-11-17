@@ -1,10 +1,16 @@
 -- @include lib/prelude.lua
--- net.olamaelcu.livtet.biblio.listReactions — one record's reactions.
+-- net.olamaelcu.livtet.biblio.listReactions — one review's reactions.
 --
 -- Reads the shared reaction collection filtered on the subject's uri. The
--- subject is a strongRef, so the filter is on `subject.uri`; a reaction whose
--- `value` is not a Unicode emoji is skipped rather than guessed at — the
--- union is open, and a later revision may carry an image or a label.
+-- subject is a strongRef, so the filter is on `subject.uri`, and it must name a
+-- review: `community.lexicon.media.book.review`, or the `buzz.bookhive.book`
+-- record a reader's review lives in. Any other record is refused rather than
+-- answered empty — the only caller is the reaction bar under a review, and a
+-- silent empty page there would hide a client bug instead of reporting it.
+--
+-- A reaction whose `value` is not a Unicode emoji is skipped rather than
+-- guessed at — the union is open, and a later revision may carry an image or a
+-- label.
 --
 -- Club reactions are not here: they are records inside the club's space and
 -- are read through the club, under its own access rule.
@@ -15,6 +21,14 @@
 function handle()
   local subject, err = required_at_uri(params.subject, 'subject')
   if err ~= nil then return fail(400, 'InvalidRequest', err) end
+  local _, collection = at_uri_parts(subject)
+  if collection ~= REVIEW_COLLECTION and collection ~= BOOKHIVE_BOOK then
+    return fail(
+      400,
+      'InvalidRequest',
+      '`subject` must be an AT-URI in ' .. REVIEW_COLLECTION .. ' or ' .. BOOKHIVE_BOOK
+    )
+  end
   local limit = clamp_int(params.limit, 50, 1, 100)
   local offset = decode_offset(decode_cursor(params.cursor).o)
 

@@ -1,3 +1,17 @@
+bibliograph-worker (0.2.27-1) unstable; urgency=medium
+
+  * 0.2.27 release: no worker payload change since 0.2.26.
+
+    - The ESM, the production `node_modules` and `sql/` are identical to
+      `0.2.26-1`; the newest migration is still
+      `0019-entity-fanout-guard.sql`, so installing this package restarts the
+      unit and re-applies the schema as a no-op.
+    - Full deploy anyway: the happyview package changes the `listReactions`
+      contract, web depends on HappyView, and the rollback set stays one
+      version.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Tue, 17 Nov 2026 05:30:00 +0000
+
 bibliograph-worker (0.2.26-1) unstable; urgency=medium
 
   * 0.2.26: the Bookhive import reads a page's hive ids once and commits a
