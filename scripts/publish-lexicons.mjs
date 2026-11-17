@@ -26,13 +26,13 @@
  * documents are updated; new ones are created. Every write is re-read and the
  * stored value/CID are compared before it counts as published.
  *
- * Foreign authorities are never written. `happyview/lexicons/buzz/bookhive/`
- * is vendored so HappyView can dispatch and the worker can index readers'
- * `buzz.bookhive.book` records, but that authority is Bookhive's
- * (`_lexicon.bookhive.buzz` names did:plc:enu2j5xjlqsjaylv3du4myh4). Those
- * documents stay in the tree and keep being uploaded by `hv-deploy`; this
- * script skips them and deletes a record an earlier run left behind, so the
- * repo converges on "not ours" instead of holding a claim it cannot back.
+ * Foreign authorities are never written: `buzz.bookhive` (Bookhive's) and
+ * `community.lexicon` (lexicon.community's books-WG documents) are vendored so
+ * HappyView can dispatch and the worker can index readers' records, but each
+ * authority's `_lexicon` TXT names another DID. Those documents stay in the
+ * tree and keep being uploaded by `hv-deploy`; this script skips them and
+ * deletes a record an earlier run left behind, so the repo converges on "not
+ * ours" instead of holding a claim it cannot back.
  *
  * Usage:
  *   node scripts/publish-lexicons.mjs [--dry-run] [--no-validate]
@@ -55,16 +55,28 @@ const DNS_TIMEOUT_MS = 5_000;
 const NSID_RE =
   /^[a-zA-Z]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+(\.[a-zA-Z]([a-zA-Z0-9]{0,62})?)$/;
 
-// Documents shipped in the lexicon tree that this repo must not publish. They
-// are inputs, not claims: HappyView registers them so it can dispatch, and the
-// worker reads `buzz.bookhive.book` from readers' repos, but the namespace
-// belongs to Bookhive (`_lexicon.bookhive.buzz` -> did:plc:enu2j5xjlqsjaylv3du4myh4),
-// so a `com.atproto.lexicon.schema` record under our DID is a claim nothing
-// backs. Skipped on publish; deleted from the repo when an earlier run wrote one.
-const FOREIGN_AUTHORITY = new Map([
-  ['buzz.bookhive.book', 'Bookhive owns _lexicon.bookhive.buzz'],
-  ['buzz.bookhive.defs', 'Bookhive owns _lexicon.bookhive.buzz']
-]);
+// Documents shipped in the lexicon tree that this repo must not publish, keyed
+// by NSID prefix. They are inputs, not claims: HappyView registers them so it
+// can dispatch, and the worker reads `buzz.bookhive.book` from readers' repos,
+// but each namespace belongs to another authority, so a
+// `com.atproto.lexicon.schema` record under our DID is a claim nothing backs:
+//
+//   buzz.bookhive        `_lexicon.bookhive.buzz` -> did:plc:enu2j5xjlqsjaylv3du4myh4
+//   community.lexicon    `_lexicon.*.lexicon.community` -> did:plc:mtr7qrqtcyseedx3jyr5o7db
+//                        (the books-WG documents imported for the review surface)
+//
+// Skipped on publish; deleted from the repo when an earlier run wrote one.
+const FOREIGN_AUTHORITY = [
+  ['buzz.bookhive.', 'Bookhive owns _lexicon.bookhive.buzz'],
+  ['community.lexicon.', 'lexicon.community owns the community.lexicon authority']
+];
+
+function foreignAuthority(id) {
+  for (const [prefix, reason] of FOREIGN_AUTHORITY) {
+    if (id.startsWith(prefix)) return reason;
+  }
+  return null;
+}
 
 class PdsError extends Error {
   constructor(message, { status, code, body } = {}) {
@@ -479,14 +491,16 @@ async function main() {
   // Foreign-authority documents are inputs for HappyView and the worker, not
   // claims on this repo: they are excluded from every write and their (stale)
   // records are removed below.
-  const publishable = documents.filter(({ id }) => !FOREIGN_AUTHORITY.has(id));
-  const foreign = documents.filter(({ id }) => FOREIGN_AUTHORITY.has(id));
+  const publishable = documents.filter(({ id }) => foreignAuthority(id) === null);
+  const foreign = documents
+    .filter(({ id }) => foreignAuthority(id) !== null)
+    .map((entry) => ({ ...entry, reason: foreignAuthority(entry.id) }));
 
   console.log(
     `lexicons: ${documents.length} from ${path.relative(REPO_ROOT, root)}/ ` +
       `(${publishable.length} to publish, ${foreign.length} foreign authority)`
   );
-  for (const { id } of foreign) console.log(`  foreign  ${id}  (${FOREIGN_AUTHORITY.get(id)})`);
+  for (const { id, reason } of foreign) console.log(`  foreign  ${id}  (${reason})`);
   console.log(`publisher: ${publisherDid ?? '(unset)'}`);
   if (options.dryRun) {
     console.log('mode: dry-run (no writes)');
@@ -518,7 +532,7 @@ async function main() {
 
   // A record written by an earlier run must not survive the exclusion, or the
   // repo keeps claiming a namespace the TXT does not point at.
-  for (const { id } of foreign) {
+  for (const { id, reason } of foreign) {
     const uri = `at://${publisherDid}/${COLLECTION}/${id}`;
     try {
       if ((await client.getRecord(id)) === null) {
@@ -530,7 +544,7 @@ async function main() {
         throw new PdsError('record still readable after deleteRecord');
       }
       counts.deleted += 1;
-      console.log(`  DELETE  ${uri}`);
+      console.log(`  DELETE  ${uri}  (${reason})`);
     } catch (error) {
       counts.failed += 1;
       const message = error instanceof Error ? error.message : String(error);

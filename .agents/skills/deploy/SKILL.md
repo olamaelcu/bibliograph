@@ -54,7 +54,7 @@ the host sees it.
 | `deploy.sh`, `.mise/tasks/**`, `mise.toml` | none (tooling) | No payload by themselves. They change how packages are built/selected/installed; rerun a full `mise run deploy` to exercise them. |
 | `docs/**`, `README.md`, `AGENTS.md`, `.agents/**`, package tests (`packages/*/test/**`, `happyview/test/**`) | none | Documentation and checks only; no package deploy. |
 | `docker/**`, `docker-compose.yml` | none | Local/dev compose stack (Postgres, PLC, PDS, Caddy, HappyView) — never the production deployment. |
-| `scripts/publish-lexicons.mjs` | none (separate step) | No Debian package; `mise run publish-lex` publishes schema records to the PDS. Vendored foreign-authority documents (`happyview/lexicons/buzz/bookhive/*`, Bookhive's) are never published: the script skips them and deletes a record an earlier run left behind, while `hv-deploy` keeps uploading the files. `scripts/verify-lexicons.mjs` and `scripts/dev-seed.py` are check/dev-only. |
+| `scripts/publish-lexicons.mjs` | none (separate step) | No Debian package; `mise run publish-lex` publishes schema records to the PDS. Vendored foreign-authority documents — `buzz.bookhive.*` (Bookhive's) and `community.lexicon.*` (lexicon.community's) — are never published: the script skips them and deletes a record an earlier run left behind, while `hv-deploy` keeps uploading the files. `scripts/verify-lexicons.mjs` and `scripts/dev-seed.py` are check/dev-only. |
 
 Cross-package notes and false assumptions:
 

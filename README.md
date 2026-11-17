@@ -79,6 +79,11 @@ dispatch the collection, but it is never published as a `com.atproto.lexicon.sch
 `did:plc:enu2j5xjlqsjaylv3du4myh4`), and `scripts/publish-lexicons.mjs` both skips it and deletes a
 record an earlier publish left behind.
 
+The imported `community.lexicon.*` book and interaction lexicons are treated the same way: they
+stay in `happyview/lexicons/` for dispatch and ingest, and are never published, because that
+authority belongs to lexicon.community (`_lexicon.book.media.lexicon.community` and
+`_lexicon.interaction.lexicon.community` name `did:plc:mtr7qrqtcyseedx3jyr5o7db`).
+
 Catalog identifiers are exact `(issuer, value)` pairs in
 `edition_identifiers`; an ingest updates an existing edition when any incoming
 pair is already owned, otherwise it mints a new TID. The edition record inlines
