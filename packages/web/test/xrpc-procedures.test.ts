@@ -59,11 +59,11 @@ function dependencies(calls: string[]): XrpcDependencies {
     describeFeedGenerator: respond,
     getFeedSkeleton: respond,
     entityGet: respond,
-    resolveBooks: () => {
+    resolveEditions: () => {
       calls.push('resolveEditions');
       return respond();
     },
-    searchBooks: () => {
+    searchEditions: () => {
       calls.push('searchEditions');
       return respond();
     },

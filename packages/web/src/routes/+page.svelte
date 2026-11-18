@@ -156,7 +156,7 @@
   function procedureExample(endpoint: ProcedureEndpoint): string {
     const body: Record<string, unknown> = {};
     for (const field of endpoint.input.filter((f) => f.required)) body[field.name] = sample(field);
-    // searchBooks has no required field, but an empty body is InvalidQuery;
+    // searchEditions has no required field, but an empty body is InvalidQuery;
     // show the smallest body the endpoint accepts.
     if (Object.keys(body).length === 0 && endpoint.id.endsWith('searchEditions')) {
       body.title = 'The Left Hand of Darkness';

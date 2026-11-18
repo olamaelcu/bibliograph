@@ -539,11 +539,11 @@ export function createWebMetrics(): WebMetrics {
     ),
     catalogSearchDecisions: registry.counter(
       'bibliograph_catalog_search_decision_total',
-      'searchBooks requests by provider-hydration decision.'
+      'searchEditions requests by provider-hydration decision.'
     ),
     catalogSearchMatches: registry.histogram(
       'bibliograph_catalog_search_first_page_matches',
-      'First-page total of each searchBooks call, to size the hydration threshold.',
+      'First-page total of each searchEditions call, to size the hydration threshold.',
       SEARCH_MATCH_BUCKETS
     ),
     feedRequests: registry.counter(

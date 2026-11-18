@@ -1,3 +1,19 @@
+bibliograph-web (0.5.2-1) unstable; urgency=medium
+
+  * 0.5.2: the XRPC-facing functions keep their method names.
+
+    - `searchBooks`/`resolveBooks`/`listBooks`/`listBooksByContributor` are
+      `searchEditions`/`resolveEditions`/`listEditions`/
+      `listEditionsByContributor` again, and the dispatcher's dependency slots
+      with them. Those functions implement the lexicon's procedures and
+      queries, so their names belong to the XRPC vocabulary; only the storage
+      modules and types keep the new name (`books.ts`, `book-view.ts`,
+      `BookShape`, the admin read/edit modules).
+    - No behaviour change: the NSIDs, the SQL and the metric labels were
+      already correct.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.5.1-1) unstable; urgency=medium
 
   * 0.5.1: restore the XRPC procedure NSIDs the storage rename rewrote.

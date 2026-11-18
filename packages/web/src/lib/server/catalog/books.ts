@@ -21,7 +21,7 @@ export type {
 } from './book-view';
 
 /**
- * Result ordering for `searchBooks`.
+ * Result ordering for `searchEditions`.
  *
  * `relevance` is the lexicon's provider-defined ranking; `title` and
  * `publishedYear` are local extensions over it.
@@ -57,8 +57,8 @@ export type BookOrderParams =
 /**
  * Validate `sort`/`order` for any edition listing.
  *
- * One implementation for both surfaces, so `searchBooks` and
- * `listBooksByContributor` cannot drift in what they accept or in how the
+ * One implementation for both surfaces, so `searchEditions` and
+ * `listEditionsByContributor` cannot drift in what they accept or in how the
  * default reads.
  */
 export function parseBookOrder(input: {
@@ -132,7 +132,7 @@ function identifierMatch(
   return `(i.issuer, i.value) IN (${tuples.join(', ')})`;
 }
 
-export async function resolveBooks(input: {
+export async function resolveEditions(input: {
   identifiers: Identifier[];
   offset: number;
   limit: number;
@@ -187,8 +187,8 @@ export async function resolveBooks(input: {
 /**
  * A page of the catalog's editions, in at-uri order.
  *
- * This is the enumeration surface: `searchBooks` needs a term and
- * `resolveBooks` needs an identifier, so neither can answer "give me
+ * This is the enumeration surface: `searchEditions` needs a term and
+ * `resolveEditions` needs an identifier, so neither can answer "give me
  * everything", which is what a crawl (a sitemap, a mirror) asks for. A page is
  * served by `editions_pkey` alone — no shape or cover join, no hydration — so a
  * whole-catalogue walk is a handful of index scans instead of one query per
@@ -197,7 +197,7 @@ export async function resolveBooks(input: {
  */
 export type BookListing = { uri: string; title: string; indexedAt: string };
 
-export async function listBooks(
+export async function listEditions(
   input: { after: string | null; limit: number },
   pool: BookQueryable
 ): Promise<{ items: BookListing[]; cursor?: string }> {
@@ -234,7 +234,7 @@ export async function listBooks(
   };
 }
 
-export async function searchBooks(input: {
+export async function searchEditions(input: {
   q?: string;
   title?: string;
   author?: string;
@@ -358,7 +358,7 @@ export async function searchBooks(input: {
   );
   const rows = page.rows.slice(0, input.limit);
 
-  // See `resolveBooks`: a short first page is the whole match set. The count
+  // See `resolveEditions`: a short first page is the whole match set. The count
   // re-runs the same predicate over the catalogue, so it is only paid for a
   // page that could have more behind it.
   const counted =

@@ -72,11 +72,11 @@ function mocked(): Mocked {
       calls.push({ handler: 'entityGet', method });
       return respond('entityGet');
     },
-    resolveBooks: () => {
+    resolveEditions: () => {
       calls.push({ handler: 'resolveEditions', method: CATALOG_POST });
       return respond('resolveEditions');
     },
-    searchBooks: () => {
+    searchEditions: () => {
       calls.push({ handler: 'searchEditions', method: CATALOG_SEARCH });
       return respond('searchEditions');
     },

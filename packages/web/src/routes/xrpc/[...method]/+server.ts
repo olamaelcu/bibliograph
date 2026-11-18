@@ -14,10 +14,10 @@ import { proxyPdsRead } from "$lib/server/pds";
 import { catalogPool, isCatalogPoolTimeout } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import {
-  resolveBooks,
+  resolveEditions,
   parseBookOrder,
-  searchBooks,
-  listBooks,
+  searchEditions,
+  listEditions,
   type Identifier,
 } from "$lib/server/catalog/books";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
@@ -40,7 +40,7 @@ import {
   CONTRIBUTOR_COLLECTION,
   getContributor,
   getPublisher,
-  listBooksByContributor,
+  listEditionsByContributor,
   parseEntityUri,
   resolveContributors,
   resolvePublishers,
@@ -79,7 +79,7 @@ import { coversBaseUrl } from "$lib/server/covers/config";
 const MAX_IDENTIFIERS = 100;
 
 /**
- * The largest page `listBooks` serves. One page is one `editions_pkey`
+ * The largest page `listEditions` serves. One page is one `editions_pkey`
  * index scan — 5 000 uris measured at ~180 ms — so a full crawl of the
  * catalogue is 57 requests at this size and 283 at the 1 000 default.
  */
@@ -172,7 +172,7 @@ async function handleResolve(request: Request): Promise<Response> {
 
   const started = performance.now();
   try {
-    const results = await resolveBooks({
+    const results = await resolveEditions({
       identifiers,
       offset,
       limit,
@@ -265,7 +265,7 @@ async function handleSearch(request: Request): Promise<Response> {
 
   const started = performance.now();
   try {
-    const results = await searchBooks({
+    const results = await searchEditions({
       q,
       title,
       author,
@@ -427,7 +427,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       const limit = queryInteger(params.get("limit"), 1000, 1, MAX_EDITION_PAGE);
       if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
       return json(
-        await listBooks(
+        await listEditions(
           { after: decodeKeysetCursor(params.get("cursor")), limit },
           pool,
         ),
@@ -444,7 +444,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       }
       const limit = queryInteger(params.get("limit"), 25, 1, 100);
       if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
-      // The same local extensions `searchBooks` accepts, so one contributor's
+      // The same local extensions `searchEditions` accepts, so one contributor's
       // page can be narrowed and ordered identically.
       const language = (params.get("language") ?? "").trim();
       if (language.length > MAX_LANGUAGE_LENGTH) {
@@ -459,7 +459,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
         order: params.get("order"),
       });
       if ("error" in parsedOrder) return fail(400, "InvalidRequest", parsedOrder.error);
-      const page = await listBooksByContributor(pool, {
+      const page = await listEditionsByContributor(pool, {
         contributor,
         ...(language === "" ? {} : { language }),
         sort: parsedOrder.sort,
@@ -473,7 +473,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
     }
 
     // Identifier lookups: exact pairs repeated as `issuer:value` parameters,
-    // paged and bounded like the books-wg `resolveBooks` body.
+    // paged and bounded like the books-wg `resolveEditions` body.
     if (method === RESOLVE_CONTRIBUTORS || method === RESOLVE_PUBLISHERS) {
       const identifiers = parseIdentifierParams(params.getAll("identifiers"));
       if (identifiers === null) {
@@ -568,8 +568,8 @@ const dependencies: XrpcDependencies = {
   describeFeedGenerator: timed("feed", describeFeedGenerator, () => DESCRIBE_FEED_GENERATOR),
   getFeedSkeleton: timed("feed", getFeedSkeleton, () => GET_FEED_SKELETON),
   entityGet: timed("catalog", handleEntityGet, (_request, method) => method),
-  resolveBooks: timed("catalog", handleResolve, () => RESOLVE_EDITIONS),
-  searchBooks: timed("catalog", handleSearch, () => SEARCH_EDITIONS),
+  resolveEditions: timed("catalog", handleResolve, () => RESOLVE_EDITIONS),
+  searchEditions: timed("catalog", handleSearch, () => SEARCH_EDITIONS),
   proxyPdsRead: timed("pds", proxyPdsRead, (method) => method),
   forward: timed("happyview", forward, (method) => method),
 };

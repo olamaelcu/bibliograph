@@ -35,8 +35,8 @@ export type XrpcDependencies = {
   describeFeedGenerator: () => Response | Promise<Response>;
   getFeedSkeleton: (request: Request) => Response | Promise<Response>;
   entityGet: (request: Request, method: string) => Response | Promise<Response>;
-  resolveBooks: (request: Request) => Response | Promise<Response>;
-  searchBooks: (request: Request) => Response | Promise<Response>;
+  resolveEditions: (request: Request) => Response | Promise<Response>;
+  searchEditions: (request: Request) => Response | Promise<Response>;
   proxyPdsRead: (method: string, request: Request) => Response | Promise<Response>;
   forward: (method: string, request: Request) => Response | Promise<Response>;
 };
@@ -88,8 +88,8 @@ export function dispatchPost(
   if (method === DESCRIBE_FEED_GENERATOR || method === GET_FEED_SKELETON) {
     return methodNotAllowed();
   }
-  if (method === RESOLVE_EDITIONS) return dependencies.resolveBooks(request);
-  if (method === SEARCH_EDITIONS) return dependencies.searchBooks(request);
+  if (method === RESOLVE_EDITIONS) return dependencies.resolveEditions(request);
+  if (method === SEARCH_EDITIONS) return dependencies.searchEditions(request);
   // Every entity method is a getter, search or resolver: GET-only.
   if (ENTITY_QUERIES.has(method)) return methodNotAllowed();
   return dependencies.forward(method, request);

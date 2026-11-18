@@ -1,6 +1,6 @@
 import type { Identifier } from './books';
 
-/** Issuers that carry an ISBN in `searchBooks` identifiers (case-insensitive). */
+/** Issuers that carry an ISBN in `searchEditions` identifiers (case-insensitive). */
 const ISBN_ISSUERS: Record<string, true> = { isbn: true, isbn10: true, isbn13: true };
 
 const ISBN13 = /^\d{13}$/;

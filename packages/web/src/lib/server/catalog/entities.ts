@@ -2,7 +2,7 @@
  * Catalog reads for contributor and publisher records.
  *
  * These are the anonymous, edge-served half of the entity feature: they read
- * the deployment's own tables (never a PDS) exactly like `resolveBooks`.
+ * the deployment's own tables (never a PDS) exactly like `resolveEditions`.
  * HappyView is not involved — its index holds activity records, and the entity
  * records are published by the catalog's own repo, so the catalog tables are the
  * only complete, zero-lag source.
@@ -415,11 +415,11 @@ export type BookResults = { items: BookView[]; cursor?: string; total?: number }
  * join is `EXISTS`, so a person credited twice on one edition appears once.
  * Default order is `books.created_at DESC, uri ASC` — stable for offset
  * paging and newest-first for display. `sort`/`order` and `language` are the
- * same ones `searchBooks` accepts (`editionOrderBy` /
+ * same ones `searchEditions` accepts (`editionOrderBy` /
  * `editionLanguageClause`), and `total` counts what the filters returned. Only
  * the first page carries a total.
  */
-export async function listBooksByContributor(
+export async function listEditionsByContributor(
   pool: EntityQueryable,
   input: {
     contributor: string;
@@ -447,7 +447,7 @@ export async function listBooksByContributor(
 
   // The credit is the listing's own predicate; the language filter and the
   // order are the shared ones, so this page filters and sorts exactly like
-  // `searchBooks`.
+  // `searchEditions`.
   const where = [
     `EXISTS (
               SELECT 1 FROM edition_contributors ec

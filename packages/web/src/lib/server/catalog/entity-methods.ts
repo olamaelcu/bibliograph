@@ -2,7 +2,7 @@
  * The catalog XRPC methods the edge answers itself.
  *
  * They are anonymous catalog reads over the deployment's own tables, exactly
- * like `resolveBooks` / `searchBooks`, so they never reach HappyView and
+ * like `resolveEditions` / `searchEditions`, so they never reach HappyView and
  * are not part of `hv-deploy`'s uploaded surface. Keeping the NSIDs in a module
  * without SvelteKit imports makes the dispatch classification testable.
  */

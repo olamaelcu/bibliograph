@@ -6,7 +6,7 @@ import {
   CONTRIBUTOR_COLLECTION,
   getContributor,
   getPublisher,
-  listBooksByContributor,
+  listEditionsByContributor,
   parseEntityUri,
   resolveContributors,
   resolvePublishers,
@@ -259,7 +259,7 @@ test('likePattern wraps and escapes in one place', () => {
   expect(likePattern('plain')).toBe('%plain%');
 });
 
-test('listBooksByContributor returns bookViews for every credited edition', async () => {
+test('listEditionsByContributor returns bookViews for every credited edition', async () => {
   const rows = [editionRow(`${EDITION_PREFIX}1`), editionRow(`${EDITION_PREFIX}2`)];
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
@@ -268,7 +268,7 @@ test('listBooksByContributor returns bookViews for every credited edition', asyn
     return [];
   });
 
-  const page = await listBooksByContributor(pool, {
+  const page = await listEditionsByContributor(pool, {
     contributor: CONTRIBUTOR_URI,
     offset: 0,
     limit: 1
@@ -292,7 +292,7 @@ test('listBooksByContributor returns bookViews for every credited edition', asyn
   expect(pageCall.values).toEqual([42, 2, 0]);
 });
 
-test('listBooksByContributor uses the shared order and language clauses', async () => {
+test('listEditionsByContributor uses the shared order and language clauses', async () => {
   const rows = [editionRow(`${EDITION_PREFIX}1`)];
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
@@ -301,7 +301,7 @@ test('listBooksByContributor uses the shared order and language clauses', async 
     return [];
   });
 
-  const page = await listBooksByContributor(pool, {
+  const page = await listEditionsByContributor(pool, {
     contributor: CONTRIBUTOR_URI,
     language: 'EN-us',
     sort: 'publishedYear',
@@ -312,7 +312,7 @@ test('listBooksByContributor uses the shared order and language clauses', async 
 
   const pageCall = calls.find((call) => call.sql.includes('ORDER BY'));
   expect(pageCall).toBeTruthy();
-  // The clauses `searchBooks` builds, from the shared helpers: the union
+  // The clauses `searchEditions` builds, from the shared helpers: the union
   // claim's primary subtag, and the year-then-date ordering with unknown last.
   expect(pageCall.sql).toMatch(/split_part\(lower\(s\.language\), '-', 1\) = split_part\(\$2, '-', 1\)/);
   expect(pageCall.sql).toMatch(/ORDER BY \(CASE WHEN s\.published_date/);
@@ -325,7 +325,7 @@ test('listBooksByContributor uses the shared order and language clauses', async 
   expect(calls.some((call) => call.sql.includes('count(*)::int AS n')), 'a page shorter than the limit is its own total').toBe(false);
 });
 
-test('listBooksByContributor counts only a full first page', async () => {
+test('listEditionsByContributor counts only a full first page', async () => {
   const rows = Array.from({ length: 11 }, (_, index) => editionRow(`${EDITION_PREFIX}${index}`));
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
@@ -334,7 +334,7 @@ test('listBooksByContributor counts only a full first page', async () => {
     return [];
   });
 
-  const page = await listBooksByContributor(pool, {
+  const page = await listEditionsByContributor(pool, {
     contributor: CONTRIBUTOR_URI,
     offset: 0,
     limit: 10
@@ -348,9 +348,9 @@ test('listBooksByContributor counts only a full first page', async () => {
   expect(countCall.values).toEqual([42]);
 });
 
-test('listBooksByContributor returns null for an unknown contributor', async () => {
+test('listEditionsByContributor returns null for an unknown contributor', async () => {
   const { pool } = fakePool(() => []);
-  expect(await listBooksByContributor(pool, {
+  expect(await listEditionsByContributor(pool, {
       contributor: CONTRIBUTOR_URI,
       offset: 0,
       limit: 25
@@ -358,7 +358,7 @@ test('listBooksByContributor returns null for an unknown contributor', async () 
   expect(parseEntityUri(PUBLISHER_URI, CONTRIBUTOR_COLLECTION)).toBe(null);
 });
 
-test('listBooksByContributor pages by offset and omits the total after page one', async () => {
+test('listEditionsByContributor pages by offset and omits the total after page one', async () => {
   const rows = [editionRow(`${EDITION_PREFIX}1`)];
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
@@ -366,7 +366,7 @@ test('listBooksByContributor pages by offset and omits the total after page one'
     return [];
   });
 
-  const page = await listBooksByContributor(pool, {
+  const page = await listEditionsByContributor(pool, {
     contributor: CONTRIBUTOR_URI,
     offset: 1,
     limit: 25
