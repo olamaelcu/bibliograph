@@ -1,3 +1,18 @@
+bibliograph-worker (0.4.1-1) unstable; urgency=medium
+
+  * 0.4.1: a deadlocked ingest transaction is retried instead of failing the
+    task.
+
+    - `ingestCandidate` retries SQLSTATE `40P01` (deadlock) and `40001`
+      (serialization failure) up to three attempts with jittered backoff. Every
+      statement it runs is an upsert or an `ON CONFLICT DO NOTHING`, so a
+      rolled-back attempt leaves nothing behind. Two candidates naming the same
+      publisher took its row locks in different orders and deadlocked in
+      `linkPublisher`, which crash-looped the worker until systemd's start limit
+      gave up. No SQL change.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.4.0-1) unstable; urgency=medium
 
   * 0.4.0: the feed's order index follows the activity time the edge now

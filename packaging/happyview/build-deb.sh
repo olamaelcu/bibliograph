@@ -13,7 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 VERSION="${HAPPYVIEW_VERSION:-2.17.4}"
-REVISION="${HAPPYVIEW_REVISION:-4}"
+REVISION="${HAPPYVIEW_REVISION:-5}"
 ARCH="${HAPPYVIEW_ARCH:-$(dpkg --print-architecture)}"
 PAYLOAD="packaging/payload/happyview"
 LIVE="/usr/lib/bibliograph-happyview"
@@ -46,9 +46,14 @@ cp -a happyview/lexicons "$STAGE$LIVE/lexicons"
 cp -a happyview/scripts "$STAGE$LIVE/scripts"
 cp -a happyview/lib "$STAGE$LIVE/lib"
 install -D -m 0644 happyview/sql/indexes.sql "$STAGE$LIVE/sql/indexes.sql"
-install -D -m 0644 happyview/sql/admin-bootstrap.sql "$STAGE$LIVE/sql/admin-bootstrap.sql"
 install -D -m 0755 happyview/bin/hv-deploy "$STAGE$LIVE/bin/hv-deploy"
-install -D -m 0644 happyview/sql/client-bootstrap.sql "$STAGE$LIVE/sql/client-bootstrap.sql"
+# Every SQL file, by glob: the oneshot reads indexes.sql and role-limits.sql
+# out of this directory at run time, and `--seed` reads the bootstrap files. An
+# enumerated list let a new file be added to the tree and forgotten here, which
+# fails hv-deploy only after it has already uploaded the lexicons.
+for sql in happyview/sql/*.sql; do
+  install -D -m 0644 "$sql" "$STAGE$LIVE/sql/$(basename "$sql")"
+done
 install -D -m 0755 happyview/bin/hv-client "$STAGE$LIVE/bin/hv-client"
 install -D -m 0644 happyview/bin/hvlib.py "$STAGE$LIVE/bin/hvlib.py"
 install -D -m 0755 packaging/happyview/bin/hv-prepare-static \

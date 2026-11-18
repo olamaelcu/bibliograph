@@ -1,3 +1,15 @@
+bibliograph-web (0.4.1-1) unstable; urgency=medium
+
+  * 0.4.1: catalog pages are ordered by `uri`, not ingest time.
+
+    - `searchEditions` and `resolveEditions` drop `indexed_at` from their
+      `ORDER BY`. `uri` is the primary key, so a page is one index scan instead
+      of a sort over the whole match set, and the order no longer changes when a
+      row is re-ingested. Ranking (`r.rank`) is unchanged; only the tiebreak
+      and the unranked page order moved.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.4.0-1) unstable; urgency=medium
 
   * 0.4.0: the discover feed carries Popfeed's book reviews and shelves.

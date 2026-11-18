@@ -1,3 +1,24 @@
+bibliograph-happyview (2.17.4-5) unstable; urgency=medium
+
+  * Packaging revision 5: the deploy oneshot bounds the runtime role's
+    connections and drops an index that only cost inserts. The HappyView
+    binary is unchanged at 2.17.4.
+
+    - `sql/role-limits.sql` is applied by `hv-deploy` on every run, including
+      with `--no-indexes`: `ALTER ROLE happyview_app CONNECTION LIMIT 40` and
+      `idle_session_timeout = 120s`, after a network backfill was measured
+      holding 71 idle backends on a cluster whose `max_connections` is 100.
+      Both need a superuser; when `hv-deploy` connects as `bibliograph` the
+      file raises a notice and the postgres role applies them from Ansible.
+    - `sql/indexes.sql` drops `happyview_record_review_identifiers_idx`: a GIN
+      index over an expression on a `text` column, 0 scans on a 371k-row table
+      while `INSERT INTO happyview_records` spent ~2.9s mean.
+    - `build-deb.sh` installs `happyview/sql/*.sql` by glob instead of naming
+      three files, so a new file cannot ship missing and crash `hv-deploy`
+      after it has uploaded the lexicons.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-happyview (2.17.4-4) unstable; urgency=medium
 
   * Packaging revision 4: the network backfill a first registration could
