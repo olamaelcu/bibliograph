@@ -131,7 +131,9 @@ prunes the workspace dev links the web build needs
 (`packages/web/node_modules/.bin/vite`). Build and package web first; stage
 the worker payload last. On a repeat run the pruned links are gone, so the
 wrapper restores them with `pnpm install --frozen-lockfile` before building
-web.
+web, and once more after staging the worker payload so the workspace it
+pruned still resolves the test tier's dependencies (`packages/web`'s `pg`)
+when the deploy returns.
 
 ```bash
 mise run package-web-deb     # package-web-payload (pnpm build) -> dpkg-deb; first

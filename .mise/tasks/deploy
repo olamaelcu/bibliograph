@@ -11,7 +11,8 @@
 # dev dependency links (notably packages/web/node_modules/.bin/vite). Building
 # web after that races the worker payload and fails, so web is built and
 # packaged first; the worker payload is staged last. A repeat run restores the
-# pruned links with `pnpm install --frozen-lockfile` before building web.
+# pruned links with `pnpm install --frozen-lockfile` before building web, and
+# again after staging the worker payload so the workspace is usable afterwards.
 #
 # Do not turn these into #MISE depends: mise may run dependencies concurrently,
 # which reintroduces the same race and leaves vite missing under the web build.
@@ -62,5 +63,11 @@ printf '==> Building bibliograph-happyview\n'
 mise run package-hv-deb
 printf '==> Building bibliograph-worker (payload staging prunes workspace dev links)\n'
 mise run package-worker-deb
+
+# Staging the worker payload is the last build, so restore the links it pruned
+# before returning: otherwise the tree is left without the web tests' `pg` and
+# `mise run test` fails with ERR_MODULE_NOT_FOUND until someone runs
+# `pnpm install` by hand.
+pnpm install --frozen-lockfile
 
 exec bash "$ROOT/deploy.sh" "$@"
