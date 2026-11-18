@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   Registry,
@@ -46,14 +45,11 @@ test('counters render escaped label values and accumulate one series per tuple',
   counter.inc({ quote: 'plain' });
 
   const text = registry.render();
-  assert.match(text, /^# HELP test_total multi\\nline help$/m);
-  assert.match(text, /^# TYPE test_total counter$/m);
-  assert.ok(
-    text.includes('test_total{quote="a\\"b",backslash="a\\\\b",newline="a\\nb"} 3'),
-    text
-  );
-  assert.match(text, /^test_total\{quote="plain"\} 1$/m);
-  assert.equal(text.match(/^test_total\{/gm)?.length, 2, 'the repeated tuple is one series');
+  expect(text).toMatch(/^# HELP test_total multi\\nline help$/m);
+  expect(text).toMatch(/^# TYPE test_total counter$/m);
+  expect(text.includes('test_total{quote="a\\"b",backslash="a\\\\b",newline="a\\nb"} 3'), text).toBeTruthy();
+  expect(text).toMatch(/^test_total\{quote="plain"\} 1$/m);
+  expect(text.match(/^test_total\{/gm)?.length, 'the repeated tuple is one series').toBe(2);
 });
 
 test('histograms are cumulative across buckets and expose _sum and _count', () => {
@@ -64,14 +60,14 @@ test('histograms are cumulative across buckets and expose _sum and _count', () =
   histogram.observe({ operation: 'x' }, 3);
 
   const text = registry.render();
-  assert.match(text, /^# TYPE test_duration_seconds histogram$/m);
-  assert.match(text, /^test_duration_seconds_bucket\{operation="x",le="0.1"\} 1$/m);
-  assert.match(text, /^test_duration_seconds_bucket\{operation="x",le="1"\} 2$/m);
-  assert.match(text, /^test_duration_seconds_bucket\{operation="x",le="\+Inf"\} 3$/m);
+  expect(text).toMatch(/^# TYPE test_duration_seconds histogram$/m);
+  expect(text).toMatch(/^test_duration_seconds_bucket\{operation="x",le="0.1"\} 1$/m);
+  expect(text).toMatch(/^test_duration_seconds_bucket\{operation="x",le="1"\} 2$/m);
+  expect(text).toMatch(/^test_duration_seconds_bucket\{operation="x",le="\+Inf"\} 3$/m);
   const sum = /^test_duration_seconds_sum\{operation="x"\} (.+)$/m.exec(text);
-  assert.ok(sum, text);
-  assert.ok(Math.abs(Number(sum[1]) - 3.55) < 1e-9, `sum was ${sum[1]}`);
-  assert.match(text, /^test_duration_seconds_count\{operation="x"\} 3$/m);
+  expect(sum, text).toBeTruthy();
+  expect(Math.abs(Number(sum[1]) - 3.55) < 1e-9, `sum was ${sum[1]}`).toBeTruthy();
+  expect(text).toMatch(/^test_duration_seconds_count\{operation="x"\} 3$/m);
 });
 
 test('non-finite and negative observations never reach the exposition', () => {
@@ -79,7 +75,7 @@ test('non-finite and negative observations never reach the exposition', () => {
   const histogram = registry.histogram('test_seconds', 'h', [1]);
   histogram.observe({}, Number.NaN);
   histogram.observe({}, -1);
-  assert.doesNotMatch(registry.render(), /^test_seconds_count/m);
+  expect(registry.render()).not.toMatch(/^test_seconds_count/m);
 });
 
 test('HTTP requests use route-id, method and status label normalizers', () => {
@@ -93,26 +89,17 @@ test('HTTP requests use route-id, method and status label normalizers', () => {
   });
 
   const text = renderWebMetrics(metrics);
-  assert.match(
-    text,
-    /^bibliograph_http_requests_total\{method="GET",route="unmatched",status="200"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_http_requests_total\{method="other",route="\/admin",status="unknown"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_http_request_duration_seconds_bucket\{method="GET",route="unmatched",le="0\.25"\} 1$/m
-  );
+  expect(text).toMatch(/^bibliograph_http_requests_total\{method="GET",route="unmatched",status="200"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_http_requests_total\{method="other",route="\/admin",status="unknown"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_http_request_duration_seconds_bucket\{method="GET",route="unmatched",le="0\.25"\} 1$/m);
 
-  assert.equal(normalizeHttpMethod('delete'), 'DELETE');
-  assert.equal(normalizeHttpMethod('CONNECT'), 'other');
-  assert.equal(normalizeRoute(undefined), 'unmatched');
-  assert.equal(normalizeRoute('/xrpc/[...method]'), '/xrpc/[...method]');
-  assert.equal(normalizeStatus(0), '0');
-  assert.equal(normalizeStatus(404), '404');
-  assert.equal(normalizeStatus(42), 'unknown');
+  expect(normalizeHttpMethod('delete')).toBe('DELETE');
+  expect(normalizeHttpMethod('CONNECT')).toBe('other');
+  expect(normalizeRoute(undefined)).toBe('unmatched');
+  expect(normalizeRoute('/xrpc/[...method]')).toBe('/xrpc/[...method]');
+  expect(normalizeStatus(0)).toBe('0');
+  expect(normalizeStatus(404)).toBe('404');
+  expect(normalizeStatus(42)).toBe('unknown');
 });
 
 test('proxy counters collapse unknown NSIDs to other and mark thrown calls', () => {
@@ -127,28 +114,13 @@ test('proxy counters collapse unknown NSIDs to other and mark thrown calls', () 
   recordPdsProxyRequest(metrics, { method: 'com.atproto.repo.listRecords', status: 404 });
 
   const text = renderWebMetrics(metrics);
-  assert.match(
-    text,
-    /^bibliograph_happyview_requests_total\{method="com\.atproto\.repo\.getRecord",outcome="ok",status="200"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_happyview_requests_total\{method="other",outcome="error",status="502"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_happyview_requests_total\{method="com\.atproto\.repo\.getRecord",outcome="exception",status="0"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_pds_proxy_requests_total\{method="com\.atproto\.repo\.listRecords",outcome="error",status="404"\} 1$/m
-  );
-  assert.equal(
-    normalizeXrpcMethod('net.olamaelcu.livtet.biblio.getContributor'),
-    'net.olamaelcu.livtet.biblio.getContributor'
-  );
-  assert.equal(normalizeXrpcMethod('net.olamaelcu.livtet.biblio.getEditions'), 'other');
-  assert.equal(normalizeXrpcMethod('com.example.other'), 'other');
+  expect(text).toMatch(/^bibliograph_happyview_requests_total\{method="com\.atproto\.repo\.getRecord",outcome="ok",status="200"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_happyview_requests_total\{method="other",outcome="error",status="502"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_happyview_requests_total\{method="com\.atproto\.repo\.getRecord",outcome="exception",status="0"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_pds_proxy_requests_total\{method="com\.atproto\.repo\.listRecords",outcome="error",status="404"\} 1$/m);
+  expect(normalizeXrpcMethod('net.olamaelcu.livtet.biblio.getContributor')).toBe('net.olamaelcu.livtet.biblio.getContributor');
+  expect(normalizeXrpcMethod('net.olamaelcu.livtet.biblio.getEditions')).toBe('other');
+  expect(normalizeXrpcMethod('com.example.other')).toBe('other');
 });
 
 test('catalog operations and feed kinds are fixed label sets', () => {
@@ -162,41 +134,17 @@ test('catalog operations and feed kinds are fixed label sets', () => {
   recordFeedRequest(metrics, 'weird', 500);
 
   const text = renderWebMetrics(metrics);
-  assert.match(
-    text,
-    /^bibliograph_catalog_queries_total\{operation="resolveEditions",outcome="ok"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_catalog_queries_total\{operation="searchEditions",outcome="unavailable"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_catalog_queries_total\{operation="other",outcome="error"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_catalog_query_duration_seconds_count\{operation="resolveEditions"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_feed_requests_total\{kind="public",outcome="ok"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_feed_requests_total\{kind="following",outcome="auth_required"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_feed_requests_total\{kind="invalid",outcome="invalid_request"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_feed_requests_total\{kind="other",outcome="error"\} 1$/m
-  );
-  assert.equal(normalizeFeedKind('dynamic'), 'dynamic');
-  assert.equal(normalizeFeedKind('private'), 'other');
-  assert.equal(feedOutcomeForStatus(503), 'unavailable');
+  expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="resolveEditions",outcome="ok"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="searchEditions",outcome="unavailable"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="other",outcome="error"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_query_duration_seconds_count\{operation="resolveEditions"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="public",outcome="ok"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="following",outcome="auth_required"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="invalid",outcome="invalid_request"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="other",outcome="error"\} 1$/m);
+  expect(normalizeFeedKind('dynamic')).toBe('dynamic');
+  expect(normalizeFeedKind('private')).toBe('other');
+  expect(feedOutcomeForStatus(503)).toBe('unavailable');
 });
 
 test('catalog hydration, decision and first-page metrics stay bounded', () => {
@@ -210,28 +158,16 @@ test('catalog hydration, decision and first-page metrics stay bounded', () => {
   recordCatalogSearchMatches(metrics, 3);
 
   const text = renderWebMetrics(metrics);
-  assert.match(
-    text,
-    /^bibliograph_catalog_hydration_total\{task="catalog.search",outcome="over_budget"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_catalog_hydration_total\{task="catalog.isbn",outcome="queued"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_catalog_hydration_total\{task="other",outcome="queued"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_catalog_hydration_total\{task="catalog.search",outcome="other"\} 1$/m
-  );
-  assert.match(text, /^bibliograph_catalog_search_decision_total\{decision="thin"\} 1$/m);
-  assert.match(text, /^bibliograph_catalog_search_decision_total\{decision="other"\} 1$/m);
-  assert.match(text, /^bibliograph_catalog_search_first_page_matches_count 1$/m);
-  assert.match(text, /^bibliograph_catalog_search_first_page_matches_sum 3$/m);
-  assert.match(text, /^bibliograph_catalog_search_first_page_matches_bucket\{le="5"\} 1$/m);
-  assert.match(text, /^bibliograph_catalog_search_first_page_matches_bucket\{le="2"\} 0$/m);
+  expect(text).toMatch(/^bibliograph_catalog_hydration_total\{task="catalog.search",outcome="over_budget"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_hydration_total\{task="catalog.isbn",outcome="queued"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_hydration_total\{task="other",outcome="queued"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_hydration_total\{task="catalog.search",outcome="other"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_search_decision_total\{decision="thin"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_search_decision_total\{decision="other"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_search_first_page_matches_count 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_search_first_page_matches_sum 3$/m);
+  expect(text).toMatch(/^bibliograph_catalog_search_first_page_matches_bucket\{le="5"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_search_first_page_matches_bucket\{le="2"\} 0$/m);
 });
 
 test('feed latency, page size, follow-set and auth-failure metrics are bounded', () => {
@@ -247,31 +183,22 @@ test('feed latency, page size, follow-set and auth-failure metrics are bounded',
   recordFeedAuthFailure(metrics, 'bogus');
 
   const text = renderWebMetrics(metrics);
-  assert.match(text, /^bibliograph_feed_request_duration_seconds_count\{kind="public"\} 1$/m);
-  assert.match(text, /^bibliograph_feed_request_duration_seconds_count\{kind="other"\} 1$/m);
-  assert.match(
-    text,
-    /^bibliograph_feed_pages_total\{kind="following",cursor="first"\} 1$/m
-  );
-  assert.match(text, /^bibliograph_feed_pages_total\{kind="following",cursor="next"\} 1$/m);
-  assert.match(text, /^bibliograph_feed_page_items_count\{kind="following"\} 2$/m);
-  assert.match(text, /^bibliograph_feed_page_items_sum\{kind="following"\} 15$/m);
-  assert.match(text, /^bibliograph_feed_follow_dids_count\{kind="extended"\} 1$/m);
-  assert.match(
-    text,
-    /^bibliograph_feed_query_duration_seconds_count\{operation="page"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_feed_query_duration_seconds_count\{operation="other"\} 1$/m
-  );
-  assert.match(text, /^bibliograph_feed_auth_failures_total\{reason="missing"\} 1$/m);
-  assert.match(text, /^bibliograph_feed_auth_failures_total\{reason="other"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_request_duration_seconds_count\{kind="public"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_request_duration_seconds_count\{kind="other"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_pages_total\{kind="following",cursor="first"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_pages_total\{kind="following",cursor="next"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_page_items_count\{kind="following"\} 2$/m);
+  expect(text).toMatch(/^bibliograph_feed_page_items_sum\{kind="following"\} 15$/m);
+  expect(text).toMatch(/^bibliograph_feed_follow_dids_count\{kind="extended"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_query_duration_seconds_count\{operation="page"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_query_duration_seconds_count\{operation="other"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_auth_failures_total\{reason="missing"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_feed_auth_failures_total\{reason="other"\} 1$/m);
 
-  assert.equal(normalizeFeedQueryPhase('follow_dids'), 'follow_dids');
-  assert.equal(normalizeFeedQueryPhase('bogus'), 'other');
-  assert.equal(normalizeFeedAuthReason('signature'), 'signature');
-  assert.equal(normalizeFeedAuthReason('bogus'), 'other');
+  expect(normalizeFeedQueryPhase('follow_dids')).toBe('follow_dids');
+  expect(normalizeFeedQueryPhase('bogus')).toBe('other');
+  expect(normalizeFeedAuthReason('signature')).toBe('signature');
+  expect(normalizeFeedAuthReason('bogus')).toBe('other');
 });
 
 test('process gauges are collected from the live process shape', () => {
@@ -283,10 +210,10 @@ test('process gauges are collected from the live process shape', () => {
   });
 
   const text = renderWebMetrics(metrics);
-  assert.match(text, /^bibliograph_process_resident_memory_bytes 1048576$/m);
-  assert.match(text, /^bibliograph_process_cpu_seconds_total 2$/m);
-  assert.match(text, /^bibliograph_process_uptime_seconds 12\.5$/m);
-  assert.match(text, /^bibliograph_nodejs_heap_used_bytes 524288$/m);
+  expect(text).toMatch(/^bibliograph_process_resident_memory_bytes 1048576$/m);
+  expect(text).toMatch(/^bibliograph_process_cpu_seconds_total 2$/m);
+  expect(text).toMatch(/^bibliograph_process_uptime_seconds 12\.5$/m);
+  expect(text).toMatch(/^bibliograph_nodejs_heap_used_bytes 524288$/m);
 });
 
 test('an untouched registry still exposes every contracted family header', () => {
@@ -312,10 +239,10 @@ test('an untouched registry still exposes every contracted family header', () =>
     ['bibliograph_process_uptime_seconds', 'gauge'],
     ['bibliograph_nodejs_heap_used_bytes', 'gauge']
   ]) {
-    assert.match(text, new RegExp(`^# HELP ${name} .+$`, 'm'));
-    assert.match(text, new RegExp(`^# TYPE ${name} ${type}$`, 'm'));
+    expect(text).toMatch(new RegExp(`^# HELP ${name} .+$`, 'm'));
+    expect(text).toMatch(new RegExp(`^# TYPE ${name} ${type}$`, 'm'));
   }
-  assert.match(text, /^$/m);
+  expect(text).toMatch(/^$/m);
 });
 test('XRPC and upstream histograms are labelled by method, backend and outcome', () => {
   const metrics = createWebMetrics();
@@ -348,29 +275,17 @@ test('XRPC and upstream histograms are labelled by method, backend and outcome',
   const text = renderWebMetrics(metrics);
   // The backend that answered is the split the dashboard needs: the same NSID
   // must never share a series between the edge and the proxied AppView.
-  assert.match(
-    text,
-    /^bibliograph_xrpc_request_duration_seconds_bucket\{method="community\.lexicon\.media\.book\.searchEditions",backend="catalog",outcome="ok",le="0\.025"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_xrpc_request_duration_seconds_bucket\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",backend="happyview",outcome="error",le="0\.5"\} 1$/m
-  );
+  expect(text).toMatch(/^bibliograph_xrpc_request_duration_seconds_bucket\{method="community\.lexicon\.media\.book\.searchEditions",backend="catalog",outcome="ok",le="0\.025"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_xrpc_request_duration_seconds_bucket\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",backend="happyview",outcome="error",le="0\.5"\} 1$/m);
   // An NSID outside the allowlist collapses instead of minting a series.
-  assert.match(
-    text,
-    /^bibliograph_xrpc_request_duration_seconds_bucket\{method="other",backend="pds",outcome="exception",le="\+Inf"\} 1$/m
-  );
-  assert.match(
-    text,
-    /^bibliograph_upstream_request_duration_seconds_bucket\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",upstream="happyview",outcome="error",le="0\.5"\} 1$/m
-  );
-  assert.match(text, /^bibliograph_upstream_request_duration_seconds_count\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",upstream="happyview",outcome="error"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_xrpc_request_duration_seconds_bucket\{method="other",backend="pds",outcome="exception",le="\+Inf"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_upstream_request_duration_seconds_bucket\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",upstream="happyview",outcome="error",le="0\.5"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_upstream_request_duration_seconds_count\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",upstream="happyview",outcome="error"\} 1$/m);
 });
 
 test('every NSID the deployment answers keeps its own series', () => {
   // Pins the allowlist to the surface: a method added to `serviceMethods()`
   // fails here instead of quietly reporting as `other` forever.
   const collapsed = serviceMethods().filter((method) => normalizeXrpcMethod(method) !== method);
-  assert.deepEqual(collapsed, []);
+  expect(collapsed).toEqual([]);
 });

@@ -8,8 +8,8 @@
  * no other integration coverage.
  */
 
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import pg from 'pg';
 
 import { MergeError, mergeEditions } from '../src/lib/server/admin/merge.ts';
@@ -111,7 +111,7 @@ async function seedEdition(input: {
     }
     identifierPosition += 1;
   }
-  assert.ok(identifierPosition > 0);
+  expect(identifierPosition > 0).toBeTruthy();
 
   let contributorPosition = 0;
   for (const contributorId of input.contributors ?? []) {
@@ -146,7 +146,7 @@ async function publisherLinks(
   }>;
 }
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 3 });
   try {
     await pool.query('SELECT 1');
@@ -157,7 +157,7 @@ before(async () => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   if (pool) {
     await cleanup().catch(() => {});
     await pool.end();
@@ -208,7 +208,7 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
     publishers: { mode: 'union' }
   });
 
-  assert.deepEqual(result, {
+  expect(result).toEqual({
     uri: base.uri,
     deleted: [other.uri],
     identifiers: 2,
@@ -221,16 +221,16 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
     'SELECT uri, rkey, title, created_at FROM editions WHERE uri = ANY($1::text[]) ORDER BY uri',
     [[base.uri, other.uri]]
   );
-  assert.equal(editions.rowCount, 1);
-  assert.equal(editions.rows[0]?.uri, base.uri);
-  assert.equal(editions.rows[0]?.rkey, base.rkey);
-  assert.equal(editions.rows[0]?.created_at.toISOString(), '2020-01-02T03:04:05.000Z');
+  expect(editions.rowCount).toBe(1);
+  expect(editions.rows[0]?.uri).toBe(base.uri);
+  expect(editions.rows[0]?.rkey).toBe(base.rkey);
+  expect(editions.rows[0]?.created_at.toISOString()).toBe('2020-01-02T03:04:05.000Z');
 
   const identifiers = await db.query<{ issuer: string; value: string }>(
     'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',
     [base.uri]
   );
-  assert.deepEqual(identifiers.rows, [
+  expect(identifiers.rows).toEqual([
     { issuer: 'isbn10', value: '0000000002' },
     { issuer: 'isbn13', value: '9780000009001' }
   ]);
@@ -244,7 +244,7 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
       WHERE edition_uri = $1 ORDER BY issuer`,
     [base.uri]
   );
-  assert.deepEqual(durations.rows, [
+  expect(durations.rows).toEqual([
     {
       issuer: 'isbn10',
       value: '0000000002',
@@ -260,47 +260,35 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
   ]);
 
   // Base-first, position-renumbered, never overwritten.
-  assert.deepEqual(
-    (await publisherLinks(base.uri)).map((row) => [row.issuer, row.value, row.name, row.position]),
-    [
+  expect((await publisherLinks(base.uri)).map((row) => [row.issuer, row.value, row.name, row.position])).toEqual([
       ['isbn13', '9780000009001', `${RUN} Alpha Press`, 1],
       ['isbn13', '9780000009001', `${RUN} Gamma Press`, 2],
       ['isbn10', '0000000002', `${RUN} Beta Press`, 1]
-    ]
-  );
+    ]);
 
   const credits = await db.query<{ contributor_id: string }>(
     'SELECT contributor_id FROM edition_contributors WHERE edition_uri = $1 ORDER BY position',
     [base.uri]
   );
-  assert.deepEqual(
-    credits.rows.map((row) => Number(row.contributor_id)),
-    [firstContributor, secondContributor]
-  );
+  expect(credits.rows.map((row) => Number(row.contributor_id))).toEqual([firstContributor, secondContributor]);
 
   // The published record takes the head of the ordered list.
   const readModel = await db.query<{ publisher: { name: string }; publishers: unknown[] }>(
     'SELECT publisher, publishers FROM appview_book WHERE uri = $1',
     [base.uri]
   );
-  assert.equal(readModel.rows[0]?.publisher.name, `${RUN} Alpha Press`);
-  assert.deepEqual(
-    (readModel.rows[0]?.publishers as Array<{ name: string }>).map((entry) => entry.name),
-    [`${RUN} Alpha Press`, `${RUN} Gamma Press`, `${RUN} Beta Press`]
-  );
+  expect(readModel.rows[0]?.publisher.name).toBe(`${RUN} Alpha Press`);
+  expect((readModel.rows[0]?.publishers as Array<{ name: string }>).map((entry) => entry.name)).toEqual([`${RUN} Alpha Press`, `${RUN} Gamma Press`, `${RUN} Beta Press`]);
 
   // Outbox: the absorbed edition is deleted, the base republished.
   const outbox = await db.query<{ uri: string; op: string }>(
     'SELECT uri, op FROM pds_outbox WHERE uri = ANY($1::text[]) ORDER BY uri',
     [[base.uri, other.uri]]
   );
-  assert.deepEqual(
-    outbox.rows.map((row) => [row.uri === base.uri ? 'base' : 'other', row.op]).sort(),
-    [
+  expect(outbox.rows.map((row) => [row.uri === base.uri ? 'base' : 'other', row.op]).sort()).toEqual([
       ['base', 'update'],
       ['other', 'delete']
-    ]
-  );
+    ]);
 });
 
 test('publisher source mode applies the chosen record set to every identifier', async (t) => {
@@ -329,23 +317,20 @@ test('publisher source mode applies the chosen record set to every identifier', 
     publishers: { mode: 'source', source: source.uri }
   });
 
-  assert.equal(result.publishers, 4);
+  expect(result.publishers).toBe(4);
   // Both identifiers of the base now carry the source's ordered set.
-  assert.deepEqual(
-    (await publisherLinks(base.uri)).map((row) => [row.issuer, row.value, row.name, row.position]),
-    [
+  expect((await publisherLinks(base.uri)).map((row) => [row.issuer, row.value, row.name, row.position])).toEqual([
       ['isbn13', '9780000009003', `${RUN} Source One Press`, 1],
       ['isbn13', '9780000009003', `${RUN} Source Two Press`, 2],
       ['isbn10', '0000000004', `${RUN} Source One Press`, 1],
       ['isbn10', '0000000004', `${RUN} Source Two Press`, 2]
-    ]
-  );
+    ]);
 
   const readModel = await db.query<{ publisher: { name: string } }>(
     'SELECT publisher FROM appview_book WHERE uri = $1',
     [base.uri]
   );
-  assert.equal(readModel.rows[0]?.publisher.name, `${RUN} Source One Press`);
+  expect(readModel.rows[0]?.publisher.name).toBe(`${RUN} Source One Press`);
 });
 
 test('a rejected merge writes nothing', async (t) => {
@@ -362,35 +347,23 @@ test('a rejected merge writes nothing', async (t) => {
     identifiers: [{ issuer: 'isbn10', value: '0000000006' }]
   });
 
-  await assert.rejects(
-    mergeEditions(db, {
+  await expect(mergeEditions(db, {
       base: base.uri,
       others: [other.uri],
       sources: { title: 'at://did:plc:not-selected/community.lexicon.media.book.edition/x' },
       publishers: { mode: 'union' },
       contributors: { mode: 'union' }
-    }),
-    (error: unknown) =>
-      error instanceof MergeError && error.status === 400 && /outside the selection/.test(error.message)
-  );
+    })).rejects.toSatisfy((error: unknown) =>
+      error instanceof MergeError && error.status === 400 && /outside the selection/.test(error.message));
 
   // Both editions and the base's own link are untouched.
   const editions = await db.query('SELECT uri FROM editions WHERE uri = ANY($1::text[])', [
     [base.uri, other.uri]
   ]);
-  assert.equal(editions.rowCount, 2);
-  assert.deepEqual(
-    (await publisherLinks(base.uri)).map((row) => [row.value, row.name]),
-    [['9780000009005', `${RUN} Reject Press`]]
-  );
+  expect(editions.rowCount).toBe(2);
+  expect((await publisherLinks(base.uri)).map((row) => [row.value, row.name])).toEqual([['9780000009005', `${RUN} Reject Press`]]);
 
   // A merge of one edition, or of an unknown base, is rejected before writing.
-  await assert.rejects(
-    mergeEditions(db, { base: base.uri, others: [] }),
-    (error: unknown) => error instanceof MergeError && error.status === 400
-  );
-  await assert.rejects(
-    mergeEditions(db, { base: editionUri('missing-edition'), others: [other.uri] }),
-    (error: unknown) => error instanceof MergeError && error.status === 404
-  );
+  await expect(mergeEditions(db, { base: base.uri, others: [] })).rejects.toSatisfy((error: unknown) => error instanceof MergeError && error.status === 400);
+  await expect(mergeEditions(db, { base: editionUri('missing-edition'), others: [other.uri] })).rejects.toSatisfy((error: unknown) => error instanceof MergeError && error.status === 404);
 });

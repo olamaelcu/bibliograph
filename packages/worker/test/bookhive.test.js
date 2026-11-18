@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   BOOKHIVE_ISSUER,
@@ -87,26 +86,26 @@ function pageFetcher(pages) {
     async fetch(url) {
       urls.push(url);
       const body = pages.shift();
-      assert.ok(body !== undefined, 'unexpected extra request');
+      expect(body !== undefined, 'unexpected extra request').toBeTruthy();
       return { ok: true, status: 200, async json() { return body; } };
     }
   };
 }
 
 test('parseCatalogBook rejects a hand-written hive id and an empty title', () => {
-  assert.equal(parseCatalogBook(catalogBook({ id: 'whatever' })), null);
-  assert.equal(parseCatalogBook(catalogBook({ id: 'bk_abc' })), null);
-  assert.equal(parseCatalogBook(catalogBook({ id: undefined })), null);
-  assert.equal(parseCatalogBook(catalogBook({ title: '   ' })), null);
-  assert.equal(parseCatalogBook(catalogBook({ title: undefined })), null);
-  assert.equal(parseCatalogBook(null), null);
+  expect(parseCatalogBook(catalogBook({ id: 'whatever' }))).toBe(null);
+  expect(parseCatalogBook(catalogBook({ id: 'bk_abc' }))).toBe(null);
+  expect(parseCatalogBook(catalogBook({ id: undefined }))).toBe(null);
+  expect(parseCatalogBook(catalogBook({ title: '   ' }))).toBe(null);
+  expect(parseCatalogBook(catalogBook({ title: undefined }))).toBe(null);
+  expect(parseCatalogBook(null)).toBe(null);
 });
 
 test('parseCatalogBook emits the hive id, a normalized ISBN and a Goodreads id', () => {
   const hyphenated = parseCatalogBook(
     catalogBook({ identifiers: { isbn13: '978-0-441-01359-3', goodreadsId: ' 1234 ' } })
   );
-  assert.deepEqual(hyphenated.identifiers, [
+  expect(hyphenated.identifiers).toEqual([
     { issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' },
     { issuer: 'isbn13', value: '9780441013593' },
     { issuer: 'goodreads', value: '1234' }
@@ -114,37 +113,37 @@ test('parseCatalogBook emits the hive id, a normalized ISBN and a Goodreads id',
 
   // An ISBN-10 is converted rather than dropped.
   const tenDigit = parseCatalogBook(catalogBook({ identifiers: { isbn10: '0441013597' } }));
-  assert.deepEqual(tenDigit.identifiers, [
+  expect(tenDigit.identifiers).toEqual([
     { issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' },
     { issuer: 'isbn13', value: '9780441013593' }
   ]);
 
   // No identifiers object at all still catalogues the book on its hive id.
   const bare = parseCatalogBook(catalogBook());
-  assert.deepEqual(bare.identifiers, [{ issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' }]);
+  expect(bare.identifiers).toEqual([{ issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' }]);
 
   // A blank Goodreads id is not an identifier.
   const blank = parseCatalogBook(catalogBook({ identifiers: { goodreadsId: '  ' } }));
-  assert.deepEqual(blank.identifiers, [{ issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' }]);
+  expect(blank.identifiers).toEqual([{ issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' }]);
 });
 
 test('parseCatalogBook splits the tab-separated author list and other separators', () => {
   const authors = (value) => parseCatalogBook(catalogBook({ authors: value })).contributors;
 
   // Bookhive stores authors tab-separated (`parseAuthors`), including holes.
-  assert.deepEqual(authors('Ann Leckie\t\tBecky Chambers'), [
+  expect(authors('Ann Leckie\t\tBecky Chambers')).toEqual([
     { name: 'Ann Leckie' },
     { name: 'Becky Chambers' }
   ]);
-  assert.deepEqual(authors('Jane Austen, Charlotte Brontë'), [
+  expect(authors('Jane Austen, Charlotte Brontë')).toEqual([
     { name: 'Jane Austen' },
     { name: 'Charlotte Brontë' }
   ]);
-  assert.deepEqual(authors('Terry Pratchett & Neil Gaiman'), [
+  expect(authors('Terry Pratchett & Neil Gaiman')).toEqual([
     { name: 'Terry Pratchett' },
     { name: 'Neil Gaiman' }
   ]);
-  assert.deepEqual(authors('Ursula K. Le Guin and Ken Liu'), [
+  expect(authors('Ursula K. Le Guin and Ken Liu')).toEqual([
     { name: 'Ursula K. Le Guin' },
     { name: 'Ken Liu' }
   ]);
@@ -154,27 +153,24 @@ test('parseCatalogBook prefers the full cover and trims the title', () => {
   const candidate = parseCatalogBook(
     catalogBook({ title: '  A Book  ', cover: 'https://img.example/cover.jpg' })
   );
-  assert.equal(candidate.title, 'A Book');
-  assert.equal(candidate.coverUrl, 'https://img.example/cover.jpg');
-  assert.equal(candidate.hiveId, 'bk_abc123');
-  assert.equal(
-    parseCatalogBook(catalogBook({ cover: '' })).coverUrl,
-    'https://img.example/thumb.jpg'
-  );
+  expect(candidate.title).toBe('A Book');
+  expect(candidate.coverUrl).toBe('https://img.example/cover.jpg');
+  expect(candidate.hiveId).toBe('bk_abc123');
+  expect(parseCatalogBook(catalogBook({ cover: '' })).coverUrl).toBe('https://img.example/thumb.jpg');
 });
 
 test('languageTags derives name -> tag from the catalog codes', () => {
   const tags = languageTags(['en', 'nl', 'es', 'ca', 'no', 'pt']);
   // Bookhive writes the ISO English name, `;`-separated alternative included.
-  assert.equal(tags.get('english'), 'en');
-  assert.equal(tags.get('dutch'), 'nl');
-  assert.equal(tags.get('spanish'), 'es');
-  assert.equal(tags.get('catalan'), 'ca');
-  assert.equal(tags.get('norwegian'), 'no');
-  assert.equal(tags.get('portuguese'), 'pt');
-  assert.equal(tags.get('klingon'), undefined);
+  expect(tags.get('english')).toBe('en');
+  expect(tags.get('dutch')).toBe('nl');
+  expect(tags.get('spanish')).toBe('es');
+  expect(tags.get('catalan')).toBe('ca');
+  expect(tags.get('norwegian')).toBe('no');
+  expect(tags.get('portuguese')).toBe('pt');
+  expect(tags.get('klingon')).toBe(undefined);
   // Junk codes are skipped rather than throwing.
-  assert.equal(languageTags(['zzzz', '', null, 'x']).size, 0);
+  expect(languageTags(['zzzz', '', null, 'x']).size).toBe(0);
 });
 
 test('parseCatalogBook carries description, pages, language, year, publisher and series', () => {
@@ -191,26 +187,26 @@ test('parseCatalogBook carries description, pages, language, year, publisher and
     { languages }
   );
 
-  assert.equal(candidate.description, 'A novel of manners.');
-  assert.equal(candidate.pages, 320);
-  assert.equal(candidate.language, 'en');
-  assert.equal(candidate.publishedDate, '1813');
-  assert.deepEqual(candidate.publisher, { name: 'T. Egerton' });
+  expect(candidate.description).toBe('A novel of manners.');
+  expect(candidate.pages).toBe(320);
+  expect(candidate.language).toBe('en');
+  expect(candidate.publishedDate).toBe('1813');
+  expect(candidate.publisher).toEqual({ name: 'T. Egerton' });
   // Series is edition-level, not a claim: it names the work's placement.
-  assert.deepEqual(candidate.series, { name: 'The Novels' });
+  expect(candidate.series).toEqual({ name: 'The Novels' });
   // Everything above describes the identifier the record came through.
-  assert.deepEqual(candidate.sourceIdentifier, { issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' });
+  expect(candidate.sourceIdentifier).toEqual({ issuer: BOOKHIVE_ISSUER, value: 'bk_abc123' });
 });
 
 test('parseCatalogBook drops metadata it cannot publish as-is', () => {
   const languages = languageTags(['en']);
   const bare = parseCatalogBook(catalogBook(), { languages });
-  assert.equal(bare.description, undefined);
-  assert.equal(bare.pages, undefined);
-  assert.equal(bare.language, undefined);
-  assert.equal(bare.publishedDate, undefined);
-  assert.equal(bare.publisher, undefined);
-  assert.equal(bare.series, undefined);
+  expect(bare.description).toBe(undefined);
+  expect(bare.pages).toBe(undefined);
+  expect(bare.language).toBe(undefined);
+  expect(bare.publishedDate).toBe(undefined);
+  expect(bare.publisher).toBe(undefined);
+  expect(bare.series).toBe(undefined);
 
   const nonsense = parseCatalogBook(
     catalogBook({
@@ -225,15 +221,15 @@ test('parseCatalogBook drops metadata it cannot publish as-is', () => {
   );
   // An unknown language name, an impossible year and a zero page count are
   // dropped: the record must not carry an invalid claim.
-  assert.equal(nonsense.language, undefined);
-  assert.equal(nonsense.publishedDate, undefined);
-  assert.equal(nonsense.pages, undefined);
-  assert.equal(nonsense.description, undefined);
-  assert.equal(nonsense.publisher, undefined);
-  assert.equal(nonsense.series, undefined);
+  expect(nonsense.language).toBe(undefined);
+  expect(nonsense.publishedDate).toBe(undefined);
+  expect(nonsense.pages).toBe(undefined);
+  expect(nonsense.description).toBe(undefined);
+  expect(nonsense.publisher).toBe(undefined);
+  expect(nonsense.series).toBe(undefined);
 
   // A row that already holds a tag keeps it.
-  assert.equal(parseCatalogBook(catalogBook({ language: 'EN-gb' }), { languages }).language, 'en-gb');
+  expect(parseCatalogBook(catalogBook({ language: 'EN-gb' }), { languages }).language).toBe('en-gb');
 });
 
 test('fetchCatalogPage lists the collection from the PDS and follows the cursor', async () => {
@@ -246,26 +242,26 @@ test('fetchCatalogPage lists the collection from the PDS and follows the cursor'
     pdsUrl: 'https://pds.example/'
   });
 
-  assert.deepEqual(page.records, [catalogBook()]);
-  assert.equal(page.cursor, 'next');
+  expect(page.records).toEqual([catalogBook()]);
+  expect(page.cursor).toBe('next');
   const url = new URL(fetcher.urls[0]);
-  assert.equal(url.origin, 'https://pds.example');
-  assert.equal(url.pathname, '/xrpc/com.atproto.repo.listRecords');
-  assert.equal(url.searchParams.get('collection'), 'buzz.bookhive.catalogBook');
-  assert.equal(url.searchParams.get('limit'), '50');
-  assert.equal(url.searchParams.get('cursor'), null);
+  expect(url.origin).toBe('https://pds.example');
+  expect(url.pathname).toBe('/xrpc/com.atproto.repo.listRecords');
+  expect(url.searchParams.get('collection')).toBe('buzz.bookhive.catalogBook');
+  expect(url.searchParams.get('limit')).toBe('50');
+  expect(url.searchParams.get('cursor')).toBe(null);
 });
 
 test('fetchCatalogPage drops entries without a record body and the last cursor', async () => {
   const fetcher = pageFetcher([{ records: [{ uri: 'at://x/1' }, { value: catalogBook() }] }]);
   const page = await fetchCatalogPage({ fetchImpl: fetcher.fetch, pdsUrl: 'https://pds.example' });
-  assert.deepEqual(page.records, [catalogBook()]);
-  assert.equal(page.cursor, undefined);
+  expect(page.records).toEqual([catalogBook()]);
+  expect(page.cursor).toBe(undefined);
 });
 
 test('bookhivePdsUrl honours the override', () => {
-  assert.equal(bookhivePdsUrl({ BOOKHIVE_PDS_URL: ' https://mirror.example ' }), 'https://mirror.example');
-  assert.match(bookhivePdsUrl({}), /^https:\/\//);
+  expect(bookhivePdsUrl({ BOOKHIVE_PDS_URL: ' https://mirror.example ' })).toBe('https://mirror.example');
+  expect(bookhivePdsUrl({})).toMatch(/^https:\/\//);
 });
 
 test('importBookhiveCatalog skips fully known sets and ingests the rest once', async () => {
@@ -303,8 +299,8 @@ test('importBookhiveCatalog skips fully known sets and ingests the rest once', a
     }
   });
 
-  assert.deepEqual(ingested, ['bk_knownhive,9780441013593,9', 'bk_freshhive']);
-  assert.deepEqual(summary, {
+  expect(ingested).toEqual(['bk_knownhive,9780441013593,9', 'bk_freshhive']);
+  expect(summary).toEqual({
     pages: 1,
     seen: 4,
     // Only the first record's set is already complete; the second one adds a
@@ -316,9 +312,9 @@ test('importBookhiveCatalog skips fully known sets and ingests the rest once', a
   });
   // One language read for the walk, then one identifier-set query per page —
   // never one per record.
-  assert.equal(pool.calls.length, 2);
-  assert.match(pool.calls[0].sql, /language_aliases/);
-  assert.equal(pool.calls.filter((call) => call.sql.includes('FROM edition_identifiers i')).length, 1);
+  expect(pool.calls.length).toBe(2);
+  expect(pool.calls[0].sql).toMatch(/language_aliases/);
+  expect(pool.calls.filter((call) => call.sql.includes('FROM edition_identifiers i')).length).toBe(1);
 });
 
 test('importBookhiveCatalog keeps walking after a failing record and stops at the last page', async () => {
@@ -343,10 +339,10 @@ test('importBookhiveCatalog keeps walking after a failing record and stops at th
     }
   });
 
-  assert.deepEqual(seen, ['bk_onehive', 'bk_twohive', 'bk_threehive']);
-  assert.deepEqual(summary, { pages: 2, seen: 3, skipped: 0, created: 2, updated: 0, failed: 1 });
-  assert.equal(fetcher.urls.length, 2);
-  assert.equal(new URL(fetcher.urls[1]).searchParams.get('cursor'), 'page2');
+  expect(seen).toEqual(['bk_onehive', 'bk_twohive', 'bk_threehive']);
+  expect(summary).toEqual({ pages: 2, seen: 3, skipped: 0, created: 2, updated: 0, failed: 1 });
+  expect(fetcher.urls.length).toBe(2);
+  expect(new URL(fetcher.urls[1]).searchParams.get('cursor')).toBe('page2');
 });
 
 test('a page is one transaction, with a savepoint per record', async () => {
@@ -366,14 +362,14 @@ test('a page is one transaction, with a savepoint per record', async () => {
     logger: { warn() {} },
     async ingest(candidate, options) {
       // The import hands its page transaction down, so a whole page commits once.
-      assert.ok(options.client, 'ingest runs inside the page transaction');
+      expect(options.client, 'ingest runs inside the page transaction').toBeTruthy();
       return { uri: `at://edition/${candidate.hiveId}`, created: true };
     }
   });
 
-  assert.equal(summary.created, 2);
+  expect(summary.created).toBe(2);
   const [client] = pool.clients;
-  assert.deepEqual(client.queries, [
+  expect(client.queries).toEqual([
     'BEGIN',
     'SAVEPOINT record',
     'RELEASE SAVEPOINT record',
@@ -381,7 +377,7 @@ test('a page is one transaction, with a savepoint per record', async () => {
     'RELEASE SAVEPOINT record',
     'COMMIT'
   ]);
-  assert.equal(client.released, true);
+  expect(client.released).toBe(true);
 });
 
 test('a failing record rolls back to its savepoint and the page still commits', async () => {
@@ -405,12 +401,9 @@ test('a failing record rolls back to its savepoint and the page still commits', 
     }
   });
 
-  assert.deepEqual(
-    { created: summary.created, failed: summary.failed },
-    { created: 1, failed: 1 }
-  );
+  expect({ created: summary.created, failed: summary.failed }).toEqual({ created: 1, failed: 1 });
   const [client] = pool.clients;
-  assert.deepEqual(client.queries, [
+  expect(client.queries).toEqual([
     'BEGIN',
     'SAVEPOINT record',
     'ROLLBACK TO SAVEPOINT record',
@@ -433,9 +426,9 @@ test('importBookhiveCatalog honours the page budget and reports the resume curso
     }
   });
 
-  assert.equal(summary.pages, 1);
-  assert.equal(summary.cursor, 'more');
-  assert.equal(fetcher.urls.length, 1);
+  expect(summary.pages).toBe(1);
+  expect(summary.cursor).toBe('more');
+  expect(fetcher.urls.length).toBe(1);
 });
 
 test('importBookhiveCatalog counts what the run did for the scrape', async () => {
@@ -472,17 +465,16 @@ test('importBookhiveCatalog counts what the run did for the scrape', async () =>
   // The counters mirror the returned summary, so a dashboard and the log line
   // can never disagree; `run` is recorded before the first request.
   const counted = Object.fromEntries(metrics.snapshot().map((row) => [row.result, row.count]));
-  assert.deepEqual(counted, { created: 1, failed: 1, pages: 1, run: 1, skipped: 1 });
-  assert.equal(counted.pages, summary.pages);
-  assert.equal(counted.skipped, summary.skipped);
-  assert.equal(counted.created, summary.created);
-  assert.equal(counted.failed, summary.failed);
+  expect(counted).toEqual({ created: 1, failed: 1, pages: 1, run: 1, skipped: 1 });
+  expect(counted.pages).toBe(summary.pages);
+  expect(counted.skipped).toBe(summary.skipped);
+  expect(counted.created).toBe(summary.created);
+  expect(counted.failed).toBe(summary.failed);
 });
 
 test('a run that dies mid-walk still counts as an attempted run', async () => {
   const metrics = createBookhiveMetrics();
-  await assert.rejects(
-    importBookhiveCatalog({
+  await expect(importBookhiveCatalog({
       pool: fakePool(),
       fetchImpl: async () => ({ ok: false, status: 500, async json() {} }),
       pdsUrl: 'https://pds.example',
@@ -490,10 +482,8 @@ test('a run that dies mid-walk still counts as an attempted run', async () => {
       logger: { warn() {} },
       metrics,
       ingest: async () => undefined
-    }),
-    /answered 500/
-  );
-  assert.deepEqual(metrics.snapshot(), [{ result: 'run', count: 1 }]);
+    })).rejects.toThrow(/answered 500/);
+  expect(metrics.snapshot()).toEqual([{ result: 'run', count: 1 }]);
 });
 
 test('a complete identifier set is not enough when the catalog has metadata the row lacks', async () => {
@@ -534,14 +524,14 @@ test('a complete identifier set is not enough when the catalog has metadata the 
     }
   });
 
-  assert.equal(ingested.length, 1);
-  assert.deepEqual(summary, { pages: 1, seen: 1, skipped: 0, created: 0, updated: 1, failed: 0 });
-  assert.equal(ingested[0].description, 'A description the catalog gained');
-  assert.equal(ingested[0].language, 'en');
-  assert.equal(ingested[0].publishedDate, '1969');
-  assert.equal(ingested[0].pages, 320);
-  assert.deepEqual(ingested[0].publisher, { name: 'Ace Books' });
-  assert.deepEqual(ingested[0].series, { name: 'Hainish Cycle' });
+  expect(ingested.length).toBe(1);
+  expect(summary).toEqual({ pages: 1, seen: 1, skipped: 0, created: 0, updated: 1, failed: 0 });
+  expect(ingested[0].description).toBe('A description the catalog gained');
+  expect(ingested[0].language).toBe('en');
+  expect(ingested[0].publishedDate).toBe('1969');
+  expect(ingested[0].pages).toBe(320);
+  expect(ingested[0].publisher).toEqual({ name: 'Ace Books' });
+  expect(ingested[0].series).toEqual({ name: 'Hainish Cycle' });
 });
 
 test('a row that already carries the catalog metadata is skipped', async () => {
@@ -585,7 +575,7 @@ test('a row that already carries the catalog metadata is skipped', async () => {
     }
   });
 
-  assert.deepEqual(summary, { pages: 1, seen: 1, skipped: 1, created: 0, updated: 0, failed: 0 });
+  expect(summary).toEqual({ pages: 1, seen: 1, skipped: 1, created: 0, updated: 0, failed: 0 });
 });
 
 test('parseCatalogBook reads Bookhive series blobs and strips HTML descriptions', () => {
@@ -599,19 +589,19 @@ test('parseCatalogBook reads Bookhive series blobs and strips HTML descriptions'
     }),
     { languages }
   );
-  assert.deepEqual(withBlob.series, { name: 'UNIT: The New Series', position: '1.1' });
-  assert.equal(withBlob.description, 'The Faerie Queene was the first epic in English.');
+  expect(withBlob.series).toEqual({ name: 'UNIT: The New Series', position: '1.1' });
+  expect(withBlob.description).toBe('The Faerie Queene was the first epic in English.');
 
   const bare = parseCatalogBook(catalogBook({ series: 'The Green Mile' }), { languages });
-  assert.deepEqual(bare.series, { name: 'The Green Mile' });
+  expect(bare.series).toEqual({ name: 'The Green Mile' });
 
   // An empty position is not a position, and an unparsable blob is not a name.
   const noPosition = parseCatalogBook(
     catalogBook({ series: '{"title":"B.P.R.D.","position":""}' }),
     { languages }
   );
-  assert.deepEqual(noPosition.series, { name: 'B.P.R.D.' });
-  assert.equal(parseCatalogBook(catalogBook({ series: '{not json}' }), { languages }).series, undefined);
+  expect(noPosition.series).toEqual({ name: 'B.P.R.D.' });
+  expect(parseCatalogBook(catalogBook({ series: '{not json}' }), { languages }).series).toBe(undefined);
 });
 
 test('the walk stops between pages when the shutdown signal aborts', async () => {
@@ -631,6 +621,6 @@ test('the walk stops between pages when the shutdown signal aborts', async () =>
   });
 
   // Nothing fetched, nothing written: the idempotent walk resumes from page 1.
-  assert.deepEqual(fetcher.urls, []);
-  assert.deepEqual(summary, { pages: 0, seen: 0, skipped: 0, created: 0, updated: 0, failed: 0 });
+  expect(fetcher.urls).toEqual([]);
+  expect(summary).toEqual({ pages: 0, seen: 0, skipped: 0, created: 0, updated: 0, failed: 0 });
 });

@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   createMetricsServer,
@@ -12,7 +11,6 @@ import { createCoverMetrics } from '../lib/cover-metrics.js';
 import { MAX_ATTEMPTS, OUTBOX_COLLECTIONS } from '../lib/publish.js';
 import { createBookhiveMetrics } from '../lib/bookhive.js';
 
-
 /**
  * The worker scrape owns the outbox backlog gauges: one aggregate query that
  * mirrors the claim predicate, rendered alongside the unchanged quota and
@@ -22,19 +20,18 @@ import { createBookhiveMetrics } from '../lib/bookhive.js';
 
 const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
 
-
 test('the bookhive gauge counts imported books and the counters explain them', async () => {
   // The gauge is durable (read from the catalog on each scrape); the counters
   // are this process's walk history. Both must survive a scrape unchanged.
   const pool = {
     async query(sql, values) {
-      assert.match(sql, /FROM edition_identifiers WHERE issuer = \$1/);
-      assert.deepEqual(values, ['bookhive.buzz']);
+      expect(sql).toMatch(/FROM edition_identifiers WHERE issuer = \$1/);
+      expect(values).toEqual(['bookhive.buzz']);
       return { rows: [{ editions: '100' }] };
     }
   };
   const stats = await readBookhiveStats(pool);
-  assert.deepEqual(stats, { editions: 100 });
+  expect(stats).toEqual({ editions: 100 });
 
   const bookhiveMetrics = createBookhiveMetrics();
   for (const result of ['run', 'pages', 'pages', 'created', 'created', 'updated', 'skipped', 'failed']) {
@@ -42,20 +39,20 @@ test('the bookhive gauge counts imported books and the counters explain them', a
   }
 
   const text = renderMetrics({ calls: 0, limit: 100, bookhive: stats, bookhiveMetrics });
-  assert.match(text, /^bibliograph_catalog_bookhive_editions 100$/m);
-  assert.match(text, /# TYPE bibliograph_catalog_bookhive_total counter/);
-  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="created"\} 2$/m);
-  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="updated"\} 1$/m);
-  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="skipped"\} 1$/m);
-  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="failed"\} 1$/m);
-  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="pages"\} 2$/m);
-  assert.match(text, /^bibliograph_catalog_bookhive_total\{result="run"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_editions 100$/m);
+  expect(text).toMatch(/# TYPE bibliograph_catalog_bookhive_total counter/);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_total\{result="created"\} 2$/m);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_total\{result="updated"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_total\{result="skipped"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_total\{result="failed"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_total\{result="pages"\} 2$/m);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_total\{result="run"\} 1$/m);
 });
 
 test('a scrape with no bookhive import still exposes both families', () => {
   const text = renderMetrics({});
-  assert.match(text, /^bibliograph_catalog_bookhive_editions 0$/m);
-  assert.match(text, /# TYPE bibliograph_catalog_bookhive_total counter/);
+  expect(text).toMatch(/^bibliograph_catalog_bookhive_editions 0$/m);
+  expect(text).toMatch(/# TYPE bibliograph_catalog_bookhive_total counter/);
 });
 
 test('cover writes and removals are counted as files, not attempts', () => {
@@ -68,11 +65,11 @@ test('cover writes and removals are counted as files, not attempts', () => {
 
   const text = renderMetrics({ calls: 0, limit: 100, coverMetrics });
 
-  assert.match(text, /^bibliograph_cover_writes_total 2$/m);
-  assert.match(text, /^bibliograph_cover_write_bytes_total 3072$/m);
-  assert.match(text, /^bibliograph_cover_removals_total 1$/m);
-  assert.match(text, /# TYPE bibliograph_cover_write_bytes_total counter/);
-  assert.deepEqual(coverMetrics.counters(), { writes: 2, writeBytes: 3072, removals: 1 });
+  expect(text).toMatch(/^bibliograph_cover_writes_total 2$/m);
+  expect(text).toMatch(/^bibliograph_cover_write_bytes_total 3072$/m);
+  expect(text).toMatch(/^bibliograph_cover_removals_total 1$/m);
+  expect(text).toMatch(/# TYPE bibliograph_cover_write_bytes_total counter/);
+  expect(coverMetrics.counters()).toEqual({ writes: 2, writeBytes: 3072, removals: 1 });
 });
 
 test('cover download outcomes render by result and status', () => {
@@ -86,22 +83,10 @@ test('cover download outcomes render by result and status', () => {
 
   const text = renderMetrics({ calls: 0, limit: 100, coverMetrics });
 
-  assert.match(
-    text,
-    /# TYPE bibliograph_cover_downloads_total counter/
-  );
-  assert.match(
-    text,
-    /bibliograph_cover_downloads_total\{result="cached",status="200"\} 1/
-  );
-  assert.match(
-    text,
-    /bibliograph_cover_downloads_total\{result="rejected",status="403"\} 2/
-  );
-  assert.match(
-    text,
-    /bibliograph_cover_downloads_total\{result="retry",status="503"\} 1/
-  );
+  expect(text).toMatch(/# TYPE bibliograph_cover_downloads_total counter/);
+  expect(text).toMatch(/bibliograph_cover_downloads_total\{result="cached",status="200"\} 1/);
+  expect(text).toMatch(/bibliograph_cover_downloads_total\{result="rejected",status="403"\} 2/);
+  expect(text).toMatch(/bibliograph_cover_downloads_total\{result="retry",status="503"\} 1/);
 });
 const EMPTY = { ready: 0, parked: 0, oldestAgeSeconds: 0 };
 
@@ -137,37 +122,37 @@ test('renders worker liveness and outbox gauges with the existing families', () 
     ['bibliograph_provider_requests_total', 'counter'],
     ['bibliograph_provider_breaker_state', 'gauge']
   ]) {
-    assert.match(text, new RegExp(`^# HELP ${name} .+$`, 'm'));
-    assert.match(text, new RegExp(`^# TYPE ${name} ${type}$`, 'm'));
+    expect(text).toMatch(new RegExp(`^# HELP ${name} .+$`, 'm'));
+    expect(text).toMatch(new RegExp(`^# TYPE ${name} ${type}$`, 'm'));
   }
 
-  assert.match(text, /^bibliograph_worker_up 1$/m);
-  assert.match(text, /^bibliograph_process_resident_memory_bytes 1048576$/m);
-  assert.match(text, /^bibliograph_process_cpu_seconds_total 1\.5$/m);
-  assert.match(text, /^bibliograph_process_uptime_seconds 60$/m);
-  assert.match(text, /^bibliograph_nodejs_heap_used_bytes 524288$/m);
-  assert.match(text, /^bibliograph_isbndb_calls_today 10$/m);
-  assert.match(text, /^bibliograph_isbndb_calls_remaining 90$/m);
-  assert.match(text, /^bibliograph_pds_outbox_ready 4$/m);
-  assert.match(text, /^bibliograph_pds_outbox_parked 2$/m);
-  assert.match(text, /^bibliograph_pds_outbox_oldest_age_seconds 90\.5$/m);
+  expect(text).toMatch(/^bibliograph_worker_up 1$/m);
+  expect(text).toMatch(/^bibliograph_process_resident_memory_bytes 1048576$/m);
+  expect(text).toMatch(/^bibliograph_process_cpu_seconds_total 1\.5$/m);
+  expect(text).toMatch(/^bibliograph_process_uptime_seconds 60$/m);
+  expect(text).toMatch(/^bibliograph_nodejs_heap_used_bytes 524288$/m);
+  expect(text).toMatch(/^bibliograph_isbndb_calls_today 10$/m);
+  expect(text).toMatch(/^bibliograph_isbndb_calls_remaining 90$/m);
+  expect(text).toMatch(/^bibliograph_pds_outbox_ready 4$/m);
+  expect(text).toMatch(/^bibliograph_pds_outbox_parked 2$/m);
+  expect(text).toMatch(/^bibliograph_pds_outbox_oldest_age_seconds 90\.5$/m);
 });
 
 test('the soft ISBNdb limit sits 5% below the hard limit and neither goes negative', () => {
   const defaults = renderMetrics({});
-  assert.match(defaults, /^bibliograph_isbndb_daily_limit 5000$/m);
-  assert.match(defaults, /^bibliograph_isbndb_daily_soft_limit 4750$/m);
-  assert.match(defaults, /^bibliograph_isbndb_calls_remaining 5000$/m);
-  assert.match(defaults, /^bibliograph_isbndb_calls_remaining_soft 4750$/m);
+  expect(defaults).toMatch(/^bibliograph_isbndb_daily_limit 5000$/m);
+  expect(defaults).toMatch(/^bibliograph_isbndb_daily_soft_limit 4750$/m);
+  expect(defaults).toMatch(/^bibliograph_isbndb_calls_remaining 5000$/m);
+  expect(defaults).toMatch(/^bibliograph_isbndb_calls_remaining_soft 4750$/m);
 
   // At the soft limit there are still 250 calls before the provider stops.
   const atSoft = renderMetrics({ calls: 4750, limit: 5000 });
-  assert.match(atSoft, /^bibliograph_isbndb_calls_remaining_soft 0$/m);
-  assert.match(atSoft, /^bibliograph_isbndb_calls_remaining 250$/m);
+  expect(atSoft).toMatch(/^bibliograph_isbndb_calls_remaining_soft 0$/m);
+  expect(atSoft).toMatch(/^bibliograph_isbndb_calls_remaining 250$/m);
 
   const pastSoft = renderMetrics({ calls: 4800, limit: 5000 });
-  assert.match(pastSoft, /^bibliograph_isbndb_calls_remaining_soft 0$/m);
-  assert.match(pastSoft, /^bibliograph_isbndb_calls_remaining 200$/m);
+  expect(pastSoft).toMatch(/^bibliograph_isbndb_calls_remaining_soft 0$/m);
+  expect(pastSoft).toMatch(/^bibliograph_isbndb_calls_remaining 200$/m);
 });
 
 test('missing outbox stats render as zero rather than NaN', () => {
@@ -176,9 +161,9 @@ test('missing outbox stats render as zero rather than NaN', () => {
     limit: 10,
     runtime: { residentMemoryBytes: 0, cpuSeconds: 0, uptimeSeconds: 0, heapUsedBytes: 0 }
   });
-  assert.match(text, /^bibliograph_pds_outbox_ready 0$/m);
-  assert.match(text, /^bibliograph_pds_outbox_parked 0$/m);
-  assert.match(text, /^bibliograph_pds_outbox_oldest_age_seconds 0$/m);
+  expect(text).toMatch(/^bibliograph_pds_outbox_ready 0$/m);
+  expect(text).toMatch(/^bibliograph_pds_outbox_parked 0$/m);
+  expect(text).toMatch(/^bibliograph_pds_outbox_oldest_age_seconds 0$/m);
 });
 
 test('process gauges are read live from a process-like source', () => {
@@ -188,7 +173,7 @@ test('process gauges are read live from a process-like source', () => {
     uptime: () => 42.25
   });
 
-  assert.deepEqual(runtime, {
+  expect(runtime).toEqual({
     residentMemoryBytes: 2_097_152,
     cpuSeconds: 2,
     uptimeSeconds: 42.25,
@@ -207,17 +192,17 @@ test('the outbox aggregate mirrors the claim predicate and coerces pg strings', 
 
   const stats = await readOutboxStats(pool, { publisherDid: 'did:web:test.example' });
 
-  assert.deepEqual(stats, { ready: 3, parked: 2, oldestAgeSeconds: 42.5 });
-  assert.equal(calls.length, 1);
+  expect(stats).toEqual({ ready: 3, parked: 2, oldestAgeSeconds: 42.5 });
+  expect(calls.length).toBe(1);
   const [{ sql, values }] = calls;
-  assert.match(sql, /FROM pds_outbox/);
-  assert.match(sql, /attempts < \$2/);
-  assert.match(sql, /next_at <= now\(\)/);
-  assert.match(sql, /make_interval\(secs => \$3\)/);
-  assert.match(sql, /starts_with\(uri, 'at:\/\/' \|\| \$4 \|\| '\/'\)/);
-  assert.deepEqual(values, [OUTBOX_COLLECTIONS, MAX_ATTEMPTS, 300, 'did:web:test.example']);
-  assert.ok(values[0].includes('net.olamaelcu.livtet.biblio.contributor'));
-  assert.ok(values[0].includes('net.olamaelcu.livtet.biblio.publisher'));
+  expect(sql).toMatch(/FROM pds_outbox/);
+  expect(sql).toMatch(/attempts < \$2/);
+  expect(sql).toMatch(/next_at <= now\(\)/);
+  expect(sql).toMatch(/make_interval\(secs => \$3\)/);
+  expect(sql).toMatch(/starts_with\(uri, 'at:\/\/' \|\| \$4 \|\| '\/'\)/);
+  expect(values).toEqual([OUTBOX_COLLECTIONS, MAX_ATTEMPTS, 300, 'did:web:test.example']);
+  expect(values[0].includes('net.olamaelcu.livtet.biblio.contributor')).toBeTruthy();
+  expect(values[0].includes('net.olamaelcu.livtet.biblio.publisher')).toBeTruthy();
 });
 
 test('malformed aggregate values never become NaN or negative gauges', async () => {
@@ -225,10 +210,10 @@ test('malformed aggregate values never become NaN or negative gauges', async () 
     { query: async () => ({ rows: [{ ready: 'n/a', parked: '-4', oldest_age_seconds: null }] }) },
     {}
   );
-  assert.deepEqual(stats, EMPTY);
+  expect(stats).toEqual(EMPTY);
 
   const empty = await readOutboxStats({ query: async () => ({ rows: [] }) }, {});
-  assert.deepEqual(empty, EMPTY);
+  expect(empty).toEqual(EMPTY);
 });
 
 test('the metrics endpoint renders the outbox aggregate', async () => {
@@ -254,20 +239,20 @@ test('the metrics endpoint renders the outbox aggregate', async () => {
   try {
     const { port } = server.address();
     const response = await fetch(`http://127.0.0.1:${port}/metrics`);
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-type'), /^text\/plain; version=0\.0\.4/);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/^text\/plain; version=0\.0\.4/);
     const body = await response.text();
-    assert.match(body, /^bibliograph_worker_up 1$/m);
-    assert.match(body, /^bibliograph_process_resident_memory_bytes \d+$/m);
-    assert.match(body, /^bibliograph_process_cpu_seconds_total \d+(\.\d+)?$/m);
-    assert.match(body, /^bibliograph_process_uptime_seconds \d+(\.\d+)?$/m);
-    assert.match(body, /^bibliograph_nodejs_heap_used_bytes \d+$/m);
-    assert.match(body, /^bibliograph_pds_outbox_ready 5$/m);
-    assert.match(body, /^bibliograph_pds_outbox_parked 1$/m);
-    assert.match(body, /^bibliograph_pds_outbox_oldest_age_seconds 12$/m);
+    expect(body).toMatch(/^bibliograph_worker_up 1$/m);
+    expect(body).toMatch(/^bibliograph_process_resident_memory_bytes \d+$/m);
+    expect(body).toMatch(/^bibliograph_process_cpu_seconds_total \d+(\.\d+)?$/m);
+    expect(body).toMatch(/^bibliograph_process_uptime_seconds \d+(\.\d+)?$/m);
+    expect(body).toMatch(/^bibliograph_nodejs_heap_used_bytes \d+$/m);
+    expect(body).toMatch(/^bibliograph_pds_outbox_ready 5$/m);
+    expect(body).toMatch(/^bibliograph_pds_outbox_parked 1$/m);
+    expect(body).toMatch(/^bibliograph_pds_outbox_oldest_age_seconds 12$/m);
     // The scrape also reads the Bookhive import: the fake pool answers the quota
     // query shape, so the gauge renders as 0 rather than breaking the scrape.
-    assert.match(body, /^bibliograph_catalog_bookhive_editions \d+$/m);
+    expect(body).toMatch(/^bibliograph_catalog_bookhive_editions \d+$/m);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

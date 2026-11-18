@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   EDITION_COLLECTION,
@@ -52,7 +51,7 @@ test('getEditionIdentifiedFormats answers null when the edition is not in the ca
       }
     ]
   });
-  assert.equal(await getEditionIdentifiedFormats(pool, EDITION_URI), null);
+  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toBe(null);
 });
 
 test('a print identifier and an audio identifier keep rank order and their own units', async () => {
@@ -78,7 +77,7 @@ test('a print identifier and an audio identifier keep rank order and their own u
     ]
   });
 
-  assert.deepEqual(await getEditionIdentifiedFormats(pool, EDITION_URI), {
+  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     chapters: 12,
     identifiers: [
@@ -115,7 +114,7 @@ test('an identifier with no provider claim is listed with no medium and no exten
     ]
   });
 
-  assert.deepEqual(await getEditionIdentifiedFormats(pool, EDITION_URI), {
+  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     identifiers: [{ issuer: 'isbn13', value: '9781635575637' }]
   });
@@ -123,17 +122,17 @@ test('an identifier with no provider claim is listed with no medium and no exten
 
 test('both queries bind the URI and nothing else', async () => {
   const { pool, calls } = fakePool({ present: true, identifiers: [] });
-  assert.deepEqual(await getEditionIdentifiedFormats(pool, EDITION_URI), {
+  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     identifiers: []
   });
 
-  assert.equal(calls.length, 2);
-  for (const call of calls) assert.deepEqual(call.values, [EDITION_URI]);
-  assert.match(calls[0].sql, /FROM editions WHERE uri = \$1/);
+  expect(calls.length).toBe(2);
+  for (const call of calls) expect(call.values).toEqual([EDITION_URI]);
+  expect(calls[0].sql).toMatch(/FROM editions WHERE uri = \$1/);
   // The claims query must not depend on `identifier_shape_rank` existing: the
   // rank is inline, so this read works on a database that predates 0007.
-  assert.match(calls[1].sql, /WHEN 'isbn13' THEN 0/);
-  assert.doesNotMatch(calls[1].sql, /identifier_shape_rank/);
-  assert.match(calls[1].sql, /LEFT JOIN edition_identifier_info/);
+  expect(calls[1].sql).toMatch(/WHEN 'isbn13' THEN 0/);
+  expect(calls[1].sql).not.toMatch(/identifier_shape_rank/);
+  expect(calls[1].sql).toMatch(/LEFT JOIN edition_identifier_info/);
 });

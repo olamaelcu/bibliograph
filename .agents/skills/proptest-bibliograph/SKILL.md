@@ -44,8 +44,8 @@ Root, not per-package: the campaign's targets come from both packages, and none
 of them imports `$env` or a SvelteKit module, so one test file can import
 `../packages/worker/lib/record-fields.js` (plain JS) and
 `../packages/web/src/lib/server/covers/rate-limit.ts` (type-stripped by Node 26)
-alike. Neither package's `test` script can pick these up — `node --test
-test/*.test.js` and `node --test test/*.test.ts` are single-level globs — so
+alike. Neither package's `test` script can pick these up — each vitest config
+includes only its own single-level `test/*.test.{js,ts}` — so
 `pnpm test`, `pnpm worker:test` and `pnpm web:test` never run the harness.
 
 `fast-check` is a workspace-root devDependency for exactly this reason: the
@@ -107,14 +107,15 @@ Discovery work stays on `proptest/discovery`. For each confirmed bug:
 1. Branch `proptest/fix-<slug>` from `main`.
 2. Add a deterministic regression test in the owning package's existing `test/`
    directory — `packages/worker/test/<area>.test.js` or
-   `packages/web/test/<area>.test.ts`, `node:test` + `node:assert/strict`, **no
+   `packages/web/test/<area>.test.ts`, `vitest` + `expect()`, **no
    fast-check**. Committed tests must not depend on the discovery harness.
 3. Add the smallest fix that satisfies it.
 4. Prove the regression on `main` for the claimed reason:
 
    ```bash
    git worktree add /tmp/bgp-main main
-   cd /tmp/bgp-main && node --test <test file>   # must fail, for that reason
+   cd /tmp/bgp-main && pnpm install --frozen-lockfile
+   cd packages/web && pnpm exec vitest run test/<area>.test.ts  # must fail, for that reason
    ```
 
    then passes on the fix branch with the same command.

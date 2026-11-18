@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   EntityQueryError,
@@ -98,24 +97,21 @@ function editionRow(uri: string) {
 }
 
 test('parseEntityUri is scoped to one collection and rejects malformed URIs', () => {
-  assert.deepEqual(parseEntityUri(CONTRIBUTOR_URI, 'net.olamaelcu.livtet.biblio.contributor'), {
+  expect(parseEntityUri(CONTRIBUTOR_URI, 'net.olamaelcu.livtet.biblio.contributor')).toEqual({
     did: AUTHORITY,
     rkey: '3abc'
   });
-  assert.equal(
-    parseEntityUri(CONTRIBUTOR_URI, 'net.olamaelcu.livtet.biblio.publisher'),
-    null
-  );
-  assert.equal(parseEntityUri('https://example.org/x', 'net.olamaelcu.livtet.biblio.contributor'), null);
-  assert.equal(parseEntityUri('at://not-a-did/net.olamaelcu.livtet.biblio.contributor/3abc', 'net.olamaelcu.livtet.biblio.contributor'), null);
-  assert.equal(parseEntityUri(`at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/.`, 'net.olamaelcu.livtet.biblio.contributor'), null);
+  expect(parseEntityUri(CONTRIBUTOR_URI, 'net.olamaelcu.livtet.biblio.publisher')).toBe(null);
+  expect(parseEntityUri('https://example.org/x', 'net.olamaelcu.livtet.biblio.contributor')).toBe(null);
+  expect(parseEntityUri('at://not-a-did/net.olamaelcu.livtet.biblio.contributor/3abc', 'net.olamaelcu.livtet.biblio.contributor')).toBe(null);
+  expect(parseEntityUri(`at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/.`, 'net.olamaelcu.livtet.biblio.contributor')).toBe(null);
 });
 
 test('getContributor maps the row, includes the published cid, and omits empty fields', async () => {
   const { pool, calls } = fakePool((sql) => (sql.includes('FROM contributors') ? [contributorRow()] : []));
   const view = await getContributor(pool, CONTRIBUTOR_URI);
 
-  assert.deepEqual(view, {
+  expect(view).toEqual({
     uri: CONTRIBUTOR_URI,
     cid: 'bafyrecord',
     displayName: 'Ursula K. Le Guin',
@@ -127,20 +123,20 @@ test('getContributor maps the row, includes the published cid, and omits empty f
     died: '2018-01-22',
     createdAt: '2026-11-12T10:20:30.000Z'
   });
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].sql, /LEFT JOIN pds_cids/);
-  assert.deepEqual(calls[0].values, [CONTRIBUTOR_URI]);
+  expect(calls.length).toBe(1);
+  expect(calls[0].sql).toMatch(/LEFT JOIN pds_cids/);
+  expect(calls[0].values).toEqual([CONTRIBUTOR_URI]);
 });
 
 test('getContributor returns null for a missing row and rejects another collection', async () => {
   const { pool } = fakePool(() => []);
-  assert.equal(await getContributor(pool, CONTRIBUTOR_URI), null);
-  await assert.rejects(getContributor(pool, PUBLISHER_URI), (error) => error instanceof EntityUriError);
+  expect(await getContributor(pool, CONTRIBUTOR_URI)).toBe(null);
+  await expect(getContributor(pool, PUBLISHER_URI)).rejects.toSatisfy((error) => error instanceof EntityUriError);
 });
 
 test('getPublisher maps a publisher row without inventing a cid', async () => {
   const { pool } = fakePool((sql) => (sql.includes('FROM publishers') ? [publisherRow()] : []));
-  assert.deepEqual(await getPublisher(pool, PUBLISHER_URI), {
+  expect(await getPublisher(pool, PUBLISHER_URI)).toEqual({
     uri: PUBLISHER_URI,
     name: 'Ace Books',
     started: '1952-01-01',
@@ -161,7 +157,7 @@ test('resolveContributors matches identifier containment and pages with hasMore/
     limit: 1
   });
 
-  assert.deepEqual(result, {
+  expect(result).toEqual({
     items: [
       {
         uri: CONTRIBUTOR_URI,
@@ -178,8 +174,8 @@ test('resolveContributors matches identifier containment and pages with hasMore/
     hasMore: true,
     total: 2
   });
-  assert.match(calls[0].sql, /identifiers @> ANY\(\$1::jsonb\[\]\)/);
-  assert.deepEqual(calls[0].values?.[0], [
+  expect(calls[0].sql).toMatch(/identifiers @> ANY\(\$1::jsonb\[\]\)/);
+  expect(calls[0].values?.[0]).toEqual([
     JSON.stringify([{ issuer: 'orcid', value: '0000-0002-1825-0097' }])
   ]);
 });
@@ -191,9 +187,9 @@ test('resolvePublishers skips the count on later pages', async () => {
     offset: 25,
     limit: 25
   });
-  assert.deepEqual(result, { items: [], hasMore: false });
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].sql, /FROM publishers c/);
+  expect(result).toEqual({ items: [], hasMore: false });
+  expect(calls.length).toBe(1);
+  expect(calls[0].sql).toMatch(/FROM publishers c/);
 });
 
 test('searchContributors escapes LIKE metacharacters and ranks exact names first', async () => {
@@ -201,13 +197,13 @@ test('searchContributors escapes LIKE metacharacters and ranks exact names first
   await searchContributors(pool, { q: '100%_x', limit: 10 });
 
   const [call] = calls;
-  assert.match(call.sql, /c\.name ILIKE \$1/);
-  assert.match(call.sql, /jsonb_array_elements\(c\.identifiers\)/);
-  assert.equal(call.values?.[0], '%100\\%\\_x%');
-  assert.equal(call.values?.[1], '100%_x');
-  assert.equal(call.values?.[2], '100\\%\\_x%');
-  assert.equal(call.values?.[3], 11);
-  assert.equal(call.values?.[4], 0);
+  expect(call.sql).toMatch(/c\.name ILIKE \$1/);
+  expect(call.sql).toMatch(/jsonb_array_elements\(c\.identifiers\)/);
+  expect(call.values?.[0]).toBe('%100\\%\\_x%');
+  expect(call.values?.[1]).toBe('100%_x');
+  expect(call.values?.[2]).toBe('100\\%\\_x%');
+  expect(call.values?.[3]).toBe(11);
+  expect(call.values?.[4]).toBe(0);
 });
 
 test('search pagination emits an offset cursor only when a probe row exists', async () => {
@@ -215,24 +211,21 @@ test('search pagination emits an offset cursor only when a probe row exists', as
   let page = 0;
   const { pool, calls } = fakePool(() => (page++ === 0 ? rows : [publisherRow()]));
   const first = await searchPublishers(pool, { q: 'Ace', limit: 2 });
-  assert.equal(first.items.length, 2);
-  assert.ok(first.cursor);
-  assert.equal(decodeOffsetCursor(first.cursor), 2);
+  expect(first.items.length).toBe(2);
+  expect(first.cursor).toBeTruthy();
+  expect(decodeOffsetCursor(first.cursor)).toBe(2);
 
   const second = await searchPublishers(pool, { q: 'Ace', limit: 2, cursor: first.cursor });
-  assert.equal(calls.at(-1)?.values?.[4], 2);
-  assert.equal(second.cursor, undefined);
+  expect(calls.at(-1)?.values?.[4]).toBe(2);
+  expect(second.cursor).toBe(undefined);
 });
 
 test('a malformed cursor starts at the beginning and a blank q is InvalidQuery', async () => {
-  assert.equal(decodeOffsetCursor('not-base64-json'), 0);
-  assert.equal(decodeOffsetCursor(encodeOffsetCursor(7)), 7);
+  expect(decodeOffsetCursor('not-base64-json')).toBe(0);
+  expect(decodeOffsetCursor(encodeOffsetCursor(7))).toBe(7);
 
   const { pool } = fakePool(() => []);
-  await assert.rejects(
-    searchContributors(pool, { q: '   ', limit: 10 }),
-    (error) => error instanceof EntityQueryError
-  );
+  await expect(searchContributors(pool, { q: '   ', limit: 10 })).rejects.toSatisfy((error) => error instanceof EntityQueryError);
 });
 
 test('identifiers stored as JSON text are decoded', async () => {
@@ -240,13 +233,13 @@ test('identifiers stored as JSON text are decoded', async () => {
     contributorRow({ identifiers: '[{"issuer":"viaf","value":"123","url":"https://viaf.example/123"}]' })
   ]);
   const view = await getContributor(pool, CONTRIBUTOR_URI);
-  assert.deepEqual(view?.identifiers, [
+  expect(view?.identifiers).toEqual([
     { issuer: 'viaf', value: '123', url: 'https://viaf.example/123' }
   ]);
 });
 
 test('all ten entity methods are GET queries, resolvers included', () => {
-  assert.equal(ENTITY_QUERIES.size, 10);
+  expect(ENTITY_QUERIES.size).toBe(10);
   for (const method of [
     'net.olamaelcu.livtet.biblio.getIdentifiedFormats',
     'net.olamaelcu.livtet.biblio.getContributor',
@@ -257,13 +250,13 @@ test('all ten entity methods are GET queries, resolvers included', () => {
     'net.olamaelcu.livtet.biblio.resolveContributors',
     'net.olamaelcu.livtet.biblio.resolvePublishers'
   ]) {
-    assert.ok(ENTITY_QUERIES.has(method), `${method} is served as a query`);
+    expect(ENTITY_QUERIES.has(method), `${method} is served as a query`).toBeTruthy();
   }
 });
 
 test('likePattern wraps and escapes in one place', () => {
-  assert.equal(likePattern('a_b%c'), '%a\\_b\\%c%');
-  assert.equal(likePattern('plain'), '%plain%');
+  expect(likePattern('a_b%c')).toBe('%a\\_b\\%c%');
+  expect(likePattern('plain')).toBe('%plain%');
 });
 
 test('listEditionsByContributor returns bookViews for every credited edition', async () => {
@@ -281,22 +274,22 @@ test('listEditionsByContributor returns bookViews for every credited edition', a
     limit: 1
   });
 
-  assert.ok(page);
-  assert.equal(page.items.length, 1);
-  assert.equal(page.items[0]?.uri, `${EDITION_PREFIX}1`);
-  assert.equal(page.items[0]?.edition.title, 'A Test Edition');
-  assert.deepEqual(page.items[0]?.edition.identifiers, [
+  expect(page).toBeTruthy();
+  expect(page.items.length).toBe(1);
+  expect(page.items[0]?.uri).toBe(`${EDITION_PREFIX}1`);
+  expect(page.items[0]?.edition.title).toBe('A Test Edition');
+  expect(page.items[0]?.edition.identifiers).toEqual([
     { issuer: 'atproto', value: `${EDITION_PREFIX}1` }
   ]);
-  assert.equal(page.total, 2);
-  assert.equal(decodeOffsetCursor(page.cursor), 1);
+  expect(page.total).toBe(2);
+  expect(decodeOffsetCursor(page.cursor)).toBe(1);
 
   const pageCall = calls.find((call) => call.sql.includes('FROM editions e'));
-  assert.ok(pageCall);
-  assert.match(pageCall.sql, /WHERE EXISTS/);
+  expect(pageCall).toBeTruthy();
+  expect(pageCall.sql).toMatch(/WHERE EXISTS/);
   // A contributor credited twice on one edition must not duplicate the row.
-  assert.doesNotMatch(pageCall.sql, /JOIN edition_contributors/);
-  assert.deepEqual(pageCall.values, [42, 2, 0]);
+  expect(pageCall.sql).not.toMatch(/JOIN edition_contributors/);
+  expect(pageCall.values).toEqual([42, 2, 0]);
 });
 
 test('listEditionsByContributor uses the shared order and language clauses', async () => {
@@ -318,25 +311,18 @@ test('listEditionsByContributor uses the shared order and language clauses', asy
   });
 
   const pageCall = calls.find((call) => call.sql.includes('ORDER BY'));
-  assert.ok(pageCall);
+  expect(pageCall).toBeTruthy();
   // The clauses `searchEditions` builds, from the shared helpers: the union
   // claim's primary subtag, and the year-then-date ordering with unknown last.
-  assert.match(
-    pageCall.sql,
-    /split_part\(lower\(s\.language\), '-', 1\) = split_part\(\$2, '-', 1\)/
-  );
-  assert.match(pageCall.sql, /ORDER BY \(CASE WHEN s\.published_date/);
-  assert.match(pageCall.sql, /DESC NULLS LAST/);
+  expect(pageCall.sql).toMatch(/split_part\(lower\(s\.language\), '-', 1\) = split_part\(\$2, '-', 1\)/);
+  expect(pageCall.sql).toMatch(/ORDER BY \(CASE WHEN s\.published_date/);
+  expect(pageCall.sql).toMatch(/DESC NULLS LAST/);
   // contributor, language, limit + 1, offset; the count reuses the first two.
-  assert.deepEqual(pageCall.values, [42, 'en-us', 11, 0]);
+  expect(pageCall.values).toEqual([42, 'en-us', 11, 0]);
   // A short first page is the whole listing: its length is the total, and the
   // count (the same semi-join over the catalogue) is not run at all.
-  assert.equal(page?.total, 1);
-  assert.equal(
-    calls.some((call) => call.sql.includes('count(*)::int AS n')),
-    false,
-    'a page shorter than the limit is its own total'
-  );
+  expect(page?.total).toBe(1);
+  expect(calls.some((call) => call.sql.includes('count(*)::int AS n')), 'a page shorter than the limit is its own total').toBe(false);
 });
 
 test('listEditionsByContributor counts only a full first page', async () => {
@@ -354,25 +340,22 @@ test('listEditionsByContributor counts only a full first page', async () => {
     limit: 10
   });
 
-  assert.equal(page?.items.length, 10);
-  assert.equal(page?.total, 27);
-  assert.ok(page?.cursor, 'a full page has more behind it');
+  expect(page?.items.length).toBe(10);
+  expect(page?.total).toBe(27);
+  expect(page?.cursor, 'a full page has more behind it').toBeTruthy();
   const countCall = calls.find((call) => call.sql.includes('count(*)::int AS n'));
-  assert.ok(countCall, 'a full first page is counted');
-  assert.deepEqual(countCall.values, [42]);
+  expect(countCall, 'a full first page is counted').toBeTruthy();
+  expect(countCall.values).toEqual([42]);
 });
 
 test('listEditionsByContributor returns null for an unknown contributor', async () => {
   const { pool } = fakePool(() => []);
-  assert.equal(
-    await listEditionsByContributor(pool, {
+  expect(await listEditionsByContributor(pool, {
       contributor: CONTRIBUTOR_URI,
       offset: 0,
       limit: 25
-    }),
-    null
-  );
-  assert.equal(parseEntityUri(PUBLISHER_URI, CONTRIBUTOR_COLLECTION), null);
+    })).toBe(null);
+  expect(parseEntityUri(PUBLISHER_URI, CONTRIBUTOR_COLLECTION)).toBe(null);
 });
 
 test('listEditionsByContributor pages by offset and omits the total after page one', async () => {
@@ -389,20 +372,20 @@ test('listEditionsByContributor pages by offset and omits the total after page o
     limit: 25
   });
 
-  assert.ok(page);
-  assert.equal(page.items.length, 1);
-  assert.equal(page.cursor, undefined);
-  assert.equal(page.total, undefined);
-  assert.equal(calls.some((call) => call.sql.includes('count(*)::int AS n')), false);
+  expect(page).toBeTruthy();
+  expect(page.items.length).toBe(1);
+  expect(page.cursor).toBe(undefined);
+  expect(page.total).toBe(undefined);
+  expect(calls.some((call) => call.sql.includes('count(*)::int AS n'))).toBe(false);
   const pageCall = calls.find((call) => call.sql.includes('FROM editions e'));
-  assert.ok(pageCall);
-  assert.deepEqual(pageCall.values, [42, 26, 1]);
+  expect(pageCall).toBeTruthy();
+  expect(pageCall.values).toEqual([42, 26, 1]);
 });
 
 test('catalog failures are 503 ServiceUnavailable', async () => {
   const unavailable = catalogFailure(new CatalogUnavailableError());
-  assert.equal(unavailable.status, 503);
-  assert.deepEqual(await unavailable.json(), {
+  expect(unavailable.status).toBe(503);
+  expect(await unavailable.json()).toEqual({
     error: 'ServiceUnavailable',
     message: 'catalog database is not configured'
   });
@@ -411,8 +394,8 @@ test('catalog failures are 503 ServiceUnavailable', async () => {
   console.error = () => {};
   try {
     const failed = catalogFailure(new Error('connection refused'));
-    assert.equal(failed.status, 503);
-    assert.deepEqual(await failed.json(), {
+    expect(failed.status).toBe(503);
+    expect(await failed.json()).toEqual({
       error: 'ServiceUnavailable',
       message: 'catalog unavailable'
     });

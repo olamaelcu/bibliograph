@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   EntityRecordError,
@@ -40,7 +39,7 @@ function publisher(overrides = {}) {
 }
 
 test('builds the full contributor record', () => {
-  assert.deepEqual(buildContributorRecord({ contributor: contributor() }), {
+  expect(buildContributorRecord({ contributor: contributor() })).toEqual({
     displayName: 'Ursula K. Le Guin',
     nameInverted: 'Le Guin, Ursula K.',
     description: 'An American author.',
@@ -63,7 +62,7 @@ test('omits empty optional contributor fields', () => {
       identifiers: []
     })
   });
-  assert.deepEqual(record, {
+  expect(record).toEqual({
     displayName: 'Ursula K. Le Guin',
     createdAt: '2026-11-12T10:20:30.000Z'
   });
@@ -81,7 +80,7 @@ test('canonicalizes identifiers: dedupes pairs and sorts by issuer then value', 
       ]
     })
   });
-  assert.deepEqual(record.identifiers, [
+  expect(record.identifiers).toEqual([
     { issuer: 'orcid', value: '1' },
     { issuer: 'viaf', value: '2' }
   ]);
@@ -89,43 +88,29 @@ test('canonicalizes identifiers: dedupes pairs and sorts by issuer then value', 
 
 test('rejects a partial, malformed or impossible contributor date', () => {
   for (const bad of ['1929', '1929-10', '1929-1-21', '1929-13-01', '1929-00-01', '2023-02-29']) {
-    assert.throws(
-      () => buildContributorRecord({ contributor: contributor({ born: bad }) }),
-      (error) => error instanceof EntityRecordError && /born/.test(error.message),
-      `expected ${bad} to be rejected`
-    );
+    expect(thrownBy(() => buildContributorRecord({ contributor: contributor({ born: bad }) })), `expected ${bad} to be rejected`).toSatisfy((error) => error instanceof EntityRecordError && /born/.test(error.message));
   }
 });
 
 test('accepts a real leap day and year boundaries', () => {
-  assert.equal(isoCalendarDate('2024-02-29'), '2024-02-29');
-  assert.equal(isoCalendarDate('0001-01-01'), '0001-01-01');
-  assert.equal(isoCalendarDate('9999-12-31'), '9999-12-31');
+  expect(isoCalendarDate('2024-02-29')).toBe('2024-02-29');
+  expect(isoCalendarDate('0001-01-01')).toBe('0001-01-01');
+  expect(isoCalendarDate('9999-12-31')).toBe('9999-12-31');
 });
 
 test('rejects a non-http image URL', () => {
   for (const bad of ['ftp://example.org/a.jpg', 'javascript:alert(1)', 'not a url']) {
-    assert.throws(
-      () => buildContributorRecord({ contributor: contributor({ image_url: bad }) }),
-      (error) => error instanceof EntityRecordError && /image_url/.test(error.message),
-      `expected ${bad} to be rejected`
-    );
+    expect(thrownBy(() => buildContributorRecord({ contributor: contributor({ image_url: bad }) })), `expected ${bad} to be rejected`).toSatisfy((error) => error instanceof EntityRecordError && /image_url/.test(error.message));
   }
 });
 
 test('requires a display name and a created_at', () => {
-  assert.throws(
-    () => buildContributorRecord({ contributor: contributor({ name: '  ' }) }),
-    (error) => error instanceof EntityRecordError && /display name/.test(error.message)
-  );
-  assert.throws(
-    () => buildContributorRecord({ contributor: contributor({ created_at: 'not a date' }) }),
-    (error) => error instanceof EntityRecordError && /created_at/.test(error.message)
-  );
+  expect(thrownBy(() => buildContributorRecord({ contributor: contributor({ name: '  ' }) }))).toSatisfy((error) => error instanceof EntityRecordError && /display name/.test(error.message));
+  expect(thrownBy(() => buildContributorRecord({ contributor: contributor({ created_at: 'not a date' }) }))).toSatisfy((error) => error instanceof EntityRecordError && /created_at/.test(error.message));
 });
 
 test('builds the full publisher record', () => {
-  assert.deepEqual(buildPublisherRecord({ publisher: publisher() }), {
+  expect(buildPublisherRecord({ publisher: publisher() })).toEqual({
     name: 'Ace Books',
     description: 'A science-fiction imprint.',
     imageUrl: 'https://example.org/ace.png',
@@ -137,12 +122,16 @@ test('builds the full publisher record', () => {
 });
 
 test('rejects an impossible publisher date and requires a name', () => {
-  assert.throws(
-    () => buildPublisherRecord({ publisher: publisher({ started: '1952-02-30' }) }),
-    (error) => error instanceof EntityRecordError && /started/.test(error.message)
-  );
-  assert.throws(
-    () => buildPublisherRecord({ publisher: publisher({ name: '' }) }),
-    (error) => error instanceof EntityRecordError && /has no name/.test(error.message)
-  );
+  expect(thrownBy(() => buildPublisherRecord({ publisher: publisher({ started: '1952-02-30' }) }))).toSatisfy((error) => error instanceof EntityRecordError && /started/.test(error.message));
+  expect(thrownBy(() => buildPublisherRecord({ publisher: publisher({ name: '' }) }))).toSatisfy((error) => error instanceof EntityRecordError && /has no name/.test(error.message));
 });
+
+/** vitest has no predicate form of toThrow: capture the throw and assert on it. */
+function thrownBy(fn) {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to throw');
+}

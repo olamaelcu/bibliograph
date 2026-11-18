@@ -1,5 +1,5 @@
-import test, { after, afterEach, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, afterEach, beforeAll } from 'vitest';
+
 import http from 'node:http';
 import pg from 'pg';
 
@@ -280,13 +280,13 @@ async function cleanup() {
   await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
 }
 
-before(async () => {
+beforeAll(async () => {
   await pool.query('SELECT 1');
   await cleanup();
   await startStub();
 });
 
-after(async () => {
+afterAll(async () => {
   await cleanup();
   await stub.close();
   await pool.end();
@@ -324,18 +324,12 @@ test('claims only ready, under-attempt rows with SKIP LOCKED semantics', async (
   await pool.query('UPDATE pds_outbox SET attempts = 10 WHERE uri = $1', [parked.uri]);
 
   const claimed = await claimBatch(pool, { limit: DEFAULT_BATCH, publisherDid: PUBLISHER_DID });
-  assert.deepEqual(
-    claimed.map((row) => row.uri),
-    [ready.uri]
-  );
-  assert.match(claimed[0].claimed_at, /^\d{4}-\d{2}-\d{2}/);
-  assert.equal(claimed[0].op, 'create');
+  expect(claimed.map((row) => row.uri)).toEqual([ready.uri]);
+  expect(claimed[0].claimed_at).toMatch(/^\d{4}-\d{2}-\d{2}/);
+  expect(claimed[0].op).toBe('create');
 
   // A second claimer sees nothing while the lease is held.
-  assert.deepEqual(
-    await claimBatch(pool, { limit: DEFAULT_BATCH, publisherDid: PUBLISHER_DID }),
-    []
-  );
+  expect(await claimBatch(pool, { limit: DEFAULT_BATCH, publisherDid: PUBLISHER_DID })).toEqual([]);
 
   await pool.query('UPDATE pds_outbox SET claimed_at = NULL WHERE uri = $1', [ready.uri]);
 });
@@ -350,16 +344,16 @@ test('publishes a create, stores the returned CID and drains the outbox row', as
   const session = stub.state.requests.find(
     (request) => request.url === '/xrpc/com.atproto.server.createSession'
   );
-  assert.ok(session, 'createSession must be called');
-  assert.deepEqual(session.body, { identifier: PUBLISHER_DID, password: 'test-password' });
+  expect(session, 'createSession must be called').toBeTruthy();
+  expect(session.body).toEqual({ identifier: PUBLISHER_DID, password: 'test-password' });
 
   const [write] = applyWriteRequests();
-  assert.ok(write, 'applyWrites must be called');
-  assert.equal(write.method, 'POST');
-  assert.equal(write.headers.authorization, 'Bearer test-access-jwt');
-  assert.equal(write.body.repo, PUBLISHER_DID);
-  assert.equal(write.body.validate, false);
-  assert.deepEqual(write.body.writes, [
+  expect(write, 'applyWrites must be called').toBeTruthy();
+  expect(write.method).toBe('POST');
+  expect(write.headers.authorization).toBe('Bearer test-access-jwt');
+  expect(write.body.repo).toBe(PUBLISHER_DID);
+  expect(write.body.validate).toBe(false);
+  expect(write.body.writes).toEqual([
     {
       $type: 'com.atproto.repo.applyWrites#create',
       collection: COLLECTION,
@@ -385,11 +379,11 @@ test('publishes a create, stores the returned CID and drains the outbox row', as
   ]);
 
   const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri]);
-  assert.equal(outbox.rowCount, 0, 'successful publish deletes the outbox row');
+  expect(outbox.rowCount, 'successful publish deletes the outbox row').toBe(0);
 
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
-  assert.equal(cids.rowCount, 1);
-  assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].results[0].cid);
+  expect(cids.rowCount).toBe(1);
+  expect(cids.rows[0].cid).toBe(stub.state.applyWrites[0].results[0].cid);
 });
 
 test('an audio edition publishes its duration instead of a page count', async () => {
@@ -400,12 +394,12 @@ test('an audio edition publishes its duration instead of a page count', async ()
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
   const [write] = applyWriteRequests();
-  assert.ok(write, 'applyWrites must be called');
+  expect(write, 'applyWrites must be called').toBeTruthy();
   const [create] = write.body.writes;
-  assert.equal(create.rkey, fixture.rkey);
-  assert.equal(create.value.format, 'Audiobook');
-  assert.equal(create.value.durationSeconds, 3600);
-  assert.equal('pages' in create.value, false, 'an audio edition publishes no page count');
+  expect(create.rkey).toBe(fixture.rkey);
+  expect(create.value.format).toBe('Audiobook');
+  expect(create.value.durationSeconds).toBe(3600);
+  expect('pages' in create.value, 'an audio edition publishes no page count').toBe(false);
 });
 
 test('a cached cover puts the edge URL in the published record', async () => {
@@ -428,11 +422,8 @@ test('a cached cover puts the edge URL in the published record', async () => {
   const write = applyWriteRequests()
     .flatMap((request) => request.body.writes)
     .find((entry) => entry.rkey === fixture.rkey);
-  assert.ok(write, 'the edition was published');
-  assert.equal(
-    write.value.coverUrl,
-    `https://edge.test/api/covers/${encodeURIComponent(fixture.uri)}`
-  );
+  expect(write, 'the edition was published').toBeTruthy();
+  expect(write.value.coverUrl).toBe(`https://edge.test/api/covers/${encodeURIComponent(fixture.uri)}`);
 });
 
 test('a did:plc publisher authority mints and drains an edition', async () => {
@@ -442,8 +433,8 @@ test('a did:plc publisher authority mints and drains an edition', async () => {
     identifiers: [{ issuer: 'googlebooks', value: 'plc-publish-authority' }]
   });
 
-  assert.equal(ingested.created, true);
-  assert.ok(ingested.uri.startsWith(PLC_PREFIX), ingested.uri);
+  expect(ingested.created).toBe(true);
+  expect(ingested.uri.startsWith(PLC_PREFIX), ingested.uri).toBeTruthy();
 
   const config = {
     ...validConfig(stub.url),
@@ -463,28 +454,28 @@ test('a did:plc publisher authority mints and drains an edition', async () => {
   const session = stub.state.requests.find(
     (request) => request.url === '/xrpc/com.atproto.server.createSession'
   );
-  assert.ok(session, 'createSession must be called for the did:plc account');
-  assert.deepEqual(session.body, {
+  expect(session, 'createSession must be called for the did:plc account').toBeTruthy();
+  expect(session.body).toEqual({
     identifier: PLC_PUBLISHER_DID,
     password: 'test-password'
   });
 
   const [write] = applyWriteRequests();
-  assert.ok(write, 'applyWrites must be called');
-  assert.equal(write.headers.authorization, 'Bearer test-access-jwt');
-  assert.equal(write.body.repo, PLC_PUBLISHER_DID);
+  expect(write, 'applyWrites must be called').toBeTruthy();
+  expect(write.headers.authorization).toBe('Bearer test-access-jwt');
+  expect(write.body.repo).toBe(PLC_PUBLISHER_DID);
   // New editions always mint a TID, never a provider-prefixed rkey.
-  assert.match(write.body.writes[0].rkey, /^[234567abcdefghijklmnopqrstuvwxyz]{13}$/);
-  assert.equal(write.body.writes[0].value.title, 'A did:plc Edition');
+  expect(write.body.writes[0].rkey).toMatch(/^[234567abcdefghijklmnopqrstuvwxyz]{13}$/);
+  expect(write.body.writes[0].value.title).toBe('A did:plc Edition');
 
   const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri LIKE $1', [
     `${PLC_PREFIX}%`
   ]);
-  assert.equal(outbox.rowCount, 0, 'the did:plc outbox row is drained');
+  expect(outbox.rowCount, 'the did:plc outbox row is drained').toBe(0);
 
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [ingested.uri]);
-  assert.equal(cids.rowCount, 1);
-  assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].results[0].cid);
+  expect(cids.rowCount).toBe(1);
+  expect(cids.rows[0].cid).toBe(stub.state.applyWrites[0].results[0].cid);
 });
 
 test('an update uses the recorded CID and replaces it', async () => {
@@ -493,21 +484,21 @@ test('an update uses the recorded CID and replaces it', async () => {
   const tasks = createTasks({ pool, publisherHost: HOST, publisher });
 
   await tasks['pds-publish']({ limit: 10 }, helpers());
-  assert.equal(stub.state.applyWrites.length, 1);
+  expect(stub.state.applyWrites.length).toBe(1);
 
   await pool.query("UPDATE editions SET title = 'Renamed Edition' WHERE uri = $1", [fixture.uri]);
   const queued = await pool.query('SELECT op FROM pds_outbox WHERE uri = $1', [fixture.uri]);
-  assert.equal(queued.rows[0].op, 'update');
+  expect(queued.rows[0].op).toBe('update');
 
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
   const writes = applyWriteRequests();
-  assert.equal(writes.length, 2);
-  assert.equal(writes[1].body.writes[0].$type, 'com.atproto.repo.applyWrites#update');
-  assert.equal(writes[1].body.writes[0].value.title, 'Renamed Edition');
+  expect(writes.length).toBe(2);
+  expect(writes[1].body.writes[0].$type).toBe('com.atproto.repo.applyWrites#update');
+  expect(writes[1].body.writes[0].value.title).toBe('Renamed Edition');
 
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
-  assert.equal(cids.rows[0].cid, stub.state.applyWrites[1].results[0].cid);
+  expect(cids.rows[0].cid).toBe(stub.state.applyWrites[1].results[0].cid);
 });
 
 test('a delete removes the CID and treats RecordNotFound as success', async () => {
@@ -516,7 +507,7 @@ test('a delete removes the CID and treats RecordNotFound as success', async () =
   const tasks = createTasks({ pool, publisherHost: HOST, publisher });
 
   await tasks['pds-publish']({ limit: 10 }, helpers());
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(1);
 
   await pool.query(
     `INSERT INTO pds_outbox (uri, collection, rkey, op, value)
@@ -531,7 +522,7 @@ test('a delete removes the CID and treats RecordNotFound as success', async () =
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
   const write = applyWriteRequests().at(-1);
-  assert.deepEqual(write.body.writes, [
+  expect(write.body.writes).toEqual([
     {
       $type: 'com.atproto.repo.applyWrites#delete',
       collection: COLLECTION,
@@ -539,8 +530,8 @@ test('a delete removes the CID and treats RecordNotFound as success', async () =
     }
   ]);
 
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 0);
-  assert.equal((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount, 0);
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(0);
+  expect((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount).toBe(0);
 });
 
 test('a failure records last_error and backoff, then a retry succeeds', async () => {
@@ -559,20 +550,20 @@ test('a failure records last_error and backoff, then a retry succeeds', async ()
     `SELECT attempts, claimed_at, next_at, last_error FROM pds_outbox WHERE uri = $1`,
     [fixture.uri]
   );
-  assert.equal(failed.rowCount, 1, 'outbox row survives a failure');
-  assert.equal(failed.rows[0].attempts, 1);
-  assert.equal(failed.rows[0].claimed_at, null);
-  assert.match(failed.rows[0].last_error, /InternalServerError|pds unavailable/);
-  assert.ok(failed.rows[0].next_at.getTime() > Date.now() + 60_000, 'backoff delays the retry');
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 0);
+  expect(failed.rowCount, 'outbox row survives a failure').toBe(1);
+  expect(failed.rows[0].attempts).toBe(1);
+  expect(failed.rows[0].claimed_at).toBe(null);
+  expect(failed.rows[0].last_error).toMatch(/InternalServerError|pds unavailable/);
+  expect(failed.rows[0].next_at.getTime() > Date.now() + 60_000, 'backoff delays the retry').toBeTruthy();
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(0);
 
   // The row is not claimable until next_at, then retries normally.
-  assert.deepEqual(await claimBatch(pool, { publisherDid: PUBLISHER_DID }), []);
+  expect(await claimBatch(pool, { publisherDid: PUBLISHER_DID })).toEqual([]);
   await pool.query('UPDATE pds_outbox SET next_at = now() WHERE uri = $1', [fixture.uri]);
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
-  assert.equal((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount, 0);
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+  expect((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount).toBe(0);
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(1);
 });
 
 test('AlreadyExists is retried as an update', async () => {
@@ -588,10 +579,10 @@ test('AlreadyExists is retried as an update', async () => {
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
   const writes = applyWriteRequests();
-  assert.equal(writes.length, 2);
-  assert.equal(writes[0].body.writes[0].$type, 'com.atproto.repo.applyWrites#create');
-  assert.equal(writes[1].body.writes[0].$type, 'com.atproto.repo.applyWrites#update');
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+  expect(writes.length).toBe(2);
+  expect(writes[0].body.writes[0].$type).toBe('com.atproto.repo.applyWrites#create');
+  expect(writes[1].body.writes[0].$type).toBe('com.atproto.repo.applyWrites#update');
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(1);
 });
 
 test('an expired access token is refreshed once and the write retried', async () => {
@@ -609,13 +600,13 @@ test('an expired access token is refreshed once and the write retried', async ()
   const refresh = stub.state.requests.find(
     (request) => request.url === '/xrpc/com.atproto.server.refreshSession'
   );
-  assert.ok(refresh, 'refreshSession must be attempted');
-  assert.equal(refresh.headers.authorization, 'Bearer test-refresh-jwt');
+  expect(refresh, 'refreshSession must be attempted').toBeTruthy();
+  expect(refresh.headers.authorization).toBe('Bearer test-refresh-jwt');
 
   const writes = applyWriteRequests();
-  assert.equal(writes.length, 2);
-  assert.equal(writes[1].headers.authorization, 'Bearer refreshed-access-jwt');
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+  expect(writes.length).toBe(2);
+  expect(writes[1].headers.authorization).toBe('Bearer refreshed-access-jwt');
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(1);
 });
 
 test('a 400 ExpiredToken is refreshed once and the write retried', async () => {
@@ -633,14 +624,14 @@ test('a 400 ExpiredToken is refreshed once and the write retried', async () => {
   const refresh = stub.state.requests.find(
     (request) => request.url === '/xrpc/com.atproto.server.refreshSession'
   );
-  assert.ok(refresh, 'a 400 ExpiredToken must trigger refreshSession');
-  assert.equal(refresh.headers.authorization, 'Bearer test-refresh-jwt');
+  expect(refresh, 'a 400 ExpiredToken must trigger refreshSession').toBeTruthy();
+  expect(refresh.headers.authorization).toBe('Bearer test-refresh-jwt');
 
   const writes = applyWriteRequests();
-  assert.equal(writes.length, 2, 'the write is retried exactly once');
-  assert.equal(writes[1].headers.authorization, 'Bearer refreshed-access-jwt');
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
-  assert.equal((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount, 0);
+  expect(writes.length, 'the write is retried exactly once').toBe(2);
+  expect(writes[1].headers.authorization).toBe('Bearer refreshed-access-jwt');
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(1);
+  expect((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount).toBe(0);
 });
 
 test('a rotated refresh token replaces the in-memory session token', async () => {
@@ -667,9 +658,9 @@ test('a rotated refresh token replaces the in-memory session token', async () =>
   const refreshes = stub.state.requests.filter(
     (request) => request.url === '/xrpc/com.atproto.server.refreshSession'
   );
-  assert.equal(refreshes.length, 2);
-  assert.equal(refreshes[1].headers.authorization, 'Bearer rotated-refresh-jwt');
-  assert.equal((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount, 0);
+  expect(refreshes.length).toBe(2);
+  expect(refreshes[1].headers.authorization).toBe('Bearer rotated-refresh-jwt');
+  expect((await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri])).rowCount).toBe(0);
 });
 
 test('a rejected refresh falls back to an app-password createSession', async () => {
@@ -691,13 +682,13 @@ test('a rejected refresh falls back to an app-password createSession', async () 
   const creates = stub.state.requests.filter(
     (request) => request.url === '/xrpc/com.atproto.server.createSession'
   );
-  assert.equal(creates.length, 2, 'the initial sign-in plus the password fallback');
-  assert.equal(creates[1].body.password, 'test-password');
+  expect(creates.length, 'the initial sign-in plus the password fallback').toBe(2);
+  expect(creates[1].body.password).toBe('test-password');
 
   const writes = applyWriteRequests();
-  assert.equal(writes.length, 2);
-  assert.equal(writes[1].headers.authorization, 'Bearer test-access-jwt');
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+  expect(writes.length).toBe(2);
+  expect(writes[1].headers.authorization).toBe('Bearer test-access-jwt');
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(1);
 });
 
 test('an unrelated 400 does not refresh the session', async () => {
@@ -712,22 +703,18 @@ test('an unrelated 400 does not refresh the session', async () => {
 
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
-  assert.equal(
-    stub.state.requests.some(
+  expect(stub.state.requests.some(
       (request) => request.url === '/xrpc/com.atproto.server.refreshSession'
-    ),
-    false,
-    'only an expired token may refresh'
-  );
-  assert.equal(applyWriteRequests().length, 1);
+    ), 'only an expired token may refresh').toBe(false);
+  expect(applyWriteRequests().length).toBe(1);
 
   const failed = await pool.query(
     'SELECT attempts, last_error FROM pds_outbox WHERE uri = $1',
     [fixture.uri]
   );
-  assert.equal(failed.rowCount, 1);
-  assert.equal(failed.rows[0].attempts, 1);
-  assert.match(failed.rows[0].last_error, /InvalidRequest|invalid write/);
+  expect(failed.rowCount).toBe(1);
+  expect(failed.rows[0].attempts).toBe(1);
+  expect(failed.rows[0].last_error).toMatch(/InvalidRequest|invalid write/);
 });
 
 test('a trigger update during publishing is not swallowed', async () => {
@@ -743,7 +730,7 @@ test('a trigger update during publishing is not swallowed', async () => {
   };
 
   const [entry] = await claimBatch(pool, { limit: 1, publisherDid: PUBLISHER_DID });
-  assert.equal(entry.uri, fixture.uri);
+  expect(entry.uri).toBe(fixture.uri);
   const result = await publishEntry({
     pds: racing,
     publisherDid: PUBLISHER_DID,
@@ -752,17 +739,17 @@ test('a trigger update during publishing is not swallowed', async () => {
     logger: silent
   });
   const completed = await completeEntry(pool, entry, result);
-  assert.equal(completed, false, 'the newer outbox row must survive');
+  expect(completed, 'the newer outbox row must survive').toBe(false);
 
   const row = await pool.query(
     'SELECT op, claimed_at FROM pds_outbox WHERE uri = $1',
     [fixture.uri]
   );
-  assert.equal(row.rowCount, 1);
+  expect(row.rowCount).toBe(1);
   // The trigger preserves `create` for a row that has not been published under
   // our CID yet; the next run sees pds_cids and sends an update.
-  assert.equal(row.rows[0].op, 'create');
-  assert.equal(row.rows[0].claimed_at, null, 'our claim is released so the update runs promptly');
+  expect(row.rows[0].op).toBe('create');
+  expect(row.rows[0].claimed_at, 'our claim is released so the update runs promptly').toBe(null);
 });
 
 test('a provisioned access token is verified with getSession', async () => {
@@ -780,35 +767,29 @@ test('a provisioned access token is verified with getSession', async () => {
   const session = stub.state.requests.find(
     (request) => request.url === '/xrpc/com.atproto.server.getSession'
   );
-  assert.ok(session, 'getSession must verify the token');
-  assert.equal(session.headers.authorization, 'Bearer provisioned-jwt');
+  expect(session, 'getSession must verify the token').toBeTruthy();
+  expect(session.headers.authorization).toBe('Bearer provisioned-jwt');
   const write = applyWriteRequests()[0];
-  assert.equal(write.headers.authorization, 'Bearer provisioned-jwt');
-  assert.equal((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount, 1);
+  expect(write.headers.authorization).toBe('Bearer provisioned-jwt');
+  expect((await pool.query('SELECT 1 FROM pds_cids WHERE uri = $1', [fixture.uri])).rowCount).toBe(1);
 });
 
 test('missing credentials fail before any network call', () => {
   const config = resolvePublisherConfig({ PDS_URL: 'http://127.0.0.1:1' });
-  assert.equal(config.configured, false);
-  assert.ok(config.problems.some((problem) => problem.includes('PDS_ACCOUNT_PASSWORD')));
-  assert.throws(
-    () => createPdsPublisher({ config }),
-    (error) =>
+  expect(config.configured).toBe(false);
+  expect(config.problems.some((problem) => problem.includes('PDS_ACCOUNT_PASSWORD'))).toBeTruthy();
+  expect(thrownBy(() => createPdsPublisher({ config }))).toSatisfy((error) =>
       error instanceof PublisherConfigError &&
       /PDS_ACCOUNT_PASSWORD/.test(error.message) &&
-      /not configured/.test(error.message)
-  );
+      /not configured/.test(error.message));
 
-  assert.throws(
-    () =>
+  expect(() =>
       createPdsPublisher({
         config: {
           ...validConfig('http://127.0.0.1:1'),
           accountDid: 'did:web:someone-else.example'
         }
-      }),
-    /not the publisher DID/
-  );
+      })).toThrow(/not the publisher DID/)
 });
 
 test('the task fails loudly when the publisher cannot be constructed', async () => {
@@ -822,10 +803,7 @@ test('the task fails loudly when the publisher cannot be constructed', async () 
   delete process.env.PDS_ACCESS_TOKEN;
   const tasks = createTasks({ pool, publisherHost: HOST });
   try {
-    await assert.rejects(
-      tasks['pds-publish']({}, helpers()),
-      (error) => error instanceof PublisherConfigError && /not configured/.test(error.message)
-    );
+    await expect(tasks['pds-publish']({}, helpers())).rejects.toSatisfy((error) => error instanceof PublisherConfigError && /not configured/.test(error.message));
   } finally {
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
@@ -848,27 +826,24 @@ test('one claim publishes in one applyWrites call carrying every write', async (
   );
 
   const writes = applyWriteRequests();
-  assert.equal(writes.length, 1, 'the claim rides one call');
+  expect(writes.length, 'the claim rides one call').toBe(1);
   // Each edition also queues its contributor and publisher, so the call is
   // wider than the three fixtures — which is the point.
-  assert.ok(writes[0].body.writes.length >= fixtures.length);
-  assert.ok(writes[0].body.writes.length <= DEFAULT_BATCH);
+  expect(writes[0].body.writes.length >= fixtures.length).toBeTruthy();
+  expect(writes[0].body.writes.length <= DEFAULT_BATCH).toBeTruthy();
 
   for (const fixture of fixtures) {
     const rkey = fixture.uri.split('/').pop();
     const index = writes[0].body.writes.findIndex((write) => write.rkey === rkey);
-    assert.ok(index >= 0, `${rkey} is in the same call as its neighbours`);
+    expect(index >= 0, `${rkey} is in the same call as its neighbours`).toBeTruthy();
     const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
-    assert.equal(cids.rowCount, 1, 'each row keeps its own returned CID');
-    assert.equal(cids.rows[0].cid, stub.state.applyWrites[0].results[index].cid);
+    expect(cids.rowCount, 'each row keeps its own returned CID').toBe(1);
+    expect(cids.rows[0].cid).toBe(stub.state.applyWrites[0].results[index].cid);
     const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri]);
-    assert.equal(outbox.rowCount, 0);
+    expect(outbox.rowCount).toBe(0);
   }
-  assert.equal(
-    results.filter((line) => line.includes('pds-publish: create') && line.includes(`/${COLLECTION}/`))
-      .length,
-    fixtures.length
-  );
+  expect(results.filter((line) => line.includes('pds-publish: create') && line.includes(`/${COLLECTION}/`))
+      .length).toBe(fixtures.length);
 });
 
 test('a record the PDS rejects is isolated from the rest of its chunk', async () => {
@@ -883,21 +858,21 @@ test('a record the PDS rejects is isolated from the rest of its chunk', async ()
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
   // The chunk failed, then each half was retried; only the poisoned row is left.
-  assert.ok(stub.state.rejected.length > 0, 'the PDS refused the chunk');
+  expect(stub.state.rejected.length > 0, 'the PDS refused the chunk').toBeTruthy();
   for (const fixture of [good, alsoGood]) {
     const outbox = await pool.query('SELECT 1 FROM pds_outbox WHERE uri = $1', [fixture.uri]);
-    assert.equal(outbox.rowCount, 0, `${fixture.uri} published despite its neighbour`);
+    expect(outbox.rowCount, `${fixture.uri} published despite its neighbour`).toBe(0);
     const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [fixture.uri]);
-    assert.equal(cids.rowCount, 1);
+    expect(cids.rowCount).toBe(1);
   }
 
   const parked = await pool.query(
     'SELECT attempts, last_error FROM pds_outbox WHERE uri = $1',
     [poison.uri]
   );
-  assert.equal(parked.rowCount, 1, 'the rejected row stays queued');
-  assert.equal(parked.rows[0].attempts, 1, 'it consumed exactly one attempt');
-  assert.match(parked.rows[0].last_error, /InternalServerError|500/);
+  expect(parked.rowCount, 'the rejected row stays queued').toBe(1);
+  expect(parked.rows[0].attempts, 'it consumed exactly one attempt').toBe(1);
+  expect(parked.rows[0].last_error).toMatch(/InternalServerError|500/);
 });
 
 test('deletes and creates share a call without losing their operations', async () => {
@@ -918,19 +893,19 @@ test('deletes and creates share a call without losing their operations', async (
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
   const writes = applyWriteRequests();
-  assert.equal(writes.length, 1);
+  expect(writes.length).toBe(1);
   // The operations are per write, not per call: an update and a delete ride
   // together and each keeps its own `$type`.
   const createdRkey = created.uri.split('/').pop();
   const updateWrite = writes[0].body.writes.find((write) => write.rkey === createdRkey);
-  assert.equal(updateWrite.$type, 'com.atproto.repo.applyWrites#update');
-  assert.equal(updateWrite.value.title, 'Renamed While Deleting');
+  expect(updateWrite.$type).toBe('com.atproto.repo.applyWrites#update');
+  expect(updateWrite.value.title).toBe('Renamed While Deleting');
   const removedRkey = removed.uri.split('/').pop();
   const deleteWrite = writes[0].body.writes.find((write) => write.rkey === removedRkey);
-  assert.equal(deleteWrite.$type, 'com.atproto.repo.applyWrites#delete');
-  assert.equal(deleteWrite.value, undefined, 'a delete carries no value');
+  expect(deleteWrite.$type).toBe('com.atproto.repo.applyWrites#delete');
+  expect(deleteWrite.value, 'a delete carries no value').toBe(undefined);
   const cids = await pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [removed.uri]);
-  assert.equal(cids.rowCount, 0, 'a delete drops the recorded CID');
+  expect(cids.rowCount, 'a delete drops the recorded CID').toBe(0);
 });
 
 test('an aborted shutdown stops the drain before the next claim', async () => {
@@ -941,11 +916,21 @@ test('an aborted shutdown stops the drain before the next claim', async () => {
 
   const result = await publisher.drain({ limit: 10, signal: controller.signal, logger: silent });
 
-  assert.deepEqual(result, { published: 0, failed: 0, batches: 0, calls: 0 });
-  assert.equal(applyWriteRequests().length, 0, 'no write is started after the abort');
+  expect(result).toEqual({ published: 0, failed: 0, batches: 0, calls: 0 });
+  expect(applyWriteRequests().length, 'no write is started after the abort').toBe(0);
   // The rows stay claimable: nothing was claimed, nothing was published twice.
   const rows = await pool.query('SELECT uri FROM pds_outbox WHERE uri = ANY($1::text[])', [
     fixtures.map((fixture) => fixture.uri)
   ]);
-  assert.equal(rows.rowCount, 2);
+  expect(rows.rowCount).toBe(2);
 });
+
+/** vitest has no predicate form of toThrow: capture the throw and assert on it. */
+function thrownBy(fn) {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to throw');
+}

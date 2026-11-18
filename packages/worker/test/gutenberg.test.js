@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   candidateFromRdf,
@@ -89,55 +88,52 @@ function response(body, status = 200) {
 }
 
 test('gutenbergEbookId accepts every spelling the catalogue uses', () => {
-  assert.equal(gutenbergEbookId(1342), '1342');
-  assert.equal(gutenbergEbookId('1342'), '1342');
-  assert.equal(gutenbergEbookId('ebooks/1342'), '1342');
-  assert.equal(gutenbergEbookId('/ebooks/1342.opds'), '1342');
-  assert.equal(gutenbergEbookId('https://www.gutenberg.org/ebooks/1342'), '1342');
-  assert.equal(gutenbergEbookId('https://www.gutenberg.org/cache/epub/1342/pg1342.rdf'), '1342');
-  assert.equal(gutenbergEbookId(''), undefined);
-  assert.equal(gutenbergEbookId('not-a-book'), undefined);
-  assert.equal(gutenbergEbookId(0), undefined);
+  expect(gutenbergEbookId(1342)).toBe('1342');
+  expect(gutenbergEbookId('1342')).toBe('1342');
+  expect(gutenbergEbookId('ebooks/1342')).toBe('1342');
+  expect(gutenbergEbookId('/ebooks/1342.opds')).toBe('1342');
+  expect(gutenbergEbookId('https://www.gutenberg.org/ebooks/1342')).toBe('1342');
+  expect(gutenbergEbookId('https://www.gutenberg.org/cache/epub/1342/pg1342.rdf')).toBe('1342');
+  expect(gutenbergEbookId('')).toBe(undefined);
+  expect(gutenbergEbookId('not-a-book')).toBe(undefined);
+  expect(gutenbergEbookId(0)).toBe(undefined);
 });
 
 test('candidateFromRdf maps the Dublin Core record onto the ingest shape', () => {
   const candidate = candidateFromRdf(RDF);
-  assert.deepEqual(candidate.identifiers, [{ issuer: 'gutenberg', value: '1342' }]);
-  assert.equal(candidate.title, 'Pride and Prejudice');
-  assert.equal(candidate.format, 'ebook');
-  assert.equal(candidate.language, 'en');
-  assert.equal(candidate.coverUrl, 'https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg');
-  assert.deepEqual(candidate.publisher, { name: 'Project Gutenberg' });
+  expect(candidate.identifiers).toEqual([{ issuer: 'gutenberg', value: '1342' }]);
+  expect(candidate.title).toBe('Pride and Prejudice');
+  expect(candidate.format).toBe('ebook');
+  expect(candidate.language).toBe('en');
+  expect(candidate.coverUrl).toBe('https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg');
+  expect(candidate.publisher).toEqual({ name: 'Project Gutenberg' });
   // The summary wins over the catalogue note, and entities are decoded.
-  assert.equal(candidate.description, 'A novel of manners & marriage in Regency England.');
+  expect(candidate.description).toBe('A novel of manners & marriage in Regency England.');
 });
 
 test('candidateFromRdf keeps the inverted author name next to the display name', () => {
   const [contributor] = candidateFromRdf(RDF).contributors;
-  assert.deepEqual(contributor, { name: 'Jane Austen', nameInverted: 'Austen, Jane', role: 'A01' });
+  expect(contributor).toEqual({ name: 'Jane Austen', nameInverted: 'Austen, Jane', role: 'A01' });
 });
 
 test('candidateFromRdf does not claim the Gutenberg release date as publication', () => {
   // `dcterms:issued` is when Gutenberg posted the file (1998), not when the
   // edition was published; a reader must not be told Pride and Prejudice is
   // from 1998.
-  assert.equal(candidateFromRdf(RDF).publishedDate, undefined);
+  expect(candidateFromRdf(RDF).publishedDate).toBe(undefined);
 });
 
 test('candidateFromRdf rejects a document without a title or an id', () => {
-  assert.equal(candidateFromRdf(''), undefined);
-  assert.equal(candidateFromRdf('<rdf:RDF></rdf:RDF>'), undefined);
-  assert.equal(
-    candidateFromRdf(
+  expect(candidateFromRdf('')).toBe(undefined);
+  expect(candidateFromRdf('<rdf:RDF></rdf:RDF>')).toBe(undefined);
+  expect(candidateFromRdf(
       '<pgterms:ebook rdf:about="ebooks/1"><dcterms:title>Untitled</dcterms:title></pgterms:ebook>'
-    ).title,
-    'Untitled'
-  );
+    ).title).toBe('Untitled');
 });
 
 test('gutenbergIdsFromOpds lists the ids in catalogue order', () => {
-  assert.deepEqual(gutenbergIdsFromOpds(OPDS), ['1342', '84']);
-  assert.deepEqual(gutenbergIdsFromOpds(''), []);
+  expect(gutenbergIdsFromOpds(OPDS)).toEqual(['1342', '84']);
+  expect(gutenbergIdsFromOpds('')).toEqual([]);
 });
 
 test('byId reads the ebook RDF and builds one candidate', async () => {
@@ -151,13 +147,13 @@ test('byId reads the ebook RDF and builds one candidate', async () => {
 
   const [candidate] = await provider.byId('1342');
 
-  assert.deepEqual(urls, ['https://www.gutenberg.org/cache/epub/1342/pg1342.rdf']);
-  assert.equal(candidate.title, 'Pride and Prejudice');
+  expect(urls).toEqual(['https://www.gutenberg.org/cache/epub/1342/pg1342.rdf']);
+  expect(candidate.title).toBe('Pride and Prejudice');
 });
 
 test('byId answers empty for an ebook that does not exist', async () => {
   const provider = createGutenberg({ fetchImpl: async () => response('', 404) });
-  assert.deepEqual(await provider.byId('999999999'), []);
+  expect(await provider.byId('999999999')).toEqual([]);
 });
 
 test('popular walks the next link until it has enough ids', async () => {
@@ -177,10 +173,10 @@ test('popular walks the next link until it has enough ids', async () => {
 
   const ids = await provider.popular({ limit: 4 });
 
-  assert.deepEqual(ids, ['1342', '84', '31']);
-  assert.equal(urls.length, 2);
-  assert.match(urls[0], /\/ebooks\/search\.opds\/\?sort_order=downloads/);
-  assert.match(urls[1], /start_index=3/);
+  expect(ids).toEqual(['1342', '84', '31']);
+  expect(urls.length).toBe(2);
+  expect(urls[0]).toMatch(/\/ebooks\/search\.opds\/\?sort_order=downloads/);
+  expect(urls[1]).toMatch(/start_index=3/);
 });
 
 test('seeding ingests every listed id and reports what it did', async () => {
@@ -199,8 +195,8 @@ test('seeding ingests every listed id and reports what it did', async () => {
     logger: { warn() {} }
   });
 
-  assert.deepEqual(ingested, ['1342', '84']);
-  assert.deepEqual(summary, {
+  expect(ingested).toEqual(['1342', '84']);
+  expect(summary).toEqual({
     requested: 3,
     listed: 3,
     created: 1,
@@ -229,16 +225,13 @@ test('seeding counts a failed record and keeps going', async () => {
     logger: { warn: (message) => warnings.push(message) }
   });
 
-  assert.equal(summary.failed, 1);
-  assert.equal(summary.created, 1);
-  assert.match(warnings[0], /seed 1 failed — upstream 500/);
+  expect(summary.failed).toBe(1);
+  expect(summary.created).toBe(1);
+  expect(warnings[0]).toMatch(/seed 1 failed — upstream 500/);
 });
 
 test('seeding refuses a count that cannot be a page size', async () => {
-  await assert.rejects(
-    () => seedCatalogFromProvider({ provider: { popular: async () => [], byId: async () => [] }, ingest: async () => {}, count: 0 }),
-    /count must be a positive integer/
-  );
-  await assert.rejects(() => seedCatalogFromProvider({ ingest: async () => {} }), /popular\(\) and byId\(\)/);
-  await assert.rejects(() => seedCatalogFromProvider({ provider: { popular: async () => [], byId: async () => [] } }), /ingest\(\)/);
+  await expect(() => seedCatalogFromProvider({ provider: { popular: async () => [], byId: async () => [] }, ingest: async () => {}, count: 0 })).rejects.toThrow(/count must be a positive integer/);
+  await expect(() => seedCatalogFromProvider({ ingest: async () => {} })).rejects.toThrow(/popular\(\) and byId\(\)/);
+  await expect(() => seedCatalogFromProvider({ provider: { popular: async () => [], byId: async () => [] } })).rejects.toThrow(/ingest\(\)/);
 });

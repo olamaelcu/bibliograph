@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
+
 import { readFileSync } from 'node:fs';
 
 // The routes cannot be imported in a plain node test because auth.ts reads
@@ -25,24 +25,20 @@ const PAGE_LOADS = {
 test('entity API routes require the admin cookie and expose GET and POST only', () => {
   for (const [kind, url] of Object.entries(API_ROUTES)) {
     const source = readFileSync(url, 'utf8');
-    assert.match(source, /requireAdmin\(cookies\)/, `${kind} GET/POST must call requireAdmin`);
-    assert.match(source, /export const GET/, `${kind} must expose GET`);
-    assert.match(source, /export const POST/, `${kind} must expose POST`);
-    assert.match(source, /status: 404/, `${kind} must answer an unknown row with 404`);
-    assert.doesNotMatch(
-      source,
-      /export const (PUT|PATCH|DELETE)/,
-      `${kind} must not expose another write verb`
-    );
-    assert.doesNotMatch(source, /pds_outbox/, `${kind} must not write the outbox directly`);
+    expect(source, `${kind} GET/POST must call requireAdmin`).toMatch(/requireAdmin\(cookies\)/);
+    expect(source, `${kind} must expose GET`).toMatch(/export const GET/);
+    expect(source, `${kind} must expose POST`).toMatch(/export const POST/);
+    expect(source, `${kind} must answer an unknown row with 404`).toMatch(/status: 404/);
+    expect(source, `${kind} must not expose another write verb`).not.toMatch(/export const (PUT|PATCH|DELETE)/);
+    expect(source, `${kind} must not write the outbox directly`).not.toMatch(/pds_outbox/);
   }
 });
 
 test('entity editor page loads require the admin cookie and answer 404', () => {
   for (const [kind, url] of Object.entries(PAGE_LOADS)) {
     const source = readFileSync(url, 'utf8');
-    assert.match(source, /requireAdmin\(cookies\)/, `${kind} page must call requireAdmin`);
-    assert.match(source, /error\(404/, `${kind} page must answer an unknown row with 404`);
-    assert.doesNotMatch(source, /pds_outbox/);
+    expect(source, `${kind} page must call requireAdmin`).toMatch(/requireAdmin\(cookies\)/);
+    expect(source, `${kind} page must answer an unknown row with 404`).toMatch(/error\(404/);
+    expect(source).not.toMatch(/pds_outbox/);
   }
 });

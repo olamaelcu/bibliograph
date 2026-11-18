@@ -8,8 +8,8 @@
  * `0011-language-normalization.sql` keeps those claims canonical on write.
  */
 
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import pg from 'pg';
 
 import { listEditionsByContributor } from '../src/lib/server/catalog/entities.ts';
@@ -77,7 +77,7 @@ async function titles(input: Parameters<typeof searchEditions>[0]): Promise<stri
 
 const base = { identifiers: [], offset: 0, limit: 25, title: TOKEN };
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
   try {
     await pool.query('SELECT 1');
@@ -131,7 +131,7 @@ async function creditFixtures(): Promise<void> {
   );
 }
 
-after(async () => {
+afterAll(async () => {
   if (pool) {
     await cleanup().catch(() => {});
     await pool.end();
@@ -141,13 +141,13 @@ after(async () => {
 test('sorts by title, case-insensitively, with uri as the stable tie-break', async (t) => {
   if (!requiredPool(t)) return;
 
-  assert.deepEqual(await titles({ ...base, sort: 'title' }), [
+  expect(await titles({ ...base, sort: 'title' })).toEqual([
     `${TOKEN} alpha`,
     `${TOKEN} Beta`,
     `${TOKEN} Delta`,
     `${TOKEN} Gamma`
   ]);
-  assert.deepEqual(await titles({ ...base, sort: 'title', order: 'desc' }), [
+  expect(await titles({ ...base, sort: 'title', order: 'desc' })).toEqual([
     `${TOKEN} Gamma`,
     `${TOKEN} Delta`,
     `${TOKEN} Beta`,
@@ -158,13 +158,13 @@ test('sorts by title, case-insensitively, with uri as the stable tie-break', asy
 test('sorts by published year from the shape claim, unknown years last', async (t) => {
   if (!requiredPool(t)) return;
 
-  assert.deepEqual(await titles({ ...base, sort: 'publishedYear' }), [
+  expect(await titles({ ...base, sort: 'publishedYear' })).toEqual([
     `${TOKEN} alpha`,
     `${TOKEN} Delta`,
     `${TOKEN} Beta`,
     `${TOKEN} Gamma`
   ]);
-  assert.deepEqual(await titles({ ...base, sort: 'publishedYear', order: 'desc' }), [
+  expect(await titles({ ...base, sort: 'publishedYear', order: 'desc' })).toEqual([
     `${TOKEN} Beta`,
     `${TOKEN} Delta`,
     `${TOKEN} alpha`,
@@ -179,28 +179,28 @@ test('keeps the relevance order when no sort is asked for', async (t) => {
   // four are present and the ordering repeats.
   const first = await titles(base);
   const second = await titles(base);
-  assert.equal(first.length, 4);
-  assert.deepEqual(first, second, 'the default order is stable across calls');
+  expect(first.length).toBe(4);
+  expect(first, 'the default order is stable across calls').toEqual(second);
 });
 
 test('filters by language on the primary subtag and needs no other hint', async (t) => {
   if (!requiredPool(t)) return;
 
   // `en` matches both the `en` and the `en-US` claim.
-  assert.deepEqual((await titles({ ...base, language: 'en' })).sort(), [
+  expect((await titles({ ...base, language: 'en' })).sort()).toEqual([
     `${TOKEN} Beta`,
     `${TOKEN} alpha`
   ]);
   // A second language, case-insensitively.
-  assert.deepEqual((await titles({ ...base, language: 'ES' })).sort(), [
+  expect((await titles({ ...base, language: 'ES' })).sort()).toEqual([
     `${TOKEN} Delta`,
     `${TOKEN} Gamma`
   ]);
   // The filter is ANDed with the hints, not ORed.
-  assert.deepEqual(await titles({ ...base, title: `${TOKEN} Gamma`, language: 'es' }), [
+  expect(await titles({ ...base, title: `${TOKEN} Gamma`, language: 'es' })).toEqual([
     `${TOKEN} Gamma`
   ]);
-  assert.deepEqual(await titles({ ...base, title: `${TOKEN} Gamma`, language: 'en' }), []);
+  expect(await titles({ ...base, title: `${TOKEN} Gamma`, language: 'en' })).toEqual([]);
   // With no hint at all, a language is still a valid browse — and it filters
   // rather than needing a term. This used to assert that a fixture landed on
   // page one, which only held because the page was ordered by `indexed_at DESC`
@@ -208,12 +208,8 @@ test('filters by language on the primary subtag and needs no other hint', async 
   // recency (page one is uri order, the primary key), so the assertion is the
   // filter's effect: rows come back, and a language nothing claims returns none.
   const browse = await titles({ identifiers: [], offset: 0, limit: 25, language: 'es' });
-  assert.ok(browse.length > 0, 'a language-only query returns catalog rows');
-  assert.deepEqual(
-    await titles({ identifiers: [], offset: 0, limit: 25, language: 'zz' }),
-    [],
-    'and the language still filters it'
-  );
+  expect(browse.length > 0, 'a language-only query returns catalog rows').toBeTruthy();
+  expect(await titles({ identifiers: [], offset: 0, limit: 25, language: 'zz' }), 'and the language still filters it').toEqual([]);
 });
 
 /** Titles of the contributor listing for one set of params. */
@@ -242,17 +238,13 @@ test('the contributor listing sorts exactly like a search', async (t) => {
     { sort: 'publishedYear' as const },
     { sort: 'publishedYear' as const, order: 'desc' as const }
   ]) {
-    assert.deepEqual(
-      await creditedTitles(params),
-      await titles({ ...base, ...params }),
-      `contributor listing matches searchEditions for ${JSON.stringify(params)}`
-    );
+    expect(await creditedTitles(params), `contributor listing matches searchEditions for ${JSON.stringify(params)}`).toEqual(await titles({ ...base, ...params }));
   }
 
   // `relevance` is the listing's own order (newest first), not the search's.
   const newestFirst = await creditedTitles({ sort: 'relevance' });
-  assert.equal(newestFirst.length, 4);
-  assert.deepEqual(await creditedTitles({}), newestFirst);
+  expect(newestFirst.length).toBe(4);
+  expect(await creditedTitles({})).toEqual(newestFirst);
 });
 
 test('the contributor listing filters by language and counts what it returns', async (t) => {
@@ -266,13 +258,10 @@ test('the contributor listing filters by language and counts what it returns', a
     offset: 0,
     limit: 25
   });
-  assert.deepEqual(
-    (english?.items ?? []).map((item) => item.edition.title).sort(),
-    [`${TOKEN} Beta`, `${TOKEN} alpha`]
-  );
+  expect((english?.items ?? []).map((item) => item.edition.title).sort()).toEqual([`${TOKEN} Beta`, `${TOKEN} alpha`]);
   // The total counts what the filter returned, not every credited edition.
-  assert.equal(english?.total, 2);
-  assert.equal(english?.cursor, undefined);
+  expect(english?.total).toBe(2);
+  expect(english?.cursor).toBe(undefined);
 
   const spanish = await listEditionsByContributor(db, {
     contributor: CONTRIBUTOR_URI,
@@ -280,17 +269,14 @@ test('the contributor listing filters by language and counts what it returns', a
     offset: 0,
     limit: 25
   });
-  assert.deepEqual(
-    (spanish?.items ?? []).map((item) => item.edition.title).sort(),
-    [`${TOKEN} Delta`, `${TOKEN} Gamma`]
-  );
-  assert.equal(spanish?.total, 2);
+  expect((spanish?.items ?? []).map((item) => item.edition.title).sort()).toEqual([`${TOKEN} Delta`, `${TOKEN} Gamma`]);
+  expect(spanish?.total).toBe(2);
 
   const all = await listEditionsByContributor(db, {
     contributor: CONTRIBUTOR_URI,
     offset: 0,
     limit: 25
   });
-  assert.equal(all?.items.length, 4);
-  assert.equal(all?.total, 4);
+  expect(all?.items.length).toBe(4);
+  expect(all?.total).toBe(4);
 });

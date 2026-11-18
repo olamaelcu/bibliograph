@@ -8,8 +8,7 @@
  * than "no genres" ([]).
  */
 
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { createIsbndb, subjectsFromBook } from '../lib/providers/isbndb.js';
 
@@ -53,13 +52,13 @@ function provider(pool, { onFetch } = {}) {
 }
 
 test('subjectsFromBook keeps provider order and drops empty labels', () => {
-  assert.deepEqual(subjectsFromBook({ subjects: ['Biology', ' Textbooks ', ''] }), [
+  expect(subjectsFromBook({ subjects: ['Biology', ' Textbooks ', ''] })).toEqual([
     'Biology',
     'Textbooks'
   ]);
-  assert.deepEqual(subjectsFromBook({ subjects: [null, 42] }), []);
-  assert.deepEqual(subjectsFromBook({}), []);
-  assert.deepEqual(subjectsFromBook(null), []);
+  expect(subjectsFromBook({ subjects: [null, 42] })).toEqual([]);
+  expect(subjectsFromBook({})).toEqual([]);
+  expect(subjectsFromBook(null)).toEqual([]);
 });
 
 test('a cached book record answers genres with no call and no quota spend', async () => {
@@ -70,12 +69,9 @@ test('a cached book record answers genres with no call and no quota spend', asyn
 
   const subjects = await isbndb.genresForEdition([{ issuer: 'isbn13', value: ISBN13 }]);
 
-  assert.deepEqual(subjects, ['Poetry', 'Classics']);
-  assert.deepEqual(fetches, [], 'the cache answers before the network');
-  assert.ok(
-    !pool.statements.some((sql) => sql.includes('provider_daily_usage')),
-    'a cache hit reserves no daily call'
-  );
+  expect(subjects).toEqual(['Poetry', 'Classics']);
+  expect(fetches, 'the cache answers before the network').toEqual([]);
+  expect(!pool.statements.some((sql) => sql.includes('provider_daily_usage')), 'a cache hit reserves no daily call').toBeTruthy();
 });
 
 test('a cache miss fetches the book once and caches the answer', async () => {
@@ -87,13 +83,10 @@ test('a cache miss fetches the book once and caches the answer', async () => {
 
   const subjects = await isbndb.genresForEdition([{ issuer: 'isbn13', value: ISBN13 }]);
 
-  assert.deepEqual(subjects, ['Biology']);
-  assert.deepEqual(fetches, [BOOK_URL]);
-  assert.ok(pool.statements.some((sql) => sql.includes('provider_daily_usage')));
-  assert.ok(
-    pool.statements.some((sql) => sql.includes('INSERT INTO isbndb_cache')),
-    'the full book record is cached for the next genre or hydration read'
-  );
+  expect(subjects).toEqual(['Biology']);
+  expect(fetches).toEqual([BOOK_URL]);
+  expect(pool.statements.some((sql) => sql.includes('provider_daily_usage'))).toBeTruthy();
+  expect(pool.statements.some((sql) => sql.includes('INSERT INTO isbndb_cache')), 'the full book record is cached for the next genre or hydration read').toBeTruthy();
 });
 
 test('a refused daily quota answers undefined instead of no genres', async () => {
@@ -102,21 +95,18 @@ test('a refused daily quota answers undefined instead of no genres', async () =>
 
   const subjects = await isbndb.genresForEdition([{ issuer: 'isbn13', value: ISBN13 }]);
 
-  assert.equal(subjects, undefined);
-  assert.deepEqual(fetches, [], 'the quota refusal must not touch the network');
+  expect(subjects).toBe(undefined);
+  expect(fetches, 'the quota refusal must not touch the network').toEqual([]);
 });
 
 test('a missing ISBN or a 404 answers an empty list without a lookup', async () => {
   const empty = provider(scriptedPool());
-  assert.deepEqual(await empty.provider.genresForEdition([]), []);
-  assert.deepEqual(await empty.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL1A' }]), []);
-  assert.deepEqual(empty.fetches, []);
+  expect(await empty.provider.genresForEdition([])).toEqual([]);
+  expect(await empty.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL1A' }])).toEqual([]);
+  expect(empty.fetches).toEqual([]);
 
   const missing = provider(scriptedPool(), {
     onFetch: () => new Response('{}', { status: 404 })
   });
-  assert.deepEqual(
-    await missing.provider.genresForEdition([{ issuer: 'isbn10', value: '0441478123' }]),
-    []
-  );
+  expect(await missing.provider.genresForEdition([{ issuer: 'isbn10', value: '0441478123' }])).toEqual([]);
 });

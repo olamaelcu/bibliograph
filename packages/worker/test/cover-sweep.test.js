@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { createTasks, COVER_SWEEP_BATCH, COVER_SWEEP_BATCH_MAX } from '../lib/tasks.js';
 
@@ -64,10 +63,10 @@ test('uncached editions come first, then new ones, then retries with the remaind
 
   await tasks.sweep({ limit: 5 }, { logger: log });
 
-  assert.deepEqual(calls.uncached, [5], 'the backfill pass asks for the full limit');
-  assert.deepEqual(calls.fresh, [3], 'new editions get what the backfill left');
-  assert.deepEqual(calls.retries, [2], 'retries only get what is left');
-  assert.deepEqual(calls.claims, [
+  expect(calls.uncached, 'the backfill pass asks for the full limit').toEqual([5]);
+  expect(calls.fresh, 'new editions get what the backfill left').toEqual([3]);
+  expect(calls.retries, 'retries only get what is left').toEqual([2]);
+  expect(calls.claims).toEqual([
     'at://cached/1',
     'at://cached/2',
     'at://new/1',
@@ -85,10 +84,10 @@ test('a saturated backfill pass never runs the later passes', async () => {
 
   await tasks.sweep({ limit: 2 }, { logger: log });
 
-  assert.deepEqual(calls.uncached, [2]);
-  assert.deepEqual(calls.fresh, [], 'no `LIMIT 0` query is issued');
-  assert.deepEqual(calls.retries, []);
-  assert.deepEqual(calls.claims, ['at://cached/1', 'at://cached/2']);
+  expect(calls.uncached).toEqual([2]);
+  expect(calls.fresh, 'no `LIMIT 0` query is issued').toEqual([]);
+  expect(calls.retries).toEqual([]);
+  expect(calls.claims).toEqual(['at://cached/1', 'at://cached/2']);
 });
 
 test('a saturated new pass starves retries by design', async () => {
@@ -100,10 +99,10 @@ test('a saturated new pass starves retries by design', async () => {
 
   await tasks.sweep({ limit: 2 }, { logger: log });
 
-  assert.deepEqual(calls.uncached, [2]);
-  assert.deepEqual(calls.fresh, [2]);
-  assert.deepEqual(calls.retries, [], 'retries are not in addition to new work');
-  assert.deepEqual(calls.claims, ['at://new/1', 'at://new/2']);
+  expect(calls.uncached).toEqual([2]);
+  expect(calls.fresh).toEqual([2]);
+  expect(calls.retries, 'retries are not in addition to new work').toEqual([]);
+  expect(calls.claims).toEqual(['at://new/1', 'at://new/2']);
 });
 
 test('a pass that answers nothing leaves the whole budget to the next one', async () => {
@@ -111,10 +110,10 @@ test('a pass that answers nothing leaves the whole budget to the next one', asyn
 
   await tasks.sweep({ limit: 5 }, { logger: log });
 
-  assert.deepEqual(calls.uncached, [5]);
-  assert.deepEqual(calls.fresh, [5]);
-  assert.deepEqual(calls.retries, [5], 'retries get the full limit instead');
-  assert.deepEqual(calls.claims, ['at://old/1']);
+  expect(calls.uncached).toEqual([5]);
+  expect(calls.fresh).toEqual([5]);
+  expect(calls.retries, 'retries get the full limit instead').toEqual([5]);
+  expect(calls.claims).toEqual(['at://old/1']);
 });
 
 test('the sweep bounds its limit whatever the payload asks for', async () => {
@@ -130,7 +129,7 @@ test('the sweep bounds its limit whatever the payload asks for', async () => {
   for (const [payload, expected] of cases) {
     const { tasks, calls } = sweepPool({ uncached: ['at://cached/1'] });
     await tasks.sweep(payload, { logger: log });
-    assert.deepEqual(calls.uncached, [expected], `payload ${JSON.stringify(payload)}`);
+    expect(calls.uncached, `payload ${JSON.stringify(payload)}`).toEqual([expected]);
   }
 });
 
@@ -145,7 +144,7 @@ test('only a real claim counts as enqueued', async () => {
 
   await tasks.sweep({ limit: 2 }, { logger });
 
-  assert.deepEqual(lines, [
+  expect(lines).toEqual([
     'catalog.covers.sweep: 2 candidate(s) (1 uncached, 1 new, 0 retry), 1 enqueued'
   ]);
 });
@@ -157,6 +156,6 @@ test('an unset COVERS_CACHE_DIR makes the sweep a no-op instead of a guess', asy
 
   await tasks.sweep({ limit: 5 }, { logger });
 
-  assert.deepEqual(calls, { uncached: [], fresh: [], retries: [], claims: [] });
-  assert.deepEqual(lines, ['catalog.covers.sweep: COVERS_CACHE_DIR is not set, skipping']);
+  expect(calls).toEqual({ uncached: [], fresh: [], retries: [], claims: [] });
+  expect(lines).toEqual(['catalog.covers.sweep: COVERS_CACHE_DIR is not set, skipping']);
 });

@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { createIngest } from '../lib/ingest.js';
 
@@ -87,12 +86,9 @@ test('without a source identifier the claims and publisher cover the whole bag',
   const { pool, written } = fakeClient();
   await createIngest({ pool, publisherDid: AUTHORITY })(candidate());
 
-  assert.deepEqual(
-    written.claims.map((row) => `${row.issuer}:${row.value}`),
-    ['bookhive.buzz:bk_scopeprobe', 'isbn13:9780441013593']
-  );
-  assert.equal(written.publishers.length, 1);
-  assert.deepEqual(written.publishers[0].issuers, ['bookhive.buzz', 'isbn13']);
+  expect(written.claims.map((row) => `${row.issuer}:${row.value}`)).toEqual(['bookhive.buzz:bk_scopeprobe', 'isbn13:9780441013593']);
+  expect(written.publishers.length).toBe(1);
+  expect(written.publishers[0].issuers).toEqual(['bookhive.buzz', 'isbn13']);
 });
 
 test('a source identifier keeps claims and the publisher on that identifier alone', async () => {
@@ -102,31 +98,22 @@ test('a source identifier keeps claims and the publisher on that identifier alon
   );
 
   // The edition still owns both identifiers; only the attribution is scoped.
-  assert.deepEqual(
-    written.identifiers.map((row) => `${row.issuer}:${row.value}`),
-    ['bookhive.buzz:bk_scopeprobe', 'isbn13:9780441013593']
-  );
-  assert.deepEqual(
-    written.claims.map((row) => `${row.issuer}:${row.value}`),
-    ['bookhive.buzz:bk_scopeprobe']
-  );
-  assert.equal(written.publishers.length, 1);
-  assert.deepEqual(written.publishers[0].issuers, ['bookhive.buzz']);
-  assert.deepEqual(written.publishers[0].values, ['bk_scopeprobe']);
+  expect(written.identifiers.map((row) => `${row.issuer}:${row.value}`)).toEqual(['bookhive.buzz:bk_scopeprobe', 'isbn13:9780441013593']);
+  expect(written.claims.map((row) => `${row.issuer}:${row.value}`)).toEqual(['bookhive.buzz:bk_scopeprobe']);
+  expect(written.publishers.length).toBe(1);
+  expect(written.publishers[0].issuers).toEqual(['bookhive.buzz']);
+  expect(written.publishers[0].values).toEqual(['bk_scopeprobe']);
 });
 
 test('a source identifier outside the candidate bag is a rejected candidate', async () => {
   const { pool, written, statements } = fakeClient();
   const ingest = createIngest({ pool, publisherDid: AUTHORITY });
 
-  await assert.rejects(
-    ingest(candidate({ sourceIdentifier: { issuer: 'bookhive.buzz', value: 'bk_other' } })),
-    /is not one of the candidate's identifiers/
-  );
-  assert.deepEqual(written.identifiers, [], 'nothing is written before the scope check');
+  await expect(ingest(candidate({ sourceIdentifier: { issuer: 'bookhive.buzz', value: 'bk_other' } }))).rejects.toThrow(/is not one of the candidate's identifiers/);
+  expect(written.identifiers, 'nothing is written before the scope check').toEqual([]);
   // The check runs before a connection is taken, so a malformed candidate never
   // opens a transaction at all.
-  assert.deepEqual(statements, []);
+  expect(statements).toEqual([]);
 });
 
 test('the entity identity bag is stored canonically, whatever order it arrives in', async () => {
@@ -147,9 +134,9 @@ test('the entity identity bag is stored canonically, whatever order it arrives i
 
   // `(lower(name), identifiers)` is a jsonb comparison, so it is positional:
   // one identity set has to reach the row as one string, in every order.
-  assert.equal(forward.contributorBags.length, 1);
-  assert.equal(forward.contributorBags[0], reversed.contributorBags[0]);
-  assert.equal(forward.publisherBags[0], reversed.publisherBags[0]);
-  assert.deepEqual(JSON.parse(forward.contributorBags[0]), [BOOKHIVE_PAIR, ISBN_PAIR]);
-  assert.deepEqual(JSON.parse(forward.publisherBags[0]), [BOOKHIVE_PAIR, ISBN_PAIR]);
+  expect(forward.contributorBags.length).toBe(1);
+  expect(forward.contributorBags[0]).toBe(reversed.contributorBags[0]);
+  expect(forward.publisherBags[0]).toBe(reversed.publisherBags[0]);
+  expect(JSON.parse(forward.contributorBags[0])).toEqual([BOOKHIVE_PAIR, ISBN_PAIR]);
+  expect(JSON.parse(forward.publisherBags[0])).toEqual([BOOKHIVE_PAIR, ISBN_PAIR]);
 });

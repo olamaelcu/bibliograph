@@ -1,5 +1,5 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+
+import { expect, test } from 'vitest';
 import { setImmediate as setImmediatePromise } from 'node:timers/promises';
 
 import { cachedLoader } from '../src/lib/server/cached-loader.ts';
@@ -16,15 +16,15 @@ test('reuses a fresh value and reloads once the ttl is past', async () => {
     }
   });
 
-  assert.equal(await read(), 1);
-  assert.equal(loads, 1);
+  expect(await read()).toBe(1);
+  expect(loads).toBe(1);
   clock += 59_999;
-  assert.equal(await read(), 1);
-  assert.equal(loads, 1, 'a value inside the ttl is reused');
+  expect(await read()).toBe(1);
+  expect(loads, 'a value inside the ttl is reused').toBe(1);
 
   clock += 1;
-  assert.equal(await read(), 2);
-  assert.equal(loads, 2, 'the first read at the boundary reloads');
+  expect(await read()).toBe(2);
+  expect(loads, 'the first read at the boundary reloads').toBe(2);
 });
 
 test('concurrent callers share one load instead of starting their own', async () => {
@@ -40,10 +40,10 @@ test('concurrent callers share one load instead of starting their own', async ()
 
   const all = Promise.all([read(), read(), read()]);
   pending.resolve(7);
-  assert.deepEqual(await all, [7, 7, 7]);
-  assert.equal(loads, 1, 'a burst is one query, not one per caller');
-  assert.equal(await read(), 7);
-  assert.equal(loads, 1);
+  expect(await all).toEqual([7, 7, 7]);
+  expect(loads, 'a burst is one query, not one per caller').toBe(1);
+  expect(await read()).toBe(7);
+  expect(loads).toBe(1);
 });
 
 test('a failed load is not cached and the next call retries', async () => {
@@ -57,9 +57,9 @@ test('a failed load is not cached and the next call retries', async () => {
     }
   });
 
-  await assert.rejects(read, /catalog unavailable/);
-  assert.equal(await read(), 'ok', 'an outage does not pin the failure');
-  assert.equal(loads, 2);
+  await expect(read).rejects.toThrow(/catalog unavailable/);
+  expect(await read(), 'an outage does not pin the failure').toBe('ok');
+  expect(loads).toBe(2);
 });
 
 test('stale-while-revalidate answers from the expired value and refreshes behind it', async () => {
@@ -75,17 +75,17 @@ test('stale-while-revalidate answers from the expired value and refreshes behind
     }
   });
 
-  assert.equal(await read(), 1, 'the first call has nothing to serve but the load');
-  assert.equal(loads, 1);
+  expect(await read(), 'the first call has nothing to serve but the load').toBe(1);
+  expect(loads).toBe(1);
 
   clock += 60_000;
-  assert.equal(await read(), 1, 'an expired value is served without waiting');
-  assert.equal(loads, 2, 'and the reload happens behind the caller');
+  expect(await read(), 'an expired value is served without waiting').toBe(1);
+  expect(loads, 'and the reload happens behind the caller').toBe(2);
 
   // The background load settles on its own microtask turn.
   await Promise.resolve();
   await Promise.resolve();
-  assert.equal(await read(), 2, 'the refreshed value is used from then on');
+  expect(await read(), 'the refreshed value is used from then on').toBe(2);
 });
 
 test('a failed background refresh keeps the value it had', async () => {
@@ -102,11 +102,11 @@ test('a failed background refresh keeps the value it had', async () => {
     }
   });
 
-  assert.equal(await read(), 'first');
+  expect(await read()).toBe('first');
   clock += 10;
-  assert.equal(await read(), 'first', 'the expired value still answers');
+  expect(await read(), 'the expired value still answers').toBe('first');
   await setImmediatePromise();
-  assert.equal(await read(), 'first', 'a failed refresh does not blank the value');
+  expect(await read(), 'a failed refresh does not blank the value').toBe('first');
 });
 
 test('a zero ttl always reloads', async () => {
@@ -119,7 +119,7 @@ test('a zero ttl always reloads', async () => {
     }
   });
 
-  assert.equal(await read(), 1);
-  assert.equal(await read(), 2);
-  assert.equal(loads, 2);
+  expect(await read()).toBe(1);
+  expect(await read()).toBe(2);
+  expect(loads).toBe(2);
 });

@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   buildServiceDidDocument,
@@ -25,9 +24,9 @@ test('default host builds the biblio identity with no verification method', () =
     spaceManagerEndpoint: 'https://livtet.olamaelcu.net'
   });
 
-  assert.equal(document.id, 'did:web:biblio.livtet.olamaelcu.net');
-  assert.deepEqual(document.verificationMethod, []);
-  assert.deepEqual(document.service, [
+  expect(document.id).toBe('did:web:biblio.livtet.olamaelcu.net');
+  expect(document.verificationMethod).toEqual([]);
+  expect(document.service).toEqual([
     {
       id: `#${SPACE_MANAGER_FRAGMENT}`,
       type: 'AtprotoSpaceManager',
@@ -43,12 +42,12 @@ test('a configured key is published as #oauth_interaction', () => {
     spaceManagerEndpoint: 'https://livtet.olamaelcu.net'
   });
 
-  assert.equal(document.verificationMethod.length, 1);
+  expect(document.verificationMethod.length).toBe(1);
   const [method] = document.verificationMethod;
-  assert.equal(method.id, `#${INTERACTION_FRAGMENT}`);
-  assert.equal(method.type, 'Multikey');
-  assert.equal(method.controller, document.id);
-  assert.equal(method.publicKeyMultibase, 'zQ3shTest');
+  expect(method.id).toBe(`#${INTERACTION_FRAGMENT}`);
+  expect(method.type).toBe('Multikey');
+  expect(method.controller).toBe(document.id);
+  expect(method.publicKeyMultibase).toBe('zQ3shTest');
 });
 
 test('the document claims no handle', () => {
@@ -58,9 +57,9 @@ test('the document claims no handle', () => {
     spaceManagerEndpoint: 'https://livtet.olamaelcu.net'
   });
 
-  assert.equal(Object.hasOwn(document, 'alsoKnownAs'), false);
+  expect(Object.hasOwn(document, 'alsoKnownAs')).toBe(false);
 });
 
 test('a port is percent-encoded in the identifier', () => {
-  assert.equal(didWeb('127.0.0.1:5176'), 'did:web:127.0.0.1%3A5176');
+  expect(didWeb('127.0.0.1:5176')).toBe('did:web:127.0.0.1%3A5176');
 });

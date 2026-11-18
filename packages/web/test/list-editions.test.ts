@@ -6,8 +6,7 @@
  * last page grows a cursor that leads nowhere).
  */
 
-import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { expect, test } from 'vitest';
 
 import { listEditions } from '../src/lib/server/catalog/editions.ts';
 import { decodeKeysetCursor, encodeKeysetCursor } from '../src/lib/server/catalog/sql.ts';
@@ -40,12 +39,12 @@ test('a first page has no WHERE clause and probes one row past the limit', async
 
   const page = await listEditions({ after: null, limit: 1 }, pool);
 
-  assert.deepEqual(page.items.map((item) => item.title), ['A']);
+  expect(page.items.map((item) => item.title)).toEqual(['A']);
   // The probe row proves there is another page without a count over 282k rows.
-  assert.equal(calls[0]?.values.at(-1), 2);
-  assert.doesNotMatch(calls[0]?.sql ?? '', /WHERE/);
+  expect(calls[0]?.values.at(-1)).toBe(2);
+  expect(calls[0]?.sql ?? '').not.toMatch(/WHERE/);
   // The date is serialised the way every other edition read serialises it.
-  assert.equal(page.items[0]?.indexedAt, '2026-11-16T12:00:00.000Z');
+  expect(page.items[0]?.indexedAt).toBe('2026-11-16T12:00:00.000Z');
 });
 
 test('the cursor resumes strictly after the last uri of the page', async () => {
@@ -53,24 +52,24 @@ test('the cursor resumes strictly after the last uri of the page', async () => {
   const { pool } = fakePool(rows);
 
   const first = await listEditions({ after: null, limit: 1 }, pool);
-  assert.ok(first.cursor, 'a full page with a probe row carries a cursor');
-  assert.equal(decodeKeysetCursor(first.cursor), `${PREFIX}a`);
+  expect(first.cursor, 'a full page with a probe row carries a cursor').toBeTruthy();
+  expect(decodeKeysetCursor(first.cursor)).toBe(`${PREFIX}a`);
 
   const next = fakePool([edition(`${PREFIX}b`, 'B')]);
   await listEditions({ after: decodeKeysetCursor(first.cursor), limit: 1 }, next.pool);
-  assert.match(next.calls[0]?.sql ?? '', /WHERE uri > \$1/);
-  assert.deepEqual(next.calls[0]?.values, [`${PREFIX}a`, 2]);
+  expect(next.calls[0]?.sql ?? '').toMatch(/WHERE uri > \$1/);
+  expect(next.calls[0]?.values).toEqual([`${PREFIX}a`, 2]);
 });
 
 test('the last page carries no cursor, and a malformed one restarts at the beginning', async () => {
   const { pool } = fakePool([edition(`${PREFIX}a`, 'A')]);
   const page = await listEditions({ after: null, limit: 5 }, pool);
-  assert.equal(page.cursor, undefined);
-  assert.equal(page.items.length, 1);
+  expect(page.cursor).toBe(undefined);
+  expect(page.items.length).toBe(1);
 
   // A cursor the edge did not mint is not an error: the walk restarts, which is
   // the same contract the offset cursors keep.
   for (const malformed of ['', 'not-base64-json', encodeKeysetCursor('')]) {
-    assert.equal(decodeKeysetCursor(malformed), null, `${malformed} starts over`);
+    expect(decodeKeysetCursor(malformed), `${malformed} starts over`).toBe(null);
   }
 });

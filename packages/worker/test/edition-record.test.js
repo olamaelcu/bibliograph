@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { EditionRecordError, buildEditionRecord } from '../lib/edition-record.js';
 
@@ -45,7 +44,7 @@ const publisher = {
 test('builds the lexicon record from catalog rows', () => {
   const record = buildEditionRecord({ edition, identifiers, contributors, publisher });
 
-  assert.deepEqual(record, {
+  expect(record).toEqual({
     title: 'The Left Hand of Darkness',
     identifiers: [
       { issuer: 'googlebooks', value: 'efdyneVzATwC' },
@@ -75,8 +74,8 @@ test('builds the lexicon record from catalog rows', () => {
   });
 
   // coverUrl is URL-only; the record must never carry a blob field.
-  assert.equal('cover' in record, false);
-  assert.equal('durationSeconds' in record, false);
+  expect('cover' in record).toBe(false);
+  expect('durationSeconds' in record).toBe(false);
 });
 
 test('a cached cover advertises the edge URL instead of the provider hotlink', () => {
@@ -87,10 +86,7 @@ test('a cached cover advertises the edge URL instead of the provider hotlink', (
     coversBaseUrl: 'https://edge.test/'
   });
 
-  assert.equal(
-    record.coverUrl,
-    `https://edge.test/api/covers/${encodeURIComponent(edition.uri)}`
-  );
+  expect(record.coverUrl).toBe(`https://edge.test/api/covers/${encodeURIComponent(edition.uri)}`);
 
   // Without a public origin the provider URL is what a reader gets, because a
   // relative `/api/covers/...` is not a usable record field.
@@ -100,7 +96,7 @@ test('a cached cover advertises the edge URL instead of the provider hotlink', (
     contributors: [],
     coversBaseUrl: ''
   });
-  assert.equal(fallback.coverUrl, edition.cover_url);
+  expect(fallback.coverUrl).toBe(edition.cover_url);
 });
 
 test('omits empty optional fields and deduplicates identifiers', () => {
@@ -130,7 +126,7 @@ test('omits empty optional fields and deduplicates identifiers', () => {
     publisher: { name: '' }
   });
 
-  assert.deepEqual(record, {
+  expect(record).toEqual({
     title: 'Minimal',
     identifiers: [{ issuer: 'isbn13', value: '9780000000001' }],
     contributors: [],
@@ -139,21 +135,12 @@ test('omits empty optional fields and deduplicates identifiers', () => {
 });
 
 test('refuses a record with no identifiers', () => {
-  assert.throws(
-    () => buildEditionRecord({ edition, identifiers: [], contributors: [], publisher }),
-    (error) => error instanceof EditionRecordError && /no identifiers/.test(error.message)
-  );
+  expect(thrownBy(() => buildEditionRecord({ edition, identifiers: [], contributors: [], publisher }))).toSatisfy((error) => error instanceof EditionRecordError && /no identifiers/.test(error.message));
 });
 
 test('refuses a record with no title or created_at', () => {
-  assert.throws(
-    () => buildEditionRecord({ edition: { ...edition, title: ' ' }, identifiers }),
-    /no title/
-  );
-  assert.throws(
-    () => buildEditionRecord({ edition: { ...edition, created_at: 'not-a-date' }, identifiers }),
-    /created_at/
-  );
+  expect(() => buildEditionRecord({ edition: { ...edition, title: ' ' }, identifiers })).toThrow(/no title/)
+  expect(() => buildEditionRecord({ edition: { ...edition, created_at: 'not-a-date' }, identifiers })).toThrow(/created_at/)
 });
 
 test('accepts ONIX codes and nameInverted from catalog rows', () => {
@@ -169,7 +156,7 @@ test('accepts ONIX codes and nameInverted from catalog rows', () => {
     ]
   });
 
-  assert.deepEqual(record.contributors, [
+  expect(record.contributors).toEqual([
     { displayName: 'Ursula K. Le Guin', nameInverted: 'Le Guin, Ursula K.', role: 'B06' }
   ]);
 });
@@ -181,5 +168,15 @@ test('defaults a missing contributor role to A01', () => {
     contributors: [{ name: 'Anonymous' }]
   });
 
-  assert.deepEqual(record.contributors, [{ displayName: 'Anonymous', role: 'A01' }]);
+  expect(record.contributors).toEqual([{ displayName: 'Anonymous', role: 'A01' }]);
 });
+
+/** vitest has no predicate form of toThrow: capture the throw and assert on it. */
+function thrownBy(fn) {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected the call to throw');
+}

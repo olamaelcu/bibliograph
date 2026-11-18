@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   BOOK_STATUS_COLLECTION,
@@ -57,23 +56,20 @@ test('pages public records and emits a cursor only when the probe row exists', a
 
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 2 });
 
-  assert.equal(page.feed.length, 2);
-  assert.deepEqual(
-    page.feed.map((item) => item.post),
-    ['at://a/review/3', 'at://a/status/2']
-  );
-  assert.ok(page.cursor);
-  assert.deepEqual(decodeCursor(page.cursor), {
+  expect(page.feed.length).toBe(2);
+  expect(page.feed.map((item) => item.post)).toEqual(['at://a/review/3', 'at://a/status/2']);
+  expect(page.cursor).toBeTruthy();
+  expect(decodeCursor(page.cursor)).toEqual({
     c: '2026-03-02T00:00:00.000Z',
     u: 'at://a/status/2'
   });
-  assert.equal(pool.calls.length, 1);
-  assert.equal(pool.calls[0]!.values?.[0], REVIEW_COLLECTION);
-  assert.equal(pool.calls[0]!.values?.[1], BOOK_STATUS_COLLECTION);
-  assert.equal(pool.calls[0]!.values?.[2], BUZZ_BOOKHIVE_BOOK);
-  assert.equal(pool.calls[0]!.values?.[3], POPFEED_REVIEW_COLLECTION);
-  assert.equal(pool.calls[0]!.values?.[4], POPFEED_LIST_ITEM_COLLECTION);
-  assert.equal(pool.calls[0]!.values?.at(-1), 3);
+  expect(pool.calls.length).toBe(1);
+  expect(pool.calls[0]!.values?.[0]).toBe(REVIEW_COLLECTION);
+  expect(pool.calls[0]!.values?.[1]).toBe(BOOK_STATUS_COLLECTION);
+  expect(pool.calls[0]!.values?.[2]).toBe(BUZZ_BOOKHIVE_BOOK);
+  expect(pool.calls[0]!.values?.[3]).toBe(POPFEED_REVIEW_COLLECTION);
+  expect(pool.calls[0]!.values?.[4]).toBe(POPFEED_LIST_ITEM_COLLECTION);
+  expect(pool.calls[0]!.values?.at(-1)).toBe(3);
 });
 
 test('does not emit a cursor when the page is not full', async () => {
@@ -81,7 +77,7 @@ test('does not emit a cursor when the page is not full', async () => {
     [row('at://a/review/1', REVIEW_COLLECTION, { createdAt: '2026-03-01T00:00:00.000Z' }, '2026-03-01T00:00:00.000Z')]
   ]);
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
-  assert.equal(page.cursor, undefined);
+  expect(page.cursor).toBe(undefined);
 });
 
 test('passes the keyset cursor values and keeps the null-time tail reachable', async () => {
@@ -93,42 +89,30 @@ test('passes the keyset cursor values and keeps the null-time tail reachable', a
   await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 5, cursor });
 
   const values = pool.calls[0]!.values ?? [];
-  assert.deepEqual(values.slice(-3), [cursor.c, cursor.u, 6]);
+  expect(values.slice(-3)).toEqual([cursor.c, cursor.u, 6]);
   // One expression orders, paces and reads the record's own activity time, so
   // an `addedAt`-only Popfeed row sorts with the rest of the page and a null
   // tail stays reachable on the next keyset step.
-  assert.match(
-    pool.calls[0]!.sql,
-    /COALESCE\(record::jsonb->>'createdAt', record::jsonb->>'addedAt'\) IS NULL AND uri </
-  );
-  assert.match(pool.calls[0]!.sql, /ORDER BY COALESCE\(record::jsonb->>'createdAt', record::jsonb->>'addedAt'\) DESC NULLS LAST, uri DESC/);
+  expect(pool.calls[0]!.sql).toMatch(/COALESCE\(record::jsonb->>'createdAt', record::jsonb->>'addedAt'\) IS NULL AND uri </);
+  expect(pool.calls[0]!.sql).toMatch(/ORDER BY COALESCE\(record::jsonb->>'createdAt', record::jsonb->>'addedAt'\) DESC NULLS LAST, uri DESC/);
 });
 
 test('reason prefers subjectRecord, then the first atproto identifier', () => {
-  assert.equal(
-    reasonFor(REVIEW_COLLECTION, {
+  expect(reasonFor(REVIEW_COLLECTION, {
       subjectRecord: 'at://did:plc:b/edition/1',
       subject: { identifiers: [{ issuer: 'atproto', value: 'at://did:plc:b/edition/2' }] }
-    }),
-    'at://did:plc:b/edition/1'
-  );
-  assert.equal(
-    reasonFor(REVIEW_COLLECTION, {
+    })).toBe('at://did:plc:b/edition/1');
+  expect(reasonFor(REVIEW_COLLECTION, {
       subject: {
         identifiers: [
           { issuer: 'isbn13', value: '9780306406157' },
           { issuer: 'atproto', value: 'at://did:plc:b/edition/2' }
         ]
       }
-    }),
-    'at://did:plc:b/edition/2'
-  );
-  assert.equal(reasonFor(REVIEW_COLLECTION, { subject: { identifiers: [] } }), undefined);
-  assert.equal(
-    reasonFor(BOOK_STATUS_COLLECTION, { book: { uri: 'at://did:plc:b/edition/3', cid: 'bafy' } }),
-    'at://did:plc:b/edition/3'
-  );
-  assert.equal(reasonFor(BOOK_STATUS_COLLECTION, { book: {} }), undefined);
+    })).toBe('at://did:plc:b/edition/2');
+  expect(reasonFor(REVIEW_COLLECTION, { subject: { identifiers: [] } })).toBe(undefined);
+  expect(reasonFor(BOOK_STATUS_COLLECTION, { book: { uri: 'at://did:plc:b/edition/3', cid: 'bafy' } })).toBe('at://did:plc:b/edition/3');
+  expect(reasonFor(BOOK_STATUS_COLLECTION, { book: {} })).toBe(undefined);
 });
 
 test('a Bookhive entry carries its shelf and the edition its hive id resolved to', async () => {
@@ -154,20 +138,20 @@ test('a Bookhive entry carries its shelf and the edition its hive id resolved to
 
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
 
-  assert.deepEqual(page.feed, [
+  expect(page.feed).toEqual([
     { post: 'at://did:plc:r/buzz.bookhive.book/1', reason: `bookhive:read|${edition}` },
     { post: 'at://did:plc:r/buzz.bookhive.book/2', reason: `bookhive:to-read|${edition}` }
   ]);
   const values = pool.calls[0]!.values ?? [];
-  assert.deepEqual(values.slice(0, 3), [
+  expect(values.slice(0, 3)).toEqual([
     REVIEW_COLLECTION,
     BOOK_STATUS_COLLECTION,
     BUZZ_BOOKHIVE_BOOK
   ]);
   // One edition per hive id: the lookup is grouped, then joined on the page's
   // own ids, so a hive id that names several editions cannot multiply the row.
-  assert.match(pool.calls[0]!.sql, /JOIN public\.appview_bookhive_lua m ON m\.hive_id = p\.hive_id/);
-  assert.match(pool.calls[0]!.sql, /LEFT JOIN mapped ON mapped\.hive_id = p\.hive_id/);
+  expect(pool.calls[0]!.sql).toMatch(/JOIN public\.appview_bookhive_lua m ON m\.hive_id = p\.hive_id/);
+  expect(pool.calls[0]!.sql).toMatch(/LEFT JOIN mapped ON mapped\.hive_id = p\.hive_id/);
 });
 
 test('a page never repeats a post, even when the row comes back twice', async () => {
@@ -195,13 +179,10 @@ test('a page never repeats a post, even when the row comes back twice', async ()
 
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
 
-  assert.deepEqual(
-    page.feed.map((item) => item.post),
-    ['at://did:plc:r/buzz.bookhive.book/1', 'at://did:plc:r/buzz.bookhive.book/2']
-  );
+  expect(page.feed.map((item) => item.post)).toEqual(['at://did:plc:r/buzz.bookhive.book/1', 'at://did:plc:r/buzz.bookhive.book/2']);
   // The first copy's reason stands: the duplicate editions collapsed to one
   // pick, not to a second row.
-  assert.equal(page.feed[0]!.reason, 'bookhive:reading|at://did:plc:pub/community.lexicon.media.book.edition/a');
+  expect(page.feed[0]!.reason).toBe('bookhive:reading|at://did:plc:pub/community.lexicon.media.book.edition/a');
 });
 
 test('a duplicate row does not fake a next page', async () => {
@@ -215,8 +196,8 @@ test('a duplicate row does not fake a next page', async () => {
 
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 1 });
 
-  assert.equal(page.feed.length, 1);
-  assert.equal(page.cursor, undefined);
+  expect(page.feed.length).toBe(1);
+  expect(page.cursor).toBe(undefined);
 });
 
 test('the page query groups the edition lookup and dedupes by post', async () => {
@@ -225,11 +206,11 @@ test('the page query groups the edition lookup and dedupes by post', async () =>
 
   const sql = pool.calls[0]!.sql;
   // One edition per hive id: the view is many-to-one over `edition_identifiers`.
-  assert.match(sql, /mapped AS \(\s*SELECT p\.hive_id, min\(m\.edition_uri\)/);
-  assert.match(sql, /GROUP BY p\.hive_id/);
-  assert.match(sql, /LEFT JOIN mapped ON mapped\.hive_id = p\.hive_id/);
+  expect(sql).toMatch(/mapped AS \(\s*SELECT p\.hive_id, min\(m\.edition_uri\)/);
+  expect(sql).toMatch(/GROUP BY p\.hive_id/);
+  expect(sql).toMatch(/LEFT JOIN mapped ON mapped\.hive_id = p\.hive_id/);
   // The skeleton's contract, enforced where the page is built.
-  assert.match(sql, /DISTINCT ON \(uri\)/);
+  expect(sql).toMatch(/DISTINCT ON \(uri\)/);
 });
 
 test('a Bookhive entry with no imported edition still feeds with its shelf', async () => {
@@ -246,20 +227,17 @@ test('a Bookhive entry with no imported edition still feeds with its shelf', asy
 
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
 
-  assert.deepEqual(page.feed, [
+  expect(page.feed).toEqual([
     { post: 'at://did:plc:r/buzz.bookhive.book/1', reason: 'bookhive:dnf' }
   ]);
 });
 
 test('a Bookhive status outside the known shelves still names the book', () => {
   const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/abc';
-  assert.equal(
-    reasonFor(BUZZ_BOOKHIVE_BOOK, { status: 'buzz.bookhive.defs#paused' }, edition),
-    `bookhive:|${edition}`
-  );
-  assert.equal(reasonFor(BUZZ_BOOKHIVE_BOOK, {}, null), 'bookhive:');
+  expect(reasonFor(BUZZ_BOOKHIVE_BOOK, { status: 'buzz.bookhive.defs#paused' }, edition)).toBe(`bookhive:|${edition}`);
+  expect(reasonFor(BUZZ_BOOKHIVE_BOOK, {}, null)).toBe('bookhive:');
   // The two Bibliograph collections are unaffected by the third branch.
-  assert.equal(reasonFor(BUZZ_BOOKHIVE_BOOK, null), undefined);
+  expect(reasonFor(BUZZ_BOOKHIVE_BOOK, null)).toBe(undefined);
 });
 
 test('skeleton items omit reason when the record names no book', async () => {
@@ -267,37 +245,28 @@ test('skeleton items omit reason when the record names no book', async () => {
     [row('at://a/review/1', REVIEW_COLLECTION, {}, '2026-03-01T00:00:00.000Z')]
   ]);
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
-  assert.deepEqual(page.feed, [{ post: 'at://a/review/1' }]);
+  expect(page.feed).toEqual([{ post: 'at://a/review/1' }]);
 });
 
 test('a Popfeed review carries the edition its ISBN resolved to', () => {
   const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/pf';
-  assert.equal(
-    reasonFor(POPFEED_REVIEW_COLLECTION, { creativeWorkType: 'book', rating: 9 }, edition),
-    `popfeed:review|${edition}`
-  );
+  expect(reasonFor(POPFEED_REVIEW_COLLECTION, { creativeWorkType: 'book', rating: 9 }, edition)).toBe(`popfeed:review|${edition}`);
   // No catalog edition matched: the prefix stays, as it does for a Bookhive
   // record whose hive id was never imported, and the client falls back to the
   // record's own title and poster.
-  assert.equal(reasonFor(POPFEED_REVIEW_COLLECTION, { creativeWorkType: 'book' }), 'popfeed:review');
-  assert.equal(reasonFor(POPFEED_REVIEW_COLLECTION, null), undefined);
+  expect(reasonFor(POPFEED_REVIEW_COLLECTION, { creativeWorkType: 'book' })).toBe('popfeed:review');
+  expect(reasonFor(POPFEED_REVIEW_COLLECTION, null)).toBe(undefined);
 });
 
 test('a Popfeed shelf entry carries its listType as a Livtet shelf', () => {
   const edition = 'at://did:plc:pub/community.lexicon.media.book.edition/pf';
-  assert.equal(
-    reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'read_books' }, edition),
-    `popfeed:read|${edition}`
-  );
-  assert.equal(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'to_read_books' }), 'popfeed:to-read');
-  assert.equal(
-    reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'currently_reading_books' }, edition),
-    `popfeed:reading|${edition}`
-  );
+  expect(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'read_books' }, edition)).toBe(`popfeed:read|${edition}`);
+  expect(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'to_read_books' })).toBe('popfeed:to-read');
+  expect(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'currently_reading_books' }, edition)).toBe(`popfeed:reading|${edition}`);
   // The schema's `status` tokens are not what Popfeed writes, and a shelf the
   // feed does not page gets no reason.
-  assert.equal(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { status: '#finished' }), undefined);
-  assert.equal(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'favorite_movies' }), undefined);
+  expect(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { status: '#finished' })).toBe(undefined);
+  expect(reasonFor(POPFEED_LIST_ITEM_COLLECTION, { listType: 'favorite_movies' })).toBe(undefined);
 });
 
 test('a Popfeed page resolves ISBN/ASIN to an edition and keeps its own time', async () => {
@@ -324,7 +293,7 @@ test('a Popfeed page resolves ISBN/ASIN to an edition and keeps its own time', a
 
   const page = await fetchFeedPage(pool, { kind: 'public', viewerDid: null, limit: 20 });
 
-  assert.deepEqual(page.feed, [
+  expect(page.feed).toEqual([
     { post: 'at://did:plc:r/social.popfeed.feed.listItem/1', reason: `popfeed:read|${edition}` },
     { post: unknown, reason: 'popfeed:review' }
   ]);
@@ -332,23 +301,17 @@ test('a Popfeed page resolves ISBN/ASIN to an edition and keeps its own time', a
   const sql = pool.calls[0]!.sql;
   // Both Popfeed branches page book activity only, and the shelf branch reads
   // `listType` (never `status`) against the three book shelves.
-  assert.match(sql, /AND record::jsonb->>'creativeWorkType' = 'book'/);
-  assert.match(
-    sql,
-    /AND record::jsonb->>'listType' IN \('read_books', 'currently_reading_books', 'to_read_books'\)/
-  );
+  expect(sql).toMatch(/AND record::jsonb->>'creativeWorkType' = 'book'/);
+  expect(sql).toMatch(/AND record::jsonb->>'listType' IN \('read_books', 'currently_reading_books', 'to_read_books'\)/);
   // The edition comes from `edition_identifiers` for the page's own Popfeed
   // rows, grouped so one ISBN naming several editions cannot fan a row out.
-  assert.match(sql, /popfeed_keys AS \(/);
-  assert.match(sql, /\('isbn13', p\.record->'identifiers'->>'isbn13'\)/);
-  assert.match(sql, /\('isbn10', p\.record->'identifiers'->>'isbn10'\)/);
-  assert.match(sql, /\('asin',   p\.record->'identifiers'->>'asin'\)/);
-  assert.match(
-    sql,
-    /JOIN public\.edition_identifiers e ON e\.issuer = k\.issuer AND e\.value = k\.value/
-  );
-  assert.match(sql, /COALESCE\(mapped\.edition_uri, f\.edition_uri\) AS book_uri/);
-  assert.match(sql, /LEFT JOIN popfeed f ON f\.uri = p\.uri/);
+  expect(sql).toMatch(/popfeed_keys AS \(/);
+  expect(sql).toMatch(/\('isbn13', p\.record->'identifiers'->>'isbn13'\)/);
+  expect(sql).toMatch(/\('isbn10', p\.record->'identifiers'->>'isbn10'\)/);
+  expect(sql).toMatch(/\('asin',   p\.record->'identifiers'->>'asin'\)/);
+  expect(sql).toMatch(/JOIN public\.edition_identifiers e ON e\.issuer = k\.issuer AND e\.value = k\.value/);
+  expect(sql).toMatch(/COALESCE\(mapped\.edition_uri, f\.edition_uri\) AS book_uri/);
+  expect(sql).toMatch(/LEFT JOIN popfeed f ON f\.uri = p\.uri/);
 });
 
 test('following scopes the page to the viewer follow set', async () => {
@@ -363,27 +326,27 @@ test('following scopes the page to the viewer follow set', async () => {
     limit: 20
   });
 
-  assert.equal(page.feed.length, 1);
-  assert.match(pool.calls[0]!.sql, /did <> \$1/);
+  expect(page.feed.length).toBe(1);
+  expect(pool.calls[0]!.sql).toMatch(/did <> \$1/);
   // The page query's params are the five collections, then the follow set.
-  assert.deepEqual(pool.calls[1]!.values?.[5], ['did:plc:one', 'did:plc:two']);
+  expect(pool.calls[1]!.values?.[5]).toEqual(['did:plc:one', 'did:plc:two']);
 });
 
 test('normalizes bare and at:// follow subjects without a migration', async () => {
-  assert.equal(normalizeFollowSubject('did:plc:one'), 'did:plc:one');
-  assert.equal(normalizeFollowSubject('at://did:plc:one'), 'did:plc:one');
-  assert.equal(normalizeFollowSubject('at://did:web:example.test'), 'did:web:example.test');
-  assert.equal(normalizeFollowSubject('https://example.test'), null);
-  assert.equal(normalizeFollowSubject('at://not-a-did'), null);
-  assert.equal(normalizeFollowSubject(42), null);
+  expect(normalizeFollowSubject('did:plc:one')).toBe('did:plc:one');
+  expect(normalizeFollowSubject('at://did:plc:one')).toBe('did:plc:one');
+  expect(normalizeFollowSubject('at://did:web:example.test')).toBe('did:web:example.test');
+  expect(normalizeFollowSubject('https://example.test')).toBe(null);
+  expect(normalizeFollowSubject('at://not-a-did')).toBe(null);
+  expect(normalizeFollowSubject(42)).toBe(null);
 
   // Livtet's writer stores `at://did:...`; the SQL strips it and the row
   // mapper repeats the normalization, so both writers land in one DID set.
   const pool = queuedPool([[{ did: 'at://did:plc:one' }, { did: 'did:plc:two' }], []]);
   const dids = await feedDids(pool, 'following', 'did:plc:viewer');
-  assert.deepEqual(dids, ['did:plc:one', 'did:plc:two']);
-  assert.match(pool.calls[0]!.sql, /WHEN subject LIKE 'at:\/\/%' THEN substr\(subject, 6\)/);
-  assert.match(pool.calls[0]!.sql, /did LIKE 'did:%'/);
+  expect(dids).toEqual(['did:plc:one', 'did:plc:two']);
+  expect(pool.calls[0]!.sql).toMatch(/WHEN subject LIKE 'at:\/\/%' THEN substr\(subject, 6\)/);
+  expect(pool.calls[0]!.sql).toMatch(/did LIKE 'did:%'/);
 });
 
 test('extended adds the followees of followees with the 500-DID cap', async () => {
@@ -394,12 +357,12 @@ test('extended adds the followees of followees with the 500-DID cap', async () =
 
   await fetchFeedPage(pool, { kind: 'extended', viewerDid: 'did:plc:viewer', limit: 20 });
 
-  assert.match(pool.calls[0]!.sql, /hop1 AS \(/);
-  assert.match(pool.calls[0]!.sql, /LIMIT \$3/);
-  assert.match(pool.calls[0]!.sql, /r\.record::jsonb->>'subject' LIKE 'at:\/\/%'/);
-  assert.match(pool.calls[0]!.sql, /substr\(r\.record::jsonb->>'subject', 6\)/);
-  assert.equal(pool.calls[0]!.values?.[2], 500);
-  assert.deepEqual(pool.calls[1]!.values?.[5], ['did:plc:one', 'did:plc:two']);
+  expect(pool.calls[0]!.sql).toMatch(/hop1 AS \(/);
+  expect(pool.calls[0]!.sql).toMatch(/LIMIT \$3/);
+  expect(pool.calls[0]!.sql).toMatch(/r\.record::jsonb->>'subject' LIKE 'at:\/\/%'/);
+  expect(pool.calls[0]!.sql).toMatch(/substr\(r\.record::jsonb->>'subject', 6\)/);
+  expect(pool.calls[0]!.values?.[2]).toBe(500);
+  expect(pool.calls[1]!.values?.[5]).toEqual(['did:plc:one', 'did:plc:two']);
 });
 
 test('dynamic is the viewer plus the follow set', async () => {
@@ -409,7 +372,7 @@ test('dynamic is the viewer plus the follow set', async () => {
   ]);
 
   const dids = await feedDids(pool, 'dynamic', 'did:plc:viewer');
-  assert.deepEqual(dids, ['did:plc:viewer', 'did:plc:one', 'did:plc:two']);
+  expect(dids).toEqual(['did:plc:viewer', 'did:plc:one', 'did:plc:two']);
 });
 
 test('an empty follow set returns an empty page without a second query', async () => {
@@ -419,16 +382,16 @@ test('an empty follow set returns an empty page without a second query', async (
     viewerDid: 'did:plc:viewer',
     limit: 20
   });
-  assert.deepEqual(page, { feed: [] });
-  assert.equal(pool.calls.length, 1);
+  expect(page).toEqual({ feed: [] });
+  expect(pool.calls.length).toBe(1);
 });
 
 test('cursors are strict base64url JSON {c,u}', () => {
-  assert.deepEqual(decodeCursor(encodeCursor({ c: 'x', u: 'at://a/b/1' })), {
+  expect(decodeCursor(encodeCursor({ c: 'x', u: 'at://a/b/1' }))).toEqual({
     c: 'x',
     u: 'at://a/b/1'
   });
-  assert.deepEqual(decodeCursor(encodeCursor({ c: null, u: 'at://a/b/1' })), {
+  expect(decodeCursor(encodeCursor({ c: null, u: 'at://a/b/1' }))).toEqual({
     c: null,
     u: 'at://a/b/1'
   });
@@ -441,7 +404,7 @@ test('cursors are strict base64url JSON {c,u}', () => {
     Buffer.from('{"c":"x"}').toString('base64url'),
     Buffer.from('{"c":"x","u":""}').toString('base64url')
   ];
-  for (const value of cases) assert.equal(decodeCursor(value), null, value);
+  for (const value of cases) expect(decodeCursor(value), value).toBe(null);
 });
 
 test('reports follow-set and page phases once each, and only page for public', async () => {
@@ -464,9 +427,9 @@ test('reports follow-set and page phases once each, and only page for public', a
     }
   });
 
-  assert.deepEqual(followingEvents, ['follow_dids', 'page']);
-  assert.deepEqual(followingDids, [2]);
-  for (const duration of durations) assert.equal(typeof duration, 'number');
+  expect(followingEvents).toEqual(['follow_dids', 'page']);
+  expect(followingDids).toEqual([2]);
+  for (const duration of durations) expect(typeof duration).toBe('number');
 
   const publicEvents: string[] = [];
   const publicPool = queuedPool([[row('at://a/review/1', REVIEW_COLLECTION, {}, null)]]);
@@ -476,11 +439,11 @@ test('reports follow-set and page phases once each, and only page for public', a
     limit: 20,
     observe: (observation) => publicEvents.push(observation.event)
   });
-  assert.deepEqual(publicEvents, ['page']);
+  expect(publicEvents).toEqual(['page']);
 });
 
 test('advertises exactly the four documented feeds and no recommendations', () => {
   const kinds: readonly string[] = FEED_KINDS;
-  assert.deepEqual(kinds, ['public', 'following', 'extended', 'dynamic']);
-  assert.equal(kinds.includes('recommendations'), false);
+  expect(kinds).toEqual(['public', 'following', 'extended', 'dynamic']);
+  expect(kinds.includes('recommendations')).toBe(false);
 });

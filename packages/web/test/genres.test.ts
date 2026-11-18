@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { EDITION_COLLECTION, getEditionGenres } from '../src/lib/server/catalog/genres.ts';
 import type { EntityQueryable } from '../src/lib/server/catalog/entities.ts';
@@ -27,7 +26,7 @@ function fakePool(
 
 test('getEditionGenres answers null when the edition is not in the catalog', async () => {
   const { pool } = fakePool({ present: false, genres: [{ name: 'Fantasy', source: 'goodreads' }] });
-  assert.equal(await getEditionGenres(pool, EDITION_URI), null);
+  expect(await getEditionGenres(pool, EDITION_URI)).toBe(null);
 });
 
 test('getEditionGenres maps the rows in query order', async () => {
@@ -39,7 +38,7 @@ test('getEditionGenres maps the rows in query order', async () => {
     ]
   });
 
-  assert.deepEqual(await getEditionGenres(pool, EDITION_URI), {
+  expect(await getEditionGenres(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     genres: [
       { name: 'Science Fiction', source: 'goodreads' },
@@ -50,7 +49,7 @@ test('getEditionGenres maps the rows in query order', async () => {
 
 test('getEditionGenres answers an empty list for a known edition with no genres', async () => {
   const { pool } = fakePool({ present: true, genres: [] });
-  assert.deepEqual(await getEditionGenres(pool, EDITION_URI), {
+  expect(await getEditionGenres(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     genres: []
   });
@@ -60,8 +59,8 @@ test('both queries parameterize the URI and nothing else', async () => {
   const { pool, calls } = fakePool({ present: true, genres: [] });
   await getEditionGenres(pool, EDITION_URI);
 
-  assert.equal(calls.length, 2);
-  for (const call of calls) assert.deepEqual(call.values, [EDITION_URI]);
-  assert.match(calls[0].sql, /FROM editions WHERE uri = \$1/);
-  assert.match(calls[1].sql, /ORDER BY eg\.position, g\.name/);
+  expect(calls.length).toBe(2);
+  for (const call of calls) expect(call.values).toEqual([EDITION_URI]);
+  expect(calls[0].sql).toMatch(/FROM editions WHERE uri = \$1/);
+  expect(calls[1].sql).toMatch(/ORDER BY eg\.position, g\.name/);
 });

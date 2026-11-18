@@ -7,8 +7,8 @@
  * response is rejected for good, and an outage never writes a terminal outcome.
  */
 
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
+
 import { mkdtempSync } from 'node:fs';
 import { rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -42,7 +42,7 @@ function placeholderGif() {
 
 function cacheDirFor(t) {
   const dir = mkdtempSync(join(tmpdir(), 'bibliograph-covers-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  t.onTestFinished(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
 
@@ -179,9 +179,9 @@ test('a cached edition is never downloaded again', async (t) => {
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.deepEqual(download.calls, [], 'the cached bytes are reused');
-  assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
-  assert.deepEqual(statementsLike(statements, 'UPDATE editions'), [], 'no edition write');
+  expect(download.calls, 'the cached bytes are reused').toEqual([]);
+  expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'found'/);
+  expect(statementsLike(statements, 'UPDATE editions'), 'no edition write').toEqual([]);
 });
 
 test('a downloaded cover is cached, recorded, and the record is republished', async (t) => {
@@ -199,17 +199,13 @@ test('a downloaded cover is cached, recorded, and the record is republished', as
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.equal(await fileExists(coverCachePath(cacheDir, EDITION)), true, 'the bytes are on disk');
+  expect(await fileExists(coverCachePath(cacheDir, EDITION)), 'the bytes are on disk').toBe(true);
   const upsert = statementsLike(statements, 'INSERT INTO edition_cover_files');
-  assert.equal(upsert.length, 1);
-  assert.deepEqual(upsert[0].values, [EDITION, COVER, 'image/jpeg', bytes.length]);
-  assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
-  assert.equal(statementsLike(statements, 'INSERT INTO pds_outbox').length, 1);
-  assert.deepEqual(
-    statementsLike(statements, 'UPDATE editions'),
-    [],
-    'an existing provider URL is left alone'
-  );
+  expect(upsert.length).toBe(1);
+  expect(upsert[0].values).toEqual([EDITION, COVER, 'image/jpeg', bytes.length]);
+  expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'found'/);
+  expect(statementsLike(statements, 'INSERT INTO pds_outbox').length).toBe(1);
+  expect(statementsLike(statements, 'UPDATE editions'), 'an existing provider URL is left alone').toEqual([]);
 });
 
 test('a placeholder-sized image is rejected, and the URL is cleared', async (t) => {
@@ -227,12 +223,12 @@ test('a placeholder-sized image is rejected, and the URL is cleared', async (t) 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
   const cleared = statementsLike(statements, 'UPDATE editions SET cover_url = NULL');
-  assert.deepEqual(cleared[0]?.values, [EDITION, COVER]);
+  expect(cleared[0]?.values).toEqual([EDITION, COVER]);
   const rejected = ledger(statements);
-  assert.match(rejected?.sql ?? '', /outcome = 'rejected'/);
-  assert.match(rejected?.sql ?? '', /source_url = \$2/);
-  assert.deepEqual(rejected?.values, [EDITION, COVER]);
-  assert.equal(await fileExists(coverCachePath(cacheDir, EDITION)), false, 'nothing was cached');
+  expect(rejected?.sql ?? '').toMatch(/outcome = 'rejected'/);
+  expect(rejected?.sql ?? '').toMatch(/source_url = \$2/);
+  expect(rejected?.values).toEqual([EDITION, COVER]);
+  expect(await fileExists(coverCachePath(cacheDir, EDITION)), 'nothing was cached').toBe(false);
 });
 
 test('a transport failure rejects the job and writes no terminal outcome', async (t) => {
@@ -247,13 +243,10 @@ test('a transport failure rejects the job and writes no terminal outcome', async
     coverFetch: download.impl
   });
 
-  await assert.rejects(
-    () => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log }),
-    /socket hang up/
-  );
+  await expect(() => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log })).rejects.toThrow(/socket hang up/);
 
-  assert.equal(ledger(statements), undefined, 'the claim is kept so the retry does not wait');
-  assert.deepEqual(statementsLike(statements, 'UPDATE editions'), []);
+  expect(ledger(statements), 'the claim is kept so the retry does not wait').toBe(undefined);
+  expect(statementsLike(statements, 'UPDATE editions')).toEqual([]);
 });
 
 test('a provider 5xx is retried rather than treated as a missing cover', async (t) => {
@@ -270,13 +263,10 @@ test('a provider 5xx is retried rather than treated as a missing cover', async (
     coverFetch: download.impl
   });
 
-  await assert.rejects(
-    () => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log }),
-    /answered 503/
-  );
-  assert.equal(ledger(statements), undefined);
+  await expect(() => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log })).rejects.toThrow(/answered 503/);
+  expect(ledger(statements)).toBe(undefined);
   // A 5xx is a provider problem: the retry is what the counter must show.
-  assert.deepEqual(coverMetrics.snapshot(), [{ result: 'retry', status: '503', count: 1 }]);
+  expect(coverMetrics.snapshot()).toEqual([{ result: 'retry', status: '503', count: 1 }]);
 });
 
 test('a 403 is terminal for its URL, and the outcome is counted', async (t) => {
@@ -297,9 +287,9 @@ test('a 403 is terminal for its URL, and the outcome is counted', async (t) => {
   // edition loses the dead URL and the ledger records it terminaally.
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.match(ledger(statements)?.sql ?? '', /outcome = 'rejected'/);
-  assert.match(statementsLike(statements, 'UPDATE editions')[0]?.sql ?? '', /cover_url = NULL/);
-  assert.deepEqual(coverMetrics.snapshot(), [{ result: 'rejected', status: '403', count: 1 }]);
+  expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'rejected'/);
+  expect(statementsLike(statements, 'UPDATE editions')[0]?.sql ?? '').toMatch(/cover_url = NULL/);
+  expect(coverMetrics.snapshot()).toEqual([{ result: 'rejected', status: '403', count: 1 }]);
 });
 
 test('an edition without a cover URL discovers one, then caches it', async (t) => {
@@ -320,17 +310,17 @@ test('an edition without a cover URL discovers one, then caches it', async (t) =
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.deepEqual(download.calls, [COVER], 'the discovered URL is what gets downloaded');
-  assert.equal(providers.calls.google, 0, 'Google Books is only the fallback');
+  expect(download.calls, 'the discovered URL is what gets downloaded').toEqual([COVER]);
+  expect(providers.calls.google, 'Google Books is only the fallback').toBe(0);
   // The guarded write is what keeps a concurrent curator edit winning.
   const discovered = statementsLike(statements, 'UPDATE editions SET cover_url = $2');
-  assert.deepEqual(discovered[0]?.values, [EDITION, COVER]);
-  assert.match(discovered[0]?.sql ?? '', /cover_url IS NULL OR btrim\(cover_url\) = ''/);
-  assert.match(ledger(statements)?.sql ?? '', /outcome = 'found'/);
-  assert.equal(await fileExists(coverCachePath(cacheDir, EDITION)), true);
+  expect(discovered[0]?.values).toEqual([EDITION, COVER]);
+  expect(discovered[0]?.sql ?? '').toMatch(/cover_url IS NULL OR btrim\(cover_url\) = ''/);
+  expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'found'/);
+  expect(await fileExists(coverCachePath(cacheDir, EDITION))).toBe(true);
   // One file on disk, and the byte total is its size — the metric an operator
   // reads to explain the cache directory's growth.
-  assert.deepEqual(coverMetrics.counters(), {
+  expect(coverMetrics.counters()).toEqual({
     writes: 1,
     writeBytes: bytes.length,
     removals: 0
@@ -355,11 +345,8 @@ test('Google Books answers when OpenLibrary has no cover', async (t) => {
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.equal(providers.calls.isbn, ISBN, 'the ISBN is what Google is asked for');
-  assert.deepEqual(
-    statementsLike(statements, 'INSERT INTO edition_cover_files')[0]?.values.slice(0, 2),
-    [EDITION, GOOGLE_COVER]
-  );
+  expect(providers.calls.isbn, 'the ISBN is what Google is asked for').toBe(ISBN);
+  expect(statementsLike(statements, 'INSERT INTO edition_cover_files')[0]?.values.slice(0, 2)).toEqual([EDITION, GOOGLE_COVER]);
 });
 
 test('a "no cover" answer is recorded and no edition is touched', async (t) => {
@@ -376,9 +363,9 @@ test('a "no cover" answer is recorded and no edition is touched', async (t) => {
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.deepEqual(download.calls, [], 'nothing to download');
-  assert.match(ledger(statements)?.sql ?? '', /outcome = 'none'/);
-  assert.deepEqual(statementsLike(statements, 'UPDATE editions'), []);
+  expect(download.calls, 'nothing to download').toEqual([]);
+  expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'none'/);
+  expect(statementsLike(statements, 'UPDATE editions')).toEqual([]);
 });
 
 test('an outage during discovery fails the job instead of recording no cover', async (t) => {
@@ -395,11 +382,8 @@ test('an outage during discovery fails the job instead of recording no cover', a
     coverFetch: coverFetch(jpegBytes()).impl
   });
 
-  await assert.rejects(
-    () => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log }),
-    /openlibrary 503/
-  );
-  assert.equal(ledger(statements), undefined);
+  await expect(() => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log })).rejects.toThrow(/openlibrary 503/);
+  expect(ledger(statements)).toBe(undefined);
 });
 
 test('an unset COVERS_CACHE_DIR downloads nothing and records nothing', async () => {
@@ -415,8 +399,8 @@ test('an unset COVERS_CACHE_DIR downloads nothing and records nothing', async ()
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  assert.deepEqual(download.calls, []);
+  expect(download.calls).toEqual([]);
   // No query at all: the guard runs before the edition lookup, so a disabled
   // cache cannot half-apply a ledger outcome to an edition it never examined.
-  assert.deepEqual(statements, []);
+  expect(statements).toEqual([]);
 });

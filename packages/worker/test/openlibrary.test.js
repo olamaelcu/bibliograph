@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   candidateFromEdition,
@@ -96,41 +95,41 @@ function openLibrary({ handler }) {
 }
 
 test('parses only unambiguous full OpenLibrary dates', () => {
-  assert.equal(parseOpenLibraryDate('1965-07-31'), '1965-07-31');
-  assert.equal(parseOpenLibraryDate('1965-7-1'), '1965-07-01');
-  assert.equal(parseOpenLibraryDate('31 July 1965'), '1965-07-31');
-  assert.equal(parseOpenLibraryDate('July 31, 1965'), '1965-07-31');
-  assert.equal(parseOpenLibraryDate('Jan. 2, 1900'), '1900-01-02');
-  assert.equal(parseOpenLibraryDate('1965'), undefined, 'a year is partial');
-  assert.equal(parseOpenLibraryDate('July 1965'), undefined, 'a month is partial');
-  assert.equal(parseOpenLibraryDate('07/08/1965'), undefined, 'numeric order is ambiguous');
-  assert.equal(parseOpenLibraryDate('1965-02-30'), undefined, 'impossible calendar day');
-  assert.equal(parseOpenLibraryDate('circa 1965'), undefined);
-  assert.equal(parseOpenLibraryDate(undefined), undefined);
+  expect(parseOpenLibraryDate('1965-07-31')).toBe('1965-07-31');
+  expect(parseOpenLibraryDate('1965-7-1')).toBe('1965-07-01');
+  expect(parseOpenLibraryDate('31 July 1965')).toBe('1965-07-31');
+  expect(parseOpenLibraryDate('July 31, 1965')).toBe('1965-07-31');
+  expect(parseOpenLibraryDate('Jan. 2, 1900')).toBe('1900-01-02');
+  expect(parseOpenLibraryDate('1965'), 'a year is partial').toBe(undefined);
+  expect(parseOpenLibraryDate('July 1965'), 'a month is partial').toBe(undefined);
+  expect(parseOpenLibraryDate('07/08/1965'), 'numeric order is ambiguous').toBe(undefined);
+  expect(parseOpenLibraryDate('1965-02-30'), 'impossible calendar day').toBe(undefined);
+  expect(parseOpenLibraryDate('circa 1965')).toBe(undefined);
+  expect(parseOpenLibraryDate(undefined)).toBe(undefined);
 });
 
 test('normalizes an OpenLibrary search document into an edition candidate', () => {
   const candidate = candidateFromSearchDocument(searchDocument);
-  assert.equal(candidate.title, 'The Left Hand of Darkness');
-  assert.equal(candidate.subtitle, 'A Novel');
-  assert.deepEqual(candidate.identifiers, [
+  expect(candidate.title).toBe('The Left Hand of Darkness');
+  expect(candidate.subtitle).toBe('A Novel');
+  expect(candidate.identifiers).toEqual([
     { issuer: 'openlibrary', value: 'OL123M' },
     { issuer: 'isbn13', value: ISBN13 },
     { issuer: 'isbn10', value: ISBN10 }
   ]);
-  assert.equal(candidate.publishedDate, '1969');
-  assert.equal(candidate.language, 'eng');
-  assert.equal(candidate.pages, 304);
-  assert.equal(candidate.coverUrl, 'https://covers.openlibrary.org/b/id/12345-L.jpg');
-  assert.equal(candidate.publisher.name, 'Ace');
-  assert.deepEqual(candidate.contributors, [
+  expect(candidate.publishedDate).toBe('1969');
+  expect(candidate.language).toBe('eng');
+  expect(candidate.pages).toBe(304);
+  expect(candidate.coverUrl).toBe('https://covers.openlibrary.org/b/id/12345-L.jpg');
+  expect(candidate.publisher.name).toBe('Ace');
+  expect(candidate.contributors).toEqual([
     {
       name: 'Ursula K. Le Guin',
       role: 'A01',
       identifiers: [{ issuer: 'openlibrary', value: AUTHOR_KEY }]
     }
   ]);
-  assert.equal(candidateKey(candidate), `isbn:${ISBN13}`);
+  expect(candidateKey(candidate)).toBe(`isbn:${ISBN13}`);
 });
 
 test('search uses the bounded fields query and skips malformed documents', async () => {
@@ -152,12 +151,12 @@ test('search uses the bounded fields query and skips malformed documents', async
   const candidates = await provider.search({ title: 'left hand', author: 'le guin' });
 
   const searchCall = calls.find((url) => url.pathname === '/search.json');
-  assert.equal(searchCall.searchParams.get('q'), 'left hand le guin');
-  assert.equal(searchCall.searchParams.get('limit'), String(SEARCH_LIMIT));
-  assert.match(searchCall.searchParams.get('fields'), /edition_key/);
-  assert.equal(candidates.length, 2);
-  assert.equal(candidates[0].title, 'The Left Hand of Darkness');
-  assert.deepEqual(candidates[1].identifiers, [{ issuer: 'openlibrary', value: 'OL999W' }]);
+  expect(searchCall.searchParams.get('q')).toBe('left hand le guin');
+  expect(searchCall.searchParams.get('limit')).toBe(String(SEARCH_LIMIT));
+  expect(searchCall.searchParams.get('fields')).toMatch(/edition_key/);
+  expect(candidates.length).toBe(2);
+  expect(candidates[0].title).toBe('The Left Hand of Darkness');
+  expect(candidates[1].identifiers).toEqual([{ issuer: 'openlibrary', value: 'OL999W' }]);
 });
 
 test('normalizes an edition with work and author expansion', async () => {
@@ -175,23 +174,20 @@ test('normalizes an edition with work and author expansion', async () => {
 
   const candidates = await provider.byIsbn(ISBN13);
 
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].description, 'Work description.');
-  assert.equal(candidates[0].contributors[0].name, 'Ursula K. Le Guin');
-  assert.equal(candidates[0].contributors[0].description, 'An American author.');
-  assert.equal(candidates[0].coverUrl, 'https://covers.openlibrary.org/b/id/12345-L.jpg');
-  assert.equal(candidates[0].format, 'Paperback');
-  assert.equal(candidates[0].series.name, 'The Hainish Cycle');
-  assert.equal(candidates[0].language, 'eng');
-  assert.deepEqual(
-    candidates[0].identifiers,
-    [
+  expect(candidates.length).toBe(1);
+  expect(candidates[0].description).toBe('Work description.');
+  expect(candidates[0].contributors[0].name).toBe('Ursula K. Le Guin');
+  expect(candidates[0].contributors[0].description).toBe('An American author.');
+  expect(candidates[0].coverUrl).toBe('https://covers.openlibrary.org/b/id/12345-L.jpg');
+  expect(candidates[0].format).toBe('Paperback');
+  expect(candidates[0].series.name).toBe('The Hainish Cycle');
+  expect(candidates[0].language).toBe('eng');
+  expect(candidates[0].identifiers).toEqual([
       { issuer: 'openlibrary', value: 'OL123M' },
       { issuer: 'isbn13', value: ISBN13 },
       { issuer: 'isbn10', value: ISBN10 }
-    ]
-  );
-  assert.ok(calls.some((url) => url.pathname === `/isbn/${ISBN13}.json`));
+    ]);
+  expect(calls.some((url) => url.pathname === `/isbn/${ISBN13}.json`)).toBeTruthy();
 });
 
 test('byIdentifier resolves edition and work keys, deduping work editions', async () => {
@@ -212,29 +208,26 @@ test('byIdentifier resolves edition and work keys, deduping work editions', asyn
     }
   });
 
-  assert.equal(openLibraryBookKey('/books/OL123M'), 'OL123M');
-  assert.equal(openLibraryBookKey('OL456W'), 'OL456W');
-  assert.equal(openLibraryBookKey('/authors/OL789A'), undefined);
+  expect(openLibraryBookKey('/books/OL123M')).toBe('OL123M');
+  expect(openLibraryBookKey('OL456W')).toBe('OL456W');
+  expect(openLibraryBookKey('/authors/OL789A')).toBe(undefined);
 
   const edition = await provider.byIdentifier('OL123M');
-  assert.equal(edition.length, 1);
-  assert.equal(edition[0].identifiers[0].value, 'OL123M');
+  expect(edition.length).toBe(1);
+  expect(edition[0].identifiers[0].value).toBe('OL123M');
 
   const work = await provider.byIdentifier('/works/OL456W');
-  assert.equal(work.length, 2, 'the duplicate edition is merged');
-  assert.deepEqual(
-    work.map((candidate) => candidate.identifiers.find((id) => id.issuer === 'openlibrary').value),
-    ['OL123M', 'OL124M']
-  );
-  assert.ok(calls.some((url) => url.pathname === '/works/OL456W/editions.json'));
+  expect(work.length, 'the duplicate edition is merged').toBe(2);
+  expect(work.map((candidate) => candidate.identifiers.find((id) => id.issuer === 'openlibrary').value)).toEqual(['OL123M', 'OL124M']);
+  expect(calls.some((url) => url.pathname === '/works/OL456W/editions.json')).toBeTruthy();
 });
 
 test('byIsbn answers empty for a 404 and rejects a provider failure', async () => {
   const missing = openLibrary({ handler: () => jsonResponse({}, 404) });
-  assert.deepEqual(await missing.provider.byIsbn(ISBN13), []);
+  expect(await missing.provider.byIsbn(ISBN13)).toEqual([]);
 
   const broken = openLibrary({ handler: () => jsonResponse({ message: 'boom' }, 500) });
-  await assert.rejects(() => broken.provider.byIsbn(ISBN13), /answered 500/);
+  await expect(() => broken.provider.byIsbn(ISBN13)).rejects.toThrow(/answered 500/);
 });
 
 test('searches contributors and expands author detail', async () => {
@@ -256,15 +249,15 @@ test('searches contributors and expands author detail', async () => {
 
   const contributors = await provider.searchContributors('le guin', { limit: 500 });
   const searchCall = calls.find((url) => url.pathname === '/search/authors.json');
-  assert.equal(searchCall.searchParams.get('q'), 'le guin');
-  assert.equal(searchCall.searchParams.get('limit'), '50', 'the provider caps the limit');
-  assert.equal(contributors.length, 2);
-  assert.deepEqual(contributors[0].identifiers, [{ issuer: 'openlibrary', value: AUTHOR_KEY }]);
-  assert.equal(contributors[0].born, undefined, 'a bare year is omitted');
-  assert.equal(contributors[1].born, undefined, 'a month/year is omitted');
+  expect(searchCall.searchParams.get('q')).toBe('le guin');
+  expect(searchCall.searchParams.get('limit'), 'the provider caps the limit').toBe('50');
+  expect(contributors.length).toBe(2);
+  expect(contributors[0].identifiers).toEqual([{ issuer: 'openlibrary', value: AUTHOR_KEY }]);
+  expect(contributors[0].born, 'a bare year is omitted').toBe(undefined);
+  expect(contributors[1].born, 'a month/year is omitted').toBe(undefined);
 
   const detail = await provider.author(`/authors/${AUTHOR_KEY}`);
-  assert.deepEqual(detail, {
+  expect(detail).toEqual({
     displayName: 'Ursula K. Le Guin',
     identifiers: [
       { issuer: 'openlibrary', value: AUTHOR_KEY },
@@ -279,7 +272,7 @@ test('searches contributors and expands author detail', async () => {
     born: '1929-10-21',
     died: '2018-01-22'
   });
-  assert.equal(detail.role, undefined, 'contributor candidates never carry edition roles');
+  expect(detail.role, 'contributor candidates never carry edition roles').toBe(undefined);
 });
 
 test('contributor normalization keeps partial dates out', () => {
@@ -290,11 +283,11 @@ test('contributor normalization keeps partial dates out', () => {
     death_date: '1970-06',
     remote_ids: {}
   });
-  assert.equal(contributor.displayName, 'No Full Dates');
-  assert.equal(contributor.born, undefined);
-  assert.equal(contributor.died, undefined);
-  assert.deepEqual(contributor.identifiers, [{ issuer: 'openlibrary', value: 'OL1A' }]);
-  assert.equal(contributorFromAuthorDocument({ key: 'OL1A' }), undefined);
+  expect(contributor.displayName).toBe('No Full Dates');
+  expect(contributor.born).toBe(undefined);
+  expect(contributor.died).toBe(undefined);
+  expect(contributor.identifiers).toEqual([{ issuer: 'openlibrary', value: 'OL1A' }]);
+  expect(contributorFromAuthorDocument({ key: 'OL1A' })).toBe(undefined);
 });
 
 test('candidateFromEdition accepts missing optional fields', () => {
@@ -303,7 +296,7 @@ test('candidateFromEdition accepts missing optional fields', () => {
     title: 'Minimal Edition',
     isbn_13: ['9780306406157']
   });
-  assert.deepEqual(candidate, {
+  expect(candidate).toEqual({
     title: 'Minimal Edition',
     identifiers: [
       { issuer: 'openlibrary', value: 'OL1M' },
@@ -311,7 +304,7 @@ test('candidateFromEdition accepts missing optional fields', () => {
     ],
     contributors: []
   });
-  assert.equal(candidateFromEdition({ title: 'No identity' }), undefined);
+  expect(candidateFromEdition({ title: 'No identity' })).toBe(undefined);
 });
 
 test('candidateFromEdition takes the contributor bio from author detail', () => {
@@ -329,7 +322,7 @@ test('candidateFromEdition takes the contributor bio from author detail', () => 
     }
   );
 
-  assert.deepEqual(candidate.contributors, [
+  expect(candidate.contributors).toEqual([
     {
       name: 'Bio Author',
       role: 'A01',
@@ -365,19 +358,16 @@ test('describeContributors fills only a missing bio', async () => {
   ];
 
   const described = await provider.describeContributors(contributors);
-  assert.equal(described[0].description, 'An American author.');
-  assert.equal(described[1].description, 'Kept.');
-  assert.equal(described[1], contributors[1], 'a described candidate is untouched');
-  assert.equal(described[2].description, undefined);
-  assert.equal(described[3].description, undefined, 'a failed lookup is not fatal');
-  assert.deepEqual(
-    authorCalls().map((url) => url.pathname),
-    [`/authors/${AUTHOR_KEY}.json`, '/authors/OL999A.json']
-  );
+  expect(described[0].description).toBe('An American author.');
+  expect(described[1].description).toBe('Kept.');
+  expect(described[1], 'a described candidate is untouched').toBe(contributors[1]);
+  expect(described[2].description).toBe(undefined);
+  expect(described[3].description, 'a failed lookup is not fatal').toBe(undefined);
+  expect(authorCalls().map((url) => url.pathname)).toEqual([`/authors/${AUTHOR_KEY}.json`, '/authors/OL999A.json']);
 
   const skipped = await provider.describeContributors(contributors, { limit: 0 });
-  assert.deepEqual(skipped, contributors);
-  assert.equal(authorCalls().length, 2, 'limit 0 makes no author request');
+  expect(skipped).toEqual(contributors);
+  expect(authorCalls().length, 'limit 0 makes no author request').toBe(2);
 });
 
 test('provider chain tries Goodreads before OpenLibrary', async () => {
@@ -413,14 +403,12 @@ test('provider chain tries Goodreads before OpenLibrary', async () => {
   });
 
   const candidates = await providers.search({ title: 'left hand' });
-  assert.deepEqual(order, ['googlebooks', 'goodreads', 'openlibrary']);
-  assert.equal(candidates[0].title, 'The Left Hand of Darkness');
-  assert.equal(providers.resilience.openlibrary.state, 'closed');
-  assert.ok(
-    providers.metrics
+  expect(order).toEqual(['googlebooks', 'goodreads', 'openlibrary']);
+  expect(candidates[0].title).toBe('The Left Hand of Darkness');
+  expect(providers.resilience.openlibrary.state).toBe('closed');
+  expect(providers.metrics
       .snapshot()
-      .breaker.some((row) => row.provider === 'openlibrary' && row.state === 'closed')
-  );
+      .breaker.some((row) => row.provider === 'openlibrary' && row.state === 'closed')).toBeTruthy();
 });
 
 test('the ISBN chain tries Goodreads before OpenLibrary', async () => {
@@ -461,8 +449,8 @@ test('the ISBN chain tries Goodreads before OpenLibrary', async () => {
   });
 
   const candidates = await providers.resolve({ issuer: 'isbn13', value: ISBN13 });
-  assert.deepEqual(order, ['googlebooks', 'goodreads', 'openlibrary']);
-  assert.equal(candidates[0].title, 'The Left Hand of Darkness');
+  expect(order).toEqual(['googlebooks', 'goodreads', 'openlibrary']);
+  expect(candidates[0].title).toBe('The Left Hand of Darkness');
 });
 
 test('a Goodreads candidate stops the chain before OpenLibrary', async () => {
@@ -498,8 +486,8 @@ test('a Goodreads candidate stops the chain before OpenLibrary', async () => {
   });
 
   const candidates = await providers.search({ title: 'goodreads wins' });
-  assert.deepEqual(order, ['googlebooks', 'goodreads']);
-  assert.deepEqual(candidates.map((candidate) => candidate.title), ['Goodreads First']);
+  expect(order).toEqual(['googlebooks', 'goodreads']);
+  expect(candidates.map((candidate) => candidate.title)).toEqual(['Goodreads First']);
 });
 
 test('a Google candidate still stops the chain before Goodreads and OpenLibrary', async () => {
@@ -535,8 +523,8 @@ test('a Google candidate still stops the chain before Goodreads and OpenLibrary'
   });
 
   const candidates = await providers.search({ title: 'google wins' });
-  assert.deepEqual(candidates.map((candidate) => candidate.title), ['Google First']);
-  assert.deepEqual(called, ['/google/volumes']);
+  expect(candidates.map((candidate) => candidate.title)).toEqual(['Google First']);
+  expect(called).toEqual(['/google/volumes']);
 });
 
 test('openlibrary identifiers resolve directly', async () => {
@@ -565,10 +553,10 @@ test('openlibrary identifiers resolve directly', async () => {
   });
 
   const candidates = await providers.resolve({ issuer: 'openlibrary', value: 'OL123M' });
-  assert.equal(candidates[0].title, 'The Left Hand of Darkness');
-  assert.ok(called.includes('/openlibrary/books/OL123M.json'));
-  assert.ok(!called.some((path) => path.startsWith('/google/')));
-  assert.ok(!called.some((path) => path.startsWith('/goodreads/')));
+  expect(candidates[0].title).toBe('The Left Hand of Darkness');
+  expect(called.includes('/openlibrary/books/OL123M.json')).toBeTruthy();
+  expect(!called.some((path) => path.startsWith('/google/'))).toBeTruthy();
+  expect(!called.some((path) => path.startsWith('/goodreads/'))).toBeTruthy();
 });
 
 // ---------------------------------------------------------------------------
@@ -582,11 +570,11 @@ const DUNE_WORK = {
 };
 
 test('subjectsFromWork keeps only the non-empty strings', () => {
-  assert.deepEqual(subjectsFromWork(DUNE_WORK), DUNE_WORK.subjects);
-  assert.deepEqual(subjectsFromWork({ subjects: ['Fiction', '', '   ', 42, null] }), ['Fiction']);
-  assert.deepEqual(subjectsFromWork({ subjects: 'Fiction' }), [], 'a bare string is not a list');
-  assert.deepEqual(subjectsFromWork({}), []);
-  assert.deepEqual(subjectsFromWork(undefined), []);
+  expect(subjectsFromWork(DUNE_WORK)).toEqual(DUNE_WORK.subjects);
+  expect(subjectsFromWork({ subjects: ['Fiction', '', '   ', 42, null] })).toEqual(['Fiction']);
+  expect(subjectsFromWork({ subjects: 'Fiction' }), 'a bare string is not a list').toEqual([]);
+  expect(subjectsFromWork({})).toEqual([]);
+  expect(subjectsFromWork(undefined)).toEqual([]);
 });
 
 test('genresForEdition resolves a work key in one request', async () => {
@@ -599,8 +587,8 @@ test('genresForEdition resolves a work key in one request', async () => {
     { issuer: 'openlibrary', value: 'OL893414W' }
   ]);
 
-  assert.deepEqual(subjects, DUNE_WORK.subjects);
-  assert.deepEqual(calls.map((call) => call.pathname), ['/works/OL893414W.json']);
+  expect(subjects).toEqual(DUNE_WORK.subjects);
+  expect(calls.map((call) => call.pathname)).toEqual(['/works/OL893414W.json']);
 });
 
 test('genresForEdition reaches the work through an edition key', async () => {
@@ -616,8 +604,8 @@ test('genresForEdition reaches the work through an edition key', async () => {
 
   const subjects = await provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL123M' }]);
 
-  assert.equal(subjects[1], 'Science fiction');
-  assert.deepEqual(calls.map((call) => call.pathname), [
+  expect(subjects[1]).toBe('Science fiction');
+  expect(calls.map((call) => call.pathname)).toEqual([
     '/books/OL123M.json',
     '/works/OL893414W.json'
   ]);
@@ -639,8 +627,8 @@ test('genresForEdition reaches the work through an ISBN', async () => {
     { issuer: 'goodreads', value: '234225' }
   ]);
 
-  assert.equal(subjects[0], 'Fiction');
-  assert.deepEqual(calls.map((call) => call.pathname), [
+  expect(subjects[0]).toBe('Fiction');
+  expect(calls.map((call) => call.pathname)).toEqual([
     `/isbn/${ISBN13}.json`,
     '/works/OL893414W.json'
   ]);
@@ -657,11 +645,8 @@ test('genresForEdition follows exactly one work redirect', async () => {
     }
   });
 
-  assert.deepEqual(
-    await provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL893415W' }]),
-    DUNE_WORK.subjects
-  );
-  assert.deepEqual(calls.map((call) => call.pathname), [
+  expect(await provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL893415W' }])).toEqual(DUNE_WORK.subjects);
+  expect(calls.map((call) => call.pathname)).toEqual([
     '/works/OL893415W.json',
     '/works/OL893414W.json'
   ]);
@@ -679,23 +664,16 @@ test('genresForEdition answers nothing for a second redirect, a 404 or no identi
       return jsonResponse({}, 404);
     }
   });
-  assert.deepEqual(
-    await redirecting.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL893414W' }]),
-    [],
-    'a redirect chain is not chased'
-  );
-  assert.equal(redirecting.calls.length, 2, 'the second hop was attempted once, not followed again');
+  expect(await redirecting.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL893414W' }]), 'a redirect chain is not chased').toEqual([]);
+  expect(redirecting.calls.length, 'the second hop was attempted once, not followed again').toBe(2);
 
   const missing = openLibrary({ handler: () => jsonResponse({}, 404) });
-  assert.deepEqual(
-    await missing.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL404W' }]),
-    []
-  );
+  expect(await missing.provider.genresForEdition([{ issuer: 'openlibrary', value: 'OL404W' }])).toEqual([]);
 
   const empty = openLibrary({ handler: () => jsonResponse({}, 404) });
-  assert.deepEqual(await empty.provider.genresForEdition([]), []);
-  assert.deepEqual(await empty.provider.genresForEdition(), []);
-  assert.equal(empty.calls.length, 0, 'no identifier means no request');
+  expect(await empty.provider.genresForEdition([])).toEqual([]);
+  expect(await empty.provider.genresForEdition()).toEqual([]);
+  expect(empty.calls.length, 'no identifier means no request').toBe(0);
 });
 
 test('coverForEdition reads the cover of the edition an ISBN resolves to', async () => {
@@ -711,8 +689,8 @@ test('coverForEdition reads the cover of the edition an ISBN resolves to', async
     { issuer: 'goodreads', value: '234225' }
   ]);
 
-  assert.equal(cover, 'https://covers.openlibrary.org/b/id/12345-L.jpg');
-  assert.deepEqual(calls.map((call) => call.pathname), [`/isbn/${ISBN13}.json`]);
+  expect(cover).toBe('https://covers.openlibrary.org/b/id/12345-L.jpg');
+  expect(calls.map((call) => call.pathname)).toEqual([`/isbn/${ISBN13}.json`]);
 });
 
 test('coverForEdition treats a missing or non-positive cover as no cover', async () => {
@@ -720,11 +698,7 @@ test('coverForEdition treats a missing or non-positive cover as no cover', async
     const { provider } = openLibrary({
       handler: () => jsonResponse({ key: '/books/OL123M', covers })
     });
-    assert.equal(
-      await provider.coverForEdition([{ issuer: 'isbn13', value: ISBN13 }]),
-      undefined,
-      `covers ${JSON.stringify(covers)}`
-    );
+    expect(await provider.coverForEdition([{ issuer: 'isbn13', value: ISBN13 }]), `covers ${JSON.stringify(covers)}`).toBe(undefined);
   }
 });
 
@@ -738,15 +712,15 @@ test('coverForEdition reads an OL…M identifier edition without an ISBN', async
 
   const cover = await provider.coverForEdition([{ issuer: 'openlibrary', value: 'OL123M' }]);
 
-  assert.equal(cover, 'https://covers.openlibrary.org/b/id/777-L.jpg');
-  assert.deepEqual(calls.map((call) => call.pathname), ['/books/OL123M.json']);
+  expect(cover).toBe('https://covers.openlibrary.org/b/id/777-L.jpg');
+  expect(calls.map((call) => call.pathname)).toEqual(['/books/OL123M.json']);
 });
 
 test('coverForEdition makes no request for a bag with no usable identifier', async () => {
   const { provider, calls } = openLibrary({ handler: () => jsonResponse({}, 404) });
 
-  assert.equal(await provider.coverForEdition([{ issuer: 'goodreads', value: '234225' }]), undefined);
-  assert.equal(await provider.coverForEdition([]), undefined);
-  assert.equal(await provider.coverForEdition(), undefined);
-  assert.equal(calls.length, 0, 'no usable identifier means no request');
+  expect(await provider.coverForEdition([{ issuer: 'goodreads', value: '234225' }])).toBe(undefined);
+  expect(await provider.coverForEdition([])).toBe(undefined);
+  expect(await provider.coverForEdition()).toBe(undefined);
+  expect(calls.length, 'no usable identifier means no request').toBe(0);
 });

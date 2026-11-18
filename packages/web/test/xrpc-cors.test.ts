@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   applyXrpcCors,
@@ -107,22 +106,22 @@ async function invoke(
 }
 
 function assertCors(response: Response): void {
-  assert.equal(response.headers.get('access-control-allow-origin'), '*');
-  assert.equal(response.headers.get('vary'), 'Origin');
-  assert.equal(response.headers.get('access-control-expose-headers'), 'dpop-nonce');
+  expect(response.headers.get('access-control-allow-origin')).toBe('*');
+  expect(response.headers.get('vary')).toBe('Origin');
+  expect(response.headers.get('access-control-expose-headers')).toBe('dpop-nonce');
 }
 
 function assertPreflight(response: Response): void {
-  assert.equal(response.status, 204);
+  expect(response.status).toBe(204);
   assertCors(response);
-  assert.equal(response.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
+  expect(response.headers.get('access-control-allow-methods')).toBe('GET, POST, OPTIONS');
   const allowed = (response.headers.get('access-control-allow-headers') ?? '')
     .split(',')
     .map((name) => name.trim().toLowerCase());
   for (const header of ['content-type', 'authorization', 'dpop', 'accept']) {
-    assert.ok(allowed.includes(header), `preflight must allow ${header}`);
+    expect(allowed.includes(header), `preflight must allow ${header}`).toBeTruthy();
   }
-  assert.equal(response.headers.get('access-control-max-age'), '86400');
+  expect(response.headers.get('access-control-max-age')).toBe('86400');
 }
 
 test('isNsid accepts the routed methods and rejects non-NSID paths', () => {
@@ -136,10 +135,10 @@ test('isNsid accepts the routed methods and rejects non-NSID paths', () => {
     GET_FEED_SKELETON,
     'a.b.c'
   ]) {
-    assert.ok(isNsid(method), `${method} is an NSID`);
+    expect(isNsid(method), `${method} is an NSID`).toBeTruthy();
   }
   for (const method of ['', 'abc', 'com.atproto', 'com..foo', 'com/atproto/foo', '.com.foo']) {
-    assert.ok(!isNsid(method), `${JSON.stringify(method)} is not an NSID`);
+    expect(!isNsid(method), `${JSON.stringify(method)} is not an NSID`).toBeTruthy();
   }
 });
 
@@ -160,9 +159,9 @@ test('every GET branch carries CORS, including forwarded and proxied reads', asy
   for (const { method, handler } of cases) {
     const { response, calls } = await invoke(dispatchGet, method);
     assertCors(response);
-    assert.equal(response.status, 200);
-    assert.deepEqual(calls, [{ handler, method }]);
-    assert.deepEqual(await response.json(), { handler });
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ handler, method }]);
+    expect(await response.json()).toEqual({ handler });
   }
 });
 
@@ -176,8 +175,8 @@ test('every POST branch carries CORS, including forwarded writes', async () => {
   for (const { method, handler } of cases) {
     const { response, calls } = await invoke(dispatchPost, method);
     assertCors(response);
-    assert.equal(response.status, 200);
-    assert.deepEqual(calls, [{ handler, method }]);
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ handler, method }]);
   }
 });
 
@@ -185,8 +184,8 @@ test('wrong-verb 405s carry CORS', async () => {
   for (const method of [CATALOG_POST]) {
     const { response: viaGet } = await invoke(dispatchGet, method);
     assertCors(viaGet);
-    assert.equal(viaGet.status, 405);
-    assert.deepEqual(await viaGet.json(), { error: 'MethodNotAllowed' });
+    expect(viaGet.status).toBe(405);
+    expect(await viaGet.json()).toEqual({ error: 'MethodNotAllowed' });
   }
 
   for (const method of [
@@ -197,8 +196,8 @@ test('wrong-verb 405s carry CORS', async () => {
   ]) {
     const { response: viaPost } = await invoke(dispatchPost, method);
     assertCors(viaPost);
-    assert.equal(viaPost.status, 405);
-    assert.deepEqual(await viaPost.json(), { error: 'MethodNotAllowed' });
+    expect(viaPost.status).toBe(405);
+    expect(await viaPost.json()).toEqual({ error: 'MethodNotAllowed' });
   }
 });
 
@@ -206,7 +205,7 @@ test('method-not-allowed responses carry CORS for a valid NSID', () => {
   for (const method of [CATALOG_GET, CATALOG_POST, FORWARDED, PDS_READ]) {
     const response = applyXrpcCors(dispatchMethodNotAllowed(method));
     assertCors(response);
-    assert.equal(response.status, 405);
+    expect(response.status).toBe(405);
   }
 });
 
@@ -216,17 +215,17 @@ test('invalid NSID paths return a CORS-bearing JSON 400 on every verb', async ()
     const viaPost = await invoke(dispatchPost, method);
     for (const { response } of [viaGet, viaPost]) {
       assertCors(response);
-      assert.equal(response.status, 400);
-      assert.deepEqual(await response.json(), { error: 'InvalidRequest' });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'InvalidRequest' });
     }
     const options = applyXrpcCors(dispatchOptions(method));
     assertCors(options);
-    assert.equal(options.status, 400);
+    expect(options.status).toBe(400);
     const other = applyXrpcCors(dispatchMethodNotAllowed(method));
     assertCors(other);
-    assert.equal(other.status, 400);
-    assert.deepEqual(viaGet.calls, [], 'an invalid path must not reach a handler');
-    assert.deepEqual(viaPost.calls, [], 'an invalid path must not reach a handler');
+    expect(other.status).toBe(400);
+    expect(viaGet.calls, 'an invalid path must not reach a handler').toEqual([]);
+    expect(viaPost.calls, 'an invalid path must not reach a handler').toEqual([]);
   }
 });
 
@@ -255,8 +254,8 @@ test('catalog, entity and proxy error responses keep their status and gain CORS'
   for (const { response, status } of errors) {
     const wrapped = applyXrpcCors(response);
     assertCors(wrapped);
-    assert.equal(wrapped.status, status);
-    assert.deepEqual(wrapped.headers.get('content-type'), 'application/json');
+    expect(wrapped.status).toBe(status);
+    expect(wrapped.headers.get('content-type')).toEqual('application/json');
   }
 });
 
@@ -272,17 +271,17 @@ test('proxied headers survive CORS and an upstream origin is not reflected', asy
 
   const wrapped = applyXrpcCors(upstream);
   assertCors(wrapped);
-  assert.equal(wrapped.status, 401);
-  assert.equal(wrapped.headers.get('dpop-nonce'), 'nonce-value');
-  assert.equal(wrapped.headers.get('access-control-allow-origin'), '*');
-  assert.deepEqual(await wrapped.json(), { error: 'AuthRequired' });
+  expect(wrapped.status).toBe(401);
+  expect(wrapped.headers.get('dpop-nonce')).toBe('nonce-value');
+  expect(wrapped.headers.get('access-control-allow-origin')).toBe('*');
+  expect(await wrapped.json()).toEqual({ error: 'AuthRequired' });
 });
 
 test('applying CORS twice leaves one value per header', async () => {
   const once = applyXrpcCors(respond('ok'));
   const twice = applyXrpcCors(once);
-  assert.equal(twice.headers.get('access-control-allow-origin'), '*');
-  assert.equal(twice.headers.get('vary'), 'Origin');
-  assert.equal(twice.headers.get('access-control-expose-headers'), 'dpop-nonce');
-  assert.deepEqual(await twice.json(), { handler: 'ok' });
+  expect(twice.headers.get('access-control-allow-origin')).toBe('*');
+  expect(twice.headers.get('vary')).toBe('Origin');
+  expect(twice.headers.get('access-control-expose-headers')).toBe('dpop-nonce');
+  expect(await twice.json()).toEqual({ handler: 'ok' });
 });

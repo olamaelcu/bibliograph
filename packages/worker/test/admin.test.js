@@ -1,5 +1,5 @@
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import http from 'node:http';
 import pg from 'pg';
 
@@ -95,7 +95,7 @@ async function cleanup() {
   }
 }
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
   await ensureSupportSchema(pool);
   await cleanup();
@@ -336,7 +336,7 @@ before(async () => {
   });
 });
 
-after(async () => {
+afterAll(async () => {
   await admin?.close();
   await unconfiguredAdmin?.close();
   if (providerServer) await new Promise((resolve) => providerServer.close(resolve));
@@ -359,9 +359,9 @@ function post(server, path, body, token = TOKEN) {
 
 test('rejects a missing or wrong admin token with 401', async () => {
   const missing = await post(admin, '/provider-search', { provider: 'googlebooks', query: 'x' }, null);
-  assert.equal(missing.status, 401);
+  expect(missing.status).toBe(401);
   const wrong = await post(admin, '/provider-search', { provider: 'googlebooks', query: 'x' }, 'nope');
-  assert.equal(wrong.status, 401);
+  expect(wrong.status).toBe(401);
 });
 
 test('is disabled, with a log, when ADMIN_TOKEN is unset', async () => {
@@ -373,8 +373,8 @@ test('is disabled, with a log, when ADMIN_TOKEN is unset', async () => {
     env: {},
     logger: { ...silentLogger, log: (message) => messages.push(message) }
   });
-  assert.equal(server, undefined);
-  assert.ok(messages.some((message) => message.includes('ADMIN_TOKEN')));
+  expect(server).toBe(undefined);
+  expect(messages.some((message) => message.includes('ADMIN_TOKEN'))).toBeTruthy();
 });
 
 test('provider search selects only the requested provider', async () => {
@@ -388,54 +388,42 @@ test('provider search selects only the requested provider', async () => {
     provider: 'googlebooks',
     query: 'admin probe'
   });
-  assert.equal(google.status, 200);
+  expect(google.status).toBe(200);
   const googleBody = await google.json();
-  assert.equal(googleBody.provider, 'googlebooks');
-  assert.equal(googleBody.candidates.length, 1);
-  assert.equal(googleBody.candidates[0].title, 'Admin Probe Edition');
-  assert.deepEqual(
-    { googleRequests, isbndbRequests, goodreadsRequests },
-    { googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0 }
-  );
+  expect(googleBody.provider).toBe('googlebooks');
+  expect(googleBody.candidates.length).toBe(1);
+  expect(googleBody.candidates[0].title).toBe('Admin Probe Edition');
+  expect({ googleRequests, isbndbRequests, goodreadsRequests }).toEqual({ googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0 });
 
   const openlibrary = await post(admin, '/provider-search', {
     provider: 'openlibrary',
     query: 'admin probe'
   });
-  assert.equal(openlibrary.status, 200);
+  expect(openlibrary.status).toBe(200);
   const openlibraryBody = await openlibrary.json();
-  assert.equal(openlibraryBody.candidates.length, 1);
-  assert.equal(openlibraryBody.candidates[0].title, 'Admin Probe Edition');
-  assert.deepEqual(
-    { googleRequests, isbndbRequests, goodreadsRequests, openlibraryRequests },
-    { googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0, openlibraryRequests: 1 }
-  );
+  expect(openlibraryBody.candidates.length).toBe(1);
+  expect(openlibraryBody.candidates[0].title).toBe('Admin Probe Edition');
+  expect({ googleRequests, isbndbRequests, goodreadsRequests, openlibraryRequests }).toEqual({ googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0, openlibraryRequests: 1 });
 
   const isbndb = await post(admin, '/provider-search', {
     provider: 'isbndb',
     query: 'admin probe'
   });
-  assert.equal(isbndb.status, 200);
+  expect(isbndb.status).toBe(200);
   const isbndbBody = await isbndb.json();
-  assert.equal(isbndbBody.candidates.length, 1);
+  expect(isbndbBody.candidates.length).toBe(1);
   // The seeded cache answer avoids a paid call, but the candidate shape proves
   // ISBNdb was the provider selected.
-  assert.deepEqual(
-    { googleRequests, isbndbRequests, goodreadsRequests },
-    { googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0 }
-  );
+  expect({ googleRequests, isbndbRequests, goodreadsRequests }).toEqual({ googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 0 });
 
   const goodreads = await post(admin, '/provider-search', {
     provider: 'goodreads',
     query: 'admin probe'
   });
-  assert.equal(goodreads.status, 200);
+  expect(goodreads.status).toBe(200);
   const goodreadsBody = await goodreads.json();
-  assert.equal(goodreadsBody.candidates.length, 1);
-  assert.deepEqual(
-    { googleRequests, isbndbRequests, goodreadsRequests },
-    { googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 1 }
-  );
+  expect(goodreadsBody.candidates.length).toBe(1);
+  expect({ googleRequests, isbndbRequests, goodreadsRequests }).toEqual({ googleRequests: 1, isbndbRequests: 0, goodreadsRequests: 1 });
 });
 
 test('an ISBN query routes to byIsbn/byIdentifier for each provider', async () => {
@@ -443,19 +431,16 @@ test('an ISBN query routes to byIsbn/byIdentifier for each provider', async () =
 
   for (const provider of ['googlebooks', 'isbndb', 'openlibrary', 'goodreads']) {
     const response = await post(admin, '/provider-search', { provider, query: ISBN });
-    assert.equal(response.status, 200, `${provider} answered ${response.status}`);
+    expect(response.status, `${provider} answered ${response.status}`).toBe(200);
     const body = await response.json();
-    assert.equal(body.candidates.length, 1);
+    expect(body.candidates.length).toBe(1);
   }
 
-  assert.deepEqual(
-    requestedQueries.map((entry) => entry.provider).sort(),
-    ['goodreads', 'googlebooks', 'openlibrary']
-  );
+  expect(requestedQueries.map((entry) => entry.provider).sort()).toEqual(['goodreads', 'googlebooks', 'openlibrary']);
   const google = requestedQueries.find((entry) => entry.provider === 'googlebooks');
-  assert.equal(google.query, `isbn:${ISBN}`);
+  expect(google.query).toBe(`isbn:${ISBN}`);
   const openlibrary = requestedQueries.find((entry) => entry.provider === 'openlibrary');
-  assert.equal(openlibrary.query, ISBN);
+  expect(openlibrary.query).toBe(ISBN);
 });
 
 test('ISBNdb search answers a clear 503 when the provider is not configured', async () => {
@@ -463,9 +448,9 @@ test('ISBNdb search answers a clear 503 when the provider is not configured', as
     provider: 'isbndb',
     query: 'admin probe'
   });
-  assert.equal(response.status, 503);
+  expect(response.status).toBe(503);
   const body = await response.json();
-  assert.match(body.message, /ISBNDB_API_KEY/);
+  expect(body.message).toMatch(/ISBNDB_API_KEY/);
 });
 
 test('ingest creates an edition with a TID under the did:plc authority', async () => {
@@ -482,14 +467,14 @@ test('ingest creates an edition with a TID under the did:plc authority', async (
   };
 
   const response = await post(admin, '/ingest', { candidate });
-  assert.equal(response.status, 200);
+  expect(response.status).toBe(200);
   const body = await response.json();
-  assert.equal(body.created, true);
-  assert.match(body.uri, new RegExp(`^at://${AUTHORITY}/community\\.lexicon\\.media\\.book\\.edition/.+$`));
+  expect(body.created).toBe(true);
+  expect(body.uri).toMatch(new RegExp(`^at://${AUTHORITY}/community\\.lexicon\\.media\\.book\\.edition/.+$`));
 
   const rkey = body.uri.split('/').at(-1);
-  assert.equal(rkey.length, 13);
-  for (const char of rkey) assert.ok(TID_ALPHABET.includes(char), `${rkey} is not a TID`);
+  expect(rkey.length).toBe(13);
+  for (const char of rkey) expect(TID_ALPHABET.includes(char), `${rkey} is not a TID`).toBeTruthy();
 
   const stored = await pool.query(
     `SELECT e.title, o.op
@@ -497,9 +482,9 @@ test('ingest creates an edition with a TID under the did:plc authority', async (
       WHERE e.uri = $1`,
     [body.uri]
   );
-  assert.equal(stored.rowCount, 1);
-  assert.equal(stored.rows[0].title, 'Admin Probe Edition');
-  assert.equal(stored.rows[0].op, 'create');
+  expect(stored.rowCount).toBe(1);
+  expect(stored.rows[0].title).toBe('Admin Probe Edition');
+  expect(stored.rows[0].op).toBe('create');
 
   // The shape claim lands on every identifier the candidate supplied.
   const claims = await pool.query(
@@ -507,7 +492,7 @@ test('ingest creates an edition with a TID under the did:plc authority', async (
       WHERE edition_uri = $1 ORDER BY issuer`,
     [body.uri]
   );
-  assert.deepEqual(claims.rows, [
+  expect(claims.rows).toEqual([
     { issuer: 'googlebooks', pages: 211, language: 'en' },
     { issuer: 'isbn13', pages: 211, language: 'en' }
   ]);
@@ -517,9 +502,9 @@ test('ingest rejects a candidate without identifiers', async () => {
   const response = await post(admin, '/ingest', {
     candidate: { title: 'No identifiers', identifiers: [] }
   });
-  assert.equal(response.status, 400);
+  expect(response.status).toBe(400);
   const body = await response.json();
-  assert.match(body.message, /identifiers/);
+  expect(body.message).toMatch(/identifiers/);
 });
 
 test('ingest stores a provider bio and never overwrites it', async () => {
@@ -536,13 +521,13 @@ test('ingest stores a provider bio and never overwrites it', async () => {
       ]
     }
   });
-  assert.equal(first.status, 200);
-  assert.equal((await first.json()).created, true);
+  expect(first.status).toBe(200);
+  expect((await first.json()).created).toBe(true);
 
   const stored = await pool.query('SELECT description FROM contributors WHERE name = $1', [
     BIO_AUTHOR
   ]);
-  assert.deepEqual(stored.rows, [{ description: 'Admin probe author bio.' }]);
+  expect(stored.rows).toEqual([{ description: 'Admin probe author bio.' }]);
 
   const second = await post(admin, '/ingest', {
     candidate: {
@@ -558,20 +543,20 @@ test('ingest stores a provider bio and never overwrites it', async () => {
       ]
     }
   });
-  assert.equal(second.status, 200);
-  assert.equal((await second.json()).created, true);
+  expect(second.status).toBe(200);
+  expect((await second.json()).created).toBe(true);
 
   const kept = await pool.query('SELECT description FROM contributors WHERE name = $1', [
     BIO_AUTHOR
   ]);
-  assert.deepEqual(kept.rows, [{ description: 'Admin probe author bio.' }]);
+  expect(kept.rows).toEqual([{ description: 'Admin probe author bio.' }]);
 });
 
 test('unknown providers and empty queries are bad requests', async () => {
   const unknown = await post(admin, '/provider-search', { provider: 'nope', query: 'x' });
-  assert.equal(unknown.status, 400);
+  expect(unknown.status).toBe(400);
   const empty = await post(admin, '/provider-search', { provider: 'googlebooks', query: '   ' });
-  assert.equal(empty.status, 400);
+  expect(empty.status).toBe(400);
 });
 
 test('contributor search returns normalized read-only candidates', async () => {
@@ -582,60 +567,56 @@ test('contributor search returns normalized read-only candidates', async () => {
     q: 'probe author',
     limit: 10
   });
-  assert.equal(response.status, 200);
+  expect(response.status).toBe(200);
   const body = await response.json();
-  assert.equal(body.query, 'probe author');
-  assert.equal(body.limit, 10);
-  assert.equal(body.contributors.length, 2);
-  assert.deepEqual(body.contributors[0], {
+  expect(body.query).toBe('probe author');
+  expect(body.limit).toBe(10);
+  expect(body.contributors.length).toBe(2);
+  expect(body.contributors[0]).toEqual({
     displayName: CONTRIBUTOR,
     identifiers: [{ issuer: 'openlibrary', value: 'OL900A' }],
     key: 'OL900A',
     born: '1930-01-02'
   });
-  assert.equal(body.contributors[0].role, undefined, 'contributor search has no edition roles');
-  assert.equal(
-    body.contributors[1].born,
-    undefined,
-    'a bare year is omitted instead of guessed'
-  );
-  assert.equal(openlibraryRequests, 1);
-  assert.deepEqual(requestedQueries, [
+  expect(body.contributors[0].role, 'contributor search has no edition roles').toBe(undefined);
+  expect(body.contributors[1].born, 'a bare year is omitted instead of guessed').toBe(undefined);
+  expect(openlibraryRequests).toBe(1);
+  expect(requestedQueries).toEqual([
     { provider: 'openlibrary-authors', query: 'probe author', limit: '10' }
   ]);
 });
 
 test('contributor search validates q and bounds the limit', async () => {
   const missing = await post(admin, '/contributor-search', {});
-  assert.equal(missing.status, 400);
-  assert.match((await missing.json()).message, /q is required/);
+  expect(missing.status).toBe(400);
+  expect((await missing.json()).message).toMatch(/q is required/);
 
   const blank = await post(admin, '/contributor-search', { q: '   ' });
-  assert.equal(blank.status, 400);
+  expect(blank.status).toBe(400);
 
   const tooLong = await post(admin, '/contributor-search', { q: 'x'.repeat(201) });
-  assert.equal(tooLong.status, 400);
-  assert.match((await tooLong.json()).message, /at most 200/);
+  expect(tooLong.status).toBe(400);
+  expect((await tooLong.json()).message).toMatch(/at most 200/);
 
   for (const limit of [0, 51, 1.5, 'many']) {
     const bounded = await post(admin, '/contributor-search', { q: 'probe author', limit });
-    assert.equal(bounded.status, 400, `limit ${JSON.stringify(limit)} must be rejected`);
-    assert.match((await bounded.json()).message, /limit must be an integer between 1 and 50/);
+    expect(bounded.status, `limit ${JSON.stringify(limit)} must be rejected`).toBe(400);
+    expect((await bounded.json()).message).toMatch(/limit must be an integer between 1 and 50/);
   }
 
   const max = await post(admin, '/contributor-search', { q: 'probe author', limit: 50 });
-  assert.equal(max.status, 200);
+  expect(max.status).toBe(200);
 });
 
 test('contributor search requires the admin token and is POST-only', async () => {
   const unauthorized = await post(admin, '/contributor-search', { q: 'x' }, null);
-  assert.equal(unauthorized.status, 401);
+  expect(unauthorized.status).toBe(401);
 
   const response = await fetch(`${admin.url}/contributor-search`, {
     method: 'GET',
     headers: { authorization: `Bearer ${TOKEN}` }
   });
-  assert.equal(response.status, 405);
+  expect(response.status).toBe(405);
 });
 
 test('publisher search returns ISBNdb publisher names', async () => {
@@ -643,15 +624,15 @@ test('publisher search returns ISBNdb publisher names', async () => {
   requestedQueries.length = 0;
 
   const response = await post(admin, '/publisher-search', { query: 'admin probe' });
-  assert.equal(response.status, 200);
+  expect(response.status).toBe(200);
   const body = await response.json();
-  assert.equal(body.query, 'admin probe');
-  assert.deepEqual(body.publishers, [PUBLISHER, 'Another Press']);
-  assert.equal(body.total, 2);
-  assert.equal(body.page, 1);
-  assert.equal(body.pageSize, 50);
+  expect(body.query).toBe('admin probe');
+  expect(body.publishers).toEqual([PUBLISHER, 'Another Press']);
+  expect(body.total).toBe(2);
+  expect(body.page).toBe(1);
+  expect(body.pageSize).toBe(50);
   // A cache hit proves the request URL shape the live API would receive.
-  assert.equal(isbndbRequests, 0);
+  expect(isbndbRequests).toBe(0);
 });
 
 test('publisher books forwards filters and pagination', async () => {
@@ -666,18 +647,18 @@ test('publisher books forwards filters and pagination', async () => {
     publishedTo: '2024-12',
     language: 'eng'
   });
-  assert.equal(response.status, 200);
+  expect(response.status).toBe(200);
   const body = await response.json();
-  assert.equal(body.name, PUBLISHER);
-  assert.equal(body.candidates.length, 1);
-  assert.equal(body.candidates[0].title, 'Publisher Probe Edition');
-  assert.deepEqual(body.candidates[0].identifiers, [
+  expect(body.name).toBe(PUBLISHER);
+  expect(body.candidates.length).toBe(1);
+  expect(body.candidates[0].title).toBe('Publisher Probe Edition');
+  expect(body.candidates[0].identifiers).toEqual([
     { issuer: 'isbn13', value: PUBLISHER_BOOK_ISBN }
   ]);
-  assert.equal(body.total, 120);
-  assert.equal(body.page, 2);
-  assert.equal(body.pageSize, 50);
-  assert.equal(isbndbRequests, 0);
+  expect(body.total).toBe(120);
+  expect(body.page).toBe(2);
+  expect(body.pageSize).toBe(50);
+  expect(isbndbRequests).toBe(0);
 });
 
 test('publisher import ingests books and dedupes on a second run', async () => {
@@ -686,10 +667,9 @@ test('publisher import ingests books and dedupes on a second run', async () => {
     pageSize: 100,
     maxPages: 1
   });
-  assert.equal(first.status, 200);
+  expect(first.status).toBe(200);
   const firstBody = await first.json();
-  assert.deepEqual(
-    {
+  expect({
       imported: firstBody.imported,
       created: firstBody.created,
       existing: firstBody.existing,
@@ -697,8 +677,7 @@ test('publisher import ingests books and dedupes on a second run', async () => {
       stopped: firstBody.stopped,
       nextPage: firstBody.nextPage,
       pagesFetched: firstBody.pagesFetched
-    },
-    {
+    }).toEqual({
       imported: 1,
       created: 1,
       existing: 0,
@@ -706,44 +685,43 @@ test('publisher import ingests books and dedupes on a second run', async () => {
       stopped: 'end',
       nextPage: null,
       pagesFetched: 1
-    }
-  );
+    });
 
   const second = await post(admin, '/publisher-import', {
     name: PUBLISHER,
     pageSize: 100,
     maxPages: 1
   });
-  assert.equal(second.status, 200);
+  expect(second.status).toBe(200);
   const secondBody = await second.json();
-  assert.equal(secondBody.imported, 1);
-  assert.equal(secondBody.created, 0);
-  assert.equal(secondBody.existing, 1);
-  assert.equal(secondBody.stopped, 'end');
+  expect(secondBody.imported).toBe(1);
+  expect(secondBody.created).toBe(0);
+  expect(secondBody.existing).toBe(1);
+  expect(secondBody.stopped).toBe('end');
 
   const stored = await pool.query(
     `SELECT count(*)::int AS count FROM editions WHERE title = 'Publisher Probe Edition'`
   );
-  assert.equal(stored.rows[0].count, 1);
+  expect(stored.rows[0].count).toBe(1);
 });
 
 test('publisher endpoints validate input', async () => {
   const empty = await post(admin, '/publisher-search', { query: '   ' });
-  assert.equal(empty.status, 400);
+  expect(empty.status).toBe(400);
 
   const noName = await post(admin, '/publisher-books', {});
-  assert.equal(noName.status, 400);
-  assert.match((await noName.json()).message, /name/);
+  expect(noName.status).toBe(400);
+  expect((await noName.json()).message).toMatch(/name/);
 
   const tooBig = await post(admin, '/publisher-import', { name: PUBLISHER, pageSize: 101 });
-  assert.equal(tooBig.status, 400);
-  assert.match((await tooBig.json()).message, /pageSize/);
+  expect(tooBig.status).toBe(400);
+  expect((await tooBig.json()).message).toMatch(/pageSize/);
 
   const reversed = await post(admin, '/publisher-books', {
     name: PUBLISHER,
     publishedFrom: '2024',
     publishedTo: '2020'
   });
-  assert.equal(reversed.status, 400);
-  assert.match((await reversed.json()).message, /publishedFrom/);
+  expect(reversed.status).toBe(400);
+  expect((await reversed.json()).message).toMatch(/publishedFrom/);
 });

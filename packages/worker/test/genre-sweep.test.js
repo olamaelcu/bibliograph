@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { createTasks, GENRE_SWEEP_BATCH, GENRE_SWEEP_BATCH_MAX } from '../lib/tasks.js';
 
@@ -54,9 +53,9 @@ test('the sweep fills from never-attempted editions and gives retries only the r
 
   await tasks.sweep({ limit: 5 }, { logger: log });
 
-  assert.deepEqual(calls.fresh, [5], 'the first pass asks for the full limit');
-  assert.deepEqual(calls.retries, [3], 'the retry pass asks only for what is left');
-  assert.deepEqual(calls.claims, [
+  expect(calls.fresh, 'the first pass asks for the full limit').toEqual([5]);
+  expect(calls.retries, 'the retry pass asks only for what is left').toEqual([3]);
+  expect(calls.claims).toEqual([
     'at://new/1',
     'at://new/2',
     'at://old/1',
@@ -73,9 +72,9 @@ test('a saturated first pass never runs the retry query', async () => {
 
   await tasks.sweep({ limit: 2 }, { logger: log });
 
-  assert.deepEqual(calls.fresh, [2]);
-  assert.deepEqual(calls.retries, [], 'retries are starved by design, not in addition to new work');
-  assert.deepEqual(calls.claims, ['at://new/1', 'at://new/2']);
+  expect(calls.fresh).toEqual([2]);
+  expect(calls.retries, 'retries are starved by design, not in addition to new work').toEqual([]);
+  expect(calls.claims).toEqual(['at://new/1', 'at://new/2']);
 });
 
 test('a catalogue with no never-attempted edition skips the fresh pass entirely', async () => {
@@ -89,9 +88,9 @@ test('a catalogue with no never-attempted edition skips the fresh pass entirely'
 
   await tasks.sweep({ limit: 5 }, { logger: log });
 
-  assert.deepEqual(calls.fresh, [], 'no never-attempted walk when there cannot be one');
-  assert.deepEqual(calls.retries, [5], 'retries get the full limit instead');
-  assert.deepEqual(calls.claims, ['at://old/1', 'at://old/2']);
+  expect(calls.fresh, 'no never-attempted walk when there cannot be one').toEqual([]);
+  expect(calls.retries, 'retries get the full limit instead').toEqual([5]);
+  expect(calls.claims).toEqual(['at://old/1', 'at://old/2']);
 });
 
 test('the sweep bounds its limit whatever the payload asks for', async () => {
@@ -109,7 +108,7 @@ test('the sweep bounds its limit whatever the payload asks for', async () => {
     // run", so the clamped limit is observable.
     const { tasks, calls } = sweepPool({ fresh: ['at://new/1'] });
     await tasks.sweep(payload, { logger: log });
-    assert.deepEqual(calls.fresh, [expected], `payload ${JSON.stringify(payload)}`);
+    expect(calls.fresh, `payload ${JSON.stringify(payload)}`).toEqual([expected]);
   }
 });
 
@@ -123,7 +122,7 @@ test('only a real claim counts as enqueued', async () => {
 
   await tasks.sweep({ limit: 2 }, { logger });
 
-  assert.deepEqual(lines, [
+  expect(lines).toEqual([
     'catalog.genres.sweep: 2 candidate(s) (2 new, 0 retry), 1 enqueued'
   ]);
 });

@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto';
 
@@ -76,7 +75,7 @@ test('accepts a valid ES256K service JWT and returns the issuer', async () => {
     resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
     now: NOW
   });
-  assert.equal(issReturned, iss);
+  expect(issReturned).toBe(iss);
 });
 
 test('accepts a valid ES256 (P-256) service JWT', async () => {
@@ -88,7 +87,7 @@ test('accepts a valid ES256 (P-256) service JWT', async () => {
     resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
     now: NOW
   });
-  assert.equal(issReturned, iss);
+  expect(issReturned).toBe(iss);
 });
 
 test('rejects a tampered payload even though the header and signature are intact', async () => {
@@ -106,17 +105,14 @@ test('rejects a tampered payload even though the header and signature are intact
   });
   const forged = `${header}.${forgedPayload}.${signature}`;
 
-  await assert.rejects(
-    verifyFeedServiceJwt(forged, {
+  await expect(verifyFeedServiceJwt(forged, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({
         [iss]: documentFor(iss, keypair),
         [attacker]: documentFor(attacker, keypair)
       }),
       now: NOW
-    }),
-    FeedAuthError
-  );
+    })).rejects.toThrow(FeedAuthError);
 });
 
 test('rejects a tampered signature', async () => {
@@ -128,139 +124,109 @@ test('rejects a tampered signature', async () => {
   signature[10] ^= 0xff;
   const forged = `${parts[0]}.${parts[1]}.${signature.toString('base64url')}`;
 
-  await assert.rejects(
-    verifyFeedServiceJwt(forged, {
+  await expect(verifyFeedServiceJwt(forged, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    }),
-    /signature does not verify/
-  );
+    })).rejects.toThrow(/signature does not verify/);
 });
 
 test('rejects an expired token', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedexpired';
   const token = await signJwt(keypair, { iss, iat: NOW - 120, exp: NOW - 60 });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    }),
-    /expired/
-  );
+    })).rejects.toThrow(/expired/);
 });
 
 test('rejects a token issued in the future', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedfuture';
   const token = await signJwt(keypair, { iss, iat: NOW + 600, exp: NOW + 660 });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    }),
-    /future/
-  );
+    })).rejects.toThrow(/future/);
 });
 
 test('rejects the wrong audience', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedaudience';
   const token = await signJwt(keypair, { iss, aud: 'did:plc:other#atproto_feed' });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    }),
-    /audience/
-  );
+    })).rejects.toThrow(/audience/);
 });
 
 test('rejects the wrong lxm', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedlxm';
   const token = await signJwt(keypair, { iss, lxm: 'com.atproto.repo.putRecord' });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    }),
-    /getFeedSkeleton/
-  );
+    })).rejects.toThrow(/getFeedSkeleton/);
 });
 
 test('rejects an algorithm that does not match the issuer key', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedalg';
   const token = await signJwt(keypair, { iss, alg: 'ES256' });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    }),
-    /signature does not verify/
-  );
+    })).rejects.toThrow(/signature does not verify/);
 });
 
 test('rejects an unsupported algorithm', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedalgunsupported';
   const token = await signJwt(keypair, { iss, alg: 'HS256' });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    }),
-    /unsupported algorithm/
-  );
+    })).rejects.toThrow(/unsupported algorithm/);
 });
 
 test('rejects an issuer with no resolvable DID document', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedunresolved';
   const token = await signJwt(keypair, { iss });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({}),
       now: NOW
-    }),
-    /could not be resolved/
-  );
+    })).rejects.toThrow(/could not be resolved/);
 });
 
 test('rejects a document without the #atproto Multikey', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feednokey';
   const token = await signJwt(keypair, { iss });
-  await assert.rejects(
-    verifyFeedServiceJwt(token, {
+  await expect(verifyFeedServiceJwt(token, {
       audience: `${iss}#atproto_feed`,
       resolveDid: resolverFor({
         [iss]: { id: iss, verificationMethod: [{ id: `${iss}#other`, type: 'Multikey' }] }
       }),
       now: NOW
-    }),
-    /no #atproto verification method/
-  );
+    })).rejects.toThrow(/no #atproto verification method/);
 });
 
 test('rejects a non-compact token', async () => {
-  await assert.rejects(
-    verifyFeedServiceJwt('not-a-jwt', {
+  await expect(verifyFeedServiceJwt('not-a-jwt', {
       audience: 'did:plc:x#atproto_feed',
       resolveDid: resolverFor({}),
       now: NOW
-    }),
-    /not a compact JWT/
-  );
+    })).rejects.toThrow(/not a compact JWT/);
 });
 
 /** One fixed issuer DID: the reason codes do not depend on the identity. */
@@ -273,10 +239,10 @@ async function reasonFor(
   try {
     await verifyFeedServiceJwt(token, { audience: `${ISS}#atproto_feed`, resolveDid, now: NOW });
   } catch (error) {
-    assert.ok(error instanceof FeedAuthError);
+    expect(error instanceof FeedAuthError).toBeTruthy();
     return error.reason;
   }
-  assert.fail('expected a rejection');
+  throw new Error('expected a rejection');
 }
 
 test('rejections carry a bounded reason code', async () => {
@@ -284,19 +250,19 @@ test('rejections carry a bounded reason code', async () => {
   const valid = await signJwt(keypair, { iss: ISS });
   const documents = resolverFor({ [ISS]: documentFor(ISS, keypair) });
 
-  assert.equal(await reasonFor('not-a-jwt', documents), 'format');
+  expect(await reasonFor('not-a-jwt', documents)).toBe('format');
 
   const wrongAudience = await signJwt(keypair, { iss: ISS, aud: `${ISS}#other` });
-  assert.equal(await reasonFor(wrongAudience, documents), 'claims');
+  expect(await reasonFor(wrongAudience, documents)).toBe('claims');
 
   const expired = await signJwt(keypair, { iss: ISS, iat: NOW - 120, exp: NOW - 60 });
-  assert.equal(await reasonFor(expired, documents), 'expired');
+  expect(await reasonFor(expired, documents)).toBe('expired');
 
-  assert.equal(await reasonFor(valid, resolverFor({})), 'issuer');
+  expect(await reasonFor(valid, resolverFor({}))).toBe('issuer');
 
   const [header, payload, signature] = valid.split('.') as [string, string, string];
   const bytes = Buffer.from(signature.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
   bytes[0] = (bytes[0] ?? 0) ^ 0xff;
   const tampered = `${header}.${payload}.${bytes.toString('base64url')}`;
-  assert.equal(await reasonFor(tampered, documents), 'signature');
+  expect(await reasonFor(tampered, documents)).toBe('signature');
 });

@@ -4,8 +4,7 @@
  * what a browser actually sends.
  */
 
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   COVER_CACHE_CONTROL,
@@ -27,39 +26,39 @@ const URIS = [
 
 test('the path layout is identical in the worker and the edge', () => {
   for (const uri of URIS) {
-    assert.equal(coverCachePath(DIR, uri), workerCoverCachePath(DIR, uri), uri);
+    expect(coverCachePath(DIR, uri), uri).toBe(workerCoverCachePath(DIR, uri));
   }
 });
 
 test('the path is two hex characters of fan-out over the URI digest', () => {
   const path = coverCachePath(DIR, URIS[0] as string);
-  assert.match(path, new RegExp(`^${DIR}/[0-9a-f]{2}/[0-9a-f]{64}$`));
-  assert.equal(path.split('/').at(-1)?.slice(0, 2), path.split('/').at(-2));
-  assert.equal(coverCachePath(DIR, URIS[1] as string) === path, false);
+  expect(path).toMatch(new RegExp(`^${DIR}/[0-9a-f]{2}/[0-9a-f]{64}$`));
+  expect(path.split('/').at(-1)?.slice(0, 2)).toBe(path.split('/').at(-2));
+  expect(coverCachePath(DIR, URIS[1] as string) === path).toBe(false);
 });
 
 test('the etag is a strong validator that moves with the byte size', () => {
   const etag = coverEtag(URIS[0] as string, 74_000);
-  assert.match(etag, /^"[0-9a-f]{16}-74000"$/);
-  assert.notEqual(etag, coverEtag(URIS[0] as string, 74_001));
-  assert.notEqual(etag, coverEtag(URIS[1] as string, 74_000));
+  expect(etag).toMatch(/^"[0-9a-f]{16}-74000"$/);
+  expect(etag).not.toBe(coverEtag(URIS[0] as string, 74_001));
+  expect(etag).not.toBe(coverEtag(URIS[1] as string, 74_000));
 });
 
 test('If-None-Match is normalized to a bare validator', () => {
-  assert.equal(normalizeIfNoneMatch('W/"abc-1"'), '"abc-1"');
-  assert.equal(normalizeIfNoneMatch(' "abc-1" '), '"abc-1"');
-  assert.equal(normalizeIfNoneMatch('"other", "abc-1"'), '"other"');
-  assert.equal(normalizeIfNoneMatch(null), null);
-  assert.equal(normalizeIfNoneMatch(''), null);
-  assert.equal(normalizeIfNoneMatch('W/'), null);
+  expect(normalizeIfNoneMatch('W/"abc-1"')).toBe('"abc-1"');
+  expect(normalizeIfNoneMatch(' "abc-1" ')).toBe('"abc-1"');
+  expect(normalizeIfNoneMatch('"other", "abc-1"')).toBe('"other"');
+  expect(normalizeIfNoneMatch(null)).toBe(null);
+  expect(normalizeIfNoneMatch('')).toBe(null);
+  expect(normalizeIfNoneMatch('W/')).toBe(null);
 });
 
 test('an immutable cache-control is what the route advertises', () => {
-  assert.match(COVER_CACHE_CONTROL, /max-age=31536000/);
-  assert.match(COVER_CACHE_CONTROL, /immutable/);
+  expect(COVER_CACHE_CONTROL).toMatch(/max-age=31536000/);
+  expect(COVER_CACHE_CONTROL).toMatch(/immutable/);
 });
 
 test('a missing file reads as null instead of throwing', async () => {
-  assert.equal(await readCover(coverCachePath(DIR, URIS[0] as string)), null);
-  assert.equal(await cachedCoverSize(DIR, URIS[0] as string), null);
+  expect(await readCover(coverCachePath(DIR, URIS[0] as string))).toBe(null);
+  expect(await cachedCoverSize(DIR, URIS[0] as string)).toBe(null);
 });

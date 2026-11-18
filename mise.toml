@@ -40,17 +40,17 @@ description = "Syntax-check and unit-test the HappyView Lua scripts"
 run = ["happyview/test/run.sh"]
 
 [tasks."test:web"]
-description = "Run the SvelteKit edge's vitest suite"
+description = "Run the SvelteKit edge's vitest suite (starts a throwaway Postgres with testcontainers; needs Docker)"
 run = ["pnpm --filter web test"]
 
 [tasks."test:worker"]
 description = """
-Run the catalog worker's node:test suite
+Run the catalog worker's vitest suite
 
-The suite talks to the database named by `DATABASE_URL` (the local
-`bibliograph` one from `[env]` above), creates its own schema and truncates
-between cases — point it at a scratch database before running it anywhere you
-care about. `docker compose up -d` starts the local one.
+Each run starts its own throwaway Postgres through testcontainers (needs
+Docker), applies `packages/worker/sql/*.sql` to it, and the suite creates and
+truncates its own rows — the development database named by `DATABASE_URL` is
+never touched.
 """
 run = ["pnpm --filter worker test"]
 

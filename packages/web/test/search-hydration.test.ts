@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   SEARCH_HYDRATION_THRESHOLD_DEFAULT,
@@ -10,57 +9,39 @@ import {
 /**
  * The trigger is the only thing that spends provider quota, so its predicate
  * and its parser are pinned here: the module has no imports, which is what lets
- * `node --test` load it without a database or `$env`.
+ * `vitest` load it without a database or `$env`.
  */
 
 test('searchHydrationDecision enqueues only a thin first page', () => {
   const base = { hasText: true, offset: 0, total: 0, threshold: 10 };
-  assert.equal(searchHydrationDecision({ ...base, total: 9 }), 'thin');
-  assert.equal(searchHydrationDecision({ ...base, total: 10 }), 'enough');
-  assert.equal(searchHydrationDecision({ ...base, total: 0 }), 'thin');
+  expect(searchHydrationDecision({ ...base, total: 9 })).toBe('thin');
+  expect(searchHydrationDecision({ ...base, total: 10 })).toBe('enough');
+  expect(searchHydrationDecision({ ...base, total: 0 })).toBe('thin');
 });
 
 test('searchHydrationDecision skips bodies without a provider text query', () => {
-  assert.equal(
-    searchHydrationDecision({ hasText: false, offset: 0, total: 0, threshold: 10 }),
-    'no_text'
-  );
+  expect(searchHydrationDecision({ hasText: false, offset: 0, total: 0, threshold: 10 })).toBe('no_text');
 });
 
 test('searchHydrationDecision skips paging, where total is absent', () => {
-  assert.equal(
-    searchHydrationDecision({ hasText: true, offset: 25, total: undefined, threshold: 10 }),
-    'paged'
-  );
-  assert.equal(
-    searchHydrationDecision({ hasText: true, offset: 0, total: undefined, threshold: 10 }),
-    'paged'
-  );
+  expect(searchHydrationDecision({ hasText: true, offset: 25, total: undefined, threshold: 10 })).toBe('paged');
+  expect(searchHydrationDecision({ hasText: true, offset: 0, total: undefined, threshold: 10 })).toBe('paged');
 });
 
 test('searchHydrationDecision follows the threshold, and 0 disables it', () => {
-  assert.equal(
-    searchHydrationDecision({ hasText: true, offset: 0, total: 4, threshold: 5 }),
-    'thin'
-  );
-  assert.equal(
-    searchHydrationDecision({ hasText: true, offset: 0, total: 5, threshold: 5 }),
-    'enough'
-  );
-  assert.equal(
-    searchHydrationDecision({ hasText: true, offset: 0, total: 0, threshold: 0 }),
-    'enough'
-  );
+  expect(searchHydrationDecision({ hasText: true, offset: 0, total: 4, threshold: 5 })).toBe('thin');
+  expect(searchHydrationDecision({ hasText: true, offset: 0, total: 5, threshold: 5 })).toBe('enough');
+  expect(searchHydrationDecision({ hasText: true, offset: 0, total: 0, threshold: 0 })).toBe('enough');
 });
 
 test('searchHydrationThreshold accepts non-negative integers only', () => {
-  assert.equal(searchHydrationThreshold('7'), 7);
-  assert.equal(searchHydrationThreshold(' 7 '), 7);
-  assert.equal(searchHydrationThreshold('0'), 0);
-  assert.equal(searchHydrationThreshold(''), SEARCH_HYDRATION_THRESHOLD_DEFAULT);
-  assert.equal(searchHydrationThreshold(undefined), SEARCH_HYDRATION_THRESHOLD_DEFAULT);
-  assert.equal(searchHydrationThreshold('abc'), SEARCH_HYDRATION_THRESHOLD_DEFAULT);
-  assert.equal(searchHydrationThreshold('-1'), SEARCH_HYDRATION_THRESHOLD_DEFAULT);
-  assert.equal(searchHydrationThreshold('2.5'), SEARCH_HYDRATION_THRESHOLD_DEFAULT);
+  expect(searchHydrationThreshold('7')).toBe(7);
+  expect(searchHydrationThreshold(' 7 ')).toBe(7);
+  expect(searchHydrationThreshold('0')).toBe(0);
+  expect(searchHydrationThreshold('')).toBe(SEARCH_HYDRATION_THRESHOLD_DEFAULT);
+  expect(searchHydrationThreshold(undefined)).toBe(SEARCH_HYDRATION_THRESHOLD_DEFAULT);
+  expect(searchHydrationThreshold('abc')).toBe(SEARCH_HYDRATION_THRESHOLD_DEFAULT);
+  expect(searchHydrationThreshold('-1')).toBe(SEARCH_HYDRATION_THRESHOLD_DEFAULT);
+  expect(searchHydrationThreshold('2.5')).toBe(SEARCH_HYDRATION_THRESHOLD_DEFAULT);
 });
 

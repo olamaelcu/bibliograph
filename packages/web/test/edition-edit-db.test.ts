@@ -1,5 +1,5 @@
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import pg from 'pg';
 
 import {
@@ -126,11 +126,11 @@ function bodyFrom(edition: AdminEdition, overrides: Record<string, unknown> = {}
 
 async function loaded(ref: string): Promise<AdminEdition> {
   const edition = await loadEditionForEdit(pool as pg.Pool, ref);
-  assert.ok(edition, 'expected the seeded edition to load');
+  expect(edition, 'expected the seeded edition to load').toBeTruthy();
   return edition;
 }
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 3 });
   try {
     await pool.query('SELECT 1');
@@ -141,7 +141,7 @@ before(async () => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   if (pool) {
     await cleanup().catch(() => {});
     await pool.end();
@@ -154,17 +154,17 @@ test('loads an edition by rkey and by a URL-encoded at-uri', async (t) => {
   const seeded = await seedEdition('Loadable');
 
   const byRkey = await loadEditionForEdit(db, seeded.rkey);
-  assert.ok(byRkey);
-  assert.equal(byRkey.uri, seeded.uri);
-  assert.equal(byRkey.title, 'Loadable');
-  assert.equal(byRkey.contributors.length, 1);
-  assert.equal(byRkey.identifiers[0]?.publishers.length, 1);
-  assert.equal(byRkey.identifiers[0]?.value, '9780000000001');
-  assert.match(byRkey.revision, /^[a-f0-9]{64}$/);
+  expect(byRkey).toBeTruthy();
+  expect(byRkey.uri).toBe(seeded.uri);
+  expect(byRkey.title).toBe('Loadable');
+  expect(byRkey.contributors.length).toBe(1);
+  expect(byRkey.identifiers[0]?.publishers.length).toBe(1);
+  expect(byRkey.identifiers[0]?.value).toBe('9780000000001');
+  expect(byRkey.revision).toMatch(/^[a-f0-9]{64}$/);
 
   const byUri = await loadEditionForEdit(db, encodeURIComponent(seeded.uri));
-  assert.ok(byUri);
-  assert.equal(byUri.uri, seeded.uri);
+  expect(byUri).toBeTruthy();
+  expect(byUri.uri).toBe(seeded.uri);
 });
 
 test('updates scalars, identifiers, contributor order/roles and publisher order atomically', async (t) => {
@@ -205,17 +205,17 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     ],
   }));
 
-  assert.equal(saved.uri, original.uri);
-  assert.equal(saved.rkey, original.rkey);
-  assert.equal(saved.createdAt, original.createdAt);
-  assert.equal(saved.title, 'Edited title');
-  assert.deepEqual(saved.series, { name: 'Saga', position: '2', display: 'Vol. II' });
-  assert.deepEqual(saved.identifiers.map((identifier) => identifier.value).sort(), [
+  expect(saved.uri).toBe(original.uri);
+  expect(saved.rkey).toBe(original.rkey);
+  expect(saved.createdAt).toBe(original.createdAt);
+  expect(saved.title).toBe('Edited title');
+  expect(saved.series).toEqual({ name: 'Saga', position: '2', display: 'Vol. II' });
+  expect(saved.identifiers.map((identifier) => identifier.value).sort()).toEqual([
     '12345',
     '9780000000002'
   ]);
   const claimed = saved.identifiers.find((identifier) => identifier.issuer === 'isbn13');
-  assert.deepEqual(claimed?.info, {
+  expect(claimed?.info).toEqual({
     format: 'ebook',
     language: 'en',
     publishedDate: '2024-02-29',
@@ -224,37 +224,26 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     // 0013: an ebook is not audio, so the submitted duration is pruned.
     durationSeconds: null
   });
-  assert.deepEqual(
-    claimed?.publishers.map((publisher) => publisher.id),
-    [secondPublisher]
-  );
-  assert.deepEqual(
-    saved.identifiers.find((identifier) => identifier.issuer === 'oclc')?.publishers,
-    [],
-    'an identifier without links reads back an empty list'
-  );
-  assert.equal(
-    saved.identifiers.find((identifier) => identifier.issuer === 'oclc')?.info,
-    null,
-    'an identifier without a claim reads back null'
-  );
-  assert.equal(saved.contributors[0]?.id, secondContributor);
-  assert.equal(saved.contributors[0]?.role, 'B01');
-  assert.equal(saved.contributors[0]?.ref, ref);
-  assert.equal(saved.contributors[1]?.id, seeded.contributorId);
+  expect(claimed?.publishers.map((publisher) => publisher.id)).toEqual([secondPublisher]);
+  expect(saved.identifiers.find((identifier) => identifier.issuer === 'oclc')?.publishers, 'an identifier without links reads back an empty list').toEqual([]);
+  expect(saved.identifiers.find((identifier) => identifier.issuer === 'oclc')?.info, 'an identifier without a claim reads back null').toBe(null);
+  expect(saved.contributors[0]?.id).toBe(secondContributor);
+  expect(saved.contributors[0]?.role).toBe('B01');
+  expect(saved.contributors[0]?.ref).toBe(ref);
+  expect(saved.contributors[1]?.id).toBe(seeded.contributorId);
   const row = await db.query<{ title: string; created_at: Date; rkey: string }>(
     'SELECT title, created_at, rkey FROM editions WHERE uri = $1',
     [seeded.uri]
   );
-  assert.equal(row.rows[0]?.title, 'Edited title');
-  assert.equal(row.rows[0]?.rkey, seeded.rkey);
-  assert.equal(row.rows[0]?.created_at.toISOString(), '2020-01-02T03:04:05.000Z');
+  expect(row.rows[0]?.title).toBe('Edited title');
+  expect(row.rows[0]?.rkey).toBe(seeded.rkey);
+  expect(row.rows[0]?.created_at.toISOString()).toBe('2020-01-02T03:04:05.000Z');
 
   const identifiers = await db.query<{ issuer: string; value: string }>(
     'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer, value',
     [seeded.uri]
   );
-  assert.deepEqual(identifiers.rows, [
+  expect(identifiers.rows).toEqual([
     { issuer: 'isbn13', value: '9780000000002' },
     { issuer: 'oclc', value: '12345' }
   ]);
@@ -265,7 +254,7 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
        FROM edition_identifier_info WHERE edition_uri = $1`,
     [seeded.uri]
   );
-  assert.deepEqual(claims.rows, [
+  expect(claims.rows).toEqual([
     {
       issuer: 'isbn13',
       value: '9780000000002',
@@ -284,16 +273,13 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
       WHERE edition_uri = $1`,
     [seeded.uri]
   );
-  assert.deepEqual(
-    links.rows.map((row) => [row.issuer, row.value, Number(row.publisher_id)]),
-    [['isbn13', '9780000000002', secondPublisher]]
-  );
+  expect(links.rows.map((row) => [row.issuer, row.value, Number(row.publisher_id)])).toEqual([['isbn13', '9780000000002', secondPublisher]]);
 
   const shape = await db.query(
     'SELECT format, language, pages, duration_seconds FROM edition_identifier_shape WHERE edition_uri = $1',
     [seeded.uri]
   );
-  assert.deepEqual(shape.rows[0], {
+  expect(shape.rows[0]).toEqual({
     format: 'ebook',
     language: 'en',
     pages: 320,
@@ -304,13 +290,13 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
     'SELECT publisher FROM appview_book WHERE uri = $1',
     [seeded.uri]
   );
-  assert.equal(publisher.rows[0]?.publisher.name, `${RUN} Second Press ${seeded.rkey}`);
+  expect(publisher.rows[0]?.publisher.name).toBe(`${RUN} Second Press ${seeded.rkey}`);
 
   const queued = await db.query<{ op: string }>(
     'SELECT op FROM pds_outbox WHERE uri = $1',
     [seeded.uri]
   );
-  assert.ok(queued.rows[0], 'the edition trigger must queue the edition');
+  expect(queued.rows[0], 'the edition trigger must queue the edition').toBeTruthy();
 });
 
 test('creates a contributor from name and identifiers, then dedupes it', async (t) => {
@@ -328,8 +314,8 @@ test('creates a contributor from name and identifiers, then dedupes it', async (
     ]
   }));
   const created = first.contributors.find((contributor) => contributor.name === name);
-  assert.ok(created);
-  assert.ok(created.id > 0);
+  expect(created).toBeTruthy();
+  expect(created.id > 0).toBeTruthy();
 
   const second = await updateAdminEdition(db, seeded.rkey, bodyFrom(first, {
     contributors: [
@@ -342,11 +328,11 @@ test('creates a contributor from name and identifiers, then dedupes it', async (
     'SELECT id, at_uri FROM contributors WHERE lower(name) = lower($1) AND identifiers = $2::jsonb',
     [name, JSON.stringify(identifiers)]
   );
-  assert.equal(matching.rowCount, 1);
-  assert.equal(Number(matching.rows[0]?.id), created.id);
-  assert.match(matching.rows[0]?.at_uri ?? '', new RegExp(`^at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/`));
-  assert.equal(second.contributors.length, 2);
-  assert.equal(second.contributors[0]?.id, created.id);
+  expect(matching.rowCount).toBe(1);
+  expect(Number(matching.rows[0]?.id)).toBe(created.id);
+  expect(matching.rows[0]?.at_uri ?? '').toMatch(new RegExp(`^at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/`));
+  expect(second.contributors.length).toBe(2);
+  expect(second.contributors[0]?.id).toBe(created.id);
 });
 
 test('dedupes a contributor whose identifier bag arrives in another order', async (t) => {
@@ -368,7 +354,7 @@ test('dedupes a contributor whose identifier bag arrives in another order', asyn
     bodyFrom(original, { contributors: credits([isni, viaf]) })
   );
   const created = first.contributors.find((contributor) => contributor.name === name);
-  assert.ok(created);
+  expect(created).toBeTruthy();
 
   // The same identity, bag reversed: `(lower(name), identifiers)` compares the
   // stored jsonb positionally, so the row must not fork into a second address.
@@ -377,17 +363,13 @@ test('dedupes a contributor whose identifier bag arrives in another order', asyn
     seeded.rkey,
     bodyFrom(first, { contributors: credits([viaf, isni]) })
   );
-  assert.equal(
-    second.contributors[0]?.id,
-    created.id,
-    'a reordered identity bag minted a second contributor'
-  );
+  expect(second.contributors[0]?.id, 'a reordered identity bag minted a second contributor').toBe(created.id);
 
   const rows = await db.query<{ id: string }>(
     'SELECT id FROM contributors WHERE lower(name) = lower($1)',
     [name]
   );
-  assert.equal(rows.rowCount, 1);
+  expect(rows.rowCount).toBe(1);
 });
 
 test('removes a credit without deleting the shared contributor or publisher', async (t) => {
@@ -420,17 +402,14 @@ test('removes a credit without deleting the shared contributor or publisher', as
     ]
   }));
 
-  assert.equal(saved.contributors.length, 1);
-  assert.deepEqual(
-    saved.identifiers[0]?.publishers.map((entry) => entry.id),
-    [seeded.publisherId]
-  );
+  expect(saved.contributors.length).toBe(1);
+  expect(saved.identifiers[0]?.publishers.map((entry) => entry.id)).toEqual([seeded.publisherId]);
   const contributor = await db.query('SELECT id FROM contributors WHERE id = $1', [
     secondContributor
   ]);
   const publisher = await db.query('SELECT id FROM publishers WHERE id = $1', [secondPublisher]);
-  assert.equal(contributor.rowCount, 1);
-  assert.equal(publisher.rowCount, 1);
+  expect(contributor.rowCount).toBe(1);
+  expect(publisher.rowCount).toBe(1);
 });
 
 test('rejects an unknown contributor id and rolls back the scalar change', async (t) => {
@@ -439,21 +418,18 @@ test('rejects an unknown contributor id and rolls back the scalar change', async
   const seeded = await seedEdition('Unchanged title');
   const original = await loaded(seeded.rkey);
 
-  await assert.rejects(
-    updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
       title: 'Must roll back',
       contributors: [{ id: 9_000_000_000_000, role: 'A01', ref: null }]
-    })),
-    (error: unknown) =>
+    }))).rejects.toSatisfy((error: unknown) =>
       error instanceof EditionEditError &&
       error.status === 400 &&
-      error.code === 'UnknownContributor'
-  );
+      error.code === 'UnknownContributor');
 
   const row = await db.query<{ title: string }>('SELECT title FROM editions WHERE uri = $1', [
     seeded.uri
   ]);
-  assert.equal(row.rows[0]?.title, 'Unchanged title');
+  expect(row.rows[0]?.title).toBe('Unchanged title');
 });
 
 test('rejects a stale revision with 409', async (t) => {
@@ -465,17 +441,14 @@ test('rejects a stale revision with 409', async (t) => {
   const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
     title: 'Revision B'
   }));
-  assert.equal(saved.title, 'Revision B');
+  expect(saved.title).toBe('Revision B');
 
-  await assert.rejects(
-    updateAdminEdition(db, seeded.rkey, bodyFrom(original, { title: 'Revision C' })),
-    (error: unknown) =>
-      error instanceof EditionEditError && error.status === 409 && error.code === 'EditionChanged'
-  );
+  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, { title: 'Revision C' }))).rejects.toSatisfy((error: unknown) =>
+      error instanceof EditionEditError && error.status === 409 && error.code === 'EditionChanged');
   const row = await db.query<{ title: string }>('SELECT title FROM editions WHERE uri = $1', [
     seeded.uri
   ]);
-  assert.equal(row.rows[0]?.title, 'Revision B');
+  expect(row.rows[0]?.title).toBe('Revision B');
 });
 
 test('accepts the current revision with no changes', async (t) => {
@@ -484,11 +457,11 @@ test('accepts the current revision with no changes', async (t) => {
   const seeded = await seedEdition('Stable revision');
   const first = await loaded(seeded.rkey);
   const second = await loaded(seeded.rkey);
-  assert.equal(first.revision, second.revision);
+  expect(first.revision).toBe(second.revision);
 
   const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(second));
-  assert.equal(saved.title, 'Stable revision');
-  assert.equal(saved.revision, second.revision);
+  expect(saved.title).toBe('Stable revision');
+  expect(saved.revision).toBe(second.revision);
 });
 
 test('editing the cover URL clears the cover ledger, so the sweep refetches at once', async (t) => {
@@ -508,12 +481,12 @@ test('editing the cover URL clears the cover ledger, so the sweep refetches at o
     coverUrl: 'https://covers.example/real.jpg'
   }));
 
-  assert.equal(saved.coverUrl, 'https://covers.example/real.jpg');
+  expect(saved.coverUrl).toBe('https://covers.example/real.jpg');
   const claims = await db.query<{ n: string }>(
     'SELECT count(*)::int AS n FROM edition_cover_fetches WHERE edition_uri = $1',
     [seeded.uri]
   );
-  assert.equal(Number(claims.rows[0]?.n), 0, 'the ledger row is gone');
+  expect(Number(claims.rows[0]?.n), 'the ledger row is gone').toBe(0);
 });
 
 test('rejects invalid bodies before opening a transaction', async (t) => {
@@ -522,17 +495,11 @@ test('rejects invalid bodies before opening a transaction', async (t) => {
   const seeded = await seedEdition('Valid title');
   const original = await loaded(seeded.rkey);
 
-  await assert.rejects(
-    updateAdminEdition(db, seeded.rkey, bodyFrom(original, { title: '   ' })),
-    (error: unknown) =>
-      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
-  );
-  await assert.rejects(
-    updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, { title: '   ' }))).rejects.toSatisfy((error: unknown) =>
+      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition');
+  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
       coverUrl: 'javascript:alert(1)'
-    })),
-    (error: unknown) => error instanceof EditionEditError && error.status === 400
-  );
+    }))).rejects.toSatisfy((error: unknown) => error instanceof EditionEditError && error.status === 400);
 });
 
 test('claims are kept when omitted, cleared with null and written per identifier', async (t) => {
@@ -560,63 +527,54 @@ test('claims are kept when omitted, cleared with null and written per identifier
     [seeded.uri]
   );
   const seededClaim = await claimRow();
-  assert.deepEqual(
-    {
+  expect({
       // 0013: the trigger pruned the audio duration from a print claim.
       extent: seededClaim?.extent,
       format: seededClaim?.format,
       language: seededClaim?.language,
       pages: seededClaim?.pages,
       duration_seconds: seededClaim?.duration_seconds
-    },
-    {
+    }).toEqual({
       extent: { format: 'hardcover', pages: 320 },
       format: 'hardcover',
       language: 'en-GB',
       pages: 320,
       duration_seconds: null
-    }
-  );
+    });
 
   // Invalid claim field: rejected before the transaction, nothing changes.
-  await assert.rejects(
-    updateAdminEdition(
+  await expect(updateAdminEdition(
       db,
       seeded.rkey,
       bodyFrom(await loaded(seeded.rkey), {
         identifiers: [{ ...isbn, info: { language: 'en_US' } }]
       })
-    ),
-    (error: unknown) =>
-      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
-  );
-  await assert.rejects(
-    updateAdminEdition(
+    )).rejects.toSatisfy((error: unknown) =>
+      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition');
+  await expect(updateAdminEdition(
       db,
       seeded.rkey,
       bodyFrom(await loaded(seeded.rkey), {
         contributors: [{ id: seeded.contributorId, role: 'A55', ref: null }]
       })
-    ),
-    (error: unknown) =>
-      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition'
-  );
-  assert.equal((await claimRow())?.format, 'hardcover');
+    )).rejects.toSatisfy((error: unknown) =>
+      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition');
+  expect((await claimRow())?.format).toBe('hardcover');
 
   // An unchanged claim is not rewritten: `updated_at` survives a plain save.
   const reloaded = await loaded(seeded.rkey);
   const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(reloaded, {
     title: 'Claim editing 2'
   }));
-  assert.equal(saved.title, 'Claim editing 2');
-  assert.equal((await claimRow())?.updated_at.toISOString(), seededClaim?.updated_at.toISOString());
+  expect(saved.title).toBe('Claim editing 2');
+  expect((await claimRow())?.updated_at.toISOString()).toBe(seededClaim?.updated_at.toISOString());
 
   // An identifier with no `info` key keeps the stored claim untouched.
   const omitted = await updateAdminEdition(db, seeded.rkey, bodyFrom(saved, {
     identifiers: [isbn]
   }));
-  assert.equal(omitted.identifiers[0]?.info?.format, 'hardcover');
-  assert.equal((await claimRow())?.pages, 320);
+  expect(omitted.identifiers[0]?.info?.format).toBe('hardcover');
+  expect((await claimRow())?.pages).toBe(320);
 
   // A new identifier carries its own claim.
   const added = await updateAdminEdition(db, seeded.rkey, bodyFrom(omitted, {
@@ -629,22 +587,19 @@ test('claims are kept when omitted, cleared with null and written per identifier
       }
     ]
   }));
-  assert.deepEqual(
-    added.identifiers.find((identifier) => identifier.issuer === 'isbn10')?.info,
-    {
+  expect(added.identifiers.find((identifier) => identifier.issuer === 'isbn10')?.info).toEqual({
       format: 'paperback',
       language: null,
       publishedDate: '2024-02',
       pages: 288,
       description: null,
       durationSeconds: null
-    }
-  );
+    });
   const shape = await db.query<{ format: string; pages: number }>(
     'SELECT format, pages, duration_seconds FROM edition_identifier_shape WHERE edition_uri = $1',
     [seeded.uri]
   );
-  assert.deepEqual(shape.rows[0], { format: 'hardcover', pages: 320, duration_seconds: null });
+  expect(shape.rows[0]).toEqual({ format: 'hardcover', pages: 320, duration_seconds: null });
 
   // Null clears the row; the isbn13 claim still wins the union.
   const cleared = await updateAdminEdition(db, seeded.rkey, bodyFrom(added, {
@@ -653,35 +608,26 @@ test('claims are kept when omitted, cleared with null and written per identifier
       { issuer: 'isbn10', value: '0441013597' }
     ]
   }));
-  assert.equal(
-    cleared.identifiers.find((identifier) => identifier.issuer === 'isbn13')?.info,
-    null
-  );
-  assert.equal(await claimRow(), undefined);
+  expect(cleared.identifiers.find((identifier) => identifier.issuer === 'isbn13')?.info).toBe(null);
+  expect(await claimRow()).toBe(undefined);
 
   // Canonicalisation happens on the claim, exactly as it did on the edition.
   const canonical = await updateAdminEdition(db, seeded.rkey, bodyFrom(cleared, {
     identifiers: [{ ...isbn, info: { language: 'EN-us' } }]
   }));
-  assert.equal(
-    canonical.identifiers.find((identifier) => identifier.issuer === 'isbn13')?.info?.language,
-    'en-US'
-  );
-  assert.equal((await claimRow())?.language, 'en-US');
+  expect(canonical.identifiers.find((identifier) => identifier.issuer === 'isbn13')?.info?.language).toBe('en-US');
+  expect((await claimRow())?.language).toBe('en-US');
 });
 
 test('returns 404 for an unknown edition', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
-  assert.equal(await loadEditionForEdit(db, `missing${RUN}`), null);
-  await assert.rejects(
-    updateAdminEdition(db, `missing${RUN}`, {
+  expect(await loadEditionForEdit(db, `missing${RUN}`)).toBe(null);
+  await expect(updateAdminEdition(db, `missing${RUN}`, {
       title: 'x',
       identifiers: [{ issuer: 'isbn13', value: '1' }],
       contributors: [{ name: 'A' }]
-    }),
-    (error: unknown) => error instanceof EditionEditError && error.status === 404
-  );
+    })).rejects.toSatisfy((error: unknown) => error instanceof EditionEditError && error.status === 404);
 });
 
 test('queues new contributor and publisher entity rows through triggers', async (t) => {
@@ -708,33 +654,29 @@ test('queues new contributor and publisher entity rows through triggers', async 
 
   const contributor = saved.contributors.find((credit) => credit.name === name);
   const publisher = saved.identifiers[0]?.publishers.find((entry) => entry.name === publisherName);
-  assert.ok(contributor);
-  assert.ok(publisher);
+  expect(contributor).toBeTruthy();
+  expect(publisher).toBeTruthy();
 
   const contributorOutbox = await db.query<{ collection: string; op: string }>(
     'SELECT collection, op FROM pds_outbox WHERE uri LIKE $1',
     [`at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/%`]
   );
-  assert.ok(
-    contributorOutbox.rows.some(
+  expect(contributorOutbox.rows.some(
       (row) => row.collection === CONTRIBUTOR_COLLECTION && ['create', 'update'].includes(row.op)
-    )
-  );
+    )).toBeTruthy();
   const publisherOutbox = await db.query<{ collection: string; op: string }>(
     'SELECT collection, op FROM pds_outbox WHERE uri LIKE $1',
     [`at://${AUTHORITY}/${PUBLISHER_COLLECTION}/%`]
   );
-  assert.ok(
-    publisherOutbox.rows.some(
+  expect(publisherOutbox.rows.some(
       (row) => row.collection === PUBLISHER_COLLECTION && ['create', 'update'].includes(row.op)
-    )
-  );
+    )).toBeTruthy();
   const editionOutbox = await db.query<{ op: string }>(
     `SELECT op FROM pds_outbox
       WHERE uri = $1 AND collection = 'community.lexicon.media.book.edition'`,
     [seeded.uri]
   );
-  assert.ok(editionOutbox.rows[0], 'the edition row must be queued by the catalog trigger');
+  expect(editionOutbox.rows[0], 'the edition row must be queued by the catalog trigger').toBeTruthy();
 });
 
 test('deletes an edition with its children and queues the record deletion', async (t) => {
@@ -749,16 +691,12 @@ test('deletes an edition with its children and queues the record deletion', asyn
   await db.query('INSERT INTO edition_cover_fetches (edition_uri) VALUES ($1)', [seeded.uri]);
   await db.query('INSERT INTO edition_genre_fetches (edition_uri) VALUES ($1)', [seeded.uri]);
   const original = await loaded(seeded.rkey);
-  assert.equal(
-    (await db.query<{ op: string }>('SELECT op FROM pds_outbox WHERE uri = $1', [seeded.uri])).rows[0]
-      ?.op,
-    'create',
-    'a fresh seeded edition is queued as a create'
-  );
+  expect((await db.query<{ op: string }>('SELECT op FROM pds_outbox WHERE uri = $1', [seeded.uri])).rows[0]
+      ?.op, 'a fresh seeded edition is queued as a create').toBe('create');
 
   const deleted = await deleteAdminEdition(db, seeded.rkey, original.revision);
 
-  assert.equal(deleted, seeded.uri);
+  expect(deleted).toBe(seeded.uri);
   const counts = await db.query<{
     editions: number;
     identifiers: number;
@@ -777,7 +715,7 @@ test('deletes an edition with its children and queues the record deletion', asyn
             (SELECT count(*)::int FROM edition_genre_fetches WHERE edition_uri = $1) AS genres`,
     [seeded.uri]
   );
-  assert.deepEqual(counts.rows[0], {
+  expect(counts.rows[0]).toEqual({
     editions: 0,
     identifiers: 0,
     claims: 0,
@@ -790,8 +728,8 @@ test('deletes an edition with its children and queues the record deletion', asyn
   const outbox = await db.query<{ op: string }>('SELECT op FROM pds_outbox WHERE uri = $1', [
     seeded.uri
   ]);
-  assert.deepEqual(outbox.rows, [{ op: 'delete' }], 'the parked create is rewritten to a delete');
-  assert.equal(await loadEditionForEdit(db, seeded.rkey), null);
+  expect(outbox.rows, 'the parked create is rewritten to a delete').toEqual([{ op: 'delete' }]);
+  expect(await loadEditionForEdit(db, seeded.rkey)).toBe(null);
 });
 
 test('refuses to delete an edition that changed since it was loaded', async (t) => {
@@ -805,25 +743,16 @@ test('refuses to delete an edition that changed since it was loaded', async (t) 
     bodyFrom(original, { title: 'Renamed before delete' })
   );
 
-  await assert.rejects(
-    () => deleteAdminEdition(db, seeded.rkey, original.revision),
-    (error: unknown) =>
+  await expect(() => deleteAdminEdition(db, seeded.rkey, original.revision)).rejects.toSatisfy((error: unknown) =>
       error instanceof EditionEditError &&
       error.status === 409 &&
-      error.code === 'EditionChanged'
-  );
-  assert.ok(
-    (await loadEditionForEdit(db, seeded.rkey)) !== null,
-    'a refused delete leaves the edition in place'
-  );
+      error.code === 'EditionChanged');
+  expect((await loadEditionForEdit(db, seeded.rkey)) !== null, 'a refused delete leaves the edition in place').toBeTruthy();
 });
 
 test('reports an unknown edition as 404 on delete', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
-  await assert.rejects(
-    () => deleteAdminEdition(db, `missing${RUN}`, null),
-    (error: unknown) =>
-      error instanceof EditionEditError && error.status === 404 && error.code === 'NotFound'
-  );
+  await expect(() => deleteAdminEdition(db, `missing${RUN}`, null)).rejects.toSatisfy((error: unknown) =>
+      error instanceof EditionEditError && error.status === 404 && error.code === 'NotFound');
 });

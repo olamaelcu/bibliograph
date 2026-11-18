@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   EDITION_COLLECTION,
@@ -63,16 +62,16 @@ test('claimBatch drains the contributor, publisher and edition collections', asy
     { publisherDid: AUTHORITY, limit: 7 }
   );
 
-  assert.deepEqual(rows, []);
-  assert.match(calls[0].sql, /collection = ANY\(\$1::text\[\]\)/);
-  assert.deepEqual(calls[0].params[0], [...OUTBOX_COLLECTIONS]);
-  assert.ok(calls[0].params[0].includes(EDITION_COLLECTION));
-  assert.ok(calls[0].params[0].includes('net.olamaelcu.livtet.biblio.contributor'));
-  assert.ok(calls[0].params[0].includes('net.olamaelcu.livtet.biblio.publisher'));
-  assert.equal(calls[0].params[1], 10);
-  assert.equal(calls[0].params[2], 300);
-  assert.equal(calls[0].params[3], 7);
-  assert.equal(calls[0].params[4], AUTHORITY);
+  expect(rows).toEqual([]);
+  expect(calls[0].sql).toMatch(/collection = ANY\(\$1::text\[\]\)/);
+  expect(calls[0].params[0]).toEqual([...OUTBOX_COLLECTIONS]);
+  expect(calls[0].params[0].includes(EDITION_COLLECTION)).toBeTruthy();
+  expect(calls[0].params[0].includes('net.olamaelcu.livtet.biblio.contributor')).toBeTruthy();
+  expect(calls[0].params[0].includes('net.olamaelcu.livtet.biblio.publisher')).toBeTruthy();
+  expect(calls[0].params[1]).toBe(10);
+  expect(calls[0].params[2]).toBe(300);
+  expect(calls[0].params[3]).toBe(7);
+  expect(calls[0].params[4]).toBe(AUTHORITY);
 });
 
 test('claimBatch accepts an explicit collection subset', async () => {
@@ -86,7 +85,7 @@ test('claimBatch accepts an explicit collection subset', async () => {
     },
     { publisherDid: AUTHORITY, collections: [EDITION_COLLECTION] }
   );
-  assert.deepEqual(calls[0].params[0], [EDITION_COLLECTION]);
+  expect(calls[0].params[0]).toEqual([EDITION_COLLECTION]);
 });
 
 test('publishes a contributor record built from its catalog row', async () => {
@@ -111,13 +110,13 @@ test('publishes a contributor record built from its catalog row', async () => {
     logger: QUIET
   });
 
-  assert.deepEqual(result.value, {
+  expect(result.value).toEqual({
     displayName: 'Ursula K. Le Guin',
     identifiers: [{ issuer: 'orcid', value: '0000-0002-1825-0097' }],
     born: '1929-10-21',
     createdAt: '2026-11-12T10:20:30.000Z'
   });
-  assert.deepEqual(pds.writes[0], {
+  expect(pds.writes[0]).toEqual({
     operation: 'create',
     collection: 'net.olamaelcu.livtet.biblio.contributor',
     rkey: '3abc',
@@ -151,8 +150,8 @@ test('publishes a publisher record and switches to update when a CID exists', as
     logger: QUIET
   });
 
-  assert.equal(result.operation, 'update');
-  assert.deepEqual(result.value, {
+  expect(result.operation).toBe('update');
+  expect(result.value).toEqual({
     name: 'Ace Books',
     started: '1952-01-01',
     createdAt: '2026-11-12T10:20:30.000Z'
@@ -172,8 +171,8 @@ test('deletes an entity row without reading the catalog', async () => {
     entry: entry({ op: 'delete' }),
     logger: QUIET
   });
-  assert.equal(result.operation, 'delete');
-  assert.deepEqual(pds.writes[0], {
+  expect(result.operation).toBe('delete');
+  expect(pds.writes[0]).toEqual({
     operation: 'delete',
     collection: 'net.olamaelcu.livtet.biblio.contributor',
     rkey: '3abc'
@@ -181,40 +180,31 @@ test('deletes an entity row without reading the catalog', async () => {
 });
 
 test('refuses a row from an unpublished collection', async () => {
-  await assert.rejects(
-    publishEntry({
+  await expect(publishEntry({
       pds: recordingPds(),
       publisherDid: AUTHORITY,
       pool: entityPool(),
       entry: entry({ collection: 'com.example.unknown' }),
       logger: QUIET
-    }),
-    /unpublished collection/
-  );
+    })).rejects.toThrow(/unpublished collection/);
 });
 
 test('refuses a row minted under another authority', async () => {
-  await assert.rejects(
-    publishEntry({
+  await expect(publishEntry({
       pds: recordingPds(),
       publisherDid: AUTHORITY,
       pool: entityPool(),
       entry: entry({ uri: 'at://did:plc:other/net.olamaelcu.livtet.biblio.contributor/3abc' }),
       logger: QUIET
-    }),
-    (error) => error instanceof PublisherConfigError
-  );
+    })).rejects.toSatisfy((error) => error instanceof PublisherConfigError);
 });
 
 test('fails loudly when the catalog row vanished but the row is not a delete', async () => {
-  await assert.rejects(
-    publishEntry({
+  await expect(publishEntry({
       pds: recordingPds(),
       publisherDid: AUTHORITY,
       pool: entityPool({}),
       entry: entry(),
       logger: QUIET
-    }),
-    /gone from the catalog/
-  );
+    })).rejects.toThrow(/gone from the catalog/);
 });

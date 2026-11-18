@@ -5,12 +5,17 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "test": "node --test test/*.test.js",
+    "test": "vitest run",
     "normalize:descriptions": "node scripts/normalize-isbndb-descriptions.mjs",
     "normalize:isbndb-authors": "node scripts/normalize-isbndb-author-names.mjs"
   },
   "dependencies": {
     "graphile-worker": "^0.18.0",
     "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.2.1",
+    "testcontainers": "^12.2.1",
+    "vitest": "^5.1.1"
   }
 }

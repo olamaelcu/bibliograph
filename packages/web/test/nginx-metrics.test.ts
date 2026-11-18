@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
+
 import { readFile } from 'node:fs/promises';
 
 /**
@@ -15,13 +15,13 @@ const config = await readFile(
 
 test('the public vhost denies /metrics and does not proxy it', () => {
   const matches = [...config.matchAll(/location\s*=\s*\/metrics\s*\{([\s\S]*?)\}/g)];
-  assert.equal(matches.length, 1, 'exactly one exact-match /metrics location');
+  expect(matches.length, 'exactly one exact-match /metrics location').toBe(1);
   const block = matches[0][1];
-  assert.match(block, /allow\s+127\.0\.0\.1;/);
-  assert.match(block, /deny\s+all;/);
-  assert.doesNotMatch(block, /proxy_pass/, 'the denied path is never proxied upstream');
+  expect(block).toMatch(/allow\s+127\.0\.0\.1;/);
+  expect(block).toMatch(/deny\s+all;/);
+  expect(block, 'the denied path is never proxied upstream').not.toMatch(/proxy_pass/);
 });
 
 test('the upstream remains the loopback web process the scraper targets', () => {
-  assert.match(config, /upstream bibliograph_web\s*\{\s*server 127\.0\.0\.1:5176;/);
+  expect(config).toMatch(/upstream bibliograph_web\s*\{\s*server 127\.0\.0\.1:5176;/);
 });

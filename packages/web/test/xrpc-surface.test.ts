@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
+
 import { readdir } from 'node:fs/promises';
 
 import {
@@ -73,16 +73,8 @@ function mocked(): { dependencies: XrpcDependencies; calls: string[] } {
 }
 
 test('the forwarded lists match the scripts hv-deploy uploads', async () => {
-  assert.deepEqual(
-    [...(await uploaded('query'))].sort(),
-    [...FORWARDED_QUERIES].sort(),
-    'scripts/xrpc/query/ and FORWARDED_QUERIES disagree'
-  );
-  assert.deepEqual(
-    [...(await uploaded('procedure'))].sort(),
-    [...FORWARDED_PROCEDURES].sort(),
-    'scripts/xrpc/procedure/ and FORWARDED_PROCEDURES disagree'
-  );
+  expect([...(await uploaded('query'))].sort(), 'scripts/xrpc/query/ and FORWARDED_QUERIES disagree').toEqual([...FORWARDED_QUERIES].sort());
+  expect([...(await uploaded('procedure'))].sort(), 'scripts/xrpc/procedure/ and FORWARDED_PROCEDURES disagree').toEqual([...FORWARDED_PROCEDURES].sort());
 });
 
 test('the described surface is exactly the registries it is built from', () => {
@@ -96,36 +88,33 @@ test('the described surface is exactly the registries it is built from', () => {
     ...FORWARDED_QUERIES,
     ...FORWARDED_PROCEDURES
   ]);
-  assert.deepEqual(serviceMethods(), [...expected].sort());
-  assert.equal(serviceMethods().length, 51);
+  expect(serviceMethods()).toEqual([...expected].sort());
+  expect(serviceMethods().length).toBe(51);
 });
 
 test('every described method is a valid NSID, listed once', () => {
   const methods = serviceMethods();
-  assert.equal(new Set(methods).size, methods.length, 'a method is listed twice');
-  for (const method of methods) assert.match(method, NSID);
+  expect(new Set(methods).size, 'a method is listed twice').toBe(methods.length);
+  for (const method of methods) expect(method).toMatch(NSID);
 });
 
 test('describeService uses the rsky shape', () => {
   const described = describeService();
-  assert.deepEqual(described.roles, ['appview', 'feedgen']);
-  assert.equal(described.methods.length, serviceMethods().length);
+  expect(described.roles).toEqual(['appview', 'feedgen']);
+  expect(described.methods.length).toBe(serviceMethods().length);
   for (const entry of described.methods) {
-    assert.equal(entry.$type, 'community.lexicon.service.describe#nsid');
-    assert.equal(typeof entry.value, 'string');
+    expect(entry.$type).toBe('community.lexicon.service.describe#nsid');
+    expect(typeof entry.value).toBe('string');
   }
-  assert.deepEqual(
-    described.methods.map((entry) => entry.value),
-    serviceMethods()
-  );
+  expect(described.methods.map((entry) => entry.value)).toEqual(serviceMethods());
 });
 
 test('describe answers GET through its own handler only', async () => {
   const { dependencies, calls } = mocked();
   const response = await dispatchGet(SERVICE_DESCRIBE, new Request('https://edge.test/'), dependencies);
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).handler, 'serviceDescribe');
-  assert.deepEqual(calls, ['serviceDescribe']);
+  expect(response.status).toBe(200);
+  expect((await response.json()).handler).toBe('serviceDescribe');
+  expect(calls).toEqual(['serviceDescribe']);
 });
 
 test('describe is GET-only', async () => {
@@ -135,7 +124,7 @@ test('describe is GET-only', async () => {
     new Request('https://edge.test/', { method: 'POST' }),
     dependencies
   );
-  assert.equal(response.status, 405);
-  assert.deepEqual(await response.json(), { error: 'MethodNotAllowed' });
-  assert.deepEqual(calls, []);
+  expect(response.status).toBe(405);
+  expect(await response.json()).toEqual({ error: 'MethodNotAllowed' });
+  expect(calls).toEqual([]);
 });

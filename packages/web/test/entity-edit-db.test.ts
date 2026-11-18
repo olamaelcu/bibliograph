@@ -1,5 +1,5 @@
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import pg from 'pg';
 
 import {
@@ -71,7 +71,7 @@ async function createContributor(
     [name, JSON.stringify(identifiers), AUTHORITY, CONTRIBUTOR_COLLECTION]
   );
   const row = result.rows[0];
-  assert.ok(row);
+  expect(row).toBeTruthy();
   return {
     id: Number(row.id),
     atUri: row.at_uri,
@@ -94,7 +94,7 @@ async function createPublisher(
     [name, JSON.stringify(identifiers), AUTHORITY, PUBLISHER_COLLECTION]
   );
   const row = result.rows[0];
-  assert.ok(row);
+  expect(row).toBeTruthy();
   return {
     id: Number(row.id),
     atUri: row.at_uri,
@@ -157,13 +157,13 @@ function bodyFrom(record: AdminContributorRecord | AdminPublisherRecord, overrid
 
 async function loadedContributor(db: pg.Pool, ref: string): Promise<AdminContributorRecord> {
   const record = await loadAdminEntity(db, 'contributor', ref);
-  assert.ok(record, 'expected the contributor to load');
+  expect(record, 'expected the contributor to load').toBeTruthy();
   return record;
 }
 
 async function loadedPublisher(db: pg.Pool, ref: string): Promise<AdminPublisherRecord> {
   const record = await loadAdminEntity(db, 'publisher', ref);
-  assert.ok(record, 'expected the publisher to load');
+  expect(record, 'expected the publisher to load').toBeTruthy();
   return record;
 }
 
@@ -172,7 +172,7 @@ function isEntityError(status: number, code: string) {
     error instanceof EntityEditError && error.status === status && error.code === code;
 }
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 3 });
   try {
     await pool.query('SELECT 1');
@@ -183,7 +183,7 @@ before(async () => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   if (pool) {
     await cleanup().catch(() => {});
     await pool.end();
@@ -205,23 +205,23 @@ test('loads a contributor by id and by a URL-encoded at-uri', async (t) => {
   );
 
   const byId = await loadedContributor(db, String(seeded.id));
-  assert.equal(byId.id, seeded.id);
-  assert.equal(byId.atUri, seeded.atUri);
-  assert.equal(byId.name, `${RUN} Loadable Person`);
-  assert.equal(byId.nameInverted, 'Person, Loadable');
-  assert.equal(byId.description, 'A bio');
-  assert.equal(byId.imageUrl, 'https://example.org/p.jpg');
-  assert.equal(byId.born, '1920-10-08');
-  assert.equal(byId.died, '1986-02-11');
-  assert.deepEqual(byId.identifiers, [{ issuer: 'isni', value: '0000000111111111' }]);
-  assert.equal(byId.createdAt, seeded.createdAt);
-  assert.match(byId.revision, /^[a-f0-9]{64}$/);
+  expect(byId.id).toBe(seeded.id);
+  expect(byId.atUri).toBe(seeded.atUri);
+  expect(byId.name).toBe(`${RUN} Loadable Person`);
+  expect(byId.nameInverted).toBe('Person, Loadable');
+  expect(byId.description).toBe('A bio');
+  expect(byId.imageUrl).toBe('https://example.org/p.jpg');
+  expect(byId.born).toBe('1920-10-08');
+  expect(byId.died).toBe('1986-02-11');
+  expect(byId.identifiers).toEqual([{ issuer: 'isni', value: '0000000111111111' }]);
+  expect(byId.createdAt).toBe(seeded.createdAt);
+  expect(byId.revision).toMatch(/^[a-f0-9]{64}$/);
 
   const byUri = await loadedContributor(db, encodeURIComponent(seeded.atUri));
-  assert.deepEqual(byUri, byId);
+  expect(byUri).toEqual(byId);
 
   const wrongKind = await loadAdminEntity(db, 'publisher', seeded.atUri);
-  assert.equal(wrongKind, null);
+  expect(wrongKind).toBe(null);
 });
 
 test('loads a publisher by id and by a URL-encoded at-uri', async (t) => {
@@ -232,17 +232,17 @@ test('loads a publisher by id and by a URL-encoded at-uri', async (t) => {
   ]);
 
   const byId = await loadedPublisher(db, String(seeded.id));
-  assert.equal(byId.id, seeded.id);
-  assert.equal(byId.atUri, seeded.atUri);
-  assert.equal(byId.name, `${RUN} Loadable Press`);
-  assert.equal(byId.started, null);
-  assert.equal(byId.ended, null);
-  assert.deepEqual(byId.identifiers, [{ issuer: 'viaf', value: '555' }]);
-  assert.equal(byId.createdAt, seeded.createdAt);
-  assert.match(byId.revision, /^[a-f0-9]{64}$/);
+  expect(byId.id).toBe(seeded.id);
+  expect(byId.atUri).toBe(seeded.atUri);
+  expect(byId.name).toBe(`${RUN} Loadable Press`);
+  expect(byId.started).toBe(null);
+  expect(byId.ended).toBe(null);
+  expect(byId.identifiers).toEqual([{ issuer: 'viaf', value: '555' }]);
+  expect(byId.createdAt).toBe(seeded.createdAt);
+  expect(byId.revision).toMatch(/^[a-f0-9]{64}$/);
 
   const byUri = await loadedPublisher(db, encodeURIComponent(seeded.atUri));
-  assert.deepEqual(byUri, byId);
+  expect(byUri).toEqual(byId);
 });
 
 test('updates a contributor atomically and queues its record and dependent editions', async (t) => {
@@ -272,40 +272,40 @@ test('updates a contributor atomically and queues its record and dependent editi
     }
   ));
 
-  assert.equal(saved.id, original.id);
-  assert.equal(saved.atUri, original.atUri);
-  assert.equal(saved.createdAt, original.createdAt);
-  assert.equal(saved.name, `${RUN} Renamed Person`);
-  assert.equal(saved.nameInverted, 'Person, Renamed');
-  assert.equal(saved.description, 'Edited bio');
-  assert.equal(saved.imageUrl, 'https://example.org/renamed.jpg');
-  assert.equal(saved.born, '1924-02-29');
-  assert.equal(saved.died, '1990-12-31');
-  assert.deepEqual(saved.identifiers, [
+  expect(saved.id).toBe(original.id);
+  expect(saved.atUri).toBe(original.atUri);
+  expect(saved.createdAt).toBe(original.createdAt);
+  expect(saved.name).toBe(`${RUN} Renamed Person`);
+  expect(saved.nameInverted).toBe('Person, Renamed');
+  expect(saved.description).toBe('Edited bio');
+  expect(saved.imageUrl).toBe('https://example.org/renamed.jpg');
+  expect(saved.born).toBe('1924-02-29');
+  expect(saved.died).toBe('1990-12-31');
+  expect(saved.identifiers).toEqual([
     { issuer: 'isni', value: '2' },
     { issuer: 'viaf', value: '999' }
   ]);
-  assert.notEqual(saved.revision, original.revision);
+  expect(saved.revision).not.toBe(original.revision);
 
   const row = await db.query<{ at_uri: string; created_at: Date; identifiers: unknown }>(
     'SELECT at_uri, created_at, identifiers FROM contributors WHERE id = $1',
     [contributor.id]
   );
-  assert.equal(row.rows[0]?.at_uri, contributor.atUri);
-  assert.equal(row.rows[0]?.created_at.toISOString(), contributor.createdAt);
+  expect(row.rows[0]?.at_uri).toBe(contributor.atUri);
+  expect(row.rows[0]?.created_at.toISOString()).toBe(contributor.createdAt);
 
   const entityQueued = await outbox(contributor.atUri);
-  assert.equal(entityQueued?.collection, CONTRIBUTOR_COLLECTION);
-  assert.equal(entityQueued?.op, 'update');
+  expect(entityQueued?.collection).toBe(CONTRIBUTOR_COLLECTION);
+  expect(entityQueued?.op).toBe('update');
   const editionQueued = await outbox(editionUri);
-  assert.equal(editionQueued?.collection, EDITION_COLLECTION);
-  assert.equal(editionQueued?.op, 'update');
+  expect(editionQueued?.collection).toBe(EDITION_COLLECTION);
+  expect(editionQueued?.op).toBe('update');
 
   const view = await db.query<{ contributors: Array<{ name: string }> }>(
     'SELECT contributors FROM appview_book WHERE uri = $1',
     [editionUri]
   );
-  assert.equal(view.rows[0]?.contributors[0]?.name, `${RUN} Renamed Person`);
+  expect(view.rows[0]?.contributors[0]?.name).toBe(`${RUN} Renamed Person`);
 });
 
 test('leaves identifiers and stored urls alone for a metadata-only edit', async (t) => {
@@ -319,7 +319,7 @@ test('leaves identifiers and stored urls alone for a metadata-only edit', async 
 
   const original = await loadedContributor(db, String(contributor.id));
   // The editor read path shows pairs; the stored `url` is not part of the form.
-  assert.deepEqual(original.identifiers, [{ issuer: 'isni', value: '0000000222222222' }]);
+  expect(original.identifiers).toEqual([{ issuer: 'isni', value: '0000000222222222' }]);
 
   const saved = await updateAdminEntity(
     db,
@@ -327,17 +327,17 @@ test('leaves identifiers and stored urls alone for a metadata-only edit', async 
     String(contributor.id),
     bodyFrom(original, { description: 'Only the bio changed' })
   );
-  assert.equal(saved.description, 'Only the bio changed');
-  assert.notEqual(saved.revision, original.revision);
+  expect(saved.description).toBe('Only the bio changed');
+  expect(saved.revision).not.toBe(original.revision);
 
   const row = await db.query<{ identifiers: unknown }>(
     'SELECT identifiers FROM contributors WHERE id = $1',
     [contributor.id]
   );
-  assert.deepEqual(row.rows[0]?.identifiers, identifiers);
+  expect(row.rows[0]?.identifiers).toEqual(identifiers);
 
-  assert.ok(await outbox(contributor.atUri), 'the entity trigger must queue the record');
-  assert.equal(await outbox(editionUri), null, 'a metadata-only edit must not queue editions');
+  expect(await outbox(contributor.atUri), 'the entity trigger must queue the record').toBeTruthy();
+  expect(await outbox(editionUri), 'a metadata-only edit must not queue editions').toBe(null);
 });
 
 test('updates a publisher and queues its record and dependent editions', async (t) => {
@@ -361,22 +361,22 @@ test('updates a publisher and queues its record and dependent editions', async (
     }
   ));
 
-  assert.equal(saved.id, original.id);
-  assert.equal(saved.atUri, original.atUri);
-  assert.equal(saved.createdAt, original.createdAt);
-  assert.equal(saved.name, `${RUN} Renamed Press`);
-  assert.equal(saved.started, '1972-01-01');
-  assert.equal(saved.ended, '1998-12-31');
-  assert.deepEqual(saved.identifiers, [{ issuer: 'viaf', value: '777' }]);
+  expect(saved.id).toBe(original.id);
+  expect(saved.atUri).toBe(original.atUri);
+  expect(saved.createdAt).toBe(original.createdAt);
+  expect(saved.name).toBe(`${RUN} Renamed Press`);
+  expect(saved.started).toBe('1972-01-01');
+  expect(saved.ended).toBe('1998-12-31');
+  expect(saved.identifiers).toEqual([{ issuer: 'viaf', value: '777' }]);
 
-  assert.equal((await outbox(publisher.atUri))?.collection, PUBLISHER_COLLECTION);
-  assert.equal((await outbox(editionUri))?.collection, EDITION_COLLECTION);
+  expect((await outbox(publisher.atUri))?.collection).toBe(PUBLISHER_COLLECTION);
+  expect((await outbox(editionUri))?.collection).toBe(EDITION_COLLECTION);
 
   const view = await db.query<{ publishers: Array<{ name: string }> }>(
     'SELECT publishers FROM appview_book WHERE uri = $1',
     [editionUri]
   );
-  assert.equal(view.rows[0]?.publishers[0]?.name, `${RUN} Renamed Press`);
+  expect(view.rows[0]?.publishers[0]?.name).toBe(`${RUN} Renamed Press`);
 });
 
 test('keeps stored identifier urls for pairs retained during a replacement', async (t) => {
@@ -399,7 +399,7 @@ test('keeps stored identifier urls for pairs retained during a replacement', asy
     'SELECT identifiers FROM contributors WHERE id = $1',
     [contributor.id]
   );
-  assert.deepEqual(row.rows[0]?.identifiers, [
+  expect(row.rows[0]?.identifiers).toEqual([
     { issuer: 'isni', value: 'keep', url: 'https://example.org/isni/keep' },
     { issuer: 'oclc', value: 'new' }
   ]);
@@ -417,22 +417,19 @@ test('rejects a stale revision with 409 and leaves the row unchanged', async (t)
     String(contributor.id),
     bodyFrom(original, { name: `${RUN} Revision Person Two` })
   );
-  assert.equal(saved.name, `${RUN} Revision Person Two`);
+  expect(saved.name).toBe(`${RUN} Revision Person Two`);
 
-  await assert.rejects(
-    updateAdminEntity(
+  await expect(updateAdminEntity(
       db,
       'contributor',
       String(contributor.id),
       bodyFrom(original, { name: `${RUN} Revision Person Three` })
-    ),
-    isEntityError(409, 'EntityChanged')
-  );
+    )).rejects.toSatisfy(isEntityError(409, 'EntityChanged'));
 
   const row = await db.query<{ name: string }>('SELECT name FROM contributors WHERE id = $1', [
     contributor.id
   ]);
-  assert.equal(row.rows[0]?.name, `${RUN} Revision Person Two`);
+  expect(row.rows[0]?.name).toBe(`${RUN} Revision Person Two`);
 });
 
 test('rejects an unknown id or at-uri with 404', async (t) => {
@@ -441,23 +438,14 @@ test('rejects an unknown id or at-uri with 404', async (t) => {
   const seeded = await createContributor(`${RUN} Known Person`);
   const body = bodyFrom(await loadedContributor(db, String(seeded.id)));
 
-  await assert.rejects(
-    updateAdminEntity(db, 'contributor', '900000000000000', body),
-    isEntityError(404, 'NotFound')
-  );
-  await assert.rejects(
-    updateAdminEntity(
+  await expect(updateAdminEntity(db, 'contributor', '900000000000000', body)).rejects.toSatisfy(isEntityError(404, 'NotFound'));
+  await expect(updateAdminEntity(
       db,
       'contributor',
       `at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/missing${sequence}`,
       body
-    ),
-    isEntityError(404, 'NotFound')
-  );
-  assert.equal(
-    await loadAdminEntity(db, 'contributor', `at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/missing`),
-    null
-  );
+    )).rejects.toSatisfy(isEntityError(404, 'NotFound'));
+  expect(await loadAdminEntity(db, 'contributor', `at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/missing`)).toBe(null);
 });
 
 test('maps the unique identity conflict to 409 without writing', async (t) => {
@@ -470,25 +458,22 @@ test('maps the unique identity conflict to 409 without writing', async (t) => {
   const second = await createContributor(secondName, [{ issuer: 'isni', value: '2' }]);
   const current = await loadedContributor(db, String(second.id));
 
-  await assert.rejects(
-    updateAdminEntity(db, 'contributor', String(second.id), bodyFrom(current, {
+  await expect(updateAdminEntity(db, 'contributor', String(second.id), bodyFrom(current, {
       name: `${RUN} conflict one`,
       identifiers: [{ issuer: 'isni', value: '1' }]
-    })),
-    isEntityError(409, 'DuplicateEntity')
-  );
+    }))).rejects.toSatisfy(isEntityError(409, 'DuplicateEntity'));
 
   const row = await db.query<{ name: string; identifiers: unknown }>(
     'SELECT name, identifiers FROM contributors WHERE id = $1',
     [second.id]
   );
-  assert.equal(row.rows[0]?.name, secondName);
-  assert.deepEqual(row.rows[0]?.identifiers, [{ issuer: 'isni', value: '2' }]);
+  expect(row.rows[0]?.name).toBe(secondName);
+  expect(row.rows[0]?.identifiers).toEqual([{ issuer: 'isni', value: '2' }]);
   const untouched = await db.query<{ name: string; identifiers: unknown }>(
     'SELECT name, identifiers FROM contributors WHERE id = $1',
     [first.id]
   );
-  assert.equal(untouched.rows[0]?.name, `${RUN} Conflict One`);
+  expect(untouched.rows[0]?.name).toBe(`${RUN} Conflict One`);
 });
 
 test('rejects invalid bodies before opening a transaction', async (t) => {
@@ -505,18 +490,15 @@ test('rejects invalid bodies before opening a transaction', async (t) => {
     { name: 'Valid', imageUrl: '/relative.jpg' },
     { name: 'Valid', identifiers: [{ issuer: 'isni', value: ' ' }] }
   ]) {
-    await assert.rejects(
-      updateAdminEntity(db, 'contributor', String(contributor.id), body),
-      (error: unknown) => error instanceof EntityEditError && error.status === 400
-    );
+    await expect(updateAdminEntity(db, 'contributor', String(contributor.id), body)).rejects.toSatisfy((error: unknown) => error instanceof EntityEditError && error.status === 400);
   }
 
   const row = await db.query<{ name: string; identifiers: unknown }>(
     'SELECT name, identifiers FROM contributors WHERE id = $1',
     [contributor.id]
   );
-  assert.equal(row.rows[0]?.name, original.name);
-  assert.deepEqual(row.rows[0]?.identifiers, []);
+  expect(row.rows[0]?.name).toBe(original.name);
+  expect(row.rows[0]?.identifiers).toEqual([]);
 });
 
 test('accepts a save with no expectedRevision and a no-op save', async (t) => {
@@ -531,7 +513,7 @@ test('accepts a save with no expectedRevision and a no-op save', async (t) => {
     String(contributor.id),
     bodyFrom(original, { expectedRevision: null, description: 'No token' })
   );
-  assert.equal(noRevision.description, 'No token');
+  expect(noRevision.description).toBe('No token');
 
   const noop = await updateAdminEntity(
     db,
@@ -539,8 +521,8 @@ test('accepts a save with no expectedRevision and a no-op save', async (t) => {
     String(contributor.id),
     bodyFrom(noRevision)
   );
-  assert.equal(noop.revision, noRevision.revision);
-  assert.equal(noop.description, 'No token');
+  expect(noop.revision).toBe(noRevision.revision);
+  expect(noop.description).toBe('No token');
 });
 
 test('deletes an uncredited contributor and queues its record deletion', async (t) => {
@@ -557,9 +539,9 @@ test('deletes an uncredited contributor and queues its record deletion', async (
     record.revision
   );
 
-  assert.equal(deleted, seeded.id);
-  assert.equal(await loadAdminEntity(db, 'contributor', String(seeded.id)), null);
-  assert.deepEqual(await outbox(seeded.atUri), {
+  expect(deleted).toBe(seeded.id);
+  expect(await loadAdminEntity(db, 'contributor', String(seeded.id))).toBe(null);
+  expect(await outbox(seeded.atUri)).toEqual({
     collection: CONTRIBUTOR_COLLECTION,
     op: 'delete'
   });
@@ -573,27 +555,21 @@ test('refuses to delete a contributor still credited on an edition', async (t) =
   const editionUri = await seedEdition(contributor.id, publisher.id);
   const record = await loadedContributor(db, String(contributor.id));
 
-  await assert.rejects(
-    () => deleteAdminEntity(db, 'contributor', String(contributor.id), record.revision),
-    (error: unknown) => {
-      assert.ok(error instanceof EntityEditError);
-      assert.equal(error.status, 409);
-      assert.equal(error.code, 'EntityInUse');
-      assert.match(error.message, /credited on 1 edition/);
-      assert.match(error.message, /merge it into another contributor/);
+  await expect(() => deleteAdminEntity(db, 'contributor', String(contributor.id), record.revision)).rejects.toSatisfy((error: unknown) => {
+      expect(error instanceof EntityEditError).toBeTruthy();
+      expect(error.status).toBe(409);
+      expect(error.code).toBe('EntityInUse');
+      expect(error.message).toMatch(/credited on 1 edition/);
+      expect(error.message).toMatch(/merge it into another contributor/);
       return true;
-    }
-  );
+    });
 
-  assert.ok(
-    (await loadAdminEntity(db, 'contributor', String(contributor.id))) !== null,
-    'a refused delete leaves the contributor and its credit in place'
-  );
+  expect((await loadAdminEntity(db, 'contributor', String(contributor.id))) !== null, 'a refused delete leaves the contributor and its credit in place').toBeTruthy();
   const credits = await db.query<{ n: number }>(
     'SELECT count(*)::int AS n FROM edition_contributors WHERE edition_uri = $1',
     [editionUri]
   );
-  assert.equal(credits.rows[0]?.n, 1);
+  expect(credits.rows[0]?.n).toBe(1);
 });
 
 test('refuses to delete a contributor that changed since it was loaded', async (t) => {
@@ -606,22 +582,16 @@ test('refuses to delete a contributor that changed since it was loaded', async (
     name: `${RUN} Renamed Person`
   });
 
-  await assert.rejects(
-    () => deleteAdminEntity(db, 'contributor', String(seeded.id), record.revision),
-    (error: unknown) =>
-      error instanceof EntityEditError && error.status === 409 && error.code === 'EntityChanged'
-  );
-  assert.ok((await loadAdminEntity(db, 'contributor', String(seeded.id))) !== null);
+  await expect(() => deleteAdminEntity(db, 'contributor', String(seeded.id), record.revision)).rejects.toSatisfy((error: unknown) =>
+      error instanceof EntityEditError && error.status === 409 && error.code === 'EntityChanged');
+  expect((await loadAdminEntity(db, 'contributor', String(seeded.id))) !== null).toBeTruthy();
 });
 
 test('reports an unknown contributor as 404 on delete', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
-  await assert.rejects(
-    () => deleteAdminEntity(db, 'contributor', `missing${RUN}`, null),
-    (error: unknown) =>
-      error instanceof EntityEditError && error.status === 404 && error.code === 'NotFound'
-  );
+  await expect(() => deleteAdminEntity(db, 'contributor', `missing${RUN}`, null)).rejects.toSatisfy((error: unknown) =>
+      error instanceof EntityEditError && error.status === 404 && error.code === 'NotFound');
 });
 
 test('deletes an unlinked publisher and queues its record deletion', async (t) => {
@@ -638,9 +608,9 @@ test('deletes an unlinked publisher and queues its record deletion', async (t) =
     record.revision
   );
 
-  assert.equal(deleted, seeded.id);
-  assert.equal(await loadAdminEntity(db, 'publisher', String(seeded.id)), null);
-  assert.deepEqual(await outbox(seeded.atUri), {
+  expect(deleted).toBe(seeded.id);
+  expect(await loadAdminEntity(db, 'publisher', String(seeded.id))).toBe(null);
+  expect(await outbox(seeded.atUri)).toEqual({
     collection: PUBLISHER_COLLECTION,
     op: 'delete'
   });
@@ -654,25 +624,19 @@ test('refuses to delete a publisher still linked to an edition identifier', asyn
   const editionUri = await seedEdition(contributor.id, publisher.id);
   const record = await loadedPublisher(db, String(publisher.id));
 
-  await assert.rejects(
-    () => deleteAdminEntity(db, 'publisher', String(publisher.id), record.revision),
-    (error: unknown) => {
-      assert.ok(error instanceof EntityEditError);
-      assert.equal(error.status, 409);
-      assert.equal(error.code, 'EntityInUse');
-      assert.match(error.message, /linked to 1 edition identifier/);
-      assert.match(error.message, /merge it into another publisher/);
+  await expect(() => deleteAdminEntity(db, 'publisher', String(publisher.id), record.revision)).rejects.toSatisfy((error: unknown) => {
+      expect(error instanceof EntityEditError).toBeTruthy();
+      expect(error.status).toBe(409);
+      expect(error.code).toBe('EntityInUse');
+      expect(error.message).toMatch(/linked to 1 edition identifier/);
+      expect(error.message).toMatch(/merge it into another publisher/);
       return true;
-    }
-  );
+    });
 
-  assert.ok(
-    (await loadAdminEntity(db, 'publisher', String(publisher.id))) !== null,
-    'a refused delete leaves the publisher and its link in place'
-  );
+  expect((await loadAdminEntity(db, 'publisher', String(publisher.id))) !== null, 'a refused delete leaves the publisher and its link in place').toBeTruthy();
   const links = await db.query<{ n: number }>(
     'SELECT count(*)::int AS n FROM edition_identifier_publishers WHERE edition_uri = $1',
     [editionUri]
   );
-  assert.equal(links.rows[0]?.n, 1);
+  expect(links.rows[0]?.n).toBe(1);
 });

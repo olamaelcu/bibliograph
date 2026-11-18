@@ -14,8 +14,8 @@
  *    after duplicate posts collapse, so a duplicate can never fake a cursor.
  */
 
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import pg from 'pg';
 
 import {
@@ -59,7 +59,7 @@ function requiredPool(t: { skip: (message?: string) => void }): pg.Pool | null {
   return pool;
 }
 
-before(async () => {
+beforeAll(async () => {
   const candidate = new pg.Pool({ connectionString: DATABASE_URL });
   try {
     await candidate.query('SELECT 1');
@@ -169,7 +169,7 @@ before(async () => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   if (pool) {
     await pool
       .query('DELETE FROM happyview.happyview_records WHERE uri = ANY($1::text[])', [
@@ -200,10 +200,10 @@ test('a hive id that names two editions still emits one post', async (t) => {
   const page = await fetchFeedPage(live, { kind: 'dynamic', viewerDid: PROBE_DID, limit: 20 });
 
   const posts = page.feed.map((item) => item.post).filter((post) => post === POST_URI);
-  assert.equal(posts.length, 1, `post emitted ${posts.length} times`);
+  expect(posts.length, `post emitted ${posts.length} times`).toBe(1);
 
   const entry = page.feed.find((item) => item.post === POST_URI);
-  assert.ok(entry?.reason?.startsWith('bookhive:reading'), `reason was ${entry?.reason}`);
+  expect(entry?.reason?.startsWith('bookhive:reading'), `reason was ${entry?.reason}`).toBeTruthy();
 });
 
 test('the duplicated editions cannot fake a next page', async (t) => {
@@ -215,8 +215,8 @@ test('the duplicated editions cannot fake a next page', async (t) => {
   // after a page that does not exist.
   const first = await fetchFeedPage(live, { kind: 'dynamic', viewerDid: PROBE_DID, limit: 1 });
 
-  assert.deepEqual(first.feed.map((item) => item.post), [POST_URI]);
-  assert.equal(first.cursor, undefined);
+  expect(first.feed.map((item) => item.post)).toEqual([POST_URI]);
+  expect(first.cursor).toBe(undefined);
 });
 
 test('Popfeed records resolve their ISBN to an edition and page by addedAt', async (t) => {
@@ -227,7 +227,7 @@ test('Popfeed records resolve their ISBN to an edition and page by addedAt', asy
 
   // The shelf entry is newer by `addedAt` alone, so it sorts above the review:
   // an `addedAt`-only row is not a NULL-tail row.
-  assert.deepEqual(page.feed, [
+  expect(page.feed).toEqual([
     { post: LIST_ITEM_URI, reason: `popfeed:read|${POPFEED_EDITION}` },
     { post: REVIEW_URI, reason: `popfeed:review|${POPFEED_EDITION}` }
   ]);
@@ -236,6 +236,6 @@ test('Popfeed records resolve their ISBN to an edition and page by addedAt', asy
   // continuation pages from the same expression the order used.
   const first = await fetchFeedPage(live, { kind: 'dynamic', viewerDid: POPFEED_DID, limit: 1 });
 
-  assert.deepEqual(first.feed.map((item) => item.post), [LIST_ITEM_URI]);
-  assert.equal(first.cursor, encodeCursor({ c: LIST_ITEM_TIME, u: LIST_ITEM_URI }));
+  expect(first.feed.map((item) => item.post)).toEqual([LIST_ITEM_URI]);
+  expect(first.cursor).toBe(encodeCursor({ c: LIST_ITEM_TIME, u: LIST_ITEM_URI }));
 });

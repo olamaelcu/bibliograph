@@ -7,8 +7,7 @@
  * produced nothing, and a quota refusal never writes "no genres".
  */
 
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { createTasks } from '../lib/tasks.js';
 
@@ -74,10 +73,10 @@ test('a free provider answer is stored without touching the metered one', async 
 
   await tasks['catalog.genres']({ editionUri: EDITION }, { logger: log });
 
-  assert.equal(genres.calls.isbndb, 0, 'ISBNdb spends only when nothing else answered');
-  assert.deepEqual(storedSources(statements), ['goodreads', 'openlibrary']);
+  expect(genres.calls.isbndb, 'ISBNdb spends only when nothing else answered').toBe(0);
+  expect(storedSources(statements)).toEqual(['goodreads', 'openlibrary']);
   const settled = statements.find((statement) => statement.sql.includes('outcome = '));
-  assert.match(settled?.sql ?? '', /outcome = 'found'/, 'the ledger records a real answer');
+  expect(settled?.sql ?? '', 'the ledger records a real answer').toMatch(/outcome = 'found'/);
 });
 
 test('ISBNdb is asked when both free providers come back empty, and supplies the genres', async () => {
@@ -87,12 +86,12 @@ test('ISBNdb is asked when both free providers come back empty, and supplies the
 
   await tasks['catalog.genres']({ editionUri: EDITION }, { logger: log });
 
-  assert.equal(genres.calls.isbndb, 1);
-  assert.deepEqual(storedSources(statements), ['isbndb', 'isbndb']);
+  expect(genres.calls.isbndb).toBe(1);
+  expect(storedSources(statements)).toEqual(['isbndb', 'isbndb']);
   const names = statements
     .filter((statement) => statement.sql.includes('INSERT INTO genres'))
     .map((statement) => statement.values[0]);
-  assert.deepEqual(names, ['Classics', 'Poetry'], 'subject sources are stored alphabetically');
+  expect(names, 'subject sources are stored alphabetically').toEqual(['Classics', 'Poetry']);
 });
 
 test('a refused ISBNdb quota marks nothing and writes no genres', async () => {
@@ -102,12 +101,9 @@ test('a refused ISBNdb quota marks nothing and writes no genres', async () => {
 
   await tasks['catalog.genres']({ editionUri: EDITION }, { logger: log });
 
-  assert.equal(genres.calls.isbndb, 1);
-  assert.deepEqual(storedSources(statements), []);
-  assert.ok(
-    !statements.some((statement) => statement.sql.includes("outcome = 'none'")),
-    'an unasked edition must not be recorded as genreless'
-  );
+  expect(genres.calls.isbndb).toBe(1);
+  expect(storedSources(statements)).toEqual([]);
+  expect(!statements.some((statement) => statement.sql.includes("outcome = 'none'")), 'an unasked edition must not be recorded as genreless').toBeTruthy();
 });
 
 test('an ISBNdb answer still lands when both free providers failed', async () => {
@@ -119,11 +115,10 @@ test('an ISBNdb answer still lands when both free providers failed', async () =>
   });
   const tasks = createTasks({ pool, providers: genres, publisherHost: 'genres.example' });
 
-  await assert.doesNotReject(() =>
-    tasks['catalog.genres']({ editionUri: EDITION }, { logger: log })
-  );
+  await (() =>
+    tasks['catalog.genres']({ editionUri: EDITION }, { logger: log }))();
 
-  assert.deepEqual(storedSources(statements), ['isbndb']);
+  expect(storedSources(statements)).toEqual(['isbndb']);
 });
 
 test('an edition that already has genres is not re-fetched', async () => {
@@ -133,5 +128,5 @@ test('an edition that already has genres is not re-fetched', async () => {
 
   await tasks['catalog.genres']({ editionUri: EDITION }, { logger: log });
 
-  assert.deepEqual(genres.calls, { goodreads: 0, openlibrary: 0, isbndb: 0 });
+  expect(genres.calls).toEqual({ goodreads: 0, openlibrary: 0, isbndb: 0 });
 });

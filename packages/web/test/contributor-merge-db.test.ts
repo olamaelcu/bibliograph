@@ -8,8 +8,8 @@
  * integration tests.
  */
 
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import pg from 'pg';
 
 import {
@@ -100,7 +100,7 @@ async function createContributor(
     ]
   );
   const row = result.rows[0];
-  assert.ok(row, 'expected the contributor insert to return a row');
+  expect(row, 'expected the contributor insert to return a row').toBeTruthy();
   return {
     id: Number(row.id),
     name,
@@ -167,7 +167,7 @@ async function outbox(uri: string): Promise<{ collection: string; op: string } |
 
 async function loaded(db: pg.Pool, ref: string): Promise<AdminContributorRecord> {
   const record = await loadAdminEntity(db, 'contributor', ref);
-  assert.ok(record, `expected contributor ${ref} to load`);
+  expect(record, `expected contributor ${ref} to load`).toBeTruthy();
   return record;
 }
 
@@ -176,7 +176,7 @@ function isMergeError(status: number, code: string) {
     error instanceof ContributorMergeError && error.status === status && error.code === code;
 }
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 3 });
   try {
     await pool.query('SELECT 1');
@@ -187,7 +187,7 @@ before(async () => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   if (pool) {
     await cleanup().catch(() => {});
     await pool.end();
@@ -249,24 +249,24 @@ test('absorbs a contributor: repoints credits, drops duplicates, fills the survi
     targetRevision: target.revision
   });
 
-  assert.deepEqual(result.plan, {
+  expect(result.plan).toEqual({
     moved: 3,
     dropped: 1,
     identifiersAdded: 1,
     fields: ['description', 'nameInverted', 'imageUrl', 'born', 'died']
   });
-  assert.equal(result.absorbedId, absorbed.id);
-  assert.equal(result.absorbedAtUri, absorbed.atUri);
+  expect(result.absorbedId).toBe(absorbed.id);
+  expect(result.absorbedAtUri).toBe(absorbed.atUri);
 
-  assert.equal(result.target.id, survivor.id);
-  assert.equal(result.target.atUri, survivor.atUri);
-  assert.equal(result.target.name, name, 'the survivor keeps its name');
-  assert.equal(result.target.description, 'Provider bio');
-  assert.equal(result.target.nameInverted, 'Person, Absorbed');
-  assert.equal(result.target.imageUrl, 'https://example.org/person.jpg');
-  assert.equal(result.target.born, '1920-10-08');
-  assert.equal(result.target.died, '1986-02-11');
-  assert.deepEqual(result.target.identifiers, [
+  expect(result.target.id).toBe(survivor.id);
+  expect(result.target.atUri).toBe(survivor.atUri);
+  expect(result.target.name, 'the survivor keeps its name').toBe(name);
+  expect(result.target.description).toBe('Provider bio');
+  expect(result.target.nameInverted).toBe('Person, Absorbed');
+  expect(result.target.imageUrl).toBe('https://example.org/person.jpg');
+  expect(result.target.born).toBe('1920-10-08');
+  expect(result.target.died).toBe('1986-02-11');
+  expect(result.target.identifiers).toEqual([
     { issuer: 'isni', value: '111' },
     { issuer: 'openlibrary', value: 'OL9A' }
   ]);
@@ -276,56 +276,44 @@ test('absorbs a contributor: repoints credits, drops duplicates, fills the survi
     'SELECT identifiers FROM contributors WHERE id = $1',
     [survivor.id]
   );
-  assert.deepEqual(stored.rows[0]?.identifiers, [
+  expect(stored.rows[0]?.identifiers).toEqual([
     { issuer: 'isni', value: '111', url: 'https://isni.example/111' },
     { issuer: 'openlibrary', value: 'OL9A' }
   ]);
 
   const gone = await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id]);
-  assert.equal(gone.rowCount, 0, 'the absorbed row is deleted');
+  expect(gone.rowCount, 'the absorbed row is deleted').toBe(0);
 
-  assert.deepEqual(await creditsOf(e1), [
+  expect(await creditsOf(e1)).toEqual([
     { contributorId: survivor.id, position: 1, role: 'A01', ref: null }
   ]);
-  assert.deepEqual(await creditsOf(e2), [
+  expect(await creditsOf(e2)).toEqual([
     { contributorId: survivor.id, position: 1, role: 'author', ref: null }
   ]);
-  assert.deepEqual(await creditsOf(e3), [
+  expect(await creditsOf(e3)).toEqual([
     { contributorId: survivor.id, position: 1, role: 'A01', ref: null },
     { contributorId: survivor.id, position: 2, role: 'A15', ref: null }
   ]);
-  assert.equal(
-    (await creditsOf(e4))[0]?.ref,
-    'at://did:plc:elsewhere/community.lexicon.media.book.contributor/ref1',
-    'an unrelated per-edge ref survives'
-  );
+  expect((await creditsOf(e4))[0]?.ref, 'an unrelated per-edge ref survives').toBe('at://did:plc:elsewhere/community.lexicon.media.book.contributor/ref1');
 
-  assert.deepEqual(await outbox(absorbed.atUri), {
+  expect(await outbox(absorbed.atUri)).toEqual({
     collection: CONTRIBUTOR_COLLECTION,
     op: 'delete'
   });
-  assert.deepEqual(await outbox(survivor.atUri), {
+  expect(await outbox(survivor.atUri)).toEqual({
     collection: CONTRIBUTOR_COLLECTION,
     op: 'update'
   });
   for (const editionUri of [e1, e2, e3, e4]) {
-    assert.deepEqual(
-      await outbox(editionUri),
-      { collection: EDITION_COLLECTION, op: 'update' },
-      `${editionUri} must be republished`
-    );
+    expect(await outbox(editionUri), `${editionUri} must be republished`).toEqual({ collection: EDITION_COLLECTION, op: 'update' });
   }
 
   const view = await db.query<{ contributors: Array<{ name: string; ref: string | null }> }>(
     'SELECT contributors FROM appview_book WHERE uri = $1',
     [e1]
   );
-  assert.equal(view.rows[0]?.contributors[0]?.name, name);
-  assert.equal(
-    view.rows[0]?.contributors[0]?.ref,
-    survivor.atUri,
-    'the read model falls back to the survivor URI'
-  );
+  expect(view.rows[0]?.contributors[0]?.name).toBe(name);
+  expect(view.rows[0]?.contributors[0]?.ref, 'the read model falls back to the survivor URI').toBe(survivor.atUri);
 });
 
 test('keeps a curated survivor and previews the same plan without writing', async (t) => {
@@ -354,23 +342,20 @@ test('keeps a curated survivor and previews the same plan without writing', asyn
     source: String(absorbed.id),
     target: String(survivor.id)
   });
-  assert.deepEqual(preview.plan, {
+  expect(preview.plan).toEqual({
     moved: 1,
     dropped: 0,
     identifiersAdded: 0,
     fields: ['died']
   });
-  assert.equal(preview.source.id, absorbed.id);
-  assert.equal(preview.target.id, survivor.id);
+  expect(preview.source.id).toBe(absorbed.id);
+  expect(preview.target.id).toBe(survivor.id);
   // A preview never writes.
-  assert.deepEqual(await creditsOf(editionUri), [
+  expect(await creditsOf(editionUri)).toEqual([
     { contributorId: absorbed.id, position: 1, role: 'A01', ref: null }
   ]);
-  assert.equal(await outbox(absorbed.atUri), null);
-  assert.equal(
-    (await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id])).rowCount,
-    1
-  );
+  expect(await outbox(absorbed.atUri)).toBe(null);
+  expect((await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id])).rowCount).toBe(1);
 
   const result = await mergeContributors(db, {
     source: String(absorbed.id),
@@ -378,11 +363,11 @@ test('keeps a curated survivor and previews the same plan without writing', asyn
     sourceRevision: preview.source.revision,
     targetRevision: preview.target.revision
   });
-  assert.deepEqual(result.plan, preview.plan);
-  assert.equal(result.target.description, 'Curated bio', 'a curated bio is never overwritten');
-  assert.equal(result.target.born, '1900-01-01', 'a populated field is never overwritten');
-  assert.equal(result.target.died, '1970-01-01', 'a blank field is filled');
-  assert.equal(result.target.identifiers.length, 2, 'the union does not duplicate pairs');
+  expect(result.plan).toEqual(preview.plan);
+  expect(result.target.description, 'a curated bio is never overwritten').toBe('Curated bio');
+  expect(result.target.born, 'a populated field is never overwritten').toBe('1900-01-01');
+  expect(result.target.died, 'a blank field is filled').toBe('1970-01-01');
+  expect(result.target.identifiers.length, 'the union does not duplicate pairs').toBe(2);
 });
 
 test('rejects a stale revision and leaves both rows and credits alone', async (t) => {
@@ -404,29 +389,23 @@ test('rejects a stale revision and leaves both rows and credits alone', async (t
     target.id
   ]);
 
-  await assert.rejects(
-    () =>
+  await expect(() =>
       mergeContributors(db, {
         source: String(absorbed.id),
         target: String(survivor.id),
         sourceRevision: source.revision,
         targetRevision: target.revision
-      }),
-    isMergeError(409, 'EntityChanged')
-  );
+      })).rejects.toSatisfy(isMergeError(409, 'EntityChanged'));
 
-  assert.deepEqual(await creditsOf(editionUri), [
+  expect(await creditsOf(editionUri)).toEqual([
     { contributorId: absorbed.id, position: 1, role: 'A01', ref: null }
   ]);
-  assert.equal(
-    (await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id])).rowCount,
-    1
-  );
+  expect((await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id])).rowCount).toBe(1);
   const kept = await db.query<{ description: string | null }>(
     'SELECT description FROM contributors WHERE id = $1',
     [target.id]
   );
-  assert.equal(kept.rows[0]?.description, 'changed underneath');
+  expect(kept.rows[0]?.description).toBe('changed underneath');
 });
 
 test('refuses the same row, an unknown row, and a missing revision', async (t) => {
@@ -437,31 +416,22 @@ test('refuses the same row, an unknown row, and a missing revision', async (t) =
   ]);
   const record = await loaded(db, String(person.id));
 
-  await assert.rejects(
-    () =>
+  await expect(() =>
       mergeContributors(db, {
         source: String(person.id),
         target: String(person.id),
         sourceRevision: record.revision,
         targetRevision: record.revision
-      }),
-    isMergeError(400, 'InvalidRequest')
-  );
-  await assert.rejects(
-    () =>
+      })).rejects.toSatisfy(isMergeError(400, 'InvalidRequest'));
+  await expect(() =>
       mergeContributors(db, {
         source: String(person.id),
         target: '999999999',
         sourceRevision: record.revision,
         targetRevision: record.revision
-      }),
-    isMergeError(404, 'NotFound')
-  );
-  await assert.rejects(
-    () => mergeContributors(db, { source: String(person.id), target: '1' }),
-    isMergeError(400, 'InvalidRequest')
-  );
-  await assert.rejects(() => mergeContributors(db, []), isMergeError(400, 'InvalidRequest'));
+      })).rejects.toSatisfy(isMergeError(404, 'NotFound'));
+  await expect(() => mergeContributors(db, { source: String(person.id), target: '1' })).rejects.toSatisfy(isMergeError(400, 'InvalidRequest'));
+  await expect(() => mergeContributors(db, [])).rejects.toSatisfy(isMergeError(400, 'InvalidRequest'));
 });
 
 test('reports a duplicate identity collision instead of dropping the absorbed row', async (t) => {
@@ -479,19 +449,12 @@ test('reports a duplicate identity collision instead of dropping the absorbed ro
 
   const source = await loaded(db, String(absorbed.id));
   const target = await loaded(db, String(survivor.id));
-  await assert.rejects(
-    () =>
+  await expect(() =>
       mergeContributors(db, {
         source: String(absorbed.id),
         target: String(survivor.id),
         sourceRevision: source.revision,
         targetRevision: target.revision
-      }),
-    isMergeError(409, 'DuplicateEntity')
-  );
-  assert.equal(
-    (await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id])).rowCount,
-    1,
-    'the absorbed row survives a rejected merge'
-  );
+      })).rejects.toSatisfy(isMergeError(409, 'DuplicateEntity'));
+  expect((await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id])).rowCount, 'the absorbed row survives a rejected merge').toBe(1);
 });

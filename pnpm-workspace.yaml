@@ -2,7 +2,12 @@ packages:
   - "packages/*"
 allowBuilds:
   core-js: false
+  # testcontainers' optional native/CLI build steps: the JS fallbacks are what
+  # the docker strategy uses, so nothing here needs a compiler.
+  cpu-features: false
   esbuild: false
+  protobufjs: false
+  ssh2: false
 overrides:
   cookie@<0.7.0: ^0.7.0
   esbuild@<=0.24.2: ^0.28.2

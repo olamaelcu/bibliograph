@@ -1,5 +1,5 @@
-import test, { before, after } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, beforeAll, afterAll } from 'vitest';
+
 import http from 'node:http';
 import pg from 'pg';
 
@@ -123,10 +123,10 @@ let isbndbRequests = 0;
 const TID_ALPHABET = '234567abcdefghijklmnopqrstuvwxyz';
 
 function assertTid(rkey) {
-  assert.equal(typeof rkey, 'string');
-  assert.equal(rkey.length, 13, `${rkey} is not a 13-char TID`);
+  expect(typeof rkey).toBe('string');
+  expect(rkey.length, `${rkey} is not a 13-char TID`).toBe(13);
   for (const char of rkey) {
-    assert.ok(TID_ALPHABET.includes(char), `${rkey} has a non-base32-sortable character`);
+    expect(TID_ALPHABET.includes(char), `${rkey} has a non-base32-sortable character`).toBeTruthy();
   }
 }
 
@@ -213,7 +213,7 @@ async function cleanupHydrationRows(pool, host) {
   await pool.query('DELETE FROM google_books_cache WHERE key LIKE $1', [`${baseUrl}/%`]);
 }
 
-before(async () => {
+beforeAll(async () => {
   server = http.createServer((request, response) => {
     const url = new URL(request.url, 'http://localhost');
     const send = (body, type = 'application/json') => {
@@ -317,75 +317,63 @@ before(async () => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
 test('normalizes ISBN-10 and strips HTML', () => {
-  assert.equal(isbn10To13('0-441-47812-3'), '9780441478125');
-  assert.equal(stripHtml('<p>Hello&nbsp;<b>world</b></p>'), 'Hello world');
+  expect(isbn10To13('0-441-47812-3')).toBe('9780441478125');
+  expect(stripHtml('<p>Hello&nbsp;<b>world</b></p>')).toBe('Hello world');
 });
 
 test('unwraps ISBNdb synopsis citations without touching other descriptions', () => {
-  assert.equal(
-    cleanIsbndbSynopsis('"Walter Rodney was assassinated."--Back cover.'),
-    'Walter Rodney was assassinated.'
-  );
-  assert.equal(
-    cleanIsbndbSynopsis('"In his short life he set a movement in motion."--Provided by publisher.'),
-    'In his short life he set a movement in motion.'
-  );
-  assert.equal(
-    cleanIsbndbSynopsis('“The best book of the year.”—Kirkus Reviews'),
-    'The best book of the year.'
-  );
-  assert.equal(cleanIsbndbSynopsis('"A novel."'), 'A novel.');
-  assert.equal(cleanIsbndbSynopsis('<p>&quot;A novel.&quot;--Back cover.</p>'), 'A novel.');
+  expect(cleanIsbndbSynopsis('"Walter Rodney was assassinated."--Back cover.')).toBe('Walter Rodney was assassinated.');
+  expect(cleanIsbndbSynopsis('"In his short life he set a movement in motion."--Provided by publisher.')).toBe('In his short life he set a movement in motion.');
+  expect(cleanIsbndbSynopsis('“The best book of the year.”—Kirkus Reviews')).toBe('The best book of the year.');
+  expect(cleanIsbndbSynopsis('"A novel."')).toBe('A novel.');
+  expect(cleanIsbndbSynopsis('<p>&quot;A novel.&quot;--Back cover.</p>')).toBe('A novel.');
 
-  assert.equal(
-    cleanIsbndbSynopsis('"A "strange" novel."--Back cover.'),
-    'A "strange" novel.'
-  );
+  expect(cleanIsbndbSynopsis('"A "strange" novel."--Back cover.')).toBe('A "strange" novel.');
 
   const unquoted = 'A novel described as "strange".';
-  assert.equal(cleanIsbndbSynopsis(unquoted), unquoted);
+  expect(cleanIsbndbSynopsis(unquoted)).toBe(unquoted);
   const unquotedAttribution = 'A novel. --Back cover.';
-  assert.equal(cleanIsbndbSynopsis(unquotedAttribution), unquotedAttribution);
+  expect(cleanIsbndbSynopsis(unquotedAttribution)).toBe(unquotedAttribution);
   const apostrophes = 'The dog\'s "best" friend.';
-  assert.equal(cleanIsbndbSynopsis(apostrophes), apostrophes);
+  expect(cleanIsbndbSynopsis(apostrophes)).toBe(apostrophes);
   const notWholeValue = '"A novel." and more.';
-  assert.equal(cleanIsbndbSynopsis(notWholeValue), notWholeValue);
+  expect(cleanIsbndbSynopsis(notWholeValue)).toBe(notWholeValue);
   const multiCitation =
     '"A seminal text in the womenís movement." –Ethel S. Person, author of The Sexual Century ' +
     '"Still the most important work of feminist psychoanalytic exploration." –Eli Sagan, ' +
     'author of Freud, Women and Mortality';
-  assert.equal(cleanIsbndbSynopsis(multiCitation), multiCitation);
+  expect(cleanIsbndbSynopsis(multiCitation)).toBe(multiCitation);
   const adjacentCitations = '"First review." "Second review continues."--Jacket.';
-  assert.equal(cleanIsbndbSynopsis(adjacentCitations), adjacentCitations);
+  expect(cleanIsbndbSynopsis(adjacentCitations)).toBe(adjacentCitations);
   const blurbWithSynopsis =
     '"A magical revolution on the page." -- Leigh Bardugo, author of Six of Crows ' +
     'Shadowhouse rising begins a new story.';
-  assert.equal(cleanIsbndbSynopsis(blurbWithSynopsis), blurbWithSynopsis);
-  assert.equal(cleanIsbndbSynopsis(undefined), undefined);
+  expect(cleanIsbndbSynopsis(blurbWithSynopsis)).toBe(blurbWithSynopsis);
+  expect(cleanIsbndbSynopsis(undefined)).toBe(undefined);
 
   const candidate = candidateFromIsbndb({
     title: 'Quoted Synopsis',
     isbn13: '9780306406157',
     synopsis: '"The actual body."--Kirkus Reviews'
   });
-  assert.equal(candidate.description, 'The actual body.');
+  expect(candidate.description).toBe('The actual body.');
 });
 
 test('parses a Google Books volume into an edition candidate', () => {
   const candidate = candidateFromVolume(googleBody.items[0]);
-  assert.equal(candidate.title, 'The Left Hand of Darkness');
-  assert.deepEqual(candidate.identifiers, [
+  expect(candidate.title).toBe('The Left Hand of Darkness');
+  expect(candidate.identifiers).toEqual([
     { issuer: 'googlebooks', value: GOOGLE_VOLUME_ID },
     { issuer: 'isbn13', value: GOOGLE_ISBN }
   ]);
-  assert.equal(candidate.publishedDate, '1969');
-  assert.equal(candidate.coverUrl, 'https://books.example/cover.jpg');
-  assert.equal(candidate.description, 'A novel of the Ekumen.');
+  expect(candidate.publishedDate).toBe('1969');
+  expect(candidate.coverUrl).toBe('https://books.example/cover.jpg');
+  expect(candidate.description).toBe('A novel of the Ekumen.');
 });
 
 test('parses ISBNdb, Goodreads search and Goodreads book pages', () => {
@@ -401,25 +389,25 @@ test('parses ISBNdb, Goodreads search and Goodreads book pages', () => {
     image: 'http://img.example/isbndb.jpg',
     synopsis: 'A novel.'
   });
-  assert.equal(isbndb.subtitle, 'A Novel');
-  assert.equal(isbndb.coverUrl, 'https://img.example/isbndb.jpg');
+  expect(isbndb.subtitle).toBe('A Novel');
+  expect(isbndb.coverUrl).toBe('https://img.example/isbndb.jpg');
 
   const fromSearch = candidatesFromSearchPage(goodreadsSearchHtml);
-  assert.equal(fromSearch.length, 1);
-  assert.deepEqual(fromSearch[0].identifiers, [{ issuer: 'goodreads', value: GOODREADS_BOOK_ID }]);
-  assert.equal(fromSearch[0].contributors[0].name, 'Ursula K. Le Guin');
+  expect(fromSearch.length).toBe(1);
+  expect(fromSearch[0].identifiers).toEqual([{ issuer: 'goodreads', value: GOODREADS_BOOK_ID }]);
+  expect(fromSearch[0].contributors[0].name).toBe('Ursula K. Le Guin');
 
   const fromBook = candidatesFromBookPage(goodreadsBookHtml)[0];
-  assert.equal(fromBook.title, 'The Left Hand of Darkness');
-  assert.deepEqual(fromBook.identifiers, [
+  expect(fromBook.title).toBe('The Left Hand of Darkness');
+  expect(fromBook.identifiers).toEqual([
     { issuer: 'goodreads', value: GOODREADS_BOOK_ID },
     { issuer: 'isbn13', value: GOODREADS_ISBN },
     { issuer: 'asin', value: GOODREADS_ASIN }
   ]);
-  assert.equal(fromBook.pages, 366);
-  assert.equal(fromBook.publisher.name, 'Ace');
-  assert.equal(fromBook.series.name, 'The Hainish Cycle');
-  assert.equal(fromBook.series.position, '4');
+  expect(fromBook.pages).toBe(366);
+  expect(fromBook.publisher.name).toBe('Ace');
+  expect(fromBook.series.name).toBe('The Hainish Cycle');
+  expect(fromBook.series.position).toBe('4');
 });
 
 test('resolve hydrates the catalog from provider results', async () => {
@@ -448,14 +436,11 @@ test('resolve hydrates the catalog from provider results', async () => {
     const edition = await pool.query(
       "SELECT uri, rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
-    assert.equal(edition.rowCount, 1);
+    expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
-    assert.equal(
-      edition.rows[0].uri,
-      `at://did:web:test.example/community.lexicon.media.book.edition/${edition.rows[0].rkey}`
-    );
-    assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
-    assert.equal(edition.rows[0].cover_url, 'https://books.example/cover.jpg');
+    expect(edition.rows[0].uri).toBe(`at://did:web:test.example/community.lexicon.media.book.edition/${edition.rows[0].rkey}`);
+    expect(edition.rows[0].title).toBe('The Left Hand of Darkness');
+    expect(edition.rows[0].cover_url).toBe('https://books.example/cover.jpg');
 
     // The shape claim belongs to the identifier (0007), not the edition row.
     const claims = await pool.query(
@@ -463,7 +448,7 @@ test('resolve hydrates the catalog from provider results', async () => {
         WHERE edition_uri = $1 ORDER BY issuer`,
       [edition.rows[0].uri]
     );
-    assert.deepEqual(claims.rows, [
+    expect(claims.rows).toEqual([
       { issuer: 'googlebooks', pages: 304, language: 'en' },
       { issuer: 'isbn13', pages: 304, language: 'en' }
     ]);
@@ -472,7 +457,7 @@ test('resolve hydrates the catalog from provider results', async () => {
       'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',
       [edition.rows[0].uri]
     );
-    assert.deepEqual(identifiers.rows, [
+    expect(identifiers.rows).toEqual([
       { issuer: 'googlebooks', value: GOOGLE_VOLUME_ID },
       { issuer: 'isbn13', value: GOOGLE_ISBN }
     ]);
@@ -483,12 +468,12 @@ test('resolve hydrates the catalog from provider results', async () => {
        WHERE ec.edition_uri = $1`,
       [edition.rows[0].uri]
     );
-    assert.deepEqual(contributors.rows, [{ name: 'Ursula K. Le Guin', role: 'A01' }]);
+    expect(contributors.rows).toEqual([{ name: 'Ursula K. Le Guin', role: 'A01' }]);
 
     const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
       edition.rows[0].uri
     ]);
-    assert.deepEqual(outbox.rows, [
+    expect(outbox.rows).toEqual([
       { collection: 'community.lexicon.media.book.edition', op: 'create' }
     ]);
 
@@ -501,11 +486,11 @@ test('resolve hydrates the catalog from provider results', async () => {
     const after = await pool.query(
       "SELECT count(*)::int AS n FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
-    assert.equal(after.rows[0].n, 1);
+    expect(after.rows[0].n).toBe(1);
     const same = await pool.query(
       "SELECT uri FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
-    assert.equal(same.rows[0].uri, firstUri, 'identity is the identifier bag, not the rkey');
+    expect(same.rows[0].uri, 'identity is the identifier bag, not the rkey').toBe(firstUri);
   } finally {
     await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query(
@@ -556,15 +541,15 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
     const edition = await pool.query('SELECT uri, rkey, title FROM editions WHERE uri LIKE $1', [
       `at://${publisherDid}/%`
     ]);
-    assert.equal(edition.rowCount, 1);
-    assert.ok(edition.rows[0].uri.startsWith(prefix), edition.rows[0].uri);
+    expect(edition.rowCount).toBe(1);
+    expect(edition.rows[0].uri.startsWith(prefix), edition.rows[0].uri).toBeTruthy();
     assertTid(edition.rows[0].rkey);
-    assert.equal(edition.rows[0].title, 'PLC Authority Edition');
+    expect(edition.rows[0].title).toBe('PLC Authority Edition');
 
     const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
       edition.rows[0].uri
     ]);
-    assert.deepEqual(outbox.rows, [
+    expect(outbox.rows).toEqual([
       { collection: 'community.lexicon.media.book.edition', op: 'create' }
     ]);
 
@@ -577,9 +562,9 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
       'SELECT rkey FROM editions WHERE uri LIKE $1 ORDER BY rkey',
       [`at://${publisherDid}/%`]
     );
-    assert.equal(editions.rowCount, 2);
+    expect(editions.rowCount).toBe(2);
     for (const row of editions.rows) assertTid(row.rkey);
-    assert.equal(new Set(editions.rows.map((row) => row.rkey)).size, 2);
+    expect(new Set(editions.rows.map((row) => row.rkey)).size).toBe(2);
   } finally {
     await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
     await pool.query(
@@ -627,12 +612,12 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
     const edition = await pool.query(
       "SELECT rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
     );
-    assert.equal(edition.rowCount, 1);
+    expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
-    assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
-    assert.equal(edition.rows[0].cover_url, `https://img.example/${GOODREADS_BOOK_ID}.jpg`);
-    assert.equal(goodreadsRequests, 1, 'Goodreads answers before OpenLibrary');
-    assert.equal(openlibraryRequests, 0, 'OpenLibrary is not reached when Goodreads answers');
+    expect(edition.rows[0].title).toBe('The Left Hand of Darkness');
+    expect(edition.rows[0].cover_url).toBe(`https://img.example/${GOODREADS_BOOK_ID}.jpg`);
+    expect(goodreadsRequests, 'Goodreads answers before OpenLibrary').toBe(1);
+    expect(openlibraryRequests, 'OpenLibrary is not reached when Goodreads answers').toBe(0);
   } finally {
     await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query(
@@ -672,33 +657,33 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
     const edition = await pool.query(
       "SELECT uri, rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
     );
-    assert.equal(edition.rowCount, 1);
+    expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
-    assert.equal(edition.rows[0].title, 'Direct Hydration Volume');
-    assert.equal(edition.rows[0].cover_url, 'https://img.example/direct.jpg');
+    expect(edition.rows[0].title).toBe('Direct Hydration Volume');
+    expect(edition.rows[0].cover_url).toBe('https://img.example/direct.jpg');
 
     const claims = await pool.query(
       `SELECT issuer, pages, language FROM edition_identifier_info
         WHERE edition_uri = $1 ORDER BY issuer`,
       [edition.rows[0].uri]
     );
-    assert.deepEqual(claims.rows, [{ issuer: 'isbn13', pages: 200, language: 'en' }]);
+    expect(claims.rows).toEqual([{ issuer: 'isbn13', pages: 200, language: 'en' }]);
 
     const identifiers = await pool.query(
       'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',
       [edition.rows[0].uri]
     );
-    assert.deepEqual(identifiers.rows, [{ issuer: 'isbn13', value: ISBNDB_ISBN }]);
+    expect(identifiers.rows).toEqual([{ issuer: 'isbn13', value: ISBNDB_ISBN }]);
 
     const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
       edition.rows[0].uri
     ]);
-    assert.deepEqual(outbox.rows, [
+    expect(outbox.rows).toEqual([
       { collection: 'community.lexicon.media.book.edition', op: 'create' }
     ]);
 
     // A direct by-ISBN call, not the generic search path.
-    assert.equal(isbndbRequests, 1);
+    expect(isbndbRequests).toBe(1);
   } finally {
     await cleanupHydrationRows(pool, 'isbn-direct.example');
     await pool.end();
@@ -715,7 +700,7 @@ test('catalog.isbn falls back to the resolve chain without ISBNdb', async () => 
       GOODREADS_BASE_URL: `${baseUrl}/goodreads`
     }
   });
-  assert.equal(providers.providers.isbndb, null);
+  expect(providers.providers.isbndb).toBe(null);
   const tasks = createTasks({ pool, providers, publisherHost: 'isbn-fallback.example' });
   const helpers = { logger: { info() {}, warn() {}, error() {} } };
 
@@ -728,12 +713,12 @@ test('catalog.isbn falls back to the resolve chain without ISBNdb', async () => 
     const edition = await pool.query(
       "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-fallback.example/%'"
     );
-    assert.equal(edition.rowCount, 1);
+    expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
-    assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
+    expect(edition.rows[0].title).toBe('The Left Hand of Darkness');
 
     // Without a key the fallback never reaches ISBNdb.
-    assert.equal(isbndbRequests, 0);
+    expect(isbndbRequests).toBe(0);
   } finally {
     await cleanupHydrationRows(pool, 'isbn-fallback.example');
     await pool.end();
@@ -764,14 +749,14 @@ test('catalog.isbn falls back to the resolve chain when ISBNdb has no record', a
     const edition = await pool.query(
       "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-empty.example/%'"
     );
-    assert.equal(edition.rowCount, 1);
+    expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
-    assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
+    expect(edition.rows[0].title).toBe('The Left Hand of Darkness');
 
     // ISBNdb was asked directly (empty), then again by the resolve chain
     // (served from its cache), so only one HTTP request reached the stub.
-    assert.equal(isbndbRequests, 1);
-    assert.ok(googleRequests >= 1, 'Google Books must be reached after an empty ISBNdb');
+    expect(isbndbRequests).toBe(1);
+    expect(googleRequests >= 1, 'Google Books must be reached after an empty ISBNdb').toBeTruthy();
   } finally {
     await cleanupHydrationRows(pool, 'isbn-empty.example');
     await pool.end();
@@ -803,15 +788,11 @@ test('search tries ISBNdb first and never reaches Google when it returns candida
     const edition = await pool.query(
       "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:search-order.example/%'"
     );
-    assert.deepEqual(
-      edition.rows.map((row) => row.title),
-      ['ISBNdb First Volume'],
-      'only the ISBNdb candidate is ingested'
-    );
+    expect(edition.rows.map((row) => row.title), 'only the ISBNdb candidate is ingested').toEqual(['ISBNdb First Volume']);
     assertTid(edition.rows[0].rkey);
-    assert.equal(isbndbRequests, 1, 'ISBNdb search is called');
-    assert.equal(googleRequests, 0, 'Google Books must not be called');
-    assert.equal(goodreadsRequests, 0, 'Goodreads must not be called');
+    expect(isbndbRequests, 'ISBNdb search is called').toBe(1);
+    expect(googleRequests, 'Google Books must not be called').toBe(0);
+    expect(goodreadsRequests, 'Goodreads must not be called').toBe(0);
   } finally {
     await cleanupHydrationRows(pool, 'search-order.example');
     await pool.end();
@@ -839,24 +820,24 @@ test('search falls back to Google on an empty ISBNdb, then to Goodreads', async 
     goodreadsRequests = 0;
 
     await tasks['catalog.search']({ title: 'google-fills' }, helpers);
-    assert.equal(isbndbRequests, 1, 'ISBNdb is tried first');
-    assert.equal(googleRequests, 1, 'Google is called when ISBNdb is empty');
-    assert.equal(goodreadsRequests, 0, 'Goodreads is not reached when Google answers');
+    expect(isbndbRequests, 'ISBNdb is tried first').toBe(1);
+    expect(googleRequests, 'Google is called when ISBNdb is empty').toBe(1);
+    expect(goodreadsRequests, 'Goodreads is not reached when Google answers').toBe(0);
 
     const fromGoogle = await pool.query(
       "SELECT title FROM editions WHERE uri LIKE 'at://did:web:search-empty.example/%'"
     );
-    assert.deepEqual(fromGoogle.rows.map((row) => row.title), ['The Left Hand of Darkness']);
+    expect(fromGoogle.rows.map((row) => row.title)).toEqual(['The Left Hand of Darkness']);
 
     await tasks['catalog.search']({ title: 'isbndb-empty' }, helpers);
-    assert.equal(isbndbRequests, 2, 'ISBNdb is tried for the second search');
-    assert.equal(googleRequests, 2, 'Google is called for the second search');
-    assert.equal(goodreadsRequests, 1, 'Goodreads fills the gap when Google is empty too');
+    expect(isbndbRequests, 'ISBNdb is tried for the second search').toBe(2);
+    expect(googleRequests, 'Google is called for the second search').toBe(2);
+    expect(goodreadsRequests, 'Goodreads fills the gap when Google is empty too').toBe(1);
 
     const titles = await pool.query(
       "SELECT title FROM editions WHERE uri LIKE 'at://did:web:search-empty.example/%' ORDER BY title"
     );
-    assert.deepEqual(titles.rows.map((row) => row.title), [
+    expect(titles.rows.map((row) => row.title)).toEqual([
       'The Left Hand of Darkness',
       'The Left Hand of Darkness'
     ]);
@@ -890,10 +871,10 @@ test('search ingests at most 50 candidates', async () => {
     const editions = await pool.query(
       "SELECT rkey FROM editions WHERE uri LIKE 'at://did:web:cap.example/%'"
     );
-    assert.equal(editions.rowCount, 50, 'the provider returned 60 candidates');
+    expect(editions.rowCount, 'the provider returned 60 candidates').toBe(50);
     for (const row of editions.rows) assertTid(row.rkey);
-    assert.equal(new Set(editions.rows.map((row) => row.rkey)).size, 50);
-    assert.equal(googleRequests, 0);
+    expect(new Set(editions.rows.map((row) => row.rkey)).size).toBe(50);
+    expect(googleRequests).toBe(0);
   } finally {
     await cleanupHydrationRows(pool, 'cap.example');
     await pool.end();
@@ -925,11 +906,11 @@ test('search tries OpenLibrary after Google and Goodreads', async () => {
     const edition = await pool.query(
       "SELECT title FROM editions WHERE uri LIKE 'at://did:web:openlibrary.example/%'"
     );
-    assert.deepEqual(edition.rows.map((row) => row.title), ['OpenLibrary Fallback Volume']);
-    assert.deepEqual(providerOrder, ['googlebooks', 'goodreads', 'openlibrary']);
-    assert.equal(googleRequests, 1, 'Google is tried first');
-    assert.equal(goodreadsRequests, 1, 'Goodreads is tried second');
-    assert.equal(openlibraryRequests, 1, 'OpenLibrary is the final fallback');
+    expect(edition.rows.map((row) => row.title)).toEqual(['OpenLibrary Fallback Volume']);
+    expect(providerOrder).toEqual(['googlebooks', 'goodreads', 'openlibrary']);
+    expect(googleRequests, 'Google is tried first').toBe(1);
+    expect(goodreadsRequests, 'Goodreads is tried second').toBe(1);
+    expect(openlibraryRequests, 'OpenLibrary is the final fallback').toBe(1);
   } finally {
     await cleanupHydrationRows(pool, 'openlibrary.example');
     await pool.end();
@@ -952,23 +933,23 @@ test('ISBNdb reserves a call per cache miss and stops at the UTC daily limit', a
       }
     });
     const isbndb = providers.providers.isbndb;
-    assert.ok(isbndb);
+    expect(isbndb).toBeTruthy();
 
     const results = [];
     for (const isbn of [isbn13For(801), isbn13For(802), isbn13For(803)]) {
       results.push(await isbndb.byIsbn(isbn));
     }
 
-    assert.equal(isbndbRequests, 2, 'exactly the quota reaches the stub network');
-    assert.deepEqual(results[0], []);
-    assert.deepEqual(results[1], []);
-    assert.deepEqual(results[2], [], 'the exhausted call returns an empty result without HTTP');
+    expect(isbndbRequests, 'exactly the quota reaches the stub network').toBe(2);
+    expect(results[0]).toEqual([]);
+    expect(results[1]).toEqual([]);
+    expect(results[2], 'the exhausted call returns an empty result without HTTP').toEqual([]);
 
     const usage = await pool.query(
       "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
         "AND day = (now() AT TIME ZONE 'UTC')::date"
     );
-    assert.equal(usage.rows[0]?.calls, 2);
+    expect(usage.rows[0]?.calls).toBe(2);
   } finally {
     await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
     await pool.end();
@@ -996,12 +977,12 @@ test('an ISBNdb cache hit does not consume the daily quota', async () => {
     await isbndb.byIsbn(isbn);
     await isbndb.byIsbn(isbn);
 
-    assert.equal(isbndbRequests, 1, 'the second lookup is served from isbndb_cache');
+    expect(isbndbRequests, 'the second lookup is served from isbndb_cache').toBe(1);
     const usage = await pool.query(
       "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
         "AND day = (now() AT TIME ZONE 'UTC')::date"
     );
-    assert.equal(usage.rows[0]?.calls, 1);
+    expect(usage.rows[0]?.calls).toBe(1);
   } finally {
     await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
     await pool.end();
@@ -1030,17 +1011,17 @@ test('a previous UTC day at the limit does not block today', async () => {
 
     await providers.providers.isbndb.byIsbn(isbn13For(821));
 
-    assert.equal(isbndbRequests, 1, 'today starts a fresh budget after the UTC rollover');
+    expect(isbndbRequests, 'today starts a fresh budget after the UTC rollover').toBe(1);
     const today = await pool.query(
       "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
         "AND day = (now() AT TIME ZONE 'UTC')::date"
     );
-    assert.equal(today.rows[0]?.calls, 1);
+    expect(today.rows[0]?.calls).toBe(1);
     const yesterday = await pool.query(
       "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
         "AND day = (now() AT TIME ZONE 'UTC')::date - 1"
     );
-    assert.equal(yesterday.rows[0]?.calls, 2);
+    expect(yesterday.rows[0]?.calls).toBe(2);
   } finally {
     await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
     await pool.end();
@@ -1060,8 +1041,8 @@ test('the worker metrics endpoint exposes the ISBNdb quota gauges', async () => 
   try {
     const { port } = server.address();
     const response = await fetch(`http://127.0.0.1:${port}/metrics`);
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-type'), /^text\/plain; version=0\.0\.4/);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/^text\/plain; version=0\.0\.4/);
 
     const body = await response.text();
     for (const name of [
@@ -1069,12 +1050,12 @@ test('the worker metrics endpoint exposes the ISBNdb quota gauges', async () => 
       'bibliograph_isbndb_daily_limit',
       'bibliograph_isbndb_calls_remaining'
     ]) {
-      assert.match(body, new RegExp(`^# HELP ${name} .+$`, 'm'));
-      assert.match(body, new RegExp(`^# TYPE ${name} gauge$`, 'm'));
+      expect(body).toMatch(new RegExp(`^# HELP ${name} .+$`, 'm'));
+      expect(body).toMatch(new RegExp(`^# TYPE ${name} gauge$`, 'm'));
     }
-    assert.match(body, /^bibliograph_isbndb_calls_today 1234$/m);
-    assert.match(body, /^bibliograph_isbndb_daily_limit 5000$/m);
-    assert.match(body, /^bibliograph_isbndb_calls_remaining 3766$/m);
+    expect(body).toMatch(/^bibliograph_isbndb_calls_today 1234$/m);
+    expect(body).toMatch(/^bibliograph_isbndb_daily_limit 5000$/m);
+    expect(body).toMatch(/^bibliograph_isbndb_calls_remaining 3766$/m);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -1097,8 +1078,8 @@ test('a metrics database failure returns 500 instead of crashing', async () => {
   try {
     const { port } = server.address();
     const response = await fetch(`http://127.0.0.1:${port}/metrics`);
-    assert.equal(response.status, 500);
-    assert.match(await response.text(), /metrics unavailable/);
+    expect(response.status).toBe(500);
+    expect(await response.text()).toMatch(/metrics unavailable/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

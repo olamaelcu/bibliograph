@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import { parseEditionEdit } from '../src/lib/admin/edition-edit.ts';
 
@@ -27,33 +26,31 @@ function paths(body: unknown): string[] {
 
 test('accepts a minimal edition and normalises defaults', () => {
   const parsed = parseEditionEdit(valid());
-  assert.deepEqual(parsed.errors, []);
-  assert.ok(parsed.value);
-  assert.equal(parsed.value.title, 'Dune');
-  assert.equal(parsed.value.contributors[0]?.role, 'A01');
-  assert.equal(parsed.value.contributors[0]?.id, null);
-  assert.equal(parsed.value.subtitle, null);
-  assert.equal(parsed.value.expectedRevision, null);
+  expect(parsed.errors).toEqual([]);
+  expect(parsed.value).toBeTruthy();
+  expect(parsed.value.title).toBe('Dune');
+  expect(parsed.value.contributors[0]?.role).toBe('A01');
+  expect(parsed.value.contributors[0]?.id).toBe(null);
+  expect(parsed.value.subtitle).toBe(null);
+  expect(parsed.value.expectedRevision).toBe(null);
   // No `info` key at all: an omitted claim leaves the stored row untouched.
-  assert.equal('info' in (parsed.value.identifiers[0] as object), false);
+  expect('info' in (parsed.value.identifiers[0] as object)).toBe(false);
 });
 
 test('requires a non-empty title and at least one identifier and contributor', () => {
-  assert.ok(paths({ title: '  ', identifiers: [], contributors: [] }).includes('title'));
-  assert.ok(paths({ ...valid(), identifiers: [] }).includes('identifiers'));
-  assert.ok(paths({ ...valid(), contributors: [] }).includes('contributors'));
-  assert.ok(paths({ ...valid(), contributors: undefined }).includes('contributors'));
+  expect(paths({ title: '  ', identifiers: [], contributors: [] }).includes('title')).toBeTruthy();
+  expect(paths({ ...valid(), identifiers: [] }).includes('identifiers')).toBeTruthy();
+  expect(paths({ ...valid(), contributors: [] }).includes('contributors')).toBeTruthy();
+  expect(paths({ ...valid(), contributors: undefined }).includes('contributors')).toBeTruthy();
 });
 
 test('bounds string lengths', () => {
-  assert.ok(paths({ ...valid(), title: 'x'.repeat(501) }).includes('title'));
-  assert.ok(
-    paths(withInfo({ description: 'x'.repeat(20_001) })).includes(
+  expect(paths({ ...valid(), title: 'x'.repeat(501) }).includes('title')).toBeTruthy();
+  expect(paths(withInfo({ description: 'x'.repeat(20_001) })).includes(
       'identifiers.0.info.description'
-    )
-  );
-  assert.ok(paths(withInfo({ format: 'x'.repeat(101) })).includes('identifiers.0.info.format'));
-  assert.ok(paths(withInfo({ language: 'x'.repeat(36) })).includes('identifiers.0.info.language'));
+    )).toBeTruthy();
+  expect(paths(withInfo({ format: 'x'.repeat(101) })).includes('identifiers.0.info.format')).toBeTruthy();
+  expect(paths(withInfo({ language: 'x'.repeat(36) })).includes('identifiers.0.info.language')).toBeTruthy();
 });
 
 test('canonicalises valid BCP 47 language tags', () => {
@@ -68,55 +65,50 @@ test('canonicalises valid BCP 47 language tags', () => {
     ['English', 'english']
   ]) {
     const parsed = parseEditionEdit(withInfo({ language: input }));
-    assert.deepEqual(parsed.errors, [], input);
-    assert.equal(parsed.value?.identifiers[0]?.info?.language, expected, input);
+    expect(parsed.errors, input).toEqual([]);
+    expect(parsed.value?.identifiers[0]?.info?.language, input).toBe(expected);
   }
 });
 
 test('treats empty or missing language as null', () => {
   for (const value of [undefined, null, '', '   ']) {
     const parsed = parseEditionEdit(withInfo({ language: value }));
-    assert.deepEqual(parsed.errors, []);
-    assert.equal(parsed.value?.identifiers[0]?.info?.language, null);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.value?.identifiers[0]?.info?.language).toBe(null);
   }
 });
 
 test('rejects invalid BCP 47 language tags', () => {
   for (const value of ['en_US', 'en-', 'en--US', '123', 'not a tag']) {
     const errors = parseEditionEdit(withInfo({ language: value })).errors;
-    assert.ok(
-      errors.some((issue) => issue.path === 'identifiers.0.info.language'),
-      `expected a language error for ${JSON.stringify(value)}`
-    );
+    expect(errors.some((issue) => issue.path === 'identifiers.0.info.language'), `expected a language error for ${JSON.stringify(value)}`).toBeTruthy();
   }
 });
 
 test('rejects negative, fractional and oversized integers', () => {
-  assert.ok(paths(withInfo({ pages: -1 })).includes('identifiers.0.info.pages'));
-  assert.ok(
-    paths(withInfo({ durationSeconds: 1.5 })).includes('identifiers.0.info.durationSeconds')
-  );
-  assert.deepEqual(paths(withInfo({ durationSeconds: 3600 })), []);
-  assert.ok(paths({ ...valid(), chapters: 2_147_483_648 }).includes('chapters'));
-  assert.deepEqual(paths({ ...valid(), chapters: null }), []);
+  expect(paths(withInfo({ pages: -1 })).includes('identifiers.0.info.pages')).toBeTruthy();
+  expect(paths(withInfo({ durationSeconds: 1.5 })).includes('identifiers.0.info.durationSeconds')).toBeTruthy();
+  expect(paths(withInfo({ durationSeconds: 3600 }))).toEqual([]);
+  expect(paths({ ...valid(), chapters: 2_147_483_648 }).includes('chapters')).toBeTruthy();
+  expect(paths({ ...valid(), chapters: null })).toEqual([]);
 });
 
 test('validates published dates, including calendar days', () => {
   const path = 'identifiers.0.info.publishedDate';
-  assert.deepEqual(paths(withInfo({ publishedDate: '2024' })), []);
-  assert.deepEqual(paths(withInfo({ publishedDate: '2024-02' })), []);
-  assert.deepEqual(paths(withInfo({ publishedDate: '2024-02-29' })), []);
-  assert.ok(paths(withInfo({ publishedDate: '2024-02-30' })).includes(path));
-  assert.ok(paths(withInfo({ publishedDate: '24' })).includes(path));
-  assert.ok(paths(withInfo({ publishedDate: '2024-13' })).includes(path));
+  expect(paths(withInfo({ publishedDate: '2024' }))).toEqual([]);
+  expect(paths(withInfo({ publishedDate: '2024-02' }))).toEqual([]);
+  expect(paths(withInfo({ publishedDate: '2024-02-29' }))).toEqual([]);
+  expect(paths(withInfo({ publishedDate: '2024-02-30' })).includes(path)).toBeTruthy();
+  expect(paths(withInfo({ publishedDate: '24' })).includes(path)).toBeTruthy();
+  expect(paths(withInfo({ publishedDate: '2024-13' })).includes(path)).toBeTruthy();
 });
 
 test('identifier claims are optional, nullable and typed', () => {
   const parsed = parseEditionEdit(
     withInfo({ pages: '12', format: 'hardcover', durationSeconds: 12 })
   );
-  assert.deepEqual(parsed.errors, []);
-  assert.deepEqual(parsed.value?.identifiers[0]?.info, {
+  expect(parsed.errors).toEqual([]);
+  expect(parsed.value?.identifiers[0]?.info).toEqual({
     format: 'hardcover',
     language: null,
     publishedDate: null,
@@ -126,8 +118,8 @@ test('identifier claims are optional, nullable and typed', () => {
   });
 
   const durationOnly = parseEditionEdit(withInfo({ durationSeconds: 1 }));
-  assert.deepEqual(durationOnly.errors, [], 'a duration alone is a claim');
-  assert.deepEqual(durationOnly.value?.identifiers[0]?.info, {
+  expect(durationOnly.errors, 'a duration alone is a claim').toEqual([]);
+  expect(durationOnly.value?.identifiers[0]?.info).toEqual({
     format: null,
     language: null,
     publishedDate: null,
@@ -137,18 +129,18 @@ test('identifier claims are optional, nullable and typed', () => {
   });
 
   const cleared = parseEditionEdit(withInfo(null));
-  assert.deepEqual(cleared.errors, []);
-  assert.equal(cleared.value?.identifiers[0]?.info, null);
+  expect(cleared.errors).toEqual([]);
+  expect(cleared.value?.identifiers[0]?.info).toBe(null);
 
-  assert.ok(paths(withInfo('hardcover')).includes('identifiers.0.info'));
-  assert.ok(paths(withInfo([1])).includes('identifiers.0.info'));
+  expect(paths(withInfo('hardcover')).includes('identifiers.0.info')).toBeTruthy();
+  expect(paths(withInfo([1])).includes('identifiers.0.info')).toBeTruthy();
 });
 
 test('requires an http(s) cover URL', () => {
-  assert.deepEqual(paths({ ...valid(), coverUrl: 'https://example.org/c.jpg' }), []);
-  assert.deepEqual(paths({ ...valid(), coverUrl: 'http://example.org/c.jpg' }), []);
-  assert.ok(paths({ ...valid(), coverUrl: 'javascript:alert(1)' }).includes('coverUrl'));
-  assert.ok(paths({ ...valid(), coverUrl: '/relative.jpg' }).includes('coverUrl'));
+  expect(paths({ ...valid(), coverUrl: 'https://example.org/c.jpg' })).toEqual([]);
+  expect(paths({ ...valid(), coverUrl: 'http://example.org/c.jpg' })).toEqual([]);
+  expect(paths({ ...valid(), coverUrl: 'javascript:alert(1)' }).includes('coverUrl')).toBeTruthy();
+  expect(paths({ ...valid(), coverUrl: '/relative.jpg' }).includes('coverUrl')).toBeTruthy();
 });
 
 test('rejects duplicate or empty identifiers', () => {
@@ -159,9 +151,9 @@ test('rejects duplicate or empty identifiers', () => {
       { issuer: 'isbn13', value: '978' }
     ]
   });
-  assert.ok(duplicate.includes('identifiers.1'));
+  expect(duplicate.includes('identifiers.1')).toBeTruthy();
   const empty = paths({ ...valid(), identifiers: [{ issuer: 'isbn13', value: ' ' }] });
-  assert.ok(empty.includes('identifiers.0.value'));
+  expect(empty.includes('identifiers.0.value')).toBeTruthy();
 });
 
 test('normalises legacy roles and rejects unknown role tokens', () => {
@@ -169,17 +161,14 @@ test('normalises legacy roles and rejects unknown role tokens', () => {
     ...valid(),
     contributors: [{ name: 'A', role: 'editor' }]
   });
-  assert.equal(editor.value?.contributors[0]?.role, 'B01');
+  expect(editor.value?.contributors[0]?.role).toBe('B01');
   const bad = paths({
     ...valid(),
     contributors: [{ name: 'A', role: 'chief-vibes' }]
   });
-  assert.ok(bad.includes('contributors.0.role'));
+  expect(bad.includes('contributors.0.role')).toBeTruthy();
   for (const role of ['A55', 'A98', 'AAA', 'author2']) {
-    assert.ok(
-      paths({ ...valid(), contributors: [{ name: 'A', role }] }).includes('contributors.0.role'),
-      `expected ${role} to be rejected`
-    );
+    expect(paths({ ...valid(), contributors: [{ name: 'A', role }] }).includes('contributors.0.role'), `expected ${role} to be rejected`).toBeTruthy();
   }
   for (const [role, expected] of [
     ['author', 'A01'],
@@ -189,65 +178,56 @@ test('normalises legacy roles and rejects unknown role tokens', () => {
     ['Z99', 'Z99']
   ]) {
     const parsed = parseEditionEdit({ ...valid(), contributors: [{ name: 'A', role }] });
-    assert.deepEqual(parsed.errors, [], role);
-    assert.equal(parsed.value?.contributors[0]?.role, expected, role);
+    expect(parsed.errors, role).toEqual([]);
+    expect(parsed.value?.contributors[0]?.role, role).toBe(expected);
   }
   const blank = parseEditionEdit({
     ...valid(),
     contributors: [{ name: 'A', role: '' }]
   });
-  assert.equal(blank.value?.contributors[0]?.role, 'A01');
+  expect(blank.value?.contributors[0]?.role).toBe('A01');
 });
 
 test('validates a contributor per-edge ref as an at-uri', () => {
-  assert.deepEqual(
-    paths({
+  expect(paths({
       ...valid(),
       contributors: [
         { id: 4, role: 'A01', ref: 'at://did:plc:test/net.olamaelcu.livtet.biblio.contributor/abc' }
       ]
-    }),
-    []
-  );
-  assert.ok(
-    paths({ ...valid(), contributors: [{ id: 4, role: 'A01', ref: 'https://example.org' }] }).includes(
+    })).toEqual([]);
+  expect(paths({ ...valid(), contributors: [{ id: 4, role: 'A01', ref: 'https://example.org' }] }).includes(
       'contributors.0.ref'
-    )
-  );
+    )).toBeTruthy();
 });
 
 test('existing contributor ids must be positive integers', () => {
-  assert.ok(paths({ ...valid(), contributors: [{ id: 0, role: 'A01' }] }).includes('contributors.0.id'));
-  assert.ok(
-    paths({ ...valid(), contributors: [{ id: 1.5, role: 'A01' }] }).includes('contributors.0.id')
-  );
-  assert.deepEqual(paths({ ...valid(), contributors: [{ id: 7, role: 'A01' }] }), []);
+  expect(paths({ ...valid(), contributors: [{ id: 0, role: 'A01' }] }).includes('contributors.0.id')).toBeTruthy();
+  expect(paths({ ...valid(), contributors: [{ id: 1.5, role: 'A01' }] }).includes('contributors.0.id')).toBeTruthy();
+  expect(paths({ ...valid(), contributors: [{ id: 7, role: 'A01' }] })).toEqual([]);
 });
 
 test('series is optional but needs a name when a position or display is present', () => {
-  assert.deepEqual(paths({ ...valid(), series: null }), []);
-  assert.deepEqual(paths({ ...valid(), series: { name: 'Saga', position: '2' } }), []);
-  assert.ok(paths({ ...valid(), series: { name: '', position: '2' } }).includes('series.name'));
-  assert.deepEqual(paths({ ...valid(), series: { name: '' } }), []);
-  assert.ok(paths({ ...valid(), series: 'Saga' }).includes('series'));
+  expect(paths({ ...valid(), series: null })).toEqual([]);
+  expect(paths({ ...valid(), series: { name: 'Saga', position: '2' } })).toEqual([]);
+  expect(paths({ ...valid(), series: { name: '', position: '2' } }).includes('series.name')).toBeTruthy();
+  expect(paths({ ...valid(), series: { name: '' } })).toEqual([]);
+  expect(paths({ ...valid(), series: 'Saga' }).includes('series')).toBeTruthy();
 });
 
 test('publisher links hang off the identifier and accept ids or new names', () => {
-  assert.deepEqual(paths(withIdentifier({ publishers: [{ id: 3 }] })), []);
-  assert.deepEqual(paths(withIdentifier({ publishers: [{ name: 'Ace' }] })), []);
-  assert.ok(
-    paths(withIdentifier({ publishers: [{ role: 'x' }] })).includes(
+  expect(paths(withIdentifier({ publishers: [{ id: 3 }] }))).toEqual([]);
+  expect(paths(withIdentifier({ publishers: [{ name: 'Ace' }] }))).toEqual([]);
+  expect(paths(withIdentifier({ publishers: [{ role: 'x' }] })).includes(
       'identifiers.0.publishers.0.name'
-    )
-  );
-  assert.ok(paths(withIdentifier({ publishers: 'Ace' })).includes('identifiers.0.publishers'));
+    )).toBeTruthy();
+  expect(paths(withIdentifier({ publishers: 'Ace' })).includes('identifiers.0.publishers')).toBeTruthy();
   // Omitted links are not resent, so a partial client cannot clear them.
   const parsed = parseEditionEdit(valid());
-  assert.equal('publishers' in (parsed.value?.identifiers[0] as object), false);
+  expect('publishers' in (parsed.value?.identifiers[0] as object)).toBe(false);
 });
 
 test('non-object bodies are rejected', () => {
-  assert.deepEqual(paths(null), ['']);
-  assert.deepEqual(paths([]), ['']);
-  assert.deepEqual(paths('edition'), ['']);
+  expect(paths(null)).toEqual(['']);
+  expect(paths([])).toEqual(['']);
+  expect(paths('edition')).toEqual(['']);
 });

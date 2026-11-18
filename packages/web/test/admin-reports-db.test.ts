@@ -1,5 +1,5 @@
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
 
@@ -248,7 +248,7 @@ async function report(
   id: string,
   query = ''
 ): Promise<ReportResponse> {
-  assert.ok(client, 'scratch client');
+  expect(client, 'scratch client').toBeTruthy();
   return runReportFrom(client, id, new URLSearchParams(query));
 }
 
@@ -256,7 +256,7 @@ function uris(rows: Array<Record<string, unknown>>): string[] {
   return rows.map((row) => String(row.uri));
 }
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2 });
   try {
     await pool.query('SELECT 1');
@@ -273,7 +273,7 @@ before(async () => {
   await seed(client);
 });
 
-after(async () => {
+afterAll(async () => {
   if (client) {
     client.release();
     client = undefined;
@@ -293,33 +293,33 @@ test('editions missing a cover include NULL, empty and whitespace-only values', 
   if (!ready) return;
 
   const result = await report('editions-missing-cover');
-  assert.equal(result.total, 3);
-  assert.deepEqual(uris(result.rows), [uri('r01'), uri('r02'), uri('r03')]);
-  assert.equal(result.rows[0]?.title, 'Alpha');
-  assert.equal(result.rows[0]?.rkey, 'r01');
-  assert.equal(result.rows[0]?.uri, `at://${AUTHORITY}/${EDITION_COLLECTION}/r01`);
-  assert.equal(typeof result.rows[0]?.indexed_at, 'string');
+  expect(result.total).toBe(3);
+  expect(uris(result.rows)).toEqual([uri('r01'), uri('r02'), uri('r03')]);
+  expect(result.rows[0]?.title).toBe('Alpha');
+  expect(result.rows[0]?.rkey).toBe('r01');
+  expect(result.rows[0]?.uri).toBe(`at://${AUTHORITY}/${EDITION_COLLECTION}/r01`);
+  expect(typeof result.rows[0]?.indexed_at).toBe('string');
 });
 
 test('completeness reports cover descriptions, languages, pages and dates', async (t) => {
   requireDatabase(t);
   if (!ready) return;
 
-  assert.deepEqual(uris((await report('editions-missing-description')).rows).sort(), [
+  expect(uris((await report('editions-missing-description')).rows).sort()).toEqual([
     uri('r01'),
     uri('r02'),
     uri('r03')
   ]);
-  assert.deepEqual(uris((await report('editions-missing-language')).rows).sort(), [
+  expect(uris((await report('editions-missing-language')).rows).sort()).toEqual([
     uri('r01'),
     uri('r02'),
     uri('r03')
   ]);
-  assert.deepEqual(uris((await report('editions-missing-pages')).rows).sort(), [
+  expect(uris((await report('editions-missing-pages')).rows).sort()).toEqual([
     uri('r01'),
     uri('r03')
   ]);
-  assert.deepEqual(uris((await report('editions-missing-published-date')).rows).sort(), [
+  expect(uris((await report('editions-missing-published-date')).rows).sort()).toEqual([
     uri('r01'),
     uri('r02'),
     uri('r03')
@@ -332,8 +332,8 @@ test('identifier report enumerates identifiers, claims and publisher links', asy
 
   const all = await report('edition-identifier-info');
   // One row per identifier, including ones without a claim row.
-  assert.equal(all.total, 6);
-  assert.deepEqual(uris(all.rows).sort(), [
+  expect(all.total).toBe(6);
+  expect(uris(all.rows).sort()).toEqual([
     uri('r01'),
     uri('r01'),
     uri('r02'),
@@ -344,30 +344,30 @@ test('identifier report enumerates identifiers, claims and publisher links', asy
 
   // Format compares case-insensitively.
   const hardcover = await report('edition-identifier-info', 'format=HARDCOVER');
-  assert.equal(hardcover.total, 1);
-  assert.equal(hardcover.rows[0]?.uri, uri('r04'));
-  assert.equal(hardcover.rows[0]?.issuer, 'test');
-  assert.equal(hardcover.rows[0]?.value, 'a%b_c');
-  assert.equal(hardcover.rows[0]?.publisher, 'Solstice Press');
-  assert.equal(hardcover.params.format, 'HARDCOVER');
+  expect(hardcover.total).toBe(1);
+  expect(hardcover.rows[0]?.uri).toBe(uri('r04'));
+  expect(hardcover.rows[0]?.issuer).toBe('test');
+  expect(hardcover.rows[0]?.value).toBe('a%b_c');
+  expect(hardcover.rows[0]?.publisher).toBe('Solstice Press');
+  expect(hardcover.params.format).toBe('HARDCOVER');
 
   // The publisher filter matches the linked entity name.
   const byPublisher = await report('edition-identifier-info', 'publisher=solstice');
-  assert.deepEqual(uris(byPublisher.rows), [uri('r04')]);
-  assert.equal(byPublisher.params.publisher, 'solstice');
+  expect(uris(byPublisher.rows)).toEqual([uri('r04')]);
+  expect(byPublisher.params.publisher).toBe('solstice');
 
   // Issuer is exact, so only ISBN rows come back (four across r01/r02).
   const isbn = await report('edition-identifier-info', 'issuer=isbn13');
-  assert.equal(isbn.total, 4);
+  expect(isbn.total).toBe(4);
 
   // The value filter is an escaped substring, not a pattern.
   // `%` and `_` are literals: "%b_" matches the seeded value literally...
-  assert.equal((await report('edition-identifier-info', 'value=%25b_')).total, 1);
+  expect((await report('edition-identifier-info', 'value=%25b_')).total).toBe(1);
   // ...while a wildcard-shaped "%b%" matches nothing, because it is escaped.
-  assert.equal((await report('edition-identifier-info', 'value=%25b%25')).total, 0);
-  assert.equal((await report('edition-identifier-info', 'value=_')).total, 1);
+  expect((await report('edition-identifier-info', 'value=%25b%25')).total).toBe(0);
+  expect((await report('edition-identifier-info', 'value=_')).total).toBe(1);
 
-  await assert.rejects(report('edition-identifier-info', 'nope=1'), (error: unknown) => {
+  await expect(report('edition-identifier-info', 'nope=1')).rejects.toSatisfy((error: unknown) => {
     const typed = error as { code?: string; status?: number };
     return typed.code === 'UnsupportedParameter' && typed.status === 400;
   });
@@ -377,11 +377,11 @@ test('editions without contributors or publishers', async (t) => {
   requireDatabase(t);
   if (!ready) return;
 
-  assert.deepEqual(uris((await report('editions-without-contributors')).rows).sort(), [
+  expect(uris((await report('editions-without-contributors')).rows).sort()).toEqual([
     uri('r03'),
     uri('r04')
   ]);
-  assert.deepEqual(uris((await report('editions-without-publishers')).rows).sort(), [
+  expect(uris((await report('editions-without-publishers')).rows).sort()).toEqual([
     uri('r03')
   ]);
 });
@@ -391,8 +391,8 @@ test('editions without a published CID use a left join', async (t) => {
   if (!ready) return;
 
   const result = await report('editions-without-cid');
-  assert.equal(result.total, 3);
-  assert.deepEqual(uris(result.rows).sort(), [uri('r02'), uri('r03'), uri('r04')]);
+  expect(result.total).toBe(3);
+  expect(uris(result.rows).sort()).toEqual([uri('r02'), uri('r03'), uri('r04')]);
 });
 
 test('identifier count supports eq/gte/lte and m=0', async (t) => {
@@ -400,22 +400,19 @@ test('identifier count supports eq/gte/lte and m=0', async (t) => {
   if (!ready) return;
 
   const zero = await report('edition-identifier-count', 'comparison=eq&m=0');
-  assert.deepEqual(uris(zero.rows), [uri('r03')]);
-  assert.equal(zero.rows[0]?.matching_identifiers, 0);
+  expect(uris(zero.rows)).toEqual([uri('r03')]);
+  expect(zero.rows[0]?.matching_identifiers).toBe(0);
 
   const three = await report('edition-identifier-count', 'comparison=eq&m=3');
-  assert.deepEqual(uris(three.rows), [uri('r02')]);
-  assert.equal(three.rows[0]?.matching_identifiers, 3);
+  expect(uris(three.rows)).toEqual([uri('r02')]);
+  expect(three.rows[0]?.matching_identifiers).toBe(3);
 
   const atLeastTwo = await report('edition-identifier-count', 'comparison=gte&m=2');
-  assert.deepEqual(uris(atLeastTwo.rows), [uri('r02'), uri('r01')]);
-  assert.deepEqual(
-    atLeastTwo.rows.map((row) => row.matching_identifiers),
-    [3, 2]
-  );
+  expect(uris(atLeastTwo.rows)).toEqual([uri('r02'), uri('r01')]);
+  expect(atLeastTwo.rows.map((row) => row.matching_identifiers)).toEqual([3, 2]);
 
   const atMostOne = await report('edition-identifier-count', 'comparison=lte&m=1');
-  assert.deepEqual(uris(atMostOne.rows), [uri('r04'), uri('r03')]);
+  expect(uris(atMostOne.rows)).toEqual([uri('r04'), uri('r03')]);
 });
 
 test('identifier count filters by issuer and by an escaped value substring', async (t) => {
@@ -426,33 +423,33 @@ test('identifier count filters by issuer and by an escaped value substring', asy
     'edition-identifier-count',
     'issuer=goodreads&comparison=gte&m=1'
   );
-  assert.deepEqual(uris(issuers.rows), [uri('r02')]);
-  assert.equal(issuers.rows[0]?.matching_identifiers, 1);
+  expect(uris(issuers.rows)).toEqual([uri('r02')]);
+  expect(issuers.rows[0]?.matching_identifiers).toBe(1);
 
   const isbn = await report(
     'edition-identifier-count',
     'issuer=isbn13&value=978&comparison=gte&m=2'
   );
-  assert.deepEqual(uris(isbn.rows), [uri('r01'), uri('r02')]);
+  expect(uris(isbn.rows)).toEqual([uri('r01'), uri('r02')]);
 
   // A literal '%' must match e4's a%b_c, not act as "match anything".
   const percent = await report(
     'edition-identifier-count',
     'value=%25&comparison=eq&m=1'
   );
-  assert.deepEqual(uris(isbn.rows), [uri('r01'), uri('r02')]);
-  assert.deepEqual(uris(percent.rows), [uri('r04')]);
-  assert.equal(percent.rows[0]?.matching_identifiers, 1);
+  expect(uris(isbn.rows)).toEqual([uri('r01'), uri('r02')]);
+  expect(uris(percent.rows)).toEqual([uri('r04')]);
+  expect(percent.rows[0]?.matching_identifiers).toBe(1);
 
   const underscore = await report('edition-identifier-count', 'value=_&comparison=eq&m=1');
-  assert.deepEqual(uris(underscore.rows), [uri('r04')]);
+  expect(uris(underscore.rows)).toEqual([uri('r04')]);
 
   // A wildcard-style pattern that is escaped matches nothing.
   const literalWildcard = await report(
     'edition-identifier-count',
     'value=%25%25&comparison=eq&m=1'
   );
-  assert.equal(literalWildcard.total, 0);
+  expect(literalWildcard.total).toBe(0);
 });
 
 test('report pagination is stable and independent of the full count', async (t) => {
@@ -461,14 +458,14 @@ test('report pagination is stable and independent of the full count', async (t) 
 
   const first = await report('edition-identifier-count', 'comparison=gte&m=0&limit=2&offset=0');
   const second = await report('edition-identifier-count', 'comparison=gte&m=0&limit=2&offset=2');
-  assert.equal(first.total, 4);
-  assert.equal(second.total, 4);
-  assert.deepEqual(uris(first.rows), [uri('r02'), uri('r01')]);
-  assert.deepEqual(uris(second.rows), [uri('r04'), uri('r03')]);
-  assert.equal(first.limit, 2);
-  assert.equal(second.offset, 2);
-  assert.equal(first.params.comparison, 'gte');
-  assert.equal(first.params.m, 0);
+  expect(first.total).toBe(4);
+  expect(second.total).toBe(4);
+  expect(uris(first.rows)).toEqual([uri('r02'), uri('r01')]);
+  expect(uris(second.rows)).toEqual([uri('r04'), uri('r03')]);
+  expect(first.limit).toBe(2);
+  expect(second.offset).toBe(2);
+  expect(first.params.comparison).toBe('gte');
+  expect(first.params.m).toBe(0);
 });
 
 test('contributors with no identifiers include empty arrays, JSON null and unminted rows', async (t) => {
@@ -476,22 +473,19 @@ test('contributors with no identifiers include empty arrays, JSON null and unmin
   if (!ready) return;
 
   const result = await report('contributors-missing-identifiers');
-  assert.equal(result.total, 2);
+  expect(result.total).toBe(2);
   const rows = [...result.rows].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  assert.deepEqual(
-    rows.map((row) => row.name),
-    ['Empty Identifiers', 'Null Identifiers']
-  );
+  expect(rows.map((row) => row.name)).toEqual(['Empty Identifiers', 'Null Identifiers']);
   for (const row of rows) {
-    assert.equal(row.identifier_status, 'none');
-    assert.equal(row.identifier_count, 0);
-    assert.equal(row.at_uri, null);
+    expect(row.identifier_status).toBe('none');
+    expect(row.identifier_count).toBe(0);
+    expect(row.at_uri).toBe(null);
   }
 
   const publishers = await report('publishers-missing-identifiers');
-  assert.equal(publishers.total, 1);
-  assert.equal(publishers.rows[0]?.name, 'Empty Press');
-  assert.equal(publishers.rows[0]?.at_uri, null);
+  expect(publishers.total).toBe(1);
+  expect(publishers.rows[0]?.name).toBe('Empty Press');
+  expect(publishers.rows[0]?.at_uri).toBe(null);
 });
 
 test('duplicate identifier pairs list every edition by canonical AT URI', async (t) => {
@@ -499,14 +493,14 @@ test('duplicate identifier pairs list every edition by canonical AT URI', async 
   if (!ready) return;
 
   const result = await report('duplicate-identifier-pairs');
-  assert.equal(result.total, 1);
+  expect(result.total).toBe(1);
   const row = result.rows[0];
-  assert.ok(row);
-  assert.equal(row.issuer, 'isbn13');
-  assert.equal(row.value, '9780000000001');
-  assert.equal(row.edition_count, 2);
+  expect(row).toBeTruthy();
+  expect(row.issuer).toBe('isbn13');
+  expect(row.value).toBe('9780000000001');
+  expect(row.edition_count).toBe(2);
   const editions = row.editions as Array<{ uri: string; rkey: string; title: string }>;
-  assert.deepEqual(editions, [
+  expect(editions).toEqual([
     { uri: uri('r01'), rkey: 'r01', title: 'Alpha' },
     { uri: uri('r02'), rkey: 'r02', title: 'Beta' }
   ]);
@@ -517,20 +511,20 @@ test('outbox reports list pending and stale edition records', async (t) => {
   if (!ready) return;
 
   const pending = await report('outbox-pending-editions');
-  assert.equal(pending.total, 4);
+  expect(pending.total).toBe(4);
   for (const row of pending.rows) {
-    assert.equal(row.op, 'create');
-    assert.equal(row.collection, EDITION_COLLECTION);
-    assert.match(String(row.uri), /^at:\/\//);
-    assert.equal(typeof row.next_at, 'string');
-    assert.equal(Number.isNaN(new Date(String(row.next_at)).getTime()), false);
+    expect(row.op).toBe('create');
+    expect(row.collection).toBe(EDITION_COLLECTION);
+    expect(String(row.uri)).toMatch(/^at:\/\//);
+    expect(typeof row.next_at).toBe('string');
+    expect(Number.isNaN(new Date(String(row.next_at)).getTime())).toBe(false);
   }
 
   const stale = await report('outbox-stale-editions');
-  assert.equal(stale.total, 2);
-  assert.deepEqual(uris(stale.rows), [uri('r02'), uri('r03')]);
-  assert.equal(stale.rows[0]?.stale_reason, 'parked');
-  assert.equal(stale.rows[0]?.attempts, 10);
-  assert.equal(stale.rows[0]?.last_error, 'boom');
-  assert.equal(stale.rows[1]?.stale_reason, 'overdue');
+  expect(stale.total).toBe(2);
+  expect(uris(stale.rows)).toEqual([uri('r02'), uri('r03')]);
+  expect(stale.rows[0]?.stale_reason).toBe('parked');
+  expect(stale.rows[0]?.attempts).toBe(10);
+  expect(stale.rows[0]?.last_error).toBe('boom');
+  expect(stale.rows[1]?.stale_reason).toBe('overdue');
 });

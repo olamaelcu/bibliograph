@@ -1,5 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
+
 import { readFileSync } from 'node:fs';
 
 import {
@@ -37,9 +37,9 @@ test('uses form ISBNs, normalises/dedupes them, and never loads the persisted ed
     postWorker: worker.postWorker
   });
 
-  assert.equal(loaded, false);
-  assert.deepEqual(worker.calls, [{ isbns: ['9780306406157'] }]);
-  assert.deepEqual(result, { status: 200, payload: { format: 'Paperback' } });
+  expect(loaded).toBe(false);
+  expect(worker.calls).toEqual([{ isbns: ['9780306406157'] }]);
+  expect(result).toEqual({ status: 200, payload: { format: 'Paperback' } });
 });
 
 test('omitting isbns loads only persisted ISBN identifiers', async () => {
@@ -54,54 +54,42 @@ test('omitting isbns loads only persisted ISBN identifiers', async () => {
     postWorker: worker.postWorker
   });
 
-  assert.equal(loads, 1);
-  assert.deepEqual(worker.calls, [{ isbns: ['9780306406157'] }]);
+  expect(loads).toBe(1);
+  expect(worker.calls).toEqual([{ isbns: ['9780306406157'] }]);
 });
 
 test('returns 400 when no valid ISBN is available from either source', async () => {
-  await assert.rejects(
-    proxyFormatResolution({
+  await expect(proxyFormatResolution({
       body: { isbns: ['nope', '9780306406158'] },
       loadIdentifiers: async () => PERSISTED,
       postWorker: async () => ({ status: 200, payload: null })
-    }),
-    (error) =>
-      error instanceof FormatResolutionError && error.status === 400 && error.code === 'NoIsbns'
-  );
+    })).rejects.toSatisfy((error) =>
+      error instanceof FormatResolutionError && error.status === 400 && error.code === 'NoIsbns');
 
-  await assert.rejects(
-    proxyFormatResolution({
+  await expect(proxyFormatResolution({
       body: {},
       loadIdentifiers: async () => [{ issuer: 'oclc', value: '123' }],
       postWorker: async () => ({ status: 200, payload: null })
-    }),
-    (error) =>
-      error instanceof FormatResolutionError && error.status === 400 && error.code === 'NoIsbns'
-  );
+    })).rejects.toSatisfy((error) =>
+      error instanceof FormatResolutionError && error.status === 400 && error.code === 'NoIsbns');
 });
 
 test('returns 400 for a non-array isbns value and 404 for a missing edition', async () => {
-  await assert.rejects(
-    proxyFormatResolution({
+  await expect(proxyFormatResolution({
       body: { isbns: null },
       loadIdentifiers: async () => PERSISTED,
       postWorker: async () => ({ status: 200, payload: null })
-    }),
-    (error) =>
+    })).rejects.toSatisfy((error) =>
       error instanceof FormatResolutionError &&
       error.status === 400 &&
-      error.code === 'InvalidIsbns'
-  );
+      error.code === 'InvalidIsbns');
 
-  await assert.rejects(
-    proxyFormatResolution({
+  await expect(proxyFormatResolution({
       body: {},
       loadIdentifiers: async () => null,
       postWorker: async () => ({ status: 200, payload: null })
-    }),
-    (error) =>
-      error instanceof FormatResolutionError && error.status === 404 && error.code === 'NotFound'
-  );
+    })).rejects.toSatisfy((error) =>
+      error instanceof FormatResolutionError && error.status === 404 && error.code === 'NotFound');
 });
 
 test('passes the worker status and payload through unchanged', async () => {
@@ -111,7 +99,7 @@ test('passes the worker status and payload through unchanged', async () => {
     loadIdentifiers: async () => PERSISTED,
     postWorker: async () => ({ status: 404, payload: workerPayload })
   });
-  assert.deepEqual(result, { status: 404, payload: workerPayload });
+  expect(result).toEqual({ status: 404, payload: workerPayload });
 });
 
 test('the resolve-format route requires admin and proxies the worker status', () => {
@@ -122,9 +110,9 @@ test('the resolve-format route requires admin and proxies the worker status', ()
     ),
     'utf8'
   );
-  assert.match(source, /requireAdmin\(cookies\)/);
-  assert.match(source, /loadEditionForEdit\(catalogPool\(\), params\.id\)/);
-  assert.match(source, /workerAdminPost\('\/resolve-format', workerBody\)/);
-  assert.match(source, /status: result\.status/);
-  assert.doesNotMatch(source, /pds_outbox/);
+  expect(source).toMatch(/requireAdmin\(cookies\)/);
+  expect(source).toMatch(/loadEditionForEdit\(catalogPool\(\), params\.id\)/);
+  expect(source).toMatch(/workerAdminPost\('\/resolve-format', workerBody\)/);
+  expect(source).toMatch(/status: result\.status/);
+  expect(source).not.toMatch(/pds_outbox/);
 });

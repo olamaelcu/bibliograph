@@ -1,5 +1,4 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test } from 'vitest';
 
 import {
   BROWSER_PROFILES,
@@ -96,13 +95,13 @@ test('byIdentifier resolves an ISBN through the book page and parses its format'
 
   const candidates = await provider.byIdentifier(ISBN13);
 
-  assert.equal(requests.length, 1, 'no search fallback when the ISBN page answers');
-  assert.equal(requests[0].path, `/book/isbn/${ISBN13}`);
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].title, 'Dune');
-  assert.equal(candidates[0].format, 'Hardcover');
-  assert.equal(candidates[0].publisher.name, 'Ace');
-  assert.deepEqual(candidates[0].identifiers, [
+  expect(requests.length, 'no search fallback when the ISBN page answers').toBe(1);
+  expect(requests[0].path).toBe(`/book/isbn/${ISBN13}`);
+  expect(candidates.length).toBe(1);
+  expect(candidates[0].title).toBe('Dune');
+  expect(candidates[0].format).toBe('Hardcover');
+  expect(candidates[0].publisher.name).toBe('Ace');
+  expect(candidates[0].identifiers).toEqual([
     { issuer: 'goodreads', value: '260994194' },
     { issuer: 'isbn13', value: ISBN13 }
   ]);
@@ -116,11 +115,8 @@ test('byIdentifier normalises an ISBN-10 before the book page lookup', async () 
 
   const candidates = await provider.byIdentifier(ISBN10);
 
-  assert.deepEqual(
-    requests.map((request) => request.path),
-    [`/book/isbn/${ISBN13}`]
-  );
-  assert.equal(candidates[0].format, 'Hardcover');
+  expect(requests.map((request) => request.path)).toEqual([`/book/isbn/${ISBN13}`]);
+  expect(candidates[0].format).toBe('Hardcover');
 });
 
 test('byIdentifier falls back to search when the ISBN page has no candidate', async () => {
@@ -133,19 +129,16 @@ test('byIdentifier falls back to search when the ISBN page has no candidate', as
 
   const candidates = await provider.byIdentifier(ISBN13);
 
-  assert.deepEqual(
-    requests.map((request) => request.path),
-    [`/book/isbn/${ISBN13}`, '/search']
-  );
-  assert.equal(new URL(requests[1].url).searchParams.get('q'), ISBN13);
+  expect(requests.map((request) => request.path)).toEqual([`/book/isbn/${ISBN13}`, '/search']);
+  expect(new URL(requests[1].url).searchParams.get('q')).toBe(ISBN13);
   // Any Accept naming html/xhtml makes `/search` redirect to itself; only the
   // bare wildcard is served (verified against the live WAF edge).
-  assert.equal(requests[1].headers.accept, '*/*');
-  assert.equal(candidates.length, 1);
-  assert.deepEqual(candidates[0].identifiers, [
+  expect(requests[1].headers.accept).toBe('*/*');
+  expect(candidates.length).toBe(1);
+  expect(candidates[0].identifiers).toEqual([
     { issuer: 'goodreads', value: '260994194' }
   ]);
-  assert.equal(candidates[0].title, 'Dune');
+  expect(candidates[0].title).toBe('Dune');
 });
 
 test('byIdentifier falls back to search when the ISBN page is missing', async () => {
@@ -157,13 +150,10 @@ test('byIdentifier falls back to search when the ISBN page is missing', async ()
 
   const candidates = await provider.byIdentifier(ISBN13);
 
-  assert.deepEqual(
-    requests.map((request) => request.path),
-    [`/book/isbn/${ISBN13}`, '/search']
-  );
+  expect(requests.map((request) => request.path)).toEqual([`/book/isbn/${ISBN13}`, '/search']);
   // The search redirect lands on the book page, so the book parser is used.
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0].format, 'Hardcover');
+  expect(candidates.length).toBe(1);
+  expect(candidates[0].format).toBe('Hardcover');
 });
 
 test('byId keeps the numeric book path and search drops the looping Accept', async () => {
@@ -174,20 +164,17 @@ test('byId keeps the numeric book path and search drops the looping Accept', asy
   const provider = makeProvider({ fetchImpl });
 
   const byId = await provider.byId('260994194');
-  assert.equal(requests[0].path, '/book/show/260994194');
-  assert.equal(byId[0].format, 'Hardcover');
+  expect(requests[0].path).toBe('/book/show/260994194');
+  expect(byId[0].format).toBe('Hardcover');
 
   const fromSearch = await provider.search('left hand');
-  assert.equal(requests[1].path, '/search');
-  assert.equal(new URL(requests[1].url).searchParams.get('q'), 'left hand');
-  assert.equal(requests[1].headers.accept, '*/*');
-  assert.doesNotMatch(requests[1].headers.accept, /text\/html|application\/xhtml/);
-  assert.equal(/Mozilla\/5\.0/.test(requests[1].headers['user-agent']), true);
-  assert.equal(requests[1].headers['user-agent'].includes('Bibliograph'), false);
-  assert.deepEqual(
-    fromSearch.map((candidate) => candidate.title),
-    ['Dune']
-  );
+  expect(requests[1].path).toBe('/search');
+  expect(new URL(requests[1].url).searchParams.get('q')).toBe('left hand');
+  expect(requests[1].headers.accept).toBe('*/*');
+  expect(requests[1].headers.accept).not.toMatch(/text\/html|application\/xhtml/);
+  expect(/Mozilla\/5\.0/.test(requests[1].headers['user-agent'])).toBe(true);
+  expect(requests[1].headers['user-agent'].includes('Bibliograph')).toBe(false);
+  expect(fromSearch.map((candidate) => candidate.title)).toEqual(['Dune']);
 });
 
 test('a consent wall still yields no candidates instead of throwing', async () => {
@@ -196,13 +183,10 @@ test('a consent wall still yields no candidates instead of throwing', async () =
   });
   const provider = makeProvider({ fetchImpl });
 
-  assert.deepEqual(await provider.byIdentifier(ISBN13), []);
+  expect(await provider.byIdentifier(ISBN13)).toEqual([]);
   // The ISBN page is refused, then the search fallback is refused too; both
   // are answers, not outages, so nothing is retried or thrown.
-  assert.deepEqual(
-    requests.map((request) => request.path),
-    [`/book/isbn/${ISBN13}`, '/search']
-  );
+  expect(requests.map((request) => request.path)).toEqual([`/book/isbn/${ISBN13}`, '/search']);
 });
 
 // --- resilience: profiles, challenges, throttling and cache -----------------
@@ -228,50 +212,46 @@ function scriptedFetch(script) {
 }
 
 test('browser profiles are coherent, varied and free of cookies/auth', () => {
-  assert.ok(BROWSER_PROFILES.length >= 3 && BROWSER_PROFILES.length <= 5);
+  expect(BROWSER_PROFILES.length >= 3 && BROWSER_PROFILES.length <= 5).toBeTruthy();
   const ids = new Set();
   const languages = new Set();
 
   for (const profile of BROWSER_PROFILES) {
     ids.add(profile.id);
     languages.add(profile.acceptLanguage);
-    assert.match(profile.userAgent, /^Mozilla\/5\.0 /, profile.id);
-    assert.equal(profile.accept.book, 'text/html', profile.id);
-    assert.doesNotMatch(profile.accept.book, /application\/xhtml/, profile.id);
-    assert.equal(profile.accept.search, '*/*', profile.id);
-    assert.doesNotMatch(profile.accept.search, /text\/html|application\/xhtml/, profile.id);
+    expect(profile.userAgent, profile.id).toMatch(/^Mozilla\/5\.0 /);
+    expect(profile.accept.book, profile.id).toBe('text/html');
+    expect(profile.accept.book, profile.id).not.toMatch(/application\/xhtml/);
+    expect(profile.accept.search, profile.id).toBe('*/*');
+    expect(profile.accept.search, profile.id).not.toMatch(/text\/html|application\/xhtml/);
 
     const chrome = /Chrome\/(\d+)\./.exec(profile.userAgent);
     if (chrome) {
-      assert.ok(profile.chUa, `${profile.id} is Chromium and needs sec-ch-ua`);
-      assert.match(profile.chUa, new RegExp(`v="${chrome[1]}"`), profile.id);
+      expect(profile.chUa, `${profile.id} is Chromium and needs sec-ch-ua`).toBeTruthy();
+      expect(profile.chUa, profile.id).toMatch(new RegExp(`v="${chrome[1]}"`));
       const expectedPlatform = /Android/.test(profile.userAgent) ? '"Android"' : '"Windows"';
-      assert.equal(profile.chUaPlatform, expectedPlatform, profile.id);
-      assert.equal(
-        profile.chUaMobile,
-        /Mobile/.test(profile.userAgent) ? '?1' : '?0',
-        profile.id
-      );
+      expect(profile.chUaPlatform, profile.id).toBe(expectedPlatform);
+      expect(profile.chUaMobile, profile.id).toBe(/Mobile/.test(profile.userAgent) ? '?1' : '?0');
     } else {
-      assert.equal(profile.chUa, undefined, `${profile.id} must not send client hints`);
+      expect(profile.chUa, `${profile.id} must not send client hints`).toBe(undefined);
     }
 
     const headers = profileHeaders(profile, { kind: 'book' });
-    assert.equal(headers['user-agent'], profile.userAgent);
-    assert.equal(headers.accept, profile.accept.book);
-    assert.equal(headers['accept-language'], profile.acceptLanguage);
-    assert.equal(headers['sec-fetch-mode'], 'navigate');
-    assert.equal(headers['sec-fetch-dest'], 'document');
-    assert.equal(headers['sec-fetch-site'], 'none');
-    assert.equal(headers['sec-fetch-user'], '?1');
-    assert.equal(headers['upgrade-insecure-requests'], '1');
-    assert.equal(headers.cookie, undefined);
-    assert.equal(headers.authorization, undefined);
-    assert.equal(headers.referer, undefined);
+    expect(headers['user-agent']).toBe(profile.userAgent);
+    expect(headers.accept).toBe(profile.accept.book);
+    expect(headers['accept-language']).toBe(profile.acceptLanguage);
+    expect(headers['sec-fetch-mode']).toBe('navigate');
+    expect(headers['sec-fetch-dest']).toBe('document');
+    expect(headers['sec-fetch-site']).toBe('none');
+    expect(headers['sec-fetch-user']).toBe('?1');
+    expect(headers['upgrade-insecure-requests']).toBe('1');
+    expect(headers.cookie).toBe(undefined);
+    expect(headers.authorization).toBe(undefined);
+    expect(headers.referer).toBe(undefined);
   }
 
-  assert.equal(ids.size, BROWSER_PROFILES.length);
-  assert.ok(languages.size > 1, 'Accept-Language should vary across profiles');
+  expect(ids.size).toBe(BROWSER_PROFILES.length);
+  expect(languages.size > 1, 'Accept-Language should vary across profiles').toBeTruthy();
 });
 
 test('book pages use the full Accept, search uses the non-looping wildcard, and profiles rotate', async () => {
@@ -284,36 +264,31 @@ test('book pages use the full Accept, search uses the non-looping wildcard, and 
   await provider.byId('260994194');
   await provider.search('dune');
 
-  assert.equal(requests[0].headers.accept, 'text/html');
-  assert.equal(requests[0].headers.referer, undefined);
-  assert.equal(requests[0].headers['sec-fetch-site'], 'none');
-  assert.equal(requests[1].headers.accept, '*/*');
-  assert.equal(requests[1].headers.referer, `${BASE}/`);
-  assert.equal(requests[1].headers['sec-fetch-site'], 'same-origin');
-  assert.notEqual(requests[0].headers['user-agent'], requests[1].headers['user-agent']);
+  expect(requests[0].headers.accept).toBe('text/html');
+  expect(requests[0].headers.referer).toBe(undefined);
+  expect(requests[0].headers['sec-fetch-site']).toBe('none');
+  expect(requests[1].headers.accept).toBe('*/*');
+  expect(requests[1].headers.referer).toBe(`${BASE}/`);
+  expect(requests[1].headers['sec-fetch-site']).toBe('same-origin');
+  expect(requests[0].headers['user-agent']).not.toBe(requests[1].headers['user-agent']);
   for (const request of requests) {
-    assert.ok(
-      BROWSER_PROFILES.some((profile) => profile.userAgent === request.headers['user-agent'])
-    );
+    expect(BROWSER_PROFILES.some((profile) => profile.userAgent === request.headers['user-agent'])).toBeTruthy();
   }
 });
 
 test('challenge detection covers 202, AWS WAF and Cloudflare bodies', () => {
-  assert.equal(isChallengePage({ status: 202, text: '' }), true);
-  assert.equal(isChallengePage({ status: 200, text: WAF_CHALLENGE }), true);
-  assert.equal(isChallengePage({ status: 403, text: CLOUDFLARE_CHALLENGE }), true);
+  expect(isChallengePage({ status: 202, text: '' })).toBe(true);
+  expect(isChallengePage({ status: 200, text: WAF_CHALLENGE })).toBe(true);
+  expect(isChallengePage({ status: 403, text: CLOUDFLARE_CHALLENGE })).toBe(true);
   const wafHeader = (action) => ({
     get: (name) => (name === 'x-amzn-waf-action' ? action : null)
   });
-  assert.equal(isChallengePage({ status: 200, text: '', headers: wafHeader('challenge') }), true);
-  assert.equal(isChallengePage({ status: 403, text: '', headers: wafHeader('block') }), true);
-  assert.equal(
-    isChallengePage({ status: 200, text: bookPageHtml, headers: wafHeader('allow') }),
-    false
-  );
-  assert.equal(isChallengePage({ status: 200, text: bookPageHtml }), false);
-  assert.equal(isChallengePage({ status: 200, text: searchPageHtml }), false);
-  assert.equal(isChallengePage(undefined), false);
+  expect(isChallengePage({ status: 200, text: '', headers: wafHeader('challenge') })).toBe(true);
+  expect(isChallengePage({ status: 403, text: '', headers: wafHeader('block') })).toBe(true);
+  expect(isChallengePage({ status: 200, text: bookPageHtml, headers: wafHeader('allow') })).toBe(false);
+  expect(isChallengePage({ status: 200, text: bookPageHtml })).toBe(false);
+  expect(isChallengePage({ status: 200, text: searchPageHtml })).toBe(false);
+  expect(isChallengePage(undefined)).toBe(false);
 });
 
 test('a WAF challenge fails the logical request immediately and reports the block', async () => {
@@ -327,26 +302,20 @@ test('a WAF challenge fails the logical request immediately and reports the bloc
     onBlocked: (error) => blocked.push(error)
   });
 
-  await assert.rejects(
-    provider.byIdentifier(ISBN13),
-    (error) =>
+  await expect(provider.byIdentifier(ISBN13)).rejects.toSatisfy((error) =>
       error instanceof GoodreadsChallengeError &&
       error.code === 'GOODREADS_CHALLENGE' &&
-      error.status === 502
-  );
-  assert.equal(requests.length, 1, 'a challenge is not retried inline');
-  assert.equal(blocked.length, 1, 'the block opens the breaker hook');
+      error.status === 502);
+  expect(requests.length, 'a challenge is not retried inline').toBe(1);
+  expect(blocked.length, 'the block opens the breaker hook').toBe(1);
 });
 
 test('403 challenge bodies and x-amzn-waf-action are blocks, not consent walls', async () => {
   const bodyBlock = scriptedFetch([
     response({ status: 403, url: `${BASE}/book/show/1`, body: CLOUDFLARE_CHALLENGE })
   ]);
-  await assert.rejects(
-    makeProvider({ fetchImpl: bodyBlock.fetchImpl, gate: (task) => task() }).byId('1'),
-    GoodreadsChallengeError
-  );
-  assert.equal(bodyBlock.requests.length, 1);
+  await expect(makeProvider({ fetchImpl: bodyBlock.fetchImpl, gate: (task) => task() }).byId('1')).rejects.toThrow(GoodreadsChallengeError);
+  expect(bodyBlock.requests.length).toBe(1);
 
   const headerBlock = scriptedFetch([
     response({
@@ -356,11 +325,8 @@ test('403 challenge bodies and x-amzn-waf-action are blocks, not consent walls',
       headers: { 'x-amzn-waf-action': 'block' }
     })
   ]);
-  await assert.rejects(
-    makeProvider({ fetchImpl: headerBlock.fetchImpl, gate: (task) => task() }).byId('1'),
-    GoodreadsChallengeError
-  );
-  assert.equal(headerBlock.requests.length, 1);
+  await expect(makeProvider({ fetchImpl: headerBlock.fetchImpl, gate: (task) => task() }).byId('1')).rejects.toThrow(GoodreadsChallengeError);
+  expect(headerBlock.requests.length).toBe(1);
 });
 
 test('a 200 page carrying x-amzn-waf-action is never parsed as an empty success', async () => {
@@ -372,11 +338,8 @@ test('a 200 page carrying x-amzn-waf-action is never parsed as an empty success'
       headers: { 'x-amzn-waf-action': 'challenge' }
     })
   ]);
-  await assert.rejects(
-    makeProvider({ fetchImpl, gate: (task) => task() }).byIdentifier(ISBN13),
-    GoodreadsChallengeError
-  );
-  assert.equal(requests.length, 1);
+  await expect(makeProvider({ fetchImpl, gate: (task) => task() }).byIdentifier(ISBN13)).rejects.toThrow(GoodreadsChallengeError);
+  expect(requests.length).toBe(1);
 });
 
 test('a redirect loop is retried once, then surfaced as a provider error', async () => {
@@ -398,16 +361,13 @@ test('a redirect loop is retried once, then surfaced as a provider error', async
     onBlocked: (error) => blocked.push(error)
   });
 
-  await assert.rejects(
-    provider.search('dune'),
-    (error) =>
+  await expect(provider.search('dune')).rejects.toSatisfy((error) =>
       error instanceof GoodreadsRedirectLoopError &&
       error.code === 'GOODREADS_REDIRECT_LOOP' &&
-      error.status === 502
-  );
-  assert.equal(requests.length, 2, 'loops are retried at most once');
-  assert.deepEqual(sleeps, [500], 'the retry backoff is jittered from a 1 s base');
-  assert.equal(blocked.length, 1);
+      error.status === 502);
+  expect(requests.length, 'loops are retried at most once').toBe(2);
+  expect(sleeps, 'the retry backoff is jittered from a 1 s base').toEqual([500]);
+  expect(blocked.length).toBe(1);
 });
 
 test('a redirect loop that succeeds on the single retry is not an error', async () => {
@@ -424,8 +384,8 @@ test('a redirect loop that succeeds on the single retry is not an error', async 
 
   const candidates = await provider.byIdentifier(ISBN13);
 
-  assert.equal(candidates[0].format, 'Hardcover');
-  assert.equal(requests.length, 2);
+  expect(candidates[0].format).toBe('Hardcover');
+  expect(requests.length).toBe(2);
 });
 
 test('successful HTML is cached so repeated ISBN lookups skip the network', async () => {
@@ -436,14 +396,14 @@ test('successful HTML is cached so repeated ISBN lookups skip the network', asyn
   const cache = createPageCache({ ttlMs: 1000, maxEntries: 10, now: () => clock });
   const provider = makeProvider({ fetchImpl, cache, now: () => clock });
 
-  assert.equal((await provider.byIdentifier(ISBN13))[0].format, 'Hardcover');
-  assert.equal((await provider.byIdentifier(ISBN13))[0].format, 'Hardcover');
-  assert.equal(requests.length, 1, 'the second lookup is a cache hit');
-  assert.equal(cache.size, 1);
+  expect((await provider.byIdentifier(ISBN13))[0].format).toBe('Hardcover');
+  expect((await provider.byIdentifier(ISBN13))[0].format).toBe('Hardcover');
+  expect(requests.length, 'the second lookup is a cache hit').toBe(1);
+  expect(cache.size).toBe(1);
 
   clock = 1000;
-  assert.equal((await provider.byIdentifier(ISBN13))[0].format, 'Hardcover');
-  assert.equal(requests.length, 2, 'an expired entry is refetched');
+  expect((await provider.byIdentifier(ISBN13))[0].format).toBe('Hardcover');
+  expect(requests.length, 'an expired entry is refetched').toBe(2);
 });
 
 test('challenges and empty pages are never cached', async () => {
@@ -456,16 +416,16 @@ test('challenges and empty pages are never cached', async () => {
     gate: (task) => task(),
     cache: challengeCache
   });
-  await assert.rejects(challenged.byIdentifier(ISBN13), GoodreadsChallengeError);
-  assert.equal(challengeCache.size, 0);
+  await expect(challenged.byIdentifier(ISBN13)).rejects.toThrow(GoodreadsChallengeError);
+  expect(challengeCache.size).toBe(0);
 
   const emptyCache = createPageCache({ ttlMs: 1000, maxEntries: 10, now: () => 0 });
   const empty = recorder({
     [`/book/isbn/${ISBN13}`]: (url) => response({ url, body: '   ' })
   });
   const emptyProvider = makeProvider({ fetchImpl: empty.fetchImpl, cache: emptyCache });
-  assert.deepEqual(await emptyProvider.byIdentifier(ISBN13), []);
-  assert.equal(emptyCache.size, 0);
+  expect(await emptyProvider.byIdentifier(ISBN13)).toEqual([]);
+  expect(emptyCache.size).toBe(0);
 });
 
 test('the page cache is bounded and evicts the least recently used page', () => {
@@ -475,10 +435,10 @@ test('the page cache is bounded and evicts the least recently used page', () => 
   cache.get('a');
   cache.set('c', { text: 'c' });
 
-  assert.equal(cache.size, 2);
-  assert.equal(cache.get('b'), undefined);
-  assert.deepEqual(cache.get('a'), { text: 'a' });
-  assert.deepEqual(cache.get('c'), { text: 'c' });
+  expect(cache.size).toBe(2);
+  expect(cache.get('b')).toBe(undefined);
+  expect(cache.get('a')).toEqual({ text: 'a' });
+  expect(cache.get('c')).toEqual({ text: 'c' });
 });
 
 test('the serialized gate jitters its injected delay between requests', async () => {
@@ -497,7 +457,7 @@ test('the serialized gate jitters its injected delay between requests', async ()
   await provider.byId('1');
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(delays, [2500]);
+  expect(delays).toEqual([2500]);
 });
 
 // ---------------------------------------------------------------------------
@@ -531,7 +491,7 @@ const genrePageHtml = `<html><head></head><body>
 })}</script></body></html>`;
 
 test('genresFromBookPage reads inline and referenced genre entries', () => {
-  assert.deepEqual(genresFromBookPage(genrePageHtml), [
+  expect(genresFromBookPage(genrePageHtml)).toEqual([
     'Science Fiction',
     'Classics',
     'Audiobook'
@@ -539,9 +499,9 @@ test('genresFromBookPage reads inline and referenced genre entries', () => {
 });
 
 test('genresFromBookPage answers nothing for a page without the payload or genres', () => {
-  assert.deepEqual(genresFromBookPage('<html><body>No such edition</body></html>'), []);
+  expect(genresFromBookPage('<html><body>No such edition</body></html>')).toEqual([]);
   // The plain book page carries no `bookGenres` at all.
-  assert.deepEqual(genresFromBookPage(bookPageHtml), []);
+  expect(genresFromBookPage(bookPageHtml)).toEqual([]);
 });
 
 test('genresForEdition reads the page of a Goodreads id', async () => {
@@ -555,12 +515,8 @@ test('genresForEdition reads the page of a Goodreads id', async () => {
     { issuer: 'goodreads', value: GOODREADS_ID }
   ]);
 
-  assert.deepEqual(genres, ['Science Fiction', 'Classics', 'Audiobook']);
-  assert.deepEqual(
-    requests.map((request) => request.path),
-    [`/book/show/${GOODREADS_ID}`],
-    'the Goodreads id wins over the ISBN'
-  );
+  expect(genres).toEqual(['Science Fiction', 'Classics', 'Audiobook']);
+  expect(requests.map((request) => request.path), 'the Goodreads id wins over the ISBN').toEqual([`/book/show/${GOODREADS_ID}`]);
 });
 
 test('genresForEdition falls back to the ISBN route', async () => {
@@ -571,8 +527,8 @@ test('genresForEdition falls back to the ISBN route', async () => {
 
   const genres = await provider.genresForEdition([{ issuer: 'isbn13', value: ISBN13 }]);
 
-  assert.equal(genres[0], 'Science Fiction');
-  assert.deepEqual(requests.map((request) => request.path), [`/book/isbn/${ISBN13}`]);
+  expect(genres[0]).toBe('Science Fiction');
+  expect(requests.map((request) => request.path)).toEqual([`/book/isbn/${ISBN13}`]);
 });
 
 test('genresForEdition never searches and answers nothing without a usable identifier', async () => {
@@ -581,18 +537,15 @@ test('genresForEdition never searches and answers nothing without a usable ident
   });
   const provider = makeProvider({ fetchImpl });
 
-  assert.deepEqual(await provider.genresForEdition([{ issuer: 'goodreads', value: '' }]), []);
-  assert.deepEqual(await provider.genresForEdition([]), []);
-  assert.deepEqual(await provider.genresForEdition(), []);
-  assert.equal(requests.length, 0, 'a fuzzy match on another book is worse than no genre');
+  expect(await provider.genresForEdition([{ issuer: 'goodreads', value: '' }])).toEqual([]);
+  expect(await provider.genresForEdition([])).toEqual([]);
+  expect(await provider.genresForEdition()).toEqual([]);
+  expect(requests.length, 'a fuzzy match on another book is worse than no genre').toBe(0);
 });
 
 test('genresForEdition answers nothing when the book page is missing', async () => {
   const { fetchImpl } = recorder({});
   const provider = makeProvider({ fetchImpl });
 
-  assert.deepEqual(
-    await provider.genresForEdition([{ issuer: 'goodreads', value: GOODREADS_ID }]),
-    []
-  );
+  expect(await provider.genresForEdition([{ issuer: 'goodreads', value: GOODREADS_ID }])).toEqual([]);
 });

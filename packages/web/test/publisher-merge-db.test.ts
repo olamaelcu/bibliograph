@@ -7,8 +7,8 @@
  * fields and the publication queue the catalog triggers fill.
  */
 
-import test, { after, before } from 'node:test';
-import assert from 'node:assert/strict';
+import { expect, test, afterAll, beforeAll } from 'vitest';
+
 import pg from 'pg';
 
 import {
@@ -93,7 +93,7 @@ async function createPublisher(
     ]
   );
   const row = result.rows[0];
-  assert.ok(row, 'expected the publisher insert to return a row');
+  expect(row, 'expected the publisher insert to return a row').toBeTruthy();
   return {
     id: Number(row.id),
     name,
@@ -173,7 +173,7 @@ async function outbox(uri: string): Promise<{ collection: string; op: string } |
 
 async function loaded(db: pg.Pool, ref: string): Promise<AdminPublisherRecord> {
   const record = await loadAdminEntity(db, 'publisher', ref);
-  assert.ok(record, `expected publisher ${ref} to load`);
+  expect(record, `expected publisher ${ref} to load`).toBeTruthy();
   return record;
 }
 
@@ -186,7 +186,7 @@ function pairs(record: AdminPublisherRecord): string[] {
   return record.identifiers.map((identifier) => `${identifier.issuer}:${identifier.value}`);
 }
 
-before(async () => {
+beforeAll(async () => {
   pool = new pg.Pool({ connectionString: DATABASE_URL, max: 3 });
   try {
     await pool.query('SELECT 1');
@@ -197,7 +197,7 @@ before(async () => {
   }
 });
 
-after(async () => {
+afterAll(async () => {
   if (pool) {
     await cleanup().catch(() => {});
     await pool.end();
@@ -249,49 +249,45 @@ test('absorbs a publisher: repoints links, drops redundant ones, fills the survi
     targetRevision: target.revision
   });
 
-  assert.deepEqual(result.plan, {
+  expect(result.plan).toEqual({
     moved: 2,
     dropped: 1,
     identifiersAdded: 1,
     fields: ['description', 'imageUrl', 'started', 'ended']
   });
-  assert.equal(result.absorbedId, absorbed.id);
-  assert.equal(result.absorbedAtUri, absorbed.atUri);
+  expect(result.absorbedId).toBe(absorbed.id);
+  expect(result.absorbedAtUri).toBe(absorbed.atUri);
 
-  assert.equal(result.target.id, survivor.id);
-  assert.equal(result.target.atUri, survivor.atUri);
-  assert.equal(result.target.name, name, 'the survivor keeps its name');
-  assert.equal(result.target.description, 'Provider blurb');
-  assert.equal(result.target.imageUrl, 'https://example.org/press.png');
-  assert.equal(result.target.started, '1972-01-01');
-  assert.equal(result.target.ended, '1998-12-31');
-  assert.deepEqual(pairs(result.target).sort(), ['isni:111', 'openlibrary:OL9P']);
+  expect(result.target.id).toBe(survivor.id);
+  expect(result.target.atUri).toBe(survivor.atUri);
+  expect(result.target.name, 'the survivor keeps its name').toBe(name);
+  expect(result.target.description).toBe('Provider blurb');
+  expect(result.target.imageUrl).toBe('https://example.org/press.png');
+  expect(result.target.started).toBe('1972-01-01');
+  expect(result.target.ended).toBe('1998-12-31');
+  expect(pairs(result.target).sort()).toEqual(['isni:111', 'openlibrary:OL9P']);
 
-  assert.equal(
-    (await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount,
-    0,
-    'the absorbed row is gone'
-  );
+  expect((await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount, 'the absorbed row is gone').toBe(0);
 
-  assert.deepEqual(await linksOf(e1), [
+  expect(await linksOf(e1)).toEqual([
     { issuer: 'isbn13', value: '9780000000101', publisherId: survivor.id, position: 1 }
   ]);
-  assert.deepEqual(await linksOf(e2), [
+  expect(await linksOf(e2)).toEqual([
     { issuer: 'isbn13', value: '9780000000102', publisherId: survivor.id, position: 1 }
   ]);
-  assert.deepEqual(await linksOf(e3), [
+  expect(await linksOf(e3)).toEqual([
     { issuer: 'isbn13', value: '9780000000103', publisherId: survivor.id, position: 1 },
     { issuer: 'oclc', value: '222222', publisherId: survivor.id, position: 1 }
   ]);
 
   // Publication is the triggers' job: the absorbed record is deleted, the
   // survivor republished, and every edition whose links changed queued.
-  assert.deepEqual(await outbox(absorbed.atUri), {
+  expect(await outbox(absorbed.atUri)).toEqual({
     collection: PUBLISHER_COLLECTION,
     op: 'delete'
   });
   for (const uri of [survivor.atUri, e1, e2, e3]) {
-    assert.ok(await outbox(uri), `expected ${uri} to be queued`);
+    expect(await outbox(uri), `expected ${uri} to be queued`).toBeTruthy();
   }
 });
 
@@ -312,22 +308,18 @@ test('previews the same plan without writing', async (t) => {
     source: String(absorbed.id),
     target: String(survivor.id)
   });
-  assert.deepEqual(preview.plan, {
+  expect(preview.plan).toEqual({
     moved: 1,
     dropped: 0,
     identifiersAdded: 1,
     fields: ['description']
   });
 
-  assert.equal(
-    (await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount,
-    1,
-    'a preview deletes nothing'
-  );
-  assert.deepEqual(await linksOf(edition), [
+  expect((await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount, 'a preview deletes nothing').toBe(1);
+  expect(await linksOf(edition)).toEqual([
     { issuer: 'isbn13', value: '9780000000201', publisherId: absorbed.id, position: 1 }
   ]);
-  assert.deepEqual(await outbox(absorbed.atUri), null, 'a preview queues nothing');
+  expect(await outbox(absorbed.atUri), 'a preview queues nothing').toEqual(null);
 
   const source = await loaded(db, String(absorbed.id));
   const target = await loaded(db, String(survivor.id));
@@ -337,7 +329,7 @@ test('previews the same plan without writing', async (t) => {
     sourceRevision: source.revision,
     targetRevision: target.revision
   });
-  assert.deepEqual(result.plan, preview.plan, 'the merge does what the preview promised');
+  expect(result.plan, 'the merge does what the preview promised').toEqual(preview.plan);
 });
 
 test('rejects a stale revision and leaves both rows and links alone', async (t) => {
@@ -358,22 +350,16 @@ test('rejects a stale revision and leaves both rows and links alone', async (t) 
     'Edited after load'
   ]);
 
-  await assert.rejects(
-    () =>
+  await expect(() =>
       mergePublishers(db, {
         source: String(absorbed.id),
         target: String(survivor.id),
         sourceRevision: source.revision,
         targetRevision: target.revision
-      }),
-    isMergeError(409, 'EntityChanged')
-  );
+      })).rejects.toSatisfy(isMergeError(409, 'EntityChanged'));
 
-  assert.equal(
-    (await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount,
-    1
-  );
-  assert.deepEqual(await linksOf(edition), [
+  expect((await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount).toBe(1);
+  expect(await linksOf(edition)).toEqual([
     { issuer: 'isbn13', value: '9780000000301', publisherId: absorbed.id, position: 1 }
   ]);
 });
@@ -384,31 +370,22 @@ test('refuses the same row, an unknown row, and a missing revision', async (t) =
   const publisher = await createPublisher(`${RUN} Solo Press`);
   const record = await loaded(db, String(publisher.id));
 
-  await assert.rejects(
-    () =>
+  await expect(() =>
       mergePublishers(db, {
         source: String(publisher.id),
         target: String(publisher.id),
         sourceRevision: record.revision,
         targetRevision: record.revision
-      }),
-    isMergeError(400, 'InvalidRequest')
-  );
-  await assert.rejects(
-    () =>
+      })).rejects.toSatisfy(isMergeError(400, 'InvalidRequest'));
+  await expect(() =>
       mergePublishers(db, {
         source: String(publisher.id),
         target: `missing${RUN}`,
         sourceRevision: record.revision,
         targetRevision: record.revision
-      }),
-    isMergeError(404, 'NotFound')
-  );
-  await assert.rejects(
-    () => mergePublishers(db, { source: String(publisher.id), target: '1' }),
-    isMergeError(400, 'InvalidRequest')
-  );
-  await assert.rejects(() => mergePublishers(db, []), isMergeError(400, 'InvalidRequest'));
+      })).rejects.toSatisfy(isMergeError(404, 'NotFound'));
+  await expect(() => mergePublishers(db, { source: String(publisher.id), target: '1' })).rejects.toSatisfy(isMergeError(400, 'InvalidRequest'));
+  await expect(() => mergePublishers(db, [])).rejects.toSatisfy(isMergeError(400, 'InvalidRequest'));
 });
 
 test('reports a duplicate identity collision instead of dropping the absorbed row', async (t) => {
@@ -426,19 +403,12 @@ test('reports a duplicate identity collision instead of dropping the absorbed ro
 
   const source = await loaded(db, String(absorbed.id));
   const target = await loaded(db, String(survivor.id));
-  await assert.rejects(
-    () =>
+  await expect(() =>
       mergePublishers(db, {
         source: String(absorbed.id),
         target: String(survivor.id),
         sourceRevision: source.revision,
         targetRevision: target.revision
-      }),
-    isMergeError(409, 'DuplicateEntity')
-  );
-  assert.equal(
-    (await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount,
-    1,
-    'the absorbed row survives a rejected merge'
-  );
+      })).rejects.toSatisfy(isMergeError(409, 'DuplicateEntity'));
+  expect((await db.query('SELECT id FROM publishers WHERE id = $1', [absorbed.id])).rowCount, 'the absorbed row survives a rejected merge').toBe(1);
 });
