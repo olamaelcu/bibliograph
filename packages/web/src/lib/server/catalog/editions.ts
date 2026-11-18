@@ -157,7 +157,7 @@ export async function resolveEditions(input: {
      FROM editions e JOIN matches m ON m.edition_uri = e.uri
      ${EDITION_SHAPE_JOIN}
      ${EDITION_COVERS_JOIN}
-     ORDER BY e.indexed_at ASC, e.uri ASC
+     ORDER BY m.edition_uri ASC
      LIMIT ${limit} OFFSET ${offset}`,
     params
   );
@@ -313,10 +313,12 @@ export async function searchEditions(input: {
   // Local ranking is deliberately simple and stable: exact identifier matches
   // first, then title matches, then author matches, then broad text matches. A
   // body with none of the three ranked hints has no ranking key at all, so its
-  // page stays in recency order.
-  const relevanceOrder = rankedHint
-    ? 'r.rank, e.indexed_at DESC, e.uri ASC'
-    : 'e.indexed_at DESC, e.uri ASC';
+  // page stays in uri order — which is the primary key, so the page is one index
+  // scan instead of a sort of the match set. `e.indexed_at DESC` used to lead
+  // here: it described ingest time, which no reader asked for, and it made every
+  // search sort the whole page on a box whose buffer pool is smaller than the
+  // catalogue.
+  const relevanceOrder = rankedHint ? 'r.rank, e.uri ASC' : 'e.uri ASC';
 
   const limit = push(input.limit + 1);
   const offset = push(input.offset);

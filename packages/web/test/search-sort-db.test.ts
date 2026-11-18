@@ -175,8 +175,8 @@ test('sorts by published year from the shape claim, unknown years last', async (
 test('keeps the relevance order when no sort is asked for', async (t) => {
   if (!requiredPool(t)) return;
 
-  // Every fixture is a title match, so relevance ties and `indexed_at DESC`
-  // decides; all four are present and the ordering repeats.
+  // Every fixture is a title match, so relevance ties and `e.uri` decides; all
+  // four are present and the ordering repeats.
   const first = await titles(base);
   const second = await titles(base);
   assert.equal(first.length, 4);
@@ -201,9 +201,19 @@ test('filters by language on the primary subtag and needs no other hint', async 
     `${TOKEN} Gamma`
   ]);
   assert.deepEqual(await titles({ ...base, title: `${TOKEN} Gamma`, language: 'en' }), []);
-  // With no hint at all, a language is still a valid browse.
+  // With no hint at all, a language is still a valid browse — and it filters
+  // rather than needing a term. This used to assert that a fixture landed on
+  // page one, which only held because the page was ordered by `indexed_at DESC`
+  // and the fixture was the newest ingest. The listing no longer sorts by
+  // recency (page one is uri order, the primary key), so the assertion is the
+  // filter's effect: rows come back, and a language nothing claims returns none.
   const browse = await titles({ identifiers: [], offset: 0, limit: 25, language: 'es' });
-  assert.ok(browse.includes(`${TOKEN} Gamma`), 'a language-only query returns catalog rows');
+  assert.ok(browse.length > 0, 'a language-only query returns catalog rows');
+  assert.deepEqual(
+    await titles({ identifiers: [], offset: 0, limit: 25, language: 'zz' }),
+    [],
+    'and the language still filters it'
+  );
 });
 
 /** Titles of the contributor listing for one set of params. */
