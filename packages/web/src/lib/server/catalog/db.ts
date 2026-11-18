@@ -16,6 +16,7 @@ export { CatalogUnavailableError };
 const shared = globalThis as typeof globalThis & {
   __bibliographCatalogPool?: Pool;
   __bibliographFeedPool?: Pool;
+  __bibliographSearchPool?: Pool;
 };
 
 /**
@@ -79,4 +80,30 @@ export function feedPool(): Pool {
   });
 
   return shared.__bibliographFeedPool;
+}
+
+/**
+ * `searchEditions` is the one catalog read whose cost is set by the request:
+ * four trigram branches over the whole catalogue, a hash aggregate over their
+ * union and a sort of the page. Sharing the catalog pool meant a handful of
+ * slow searches owned every connection that answers resolve, list and the
+ * admin reads, and the 5 s statement bound parked each one for its full cost.
+ * This pool bounds a search at two seconds and keeps five connections of its
+ * own; an over-budget search answers 503 through `catalogFailure` instead of
+ * starving the rest of the surface.
+ */
+export function searchPool(): Pool {
+  const connectionString = env.DATABASE_URL;
+  if (!connectionString) throw new CatalogUnavailableError();
+
+  shared.__bibliographSearchPool ??= new Pool({
+    connectionString,
+    max: 5,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 2_000,
+    statement_timeout: 2_000,
+    query_timeout: 2_000
+  });
+
+  return shared.__bibliographSearchPool;
 }

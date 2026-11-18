@@ -176,7 +176,8 @@ back to the default. The feed generator defaults to 20 and clamps to 1–100; a 
 | Status | Error | Origin |
 | --- | --- | --- |
 | 400 | `InvalidRequest` | a required parameter is missing, or a value violates its contract: non-DID `subject`, self-follow, non-AT-URI shelf/review URI, wrong collection, bad enum (`status`, `period`), out-of-range integer, empty update, invalid `editionRef`, non-strongRef `book` |
-| 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author`, `language` or identifier; `searchContributors` / `searchPublishers` without a nonblank `q` |
+| 400 | `InvalidQuery` | `searchEditions` without a nonblank `q`, `title`, `author` or identifier — `language` alone is a filter with nothing to filter, so it is refused; `searchContributors` / `searchPublishers` without a nonblank `q` |
+| 400 | `InvalidRequest` | `searchEditions` / `resolveEditions` with a `q`, `title` or `author` shorter than 3 characters (a trigram index cannot serve the pattern), or an `offset` beyond 10 000 |
 | 401 | `XRPC procedures require DPoP authentication` | the 15 HappyView procedures, until a DPoP session is presented |
 | 401 | `AuthRequired` | a personalized feed (`following`/`extended`/`dynamic`) without a valid service JWT |
 | 403 | `Forbidden` | the named review or shelf belongs to another DID |
@@ -276,7 +277,7 @@ the same request.
 | NSID | Input | Returns |
 | --- | --- | --- |
 | `community.lexicon.media.book.resolveEditions` | `identifiers[]` (required), `offset` 0, `limit` 25 (≤100) | `editionResults` |
-| `community.lexicon.media.book.searchEditions` | `q?`, `title?`, `author?`, `identifiers[]?`, `language?` (≤35), `offset` 0, `limit` 25 (≤100), `sort` `relevance`\|`title`\|`publishedYear`, `order` `asc`\|`desc` | `editionResults` |
+| `community.lexicon.media.book.searchEditions` | `q?`, `title?`, `author?`, `identifiers[]?`, `language?` (≤35), `offset` 0 (≤10 000), `limit` 25 (≤100), `sort` `relevance`\|`title`\|`publishedYear`, `order` `asc`\|`desc` | `editionResults` |
 | `graph.follow` | `subject` (DID) | `{ uri, created }` |
 | `graph.unfollow` | `subject` (DID) | `{ uri }` |
 | `profile.set` | `displayName?` (≤640), `description?` (≤256), `avatarCid?` | `{ uri }` |

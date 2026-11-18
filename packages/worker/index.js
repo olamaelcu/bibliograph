@@ -248,6 +248,18 @@ cronItems.push({
   }
 });
 cronItems.push({
+  // The edge's enqueue marks are only read inside its own windows (the longest
+  // is an hour), so anything older than a day is dead weight. Hourly, off the
+  // top of the hour so it does not queue behind the sweeps.
+  task: 'catalog.marks.prune',
+  match: '17 * * * *',
+  options: {
+    queueName: 'marks-prune',
+    jobKey: 'catalog.marks.prune:cron',
+    maxAttempts: 3
+  }
+});
+cronItems.push({
   task: 'catalog.bookhive',
   match: '0 3 * * 1',
   options: {

@@ -5,7 +5,7 @@ import { createJsonCache, fetchJsonResponse } from './http.js';
 import {
   DEFAULT_ISBNDB_DAILY_LIMIT,
   parseDailyLimit,
-  reserveDailyCall
+  createDailyQuota
 } from './usage.js';
 
 const gate = createGate(1000);
@@ -166,6 +166,11 @@ export function createIsbndb({
   const limit = parseDailyLimit(dailyLimit, logger);
   const cache = createJsonCache(pool, 'isbndb_cache');
   const headers = { authorization: apiKey, accept: 'application/json' };
+  // Quota is bought in blocks and spent from memory: the shared counter is one
+  // hot row per day, and one upsert per network call made every worker queue on
+  // it. `reserveCall` answers `null` at the limit exactly as the per-call
+  // reservation did, and its allowance never crosses UTC midnight.
+  const reserveCall = createDailyQuota(pool, { provider: 'isbndb', limit });
   // Warn at most once per process per UTC day: an exhausted quota lasts until
   // midnight UTC, so repeating it on every miss would drown the log.
   let exhaustedDay;
@@ -187,8 +192,8 @@ export function createIsbndb({
 
     // Reserve before the request: failed attempts still count (billing and
     // attempt semantics), and concurrent workers cannot exceed the limit.
-    const calls = await reserveDailyCall(pool, { limit });
-    if (calls === null) {
+    const reserved = await reserveCall();
+    if (reserved === null) {
       const day = new Date().toISOString().slice(0, 10);
       if (exhaustedDay !== day) {
         exhaustedDay = day;

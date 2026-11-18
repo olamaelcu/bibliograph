@@ -12,17 +12,22 @@ const ALL_EDITIONS = 100;
  * A sweep-only task registry over a scripted `pool.query`.
  *
  * The sweep makes three kinds of call: the never-attempted pass, the retry
- * pass, and one claim per queued edition. Each is answered from the script and
- * recorded, so the test asserts the priority split without a database.
+ * pass, and one claim for the whole batch of queued editions. Each is answered
+ * from the script and recorded, so the test asserts the priority split without a
+ * database.
  */
 function sweepPool({ fresh = [], retries = [], claimed = true } = {}) {
   const calls = { fresh: [], retries: [], claims: [] };
   const pool = {
     query: async (sql, values) => {
       if (sql.includes('catalog_enqueue_genre_fetch')) {
-        const uri = values[0];
-        calls.claims.push(uri);
-        return { rows: [{ enqueued: typeof claimed === 'function' ? claimed(uri) : claimed }] };
+        const uris = values[0];
+        calls.claims.push(...uris);
+        return {
+          rows: uris.map((uri) => ({
+            enqueued: typeof claimed === 'function' ? claimed(uri) : claimed
+          }))
+        };
       }
       // The precheck compares both counts; `editions` is always the larger side
       // unless every edition has a ledger row.

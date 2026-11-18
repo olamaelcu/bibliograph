@@ -1,3 +1,27 @@
+bibliograph-web (0.6.0-1) unstable; urgency=medium
+
+  * 0.6.0: bounded public search, a pool for it, and a tsvector index.
+
+    - `searchEditions` matches free text against `book_search.document` ranked
+      by `ts_rank_cd`, instead of unioning four trigram `ILIKE` branches:
+      measured 54 ms for a page and 9 ms for the count on a 234k-book catalog,
+      against 454 ms and 1 075 ms. Title, author and identifier hints keep
+      their trigram branches and their ranking buckets.
+    - A `q`, `title` or `author` shorter than three characters, an `offset`
+      past 10 000, and a body whose only hint is `language` are refused with
+      400: each was a catalogue-wide scan on a public endpoint, and a
+      one-character term did not finish inside the 5 s statement timeout.
+    - Search draws from its own five-connection pool with a two-second
+      statement bound, so a slow search cannot starve resolve, list or the
+      admin reads.
+    - Count queries drop the shape join when no language filter needs it
+      (measured 68 ms → 37 ms on a plain count).
+    - `getFeedSkeleton` for the public feed answers `max-age=15`,
+      `describeFeedGenerator` `max-age=300` and `listEditions` `max-age=60`;
+      personalized feeds answer `private, no-store`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.5.2-1) unstable; urgency=medium
 
   * 0.5.2: the XRPC-facing functions keep their method names.

@@ -79,6 +79,7 @@ export function createProviders({
     fetchImpl: gutenbergHttp.fetch
   });
   const goodreads = createGoodreads({
+    pool,
     baseUrl: env.GOODREADS_BASE_URL || 'https://www.goodreads.com',
     logger,
     fetchImpl: goodreadsHttp.fetch,

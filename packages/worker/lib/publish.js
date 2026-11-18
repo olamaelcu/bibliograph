@@ -3,9 +3,10 @@
  *
  * Claiming is a short transaction (`FOR UPDATE SKIP LOCKED`) so several worker
  * processes can run the task without publishing a row twice. The PDS call
- * happens outside any transaction; completion is a second short transaction
- * guarded by the row's `updated_at`, so a catalog trigger that rewrites the row
- * while we are publishing is never swallowed — the new row stays queued.
+ * happens outside any transaction; completion is a second short transaction per
+ * drained batch, guarded by each row's `updated_at`, so a catalog trigger that
+ * rewrites a row while we are publishing is never swallowed — the new row stays
+ * queued.
  *
  * Retry policy:
  *
@@ -362,37 +363,74 @@ async function mapPool(items, size, fn) {
   return results;
 }
 
-/** Delete the outbox row and record the CID, atomically. */
-export async function completeEntry(pool, entry, result) {
+/**
+ * Settle a whole drained batch: delete the outbox rows and record the CIDs,
+ * atomically, in one transaction.
+ *
+ * The guard is per row and unchanged: an outbox row is deleted only while its
+ * `updated_at` is still the one the claim returned, so a catalog trigger that
+ * rewrote it while we were publishing leaves the new state queued. The CID side
+ * has no guard of its own — the record was written, so its CID is current — and
+ * is applied for every entry, superseded or not, which is what the per-row
+ * `completeEntry` did.
+ *
+ * A row that fails the guard gets only its own claim released, so the new state
+ * is not postponed by the lease.
+ *
+ * Returns the URIs whose outbox row was actually deleted.
+ */
+export async function completeEntries(pool, completed) {
+  if (completed.length === 0) return new Set();
+  const uris = completed.map(({ entry }) => entry.uri);
+  const updatedAts = completed.map(({ entry }) => entry.updated_at);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const deleted = await client.query(
-      'DELETE FROM pds_outbox WHERE uri = $1 AND updated_at = $2::timestamptz',
-      [entry.uri, entry.updated_at]
+      `DELETE FROM pds_outbox
+        WHERE (uri, updated_at) IN (SELECT * FROM unnest($1::text[], $2::timestamptz[]))
+        RETURNING uri`,
+      [uris, updatedAts]
     );
+    const deletedUris = new Set(deleted.rows.map((row) => row.uri));
 
-    if (entry.op === 'delete') {
-      await client.query('DELETE FROM pds_cids WHERE uri = $1', [entry.uri]);
-    } else if (typeof result?.cid === 'string' && result.cid !== '') {
+    const removed = completed.filter(({ entry }) => entry.op === 'delete');
+    if (removed.length > 0) {
+      await client.query('DELETE FROM pds_cids WHERE uri = ANY($1::text[])', [
+        removed.map(({ entry }) => entry.uri)
+      ]);
+    }
+
+    const written = completed.filter(
+      ({ entry, result }) =>
+        entry.op !== 'delete' && typeof result?.cid === 'string' && result.cid !== ''
+    );
+    if (written.length > 0) {
       await client.query(
-        `INSERT INTO pds_cids (uri, cid, updated_at) VALUES ($1, $2, now())
+        `INSERT INTO pds_cids (uri, cid, updated_at)
+         SELECT t.uri, t.cid, now()
+           FROM unnest($1::text[], $2::text[]) AS t(uri, cid)
          ON CONFLICT (uri) DO UPDATE SET cid = EXCLUDED.cid, updated_at = now()`,
-        [entry.uri, result.cid]
+        [written.map(({ entry }) => entry.uri), written.map(({ result }) => result.cid)]
       );
     }
 
-    // The row changed while we held the claim. The trigger left the new state
-    // queued; release only the claim we own so it is not postponed by the lease.
-    if (deleted.rowCount === 0) {
+    const superseded = completed.filter(({ entry }) => !deletedUris.has(entry.uri));
+    if (superseded.length > 0) {
       await client.query(
-        'UPDATE pds_outbox SET claimed_at = NULL WHERE uri = $1 AND claimed_at = $2::timestamptz',
-        [entry.uri, entry.claimed_at]
+        `UPDATE pds_outbox o
+            SET claimed_at = NULL
+           FROM unnest($1::text[], $2::timestamptz[]) AS t(uri, claimed_at)
+          WHERE o.uri = t.uri AND o.claimed_at = t.claimed_at`,
+        [
+          superseded.map(({ entry }) => entry.uri),
+          superseded.map(({ entry }) => entry.claimed_at)
+        ]
       );
     }
 
     await client.query('COMMIT');
-    return deleted.rowCount > 0;
+    return deletedUris;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
@@ -401,36 +439,76 @@ export async function completeEntry(pool, entry, result) {
   }
 }
 
-/** Record a failure with exponential backoff. Never overwrites a newer row. */
-export async function failEntry(pool, entry, error) {
-  const attempts = entry.attempts + 1;
-  const backoffSeconds = Math.min(
-    MAX_BACKOFF_SECONDS,
-    60 * 2 ** Math.min(attempts, 10)
-  );
+/** Delete the outbox row and record the CID, atomically. One row's completion. */
+export async function completeEntry(pool, entry, result) {
+  const deleted = await completeEntries(pool, [{ entry, result }]);
+  return deleted.has(entry.uri);
+}
+
+/**
+ * Record a batch of failures with exponential backoff, one statement.
+ *
+ * Each row keeps its own guard and its own delay: `updated_at` is the value the
+ * claim returned, and the delay is computed from that row's attempt count, so a
+ * row that has failed nine times is parked behind a long backoff while its
+ * neighbour retries in a minute. A row that fails the guard was rewritten under
+ * us; it is not charged an attempt, only released.
+ *
+ * Returns `{ attempts, retryInSeconds }` per failure, in input order.
+ */
+export async function failEntries(pool, failures) {
+  if (failures.length === 0) return [];
+  const plan = failures.map(({ entry, error }) => {
+    const attempts = entry.attempts + 1;
+    return {
+      uri: entry.uri,
+      updated_at: entry.updated_at,
+      claimed_at: entry.claimed_at,
+      lastError: truncate(describeError(error)),
+      attempts,
+      retryInSeconds: Math.min(MAX_BACKOFF_SECONDS, 60 * 2 ** Math.min(attempts, 10))
+    };
+  });
   const client = await pool.connect();
   try {
     const updated = await client.query(
-      `UPDATE pds_outbox
-          SET attempts = attempts + 1,
+      `UPDATE pds_outbox o
+          SET attempts = o.attempts + 1,
               claimed_at = NULL,
-              last_error = $3,
-              next_at = now() + make_interval(secs => $4)
-        WHERE uri = $1 AND updated_at = $2::timestamptz`,
-      [entry.uri, entry.updated_at, truncate(describeError(error)), backoffSeconds]
+              last_error = t.last_error,
+              next_at = now() + make_interval(secs => t.delay_seconds)
+         FROM unnest($1::text[], $2::timestamptz[], $3::text[], $4::int[])
+                AS t(uri, updated_at, last_error, delay_seconds)
+        WHERE o.uri = t.uri AND o.updated_at = t.updated_at
+       RETURNING o.uri`,
+      [
+        plan.map((row) => row.uri),
+        plan.map((row) => row.updated_at),
+        plan.map((row) => row.lastError),
+        plan.map((row) => row.retryInSeconds)
+      ]
     );
-    if (updated.rowCount === 0) {
-      // The row was rewritten under us; do not consume an attempt for the new
-      // state, just release the claim.
+    const charged = new Set(updated.rows.map((row) => row.uri));
+    const superseded = plan.filter((row) => !charged.has(row.uri));
+    if (superseded.length > 0) {
       await client.query(
-        'UPDATE pds_outbox SET claimed_at = NULL WHERE uri = $1 AND claimed_at = $2::timestamptz',
-        [entry.uri, entry.claimed_at]
+        `UPDATE pds_outbox o
+            SET claimed_at = NULL
+           FROM unnest($1::text[], $2::timestamptz[]) AS t(uri, claimed_at)
+          WHERE o.uri = t.uri AND o.claimed_at = t.claimed_at`,
+        [superseded.map((row) => row.uri), superseded.map((row) => row.claimed_at)]
       );
     }
-    return { attempts, retryInSeconds: backoffSeconds };
+    return plan.map(({ attempts, retryInSeconds }) => ({ attempts, retryInSeconds }));
   } finally {
     client.release();
   }
+}
+
+/** Record one failure with exponential backoff. Never overwrites a newer row. */
+export async function failEntry(pool, entry, error) {
+  const [retry] = await failEntries(pool, [{ entry, error }]);
+  return retry;
 }
 
 /**
@@ -502,32 +580,36 @@ export function createOutboxPublisher({ pool, config, fetchImpl, coversBaseUrl =
       await mapPool(chunks, writeConcurrency, (chunk) => publishChunk({ pds, prepared: chunk, out: outcomes }));
       calls += chunks.length;
 
-      for (const { entry, error } of unbuildable) {
-        failed += 1;
-        const retry = await failEntry(pool, entry, error);
-        logger.error?.(
-          `pds-publish: ${entry.uri} failed (attempt ${retry.attempts}/${MAX_ATTEMPTS}, ` +
-            `retry in ${retry.retryInSeconds}s): ${describeError(error)}`
-        );
-      }
-
+      // The batch is settled set-wise rather than row by row: every failure
+      // backs off in one statement, then every completion commits in one
+      // transaction. Each row still carries its own `updated_at` guard and its
+      // own computed delay inside those statements, and one log line per row is
+      // kept so an operator sees the same trace as before.
+      const failures = unbuildable.map(({ entry, error }) => ({ entry, error }));
       for (const outcome of outcomes) {
-        const { entry } = outcome.prepared;
         if (outcome.error !== undefined) {
-          failed += 1;
-          const retry = await failEntry(pool, entry, outcome.error);
-          logger.error?.(
-            `pds-publish: ${entry.uri} failed (attempt ${retry.attempts}/${MAX_ATTEMPTS}, ` +
-              `retry in ${retry.retryInSeconds}s): ${describeError(outcome.error)}`
-          );
-          continue;
+          failures.push({ entry: outcome.prepared.entry, error: outcome.error });
         }
-        const completed = await completeEntry(pool, entry, outcome.result);
-        published += 1;
+      }
+      const retries = await failEntries(pool, failures);
+      failed += failures.length;
+      failures.forEach(({ entry, error }, index) => {
+        logger.error?.(
+          `pds-publish: ${entry.uri} failed (attempt ${retries[index].attempts}/${MAX_ATTEMPTS}, ` +
+            `retry in ${retries[index].retryInSeconds}s): ${describeError(error)}`
+        );
+      });
+
+      const completions = outcomes
+        .filter((outcome) => outcome.error === undefined)
+        .map((outcome) => ({ entry: outcome.prepared.entry, result: outcome.result }));
+      const deleted = await completeEntries(pool, completions);
+      published += completions.length;
+      for (const { entry, result } of completions) {
         logger.info?.(
-          `pds-publish: ${outcome.result.operation ?? entry.op} ${entry.uri} ` +
-            `${outcome.result.cid ?? '(no cid)'}` +
-            `${completed ? '' : ' (superseded while publishing)'}`
+          `pds-publish: ${result.operation ?? entry.op} ${entry.uri} ` +
+            `${result.cid ?? '(no cid)'}` +
+            `${deleted.has(entry.uri) ? '' : ' (superseded while publishing)'}`
         );
       }
 

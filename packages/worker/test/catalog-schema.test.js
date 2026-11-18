@@ -112,7 +112,9 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
         AND table_name = ANY($1)
       ORDER BY table_name`,
     [[
+      'book_search',
       'books',
+      'catalog_enqueue_marks',
       'contributors',
       'edition_contributors',
       'edition_cover_fetches',
@@ -134,7 +136,9 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     ]]
   );
   expect(tables.rows.map((row) => row.table_name)).toEqual([
+      'book_search',
       'books',
+      'catalog_enqueue_marks',
       'contributors',
       'edition_contributors',
       'edition_cover_fetches',
@@ -184,9 +188,9 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_entity',
       'pds_enqueue_publisher_editions',
       'refresh_edition_publishers',
-      'refresh_edition_publishers_row',
+      'refresh_edition_publishers_statement',
       'refresh_edition_shape',
-      'refresh_edition_shape_row'
+      'refresh_edition_shape_statement'
     ]]
   );
   expect(functions.rows.length).toBe(18);
@@ -214,6 +218,18 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       ORDER BY tgname`
   );
   expect(triggers.rows.map((row) => row.tgname)).toEqual([
+      'book_search_books_delete',
+      'book_search_books_insert',
+      'book_search_books_update',
+      'book_search_edition_contributors_delete',
+      'book_search_edition_contributors_insert',
+      'book_search_edition_contributors_update',
+      'book_search_edition_identifiers_delete',
+      'book_search_edition_identifiers_insert',
+      'book_search_edition_identifiers_update',
+      'book_search_edition_shape_delete',
+      'book_search_edition_shape_insert',
+      'book_search_edition_shape_update',
       'normalize_identifier_extent',
       'normalize_identifier_language',
       'pds_enqueue_contributor_edits',
@@ -225,8 +241,12 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'pds_enqueue_publisher_edits',
       'pds_enqueue_publisher_record',
       'pds_enqueue_publishers',
-      'refresh_edition_publishers',
-      'refresh_edition_shape'
+      'refresh_edition_publishers_delete',
+      'refresh_edition_publishers_insert',
+      'refresh_edition_publishers_update',
+      'refresh_edition_shape_delete',
+      'refresh_edition_shape_insert',
+      'refresh_edition_shape_update'
     ]);
 });
 
@@ -476,6 +496,166 @@ test('an extent keeps only the unit its format uses, and the shape publishes one
     { edition_uri: audioOnly, format: 'Audiobook', pages: null, duration_seconds: 36000 },
     { edition_uri: mixed, format: 'hardcover', pages: 300, duration_seconds: null }
   ]);
+});
+
+// 0015 refreshed the shape from a FOR EACH ROW trigger, so N claim rows cost N
+// aggregations and each aggregation re-read all N rows: O(N²) for one ingest,
+// plus a rewritten `edition_shape` row every time. 0023 makes the refresh
+// statement-level, so one statement over ten claims refreshes the edition once,
+// and guards the upsert, so a refresh that computes the stored row writes no
+// tuple at all.
+test('one statement refreshes an edition shape once, and an unchanged claim writes nothing', { skip: SKIP }, async () => {
+  const probe = `at://${AUTHORITY}/${COLLECTION}/shape-statement-probe`;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO books (uri, title, created_at)
+       VALUES ($1, 'Statement Trigger Probe', now())`,
+      [probe]
+    );
+    await client.query(
+      `INSERT INTO edition_identifiers (edition_uri, issuer, value)
+       SELECT $1, 'isbn10', 'probe-' || g FROM generate_series(1, 10) g
+       UNION ALL
+       SELECT $1, 'openlibrary', 'ol-probe'`,
+      [probe]
+    );
+
+    // A row-level counter on edition_shape records the row versions actually
+    // written, which is what `pg_stat_user_tables.n_tup_upd` reports, without
+    // the stats collector's lag inside the transaction this test rolls back.
+    await client.query('DROP TABLE IF EXISTS shape_write_probe');
+    await client.query(
+      'CREATE TABLE shape_write_probe (id bigserial PRIMARY KEY, op text NOT NULL)'
+    );
+    await client.query(`
+      CREATE OR REPLACE FUNCTION shape_write_probe_record() RETURNS trigger
+      LANGUAGE plpgsql AS $function$
+      BEGIN
+        INSERT INTO shape_write_probe (op) VALUES (TG_OP);
+        RETURN NULL;
+      END
+      $function$
+    `);
+    await client.query('DROP TRIGGER IF EXISTS shape_write_probe ON edition_shape');
+    await client.query(
+      `CREATE TRIGGER shape_write_probe
+         AFTER INSERT OR UPDATE OR DELETE ON edition_shape
+         FOR EACH ROW EXECUTE FUNCTION shape_write_probe_record()`
+    );
+    const writes = async () => {
+      const counted = await client.query('SELECT count(*)::int AS n FROM shape_write_probe');
+      await client.query('DELETE FROM shape_write_probe');
+      return counted.rows[0].n;
+    };
+
+    // Seed one shape row so the batch below is an update, not an insert.
+    await client.query(
+      `INSERT INTO edition_identifier_info (edition_uri, issuer, value, extent)
+       VALUES ($1, 'openlibrary', 'ol-probe', '{"format":"hardcover","pages":100}')`,
+      [probe]
+    );
+    expect(await writes()).toBe(1);
+
+    // Ten claims in ONE statement: the statement trigger sees a single
+    // `changed` transition table and refreshes the edition once, not ten times.
+    await client.query(
+      `INSERT INTO edition_identifier_info (edition_uri, issuer, value, extent)
+       SELECT $1, 'isbn10', 'probe-' || g,
+              jsonb_build_object('format', 'paperback', 'pages', 200 + g)
+         FROM generate_series(1, 10) g`,
+      [probe]
+    );
+    expect(await writes()).toBe(1);
+
+    const claims = await client.query(
+      'SELECT count(*)::int AS n FROM edition_identifier_info WHERE edition_uri = $1',
+      [probe]
+    );
+    expect(claims.rows[0].n).toBe(11);
+
+    // One UPDATE over all ten claims also refreshes once.
+    await client.query(
+      `UPDATE edition_identifier_info SET description = 'Statement batch'
+        WHERE edition_uri = $1 AND issuer = 'isbn10'`,
+      [probe]
+    );
+    expect(await writes()).toBe(1);
+
+    // isbn10 outranks `openlibrary`, so the batch's first claim wins the shape.
+    const stored = await client.query(
+      `SELECT updated_at::text AS at, format, pages, description
+         FROM edition_shape WHERE edition_uri = $1`,
+      [probe]
+    );
+    expect(stored.rows[0]).toMatchObject({
+      format: 'paperback',
+      pages: 201,
+      description: 'Statement batch'
+    });
+
+    // The same value written again: the aggregate is identical, so the guard in
+    // refresh_edition_shape skips the upsert and edition_shape is untouched.
+    await client.query(
+      `UPDATE edition_identifier_info SET extent = extent
+        WHERE edition_uri = $1 AND issuer = 'isbn10' AND value = 'probe-1'`,
+      [probe]
+    );
+    expect(await writes()).toBe(0);
+
+    const after = await client.query(
+      'SELECT updated_at::text AS at FROM edition_shape WHERE edition_uri = $1',
+      [probe]
+    );
+    expect(after.rows[0].at).toBe(stored.rows[0].at);
+
+    // A claim re-keyed onto another edition changes two shapes. The update
+    // trigger names both transition tables, so the edition the claim left is
+    // refreshed from `old_changed` (the winner moves away, so `probe` falls back
+    // to the next claim's pages) and the edition it joined from `changed`.
+    const rekeyed = `at://${AUTHORITY}/${COLLECTION}/shape-statement-probe-rekey`;
+    await client.query(
+      `INSERT INTO books (uri, title, created_at)
+       VALUES ($1, 'Rekey Probe', now())`,
+      [rekeyed]
+    );
+    await client.query(
+      `INSERT INTO edition_identifiers (edition_uri, issuer, value) VALUES
+         ($1, 'isbn10', 'probe-1')`,
+      [rekeyed]
+    );
+    await client.query(
+      `UPDATE edition_identifier_info SET edition_uri = $2
+        WHERE edition_uri = $1 AND issuer = 'isbn10' AND value = 'probe-1'`,
+      [probe, rekeyed]
+    );
+    expect(await writes()).toBe(2);
+
+    const moved = await client.query(
+      `SELECT edition_uri, format, pages FROM edition_shape
+        WHERE edition_uri = ANY($1::text[]) ORDER BY edition_uri`,
+      [[probe, rekeyed]]
+    );
+    expect(moved.rows).toEqual([
+      // Values order as text, so the loser that wins next is 'probe-10'.
+      { edition_uri: probe, format: 'paperback', pages: 210 },
+      { edition_uri: rekeyed, format: 'paperback', pages: 201 }
+    ]);
+
+    // Deleting every claim in one statement still drops the row once, which is
+    // the `GROUP BY`-produced-no-row behaviour 0015 preserved.
+    await client.query('DELETE FROM edition_identifier_info WHERE edition_uri = $1', [probe]);
+    expect(await writes()).toBe(1);
+    const gone = await client.query(
+      'SELECT count(*)::int AS n FROM edition_shape WHERE edition_uri = $1',
+      [probe]
+    );
+    expect(gone.rows[0].n).toBe(0);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
 });
 
 test('re-ingesting the same identifier bag updates in place without downgrading the create', { skip: SKIP }, async () => {

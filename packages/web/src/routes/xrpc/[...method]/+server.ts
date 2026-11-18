@@ -11,7 +11,7 @@ import {
 } from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
 import { proxyPdsRead } from "$lib/server/pds";
-import { catalogPool, isCatalogPoolTimeout } from "$lib/server/catalog/db";
+import { catalogPool, isCatalogPoolTimeout, searchPool } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import {
   resolveEditions,
@@ -20,6 +20,11 @@ import {
   listEditions,
   type Identifier,
 } from "$lib/server/catalog/books";
+import {
+  MAX_OFFSET,
+  offsetProblem,
+  searchBodyProblem,
+} from "$lib/server/catalog/search-input";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
 import { parseIdentifierParams } from "$lib/server/xrpc/identifiers";
 import {
@@ -169,6 +174,8 @@ async function handleResolve(request: Request): Promise<Response> {
   const limit = boundedInteger(body.limit, 25, 1, 100);
   if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
   if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
+  const offsetIssue = offsetProblem(offset);
+  if (offsetIssue !== null) return fail(400, offsetIssue.error, offsetIssue.message);
 
   const started = performance.now();
   try {
@@ -240,18 +247,18 @@ async function handleSearch(request: Request): Promise<Response> {
     return fail(400, "InvalidRequest", `at most ${MAX_IDENTIFIERS} identifiers per request`);
   }
 
-  if (!q && !title && !author && !language && identifiers.length === 0) {
-    return fail(
-      400,
-      "InvalidQuery",
-      "supply q, title, author, language, or at least one identifier",
-    );
-  }
+  // A language-only body has no candidate set (it scans and sorts the whole
+  // catalogue) and a one- or two-character term cannot use a trigram index, so
+  // both are refused instead of answered slowly. See search-input.ts.
+  const bodyProblem = searchBodyProblem({ q, title, author, identifiers });
+  if (bodyProblem !== null) return fail(400, bodyProblem.error, bodyProblem.message);
 
   const offset = boundedInteger(body.offset, 0, 0, Number.MAX_SAFE_INTEGER);
   const limit = boundedInteger(body.limit, 25, 1, 100);
   if (offset === null) return fail(400, "InvalidRequest", "offset must be an integer");
   if (limit === null) return fail(400, "InvalidRequest", "limit must be an integer");
+  const offsetIssue = offsetProblem(offset);
+  if (offsetIssue !== null) return fail(400, offsetIssue.error, offsetIssue.message);
 
   // `sort` and `order` are a local extension: the upstream lexicon leaves
   // ranking to the provider, so it only declares the relevance order.
@@ -276,7 +283,7 @@ async function handleSearch(request: Request): Promise<Response> {
       order: parsedOrder.order,
       language,
       coversBaseUrl: coversBaseUrl(),
-    }, catalogPool());
+    }, searchPool());
     recordCatalogQuery(metrics, "searchEditions", "ok", (performance.now() - started) / 1000);
     // An ISBN is worth a direct ISBNdb lookup even when the local catalog
     // answered: the job enriches/ingests the edition from the provider.
@@ -431,6 +438,9 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
           { after: decodeKeysetCursor(params.get("cursor")), limit },
           pool,
         ),
+        // Read-only and keyset-paged, so a page is reusable until the next
+        // ingest writes past its cursor; a short TTL is enough for a crawler.
+        { headers: { 'cache-control': 'public, max-age=60' } },
       );
     }
 
@@ -489,7 +499,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       if (identifiers.length > MAX_IDENTIFIERS) {
         return fail(400, "InvalidRequest", `at most ${MAX_IDENTIFIERS} identifiers per request`);
       }
-      const offset = queryInteger(params.get("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+      const offset = queryInteger(params.get("offset"), 0, 0, MAX_OFFSET);
       if (offset === null) return fail(400, "InvalidRequest", "`offset` must be an integer");
       const limit = queryInteger(params.get("limit"), 25, 1, 100);
       if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");

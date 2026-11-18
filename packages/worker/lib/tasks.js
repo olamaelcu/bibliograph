@@ -505,14 +505,21 @@ export function createTasks({
         candidates.push(...retries.rows);
       }
 
-      let enqueued = 0;
-      for (const row of candidates) {
-        const claimed = await pool.query(
-          'SELECT catalog_enqueue_genre_fetch($1::text) AS enqueued',
-          [row.uri]
-        );
-        if (claimed.rows[0]?.enqueued === true) enqueued += 1;
-      }
+      // One claim call for the whole batch instead of one per candidate: the
+      // function still decides per edition (that is what makes the sweep safe
+      // against the edge), it just runs set-wise over the same ordered list.
+      // `WITH ORDINALITY` keeps the candidate order the loop had, so the jobs
+      // are queued in the same sequence they used to be.
+      const claimed =
+        candidates.length === 0
+          ? { rows: [] }
+          : await pool.query(
+              `SELECT catalog_enqueue_genre_fetch(t.uri) AS enqueued
+                 FROM unnest($1::text[]) WITH ORDINALITY AS t(uri, ord)
+                ORDER BY t.ord`,
+              [candidates.map((row) => row.uri)]
+            );
+      const enqueued = claimed.rows.filter((row) => row.enqueued === true).length;
       helpers.logger.info(
         `catalog.genres.sweep: ${candidates.length} candidate(s) ` +
           `(${freshCount} new, ${candidates.length - freshCount} retry), ` +
@@ -808,18 +815,41 @@ export function createTasks({
           : { rows: [] };
       if (retries.rows.length > 0) candidates.push(...retries.rows);
 
-      let enqueued = 0;
-      for (const row of candidates) {
-        const claimed = await pool.query(
-          'SELECT catalog_enqueue_cover_fetch($1::text) AS enqueued',
-          [row.uri]
-        );
-        if (claimed.rows[0]?.enqueued === true) enqueued += 1;
-      }
+      // Same batching as the genre sweep: one statement per sweep batch, the
+      // candidate order kept by `WITH ORDINALITY`.
+      const claimed =
+        candidates.length === 0
+          ? { rows: [] }
+          : await pool.query(
+              `SELECT catalog_enqueue_cover_fetch(t.uri) AS enqueued
+                 FROM unnest($1::text[]) WITH ORDINALITY AS t(uri, ord)
+                ORDER BY t.ord`,
+              [candidates.map((row) => row.uri)]
+            );
+      const enqueued = claimed.rows.filter((row) => row.enqueued === true).length;
       helpers.logger.info(
         `catalog.covers.sweep: ${candidates.length} candidate(s) ` +
           `(${uncached.rows.length} uncached, ${fresh.rows.length} new, ` +
           `${retries.rows.length} retry), ${enqueued} enqueued`
+      );
+    },
+
+    // Deletes the edge's enqueue-throttle marks once they can no longer throttle
+    // anything.
+    //
+    // `catalog_enqueue_marks` is a primary-key table that every annotation and
+    // hydration claim inserts into and nothing ever removed from; the edge only
+    // reads a mark inside its own window (the longest is the search budget's one
+    // hour), so a row older than a day is dead weight that still has to be
+    // scanned by the primary key. It is its own cron task rather than a branch in
+    // one of the sweeps: those are per-edition work whose queue can be starved
+    // by a backlog, and a table-wide DELETE must not sit behind that queue.
+    'catalog.marks.prune': async (_payload, helpers) => {
+      const deleted = await pool.query(
+        "DELETE FROM catalog_enqueue_marks WHERE enqueued_at < now() - interval '24 hours'"
+      );
+      helpers.logger.info(
+        `catalog.marks.prune: ${deleted.rowCount ?? 0} mark(s) older than 24 h removed`
       );
     },
 

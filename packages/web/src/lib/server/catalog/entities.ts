@@ -487,7 +487,7 @@ export async function listEditionsByContributor(
       ? await pool.query(
           `SELECT count(*)::int AS n
        FROM books e
-       ${BOOK_SHAPE_JOIN}
+       ${input.language ? BOOK_SHAPE_JOIN : ''}
             WHERE ${where}`,
           params.slice(0, params.length - 2)
         )

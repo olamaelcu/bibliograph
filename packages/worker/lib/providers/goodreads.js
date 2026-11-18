@@ -6,13 +6,12 @@ import {
   stripHtml
 } from '../util.js';
 import { normalizeContributorRole } from '../contributor-roles.js';
-import { fetchText } from './http.js';
+import { createJsonCache, fetchText } from './http.js';
 import { backoffDelay } from './resilience.js';
 
 const DEFAULT_BASE_URL = 'https://www.goodreads.com';
 // Goodreads answers successful pages with `cache-control: public, max-age=86400`.
 const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const DEFAULT_CACHE_MAX_ENTRIES = 100;
 /** Politeness gap between Goodreads requests, jittered so bursts are not clockwork. */
 const DEFAULT_GATE_MS = 1000;
 const DEFAULT_GATE_JITTER_MS = 1500;
@@ -191,50 +190,16 @@ export class GoodreadsRedirectLoopError extends Error {
 }
 
 /**
- * Bounded, TTL'd, process-local LRU of successfully fetched Goodreads HTML.
- * Each worker process keeps its own copy; nothing is shared across processes,
- * and challenges, errors and empty bodies are never inserted.
+ * What a cached page keeps.
+ *
+ * The whole fetched page is `{ text, url, status, headers }`, and `headers` is a
+ * `Headers` instance, which does not survive JSON. Nothing reads a cached
+ * page's headers either — `isChallengePage` only ever sees a freshly fetched
+ * page, and a challenged page is never cached — so the body is text, url and
+ * status, and the cache round-trips through `jsonb` unchanged.
  */
-export function createPageCache({
-  ttlMs = DEFAULT_CACHE_TTL_MS,
-  maxEntries = DEFAULT_CACHE_MAX_ENTRIES,
-  now = Date.now
-} = {}) {
-  if (!Number.isFinite(ttlMs) || ttlMs < 0) {
-    throw new Error('createPageCache requires a non-negative ttlMs');
-  }
-  if (!Number.isInteger(maxEntries) || maxEntries < 1) {
-    throw new Error('createPageCache requires a positive integer maxEntries');
-  }
-  const entries = new Map();
-
-  return {
-    get(key) {
-      const entry = entries.get(key);
-      if (!entry) return undefined;
-      if (now() >= entry.expiresAt) {
-        entries.delete(key);
-        return undefined;
-      }
-      // Refresh recency so the eviction target is the least recently used page.
-      entries.delete(key);
-      entries.set(key, entry);
-      return entry.value;
-    },
-    set(key, value) {
-      entries.delete(key);
-      entries.set(key, { value, expiresAt: now() + ttlMs });
-      while (entries.size > maxEntries) {
-        entries.delete(entries.keys().next().value);
-      }
-    },
-    get size() {
-      return entries.size;
-    },
-    clear() {
-      entries.clear();
-    }
-  };
+function cachedPage(page) {
+  return { text: page.text, url: page.url, status: page.status };
 }
 
 function role(value) {
@@ -389,10 +354,10 @@ function isRedirectLoop(error) {
 }
 
 export function createGoodreads({
+  pool,
   baseUrl = DEFAULT_BASE_URL,
   fetchImpl = fetch,
   logger,
-  now = Date.now,
   random = Math.random,
   sleep = defaultSleep,
   gateMs = DEFAULT_GATE_MS,
@@ -402,8 +367,12 @@ export function createGoodreads({
   retryMaxMs = DEFAULT_RETRY_MAX_DELAY_MS,
   onBlocked,
   cacheTtlMs = DEFAULT_CACHE_TTL_MS,
-  cacheMaxEntries = DEFAULT_CACHE_MAX_ENTRIES,
-  cache = createPageCache({ ttlMs: cacheTtlMs, maxEntries: cacheMaxEntries, now }),
+  // The shared page cache. It lives in Postgres (`goodreads_cache`) rather than
+  // in this process: the process-local LRU this replaces missed on every
+  // restart and on every request another worker had already fetched, so the
+  // politeness gate and the WAF paid for the same pages again. A caller with no
+  // pool (a unit test, a script) gets no cache rather than a private one.
+  cache = pool ? createJsonCache(pool, 'goodreads_cache') : undefined,
   profiles = BROWSER_PROFILES,
   selectProfile,
   gate = createGate(gateMs, { jitterMs: gateJitterMs, random, sleepImpl: sleep })
@@ -450,7 +419,7 @@ export function createGoodreads({
   async function get(path, kind = 'book') {
     const url = `${baseUrl}${path}`;
     const cacheKey = `${url}|${kind}`;
-    const cached = cache?.get(cacheKey);
+    const cached = await cache?.get(cacheKey);
     if (cached) return cached;
 
     for (let attempt = 0; attempt <= redirectRetries; attempt += 1) {
@@ -504,7 +473,12 @@ export function createGoodreads({
         throw challenge;
       }
 
-      if (typeof page.text === 'string' && page.text.trim() !== '') cache?.set(cacheKey, page);
+      // A 404, an empty body and a challenge all fall through to here without a
+      // write, so only a page worth re-reading is cached. The TTL is Goodreads'
+      // own `max-age`.
+      if (typeof page.text === 'string' && page.text.trim() !== '') {
+        await cache?.put(cacheKey, url, cachedPage(page), cacheTtlMs);
+      }
       return page;
     }
 
@@ -520,7 +494,7 @@ export function createGoodreads({
   }
 
   return {
-    /** Exposed for introspection and tests; process-local, not shared. */
+    /** Exposed for introspection and tests; shared through Postgres, or absent. */
     cache,
 
     async byId(id) {

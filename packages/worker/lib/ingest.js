@@ -147,12 +147,47 @@ function claimExtent(claims) {
   return Object.keys(extent).length === 0 ? null : extent;
 }
 
-async function fillIdentifierClaims(client, uri, identifier, claims) {
+/**
+ * Every identifier row of the candidate in one statement.
+ *
+ * The loop this replaces paid one round trip per identifier, and identity is
+ * the identifier bag: a candidate that arrives with eight pairs cost sixteen
+ * statements before any work was done. `unnest` carries the whole bag, and the
+ * arbiter stays bare `ON CONFLICT DO NOTHING` — an existing pair is left as it
+ * is, exactly as the per-row insert did.
+ */
+async function insertIdentifiers(client, uri, identifiers) {
+  await client.query(
+    `INSERT INTO edition_identifiers (edition_uri, issuer, value)
+     SELECT $1, t.issuer, t.value
+       FROM unnest($2::text[], $3::text[]) AS t(issuer, value)
+     ON CONFLICT DO NOTHING`,
+    [
+      uri,
+      identifiers.map((identifier) => identifier.issuer),
+      identifiers.map((identifier) => identifier.value)
+    ]
+  );
+}
+
+/**
+ * The identifier rows' shape claims in one statement.
+ *
+ * Each scoped identifier gets the candidate's own claims, which are the same
+ * for all of them, so the arrays repeat one value: what differs per row is only
+ * the `(issuer, value)` it attributes. The `DO UPDATE … WHERE` is unchanged — a
+ * stored claim is never overwritten, and a re-ingest that would fill nothing
+ * leaves the row (and its `updated_at`, and the outbox row it triggers) alone.
+ */
+async function fillIdentifierClaims(client, uri, identifiers, claims) {
   const extent = claimExtent(claims);
+  const extentJson = extent === null ? null : JSON.stringify(extent);
   await client.query(
     `INSERT INTO edition_identifier_info
            (edition_uri, issuer, value, language, published_date, description, extent)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+     SELECT $1, t.issuer, t.value, t.language, t.published_date, t.description, t.extent::jsonb
+       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[])
+              AS t(issuer, value, language, published_date, description, extent)
      ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
        language = COALESCE(edition_identifier_info.language, EXCLUDED.language),
        published_date = COALESCE(edition_identifier_info.published_date, EXCLUDED.published_date),
@@ -169,18 +204,32 @@ async function fillIdentifierClaims(client, uri, identifier, claims) {
            ) IS DISTINCT FROM edition_identifier_info.extent`,
     [
       uri,
-      identifier.issuer,
-      identifier.value,
-      claims.language,
-      claims.publishedDate,
-      claims.description,
-      extent === null ? null : JSON.stringify(extent)
+      identifiers.map((identifier) => identifier.issuer),
+      identifiers.map((identifier) => identifier.value),
+      identifiers.map(() => claims.language ?? null),
+      identifiers.map(() => claims.publishedDate ?? null),
+      identifiers.map(() => claims.description ?? null),
+      identifiers.map(() => extentJson)
     ]
   );
 }
 
+/**
+ * The key a returned contributor row is matched back to its credits by.
+ *
+ * `(lower(name), identifiers)` is the identity the arbiter uses, so it is the
+ * identity the mapping uses too: two case variants of one name are one row, and
+ * two identifier bags are two. `jsonb` normalises key order but not array
+ * order, and `canonicalIdentifiersJson` already put the array in canonical
+ * order, so re-canonicalising the value Postgres hands back reproduces the
+ * string that was sent.
+ */
+function contributorKey(name, identifiers) {
+  return `${String(name).toLowerCase()}\u0000${canonicalIdentifiersJson(identifiers)}`;
+}
+
 async function linkContributors(client, uri, contributors, authority) {
-  let position = 1;
+  const credits = [];
   for (const contributor of contributors ?? []) {
     // Lexicon-shaped callers send `displayName`; provider candidates and the
     // internal admin transport use `name`. Accept both so old and new clients
@@ -201,35 +250,96 @@ async function linkContributors(client, uri, contributors, authority) {
         : null;
     const description = clippedText(contributor.description, DESCRIPTION_LIMITS) ?? null;
     const identifiers = canonicalIdentifiersJson(contributor.identifiers);
-    const inserted = await client.query(
-      `INSERT INTO contributors (name, name_inverted, description, identifiers, at_uri)
-       VALUES ($1, $2, $3, $4::jsonb, 'at://' || $5 || '/' || $6 || '/' || editions_next_tid())
-       ON CONFLICT (lower(name), identifiers) DO UPDATE SET
-         name = EXCLUDED.name,
-         name_inverted = COALESCE(NULLIF(contributors.name_inverted, ''), EXCLUDED.name_inverted),
-         description = COALESCE(NULLIF(btrim(contributors.description), ''), EXCLUDED.description),
-         at_uri = COALESCE(contributors.at_uri, EXCLUDED.at_uri)
-       RETURNING id, at_uri`,
-      [displayName, nameInverted, description, identifiers, authority, CONTRIBUTOR_COLLECTION]
-    );
-    const contributorId = inserted.rows[0].id;
-    await client.query(
-      `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role, ref)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (edition_uri, position) DO UPDATE SET
-         contributor_id = EXCLUDED.contributor_id,
-         role = EXCLUDED.role,
-         ref = EXCLUDED.ref`,
-      [
-        uri,
-        contributorId,
-        position,
-        normalizeContributorRole(contributor.role ?? DEFAULT_CONTRIBUTOR_ROLE),
-        contributor.ref ?? null
-      ]
-    );
-    position += 1;
+    credits.push({
+      name: displayName,
+      nameInverted,
+      description,
+      identifiers,
+      // Positions count accepted contributors only, as the per-credit loop did.
+      position: credits.length + 1,
+      role: normalizeContributorRole(contributor.role ?? DEFAULT_CONTRIBUTOR_ROLE),
+      ref: contributor.ref ?? null
+    });
   }
+  if (credits.length === 0) return;
+
+  // Identity first, once for the edition: the per-credit loop paid two
+  // statements per contributor, and the only column the credits need back is
+  // the id.
+  //
+  // One person named twice in one statement would make the arbiter "affect a
+  // row a second time", so the input is grouped by the same `(lower(name),
+  // identifiers)` the arbiter keys on. Within a group the merge rules are the
+  // ones the per-credit upserts applied in order: `name` was set by every
+  // upsert, so the last occurrence wins; `name_inverted` and `description` were
+  // only filled, so the first non-null occurrence wins.
+  const identities = await client.query(
+    `WITH input AS (
+       SELECT t.name, t.name_inverted, t.description, t.identifiers, t.ord
+         FROM unnest($3::text[], $4::text[], $5::text[], $6::text[])
+                WITH ORDINALITY AS t(name, name_inverted, description, identifiers, ord)
+     ), grouped AS (
+       SELECT (array_agg(name ORDER BY ord DESC))[1] AS name,
+              (array_agg(name_inverted ORDER BY ord)
+                 FILTER (WHERE name_inverted IS NOT NULL))[1] AS name_inverted,
+              (array_agg(description ORDER BY ord)
+                 FILTER (WHERE description IS NOT NULL))[1] AS description,
+              (array_agg(identifiers ORDER BY ord))[1] AS identifiers
+         FROM input
+        GROUP BY lower(name), identifiers
+     )
+     INSERT INTO contributors (name, name_inverted, description, identifiers, at_uri)
+     SELECT g.name, g.name_inverted, g.description, g.identifiers::jsonb,
+            'at://' || $1 || '/' || $2 || '/' || editions_next_tid()
+       FROM grouped g
+     ON CONFLICT (lower(name), identifiers) DO UPDATE SET
+       name = EXCLUDED.name,
+       name_inverted = COALESCE(NULLIF(contributors.name_inverted, ''), EXCLUDED.name_inverted),
+       description = COALESCE(NULLIF(btrim(contributors.description), ''), EXCLUDED.description),
+       at_uri = COALESCE(contributors.at_uri, EXCLUDED.at_uri)
+     RETURNING id, name, identifiers`,
+    [
+      authority,
+      CONTRIBUTOR_COLLECTION,
+      credits.map((credit) => credit.name),
+      credits.map((credit) => credit.nameInverted),
+      credits.map((credit) => credit.description),
+      credits.map((credit) => credit.identifiers)
+    ]
+  );
+
+  const idByKey = new Map();
+  for (const row of identities.rows) {
+    idByKey.set(contributorKey(row.name, row.identifiers), row.id);
+  }
+  const rows = credits.map((credit) => {
+    const contributorId = idByKey.get(contributorKey(credit.name, JSON.parse(credit.identifiers)));
+    // The upsert returns every row it inserted or updated, so a miss means this
+    // mapping and the arbiter disagree about identity — never a silent null
+    // contributor on the edition.
+    if (contributorId === undefined) {
+      throw new Error(`contributor identity did not resolve for ${credit.name}`);
+    }
+    return { ...credit, contributorId };
+  });
+
+  await client.query(
+    `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role, ref)
+     SELECT $1, t.contributor_id, t.position, t.role, t.ref
+       FROM unnest($2::bigint[], $3::int[], $4::text[], $5::text[])
+              AS t(contributor_id, position, role, ref)
+     ON CONFLICT (edition_uri, position) DO UPDATE SET
+       contributor_id = EXCLUDED.contributor_id,
+       role = EXCLUDED.role,
+       ref = EXCLUDED.ref`,
+    [
+      uri,
+      rows.map((row) => row.contributorId),
+      rows.map((row) => row.position),
+      rows.map((row) => row.role),
+      rows.map((row) => row.ref)
+    ]
+  );
 }
 
 // The publisher is credited by the identifiers the candidate supplied, not by
@@ -277,10 +387,12 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
   /**
    * One candidate on a client the caller already owns.
    *
-   * It opens no transaction of its own: the Bookhive import wraps a whole page
-   * in one, so a 100-book page costs one commit instead of 100, and a candidate
-   * that throws is rolled back to the caller's savepoint rather than taking the
-   * page's other records with it.
+   * It opens no transaction of its own: the Bookhive import gives each record
+   * its own transaction, so a candidate that throws is rolled back to the
+   * caller's savepoint rather than taking the page's other records with it.
+   *
+   * The candidate's cost is a fixed number of statements, not one per identifier
+   * and one per contributor: every loop here is an `unnest` over the whole list.
    */
   async function ingestOn(client, candidate, prepared) {
     const { identifiers, scoped, claims, hasClaims } = prepared;
@@ -303,16 +415,12 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
 
     if (!created) await fillMissingFields(client, uri, candidate);
 
-    for (const identifier of identifiers) {
-      await client.query(
-        `INSERT INTO edition_identifiers (edition_uri, issuer, value)
-         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-        [uri, identifier.issuer, identifier.value]
-      );
-      if (hasClaims && scoped(identifier)) {
-        await fillIdentifierClaims(client, uri, identifier, claims);
-      }
-    }
+    // Two statements for the whole bag instead of two per identifier. The
+    // identifier rows go first because the claim rows carry a foreign key to
+    // them.
+    await insertIdentifiers(client, uri, identifiers);
+    const claimed = hasClaims ? identifiers.filter(scoped) : [];
+    if (claimed.length > 0) await fillIdentifierClaims(client, uri, claimed, claims);
 
     await linkContributors(client, uri, candidate.contributors, authority);
     await linkPublisher(client, uri, candidate.publisher, identifiers.filter(scoped), authority);

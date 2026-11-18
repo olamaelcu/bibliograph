@@ -1,11 +1,25 @@
 const DAY = 24 * 60 * 60 * 1000;
 
-/** Read-through cache over google_books_cache / isbndb_cache. */
+/**
+ * The cache tables this module will read and write, and the column each keeps
+ * the request that produced the answer in.
+ *
+ * An allowlist, not a parameter: the table and column names are interpolated
+ * into the statement (they cannot be bound), so a caller-supplied name would be
+ * an injection point.
+ */
+const CACHE_TABLES = new Map([
+  ['google_books_cache', 'url'],
+  ['isbndb_cache', 'request'],
+  ['goodreads_cache', 'url']
+]);
+
+/** Read-through cache over one of `CACHE_TABLES`. */
 export function createJsonCache(pool, table) {
-  if (table !== 'google_books_cache' && table !== 'isbndb_cache') {
+  const requestColumn = CACHE_TABLES.get(table);
+  if (requestColumn === undefined) {
     throw new Error(`unsupported cache table ${table}`);
   }
-  const requestColumn = table === 'isbndb_cache' ? 'request' : 'url';
 
   return {
     async get(key) {

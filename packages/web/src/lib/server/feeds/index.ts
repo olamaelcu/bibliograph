@@ -102,7 +102,7 @@ export function describeFeedGenerator(): Response {
       : json({
           did,
           feeds: FEED_KINDS.map((kind) => ({ uri: feedUri(did, kind) }))
-        });
+        }, { headers: { 'cache-control': 'public, max-age=300' } });
   recordFeedRequest(metrics, 'describe', response.status);
   recordFeedRequestDuration(metrics, 'describe', (performance.now() - started) / 1000);
   return response;
@@ -202,5 +202,18 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
   }
 
   recordFeedPage(metrics, metricsKind, { items: page.feed.length, paged: cursor !== null });
-  return respond(json(page));
+  // The public skeleton is identical for every caller at a given
+  // `(feed, limit, cursor)` and past the head a page never changes, so clients
+  // and any intermediary may reuse it briefly. Personalized kinds are
+  // per-viewer: never cacheable.
+  return respond(
+    json(page, {
+      headers: {
+        'cache-control':
+          kind === 'public'
+            ? 'public, max-age=15'
+            : 'private, no-store'
+      }
+    })
+  );
 }

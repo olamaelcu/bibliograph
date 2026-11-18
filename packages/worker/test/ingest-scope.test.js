@@ -36,16 +36,34 @@ function fakeClient() {
       if (text.startsWith('INSERT INTO books')) return { rows: [{ uri: EDITION }], rowCount: 1 };
       if (text.startsWith('UPDATE books')) return { rows: [], rowCount: 0 };
       if (text.startsWith('INSERT INTO edition_identifiers')) {
-        written.identifiers.push({ issuer: params[1], value: params[2] });
+        // The statement carries the whole bag: parallel issuer/value arrays.
+        params[1].forEach((issuer, index) => {
+          written.identifiers.push({ issuer, value: params[2][index] });
+        });
         return { rows: [], rowCount: 1 };
       }
       if (text.startsWith('INSERT INTO edition_identifier_info')) {
-        written.claims.push({ issuer: params[1], value: params[2] });
+        params[1].forEach((issuer, index) => {
+          written.claims.push({ issuer, value: params[2][index] });
+        });
         return { rows: [], rowCount: 1 };
       }
-      if (text.startsWith('INSERT INTO contributors')) {
-        written.contributorBags.push(params[3]);
-        return { rows: [{ id: written.identifiers.length, at_uri: 'at://contributor/1' }], rowCount: 1 };
+      // The batched identity upsert is a `WITH … INSERT`, so it is found by its
+      // insert rather than by its first token. The returned rows are what the
+      // credit statement is mapped back through, so they carry the name and the
+      // jsonb bag exactly as Postgres would parse them.
+      if (text.includes('INSERT INTO contributors')) {
+        const names = params[2];
+        const bags = params[5];
+        bags.forEach((bag) => written.contributorBags.push(bag));
+        return {
+          rows: names.map((name, index) => ({
+            id: index + 1,
+            name,
+            identifiers: JSON.parse(bags[index])
+          })),
+          rowCount: names.length
+        };
       }
       if (text.startsWith('INSERT INTO edition_contributors')) return { rows: [], rowCount: 1 };
       if (text.startsWith('INSERT INTO publishers')) {

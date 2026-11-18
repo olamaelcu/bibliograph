@@ -345,7 +345,7 @@ test('importBookhiveCatalog keeps walking after a failing record and stops at th
   expect(new URL(fetcher.urls[1]).searchParams.get('cursor')).toBe('page2');
 });
 
-test('a page is one transaction, with a savepoint per record', async () => {
+test('each record is its own transaction, with a savepoint for its failure boundary', async () => {
   const pool = fakePool();
   const summary = await importBookhiveCatalog({
     pool,
@@ -361,8 +361,9 @@ test('a page is one transaction, with a savepoint per record', async () => {
     pages: 1,
     logger: { warn() {} },
     async ingest(candidate, options) {
-      // The import hands its page transaction down, so a whole page commits once.
-      expect(options.client, 'ingest runs inside the page transaction').toBeTruthy();
+      // The import hands its per-record transaction down, so one book's work
+      // commits before the next book starts.
+      expect(options.client, 'ingest runs inside the record transaction').toBeTruthy();
       return { uri: `at://edition/${candidate.hiveId}`, created: true };
     }
   });
@@ -373,6 +374,8 @@ test('a page is one transaction, with a savepoint per record', async () => {
     'BEGIN',
     'SAVEPOINT record',
     'RELEASE SAVEPOINT record',
+    'COMMIT',
+    'BEGIN',
     'SAVEPOINT record',
     'RELEASE SAVEPOINT record',
     'COMMIT'
@@ -380,7 +383,7 @@ test('a page is one transaction, with a savepoint per record', async () => {
   expect(client.released).toBe(true);
 });
 
-test('a failing record rolls back to its savepoint and the page still commits', async () => {
+test('a failing record commits an empty transaction and the next record still lands', async () => {
   const pool = fakePool();
   const summary = await importBookhiveCatalog({
     pool,
@@ -407,6 +410,8 @@ test('a failing record rolls back to its savepoint and the page still commits', 
     'BEGIN',
     'SAVEPOINT record',
     'ROLLBACK TO SAVEPOINT record',
+    'COMMIT',
+    'BEGIN',
     'SAVEPOINT record',
     'RELEASE SAVEPOINT record',
     'COMMIT'

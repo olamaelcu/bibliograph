@@ -5,7 +5,6 @@ import {
   GoodreadsChallengeError,
   GoodreadsRedirectLoopError,
   createGoodreads,
-  createPageCache,
   genresFromBookPage,
   isChallengePage,
   profileHeaders
@@ -72,6 +71,23 @@ function makeProvider(options = {}) {
     random: () => 0.5,
     ...options
   });
+}
+
+/**
+ * The shared page cache's contract, in memory: async `get` and `put`, and the
+ * TTL travels with the write because the table stores `expires_at`.
+ */
+function fakeCache() {
+  const entries = new Map();
+  return {
+    entries,
+    async get(key) {
+      return entries.get(key)?.value;
+    },
+    async put(key, request, value, ttlMs) {
+      entries.set(key, { request, value, ttlMs });
+    }
+  };
 }
 
 /** A fetch double that records calls and answers from `routes`. */
@@ -389,25 +405,33 @@ test('a redirect loop that succeeds on the single retry is not an error', async 
 });
 
 test('successful HTML is cached so repeated ISBN lookups skip the network', async () => {
-  let clock = 0;
   const { requests, fetchImpl } = recorder({
     [`/book/isbn/${ISBN13}`]: (url) => response({ url, body: bookPageHtml })
   });
-  const cache = createPageCache({ ttlMs: 1000, maxEntries: 10, now: () => clock });
-  const provider = makeProvider({ fetchImpl, cache, now: () => clock });
+  const cache = fakeCache();
+  const provider = makeProvider({ fetchImpl, cache });
 
   expect((await provider.byIdentifier(ISBN13))[0].format).toBe('Hardcover');
   expect((await provider.byIdentifier(ISBN13))[0].format).toBe('Hardcover');
   expect(requests.length, 'the second lookup is a cache hit').toBe(1);
-  expect(cache.size).toBe(1);
+  expect(cache.entries.size).toBe(1);
 
-  clock = 1000;
+  // The table decides freshness from `expires_at`; a miss (an expired row is a
+  // miss) refetches and rewrites.
+  const [key, entry] = [...cache.entries.entries()][0];
+  expect(key.endsWith(`/book/isbn/${ISBN13}|book`), 'the key is URL + page kind').toBe(true);
+  expect(entry.request, 'the url column keeps the request').toBe(`${BASE}/book/isbn/${ISBN13}`);
+  expect(entry.ttlMs, "the TTL is Goodreads' own max-age").toBe(24 * 60 * 60 * 1000);
+  expect(entry.value, 'headers do not survive jsonb and nothing reads them back')
+    .toEqual({ text: bookPageHtml, url: `${BASE}/book/isbn/${ISBN13}`, status: 200 });
+
+  cache.entries.clear();
   expect((await provider.byIdentifier(ISBN13))[0].format).toBe('Hardcover');
-  expect(requests.length, 'an expired entry is refetched').toBe(2);
+  expect(requests.length, 'a missing entry is refetched').toBe(2);
 });
 
 test('challenges and empty pages are never cached', async () => {
-  const challengeCache = createPageCache({ ttlMs: 1000, maxEntries: 10, now: () => 0 });
+  const challengeCache = fakeCache();
   const first = scriptedFetch([
     response({ status: 202, url: `${BASE}/book/isbn/${ISBN13}`, body: WAF_CHALLENGE })
   ]);
@@ -417,28 +441,15 @@ test('challenges and empty pages are never cached', async () => {
     cache: challengeCache
   });
   await expect(challenged.byIdentifier(ISBN13)).rejects.toThrow(GoodreadsChallengeError);
-  expect(challengeCache.size).toBe(0);
+  expect(challengeCache.entries.size).toBe(0);
 
-  const emptyCache = createPageCache({ ttlMs: 1000, maxEntries: 10, now: () => 0 });
+  const emptyCache = fakeCache();
   const empty = recorder({
     [`/book/isbn/${ISBN13}`]: (url) => response({ url, body: '   ' })
   });
   const emptyProvider = makeProvider({ fetchImpl: empty.fetchImpl, cache: emptyCache });
   expect(await emptyProvider.byIdentifier(ISBN13)).toEqual([]);
-  expect(emptyCache.size).toBe(0);
-});
-
-test('the page cache is bounded and evicts the least recently used page', () => {
-  const cache = createPageCache({ ttlMs: 1000, maxEntries: 2, now: () => 0 });
-  cache.set('a', { text: 'a' });
-  cache.set('b', { text: 'b' });
-  cache.get('a');
-  cache.set('c', { text: 'c' });
-
-  expect(cache.size).toBe(2);
-  expect(cache.get('b')).toBe(undefined);
-  expect(cache.get('a')).toEqual({ text: 'a' });
-  expect(cache.get('c')).toEqual({ text: 'c' });
+  expect(emptyCache.entries.size).toBe(0);
 });
 
 test('the serialized gate jitters its injected delay between requests', async () => {

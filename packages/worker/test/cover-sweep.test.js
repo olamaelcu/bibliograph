@@ -9,9 +9,9 @@ const log = { info() {}, warn() {}, error() {} };
  * A sweep-only task registry over a scripted `pool.query`.
  *
  * The sweep makes four kinds of call: the uncached pass (a source URL with no
- * cached file), the never-attempted pass, the retry pass, and one claim per
- * queued edition. Each is answered from the script and recorded, so the test
- * asserts the priority split without a database.
+ * cached file), the never-attempted pass, the retry pass, and one claim for the
+ * whole batch of queued editions. Each is answered from the script and
+ * recorded, so the test asserts the priority split without a database.
  */
 function sweepPool({
   uncached = [],
@@ -24,9 +24,13 @@ function sweepPool({
   const pool = {
     query: async (sql, values) => {
       if (sql.includes('catalog_enqueue_cover_fetch')) {
-        const uri = values[0];
-        calls.claims.push(uri);
-        return { rows: [{ enqueued: typeof claimed === 'function' ? claimed(uri) : claimed }] };
+        const uris = values[0];
+        calls.claims.push(...uris);
+        return {
+          rows: uris.map((uri) => ({
+            enqueued: typeof claimed === 'function' ? claimed(uri) : claimed
+          }))
+        };
       }
       // Ordered routing: the retry pass is driven by the ledger's own clock, the
       // uncached pass joins the cache table, and what is left is the plain

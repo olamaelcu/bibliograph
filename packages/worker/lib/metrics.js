@@ -205,7 +205,8 @@ export function renderMetrics({
   const cap = Number.isFinite(limit) && limit > 0 ? Math.trunc(limit) : 0;
   const remaining = Math.max(0, cap - used);
   // Soft limit: where an alert should fire, 95% of the hard limit (4750 at the
-  // default 5000). The hard limit stays what `reserveDailyCall` enforces.
+  // default 5000). The hard limit stays what `createDailyQuota` enforces; the
+  // counter it reserves from is the source of `calls` here.
   const softCap = Math.max(1, Math.floor(cap * ISBNDB_SOFT_LIMIT_RATIO));
   const softRemaining = Math.max(0, softCap - used);
 

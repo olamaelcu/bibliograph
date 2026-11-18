@@ -1,3 +1,34 @@
+bibliograph-worker (0.6.0-1) unstable; urgency=medium
+
+  * 0.6.0: less work per ingest, per sweep and per publish; a search index.
+
+    - `0023`: the `edition_shape` and `edition_publisher_list` refreshes are
+      statement-level triggers with transition tables, so a candidate writing
+      N claims aggregates once per edition instead of N times (O(N²) → O(N)),
+      and an unchanged aggregate writes no row version.
+    - `0024`: `pds_outbox_claim_idx` matches `claimBatch`'s collection filter
+      and its `(next_at, updated_at, uri)` order.
+    - `0025`: `catalog_enqueue_marks` moves into the migrations — it was
+      created at worker boot, so the schema checks could not see it and a fresh
+      database lacked it until the worker started. `catalog.marks.prune`
+      deletes marks older than 24 h, hourly.
+    - `0026`: the Goodreads page cache moves from process memory into
+      Postgres, with the same TTL as the other provider caches.
+    - `0027`: `book_search`, one tsvector per book (title A, contributors B,
+      shape description C, identifier values D) with a GIN index, maintained by
+      statement-level triggers on the four contributing tables. The edge's free
+      text search reads it; the backfill runs once (2m34s for 234k books) and
+      every replay inserts nothing.
+    - Ingest batches identifier claims and contributor identities with
+      `unnest` (a 3-identifier, 4-contributor candidate: 21 statements → 11);
+      each sweep claims its whole batch in one statement; publish settles a
+      drained batch in at most six statements; Bookhive commits per record
+      instead of per page.
+    - ISBNdb quota is reserved in blocks of ten, so the hot `(provider, day)`
+      row takes one write per ten calls.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.5.2-1) unstable; urgency=medium
 
   * 0.5.2: drop the `editions` compatibility view.

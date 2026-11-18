@@ -266,7 +266,7 @@ export async function searchEditions(input: {
 
   if (input.identifiers.length > 0) {
     branches.push(
-      `SELECT i.edition_uri AS edition_uri, 0 AS rank
+      `SELECT i.edition_uri AS edition_uri, 0 AS rank, 0::real AS score
          FROM edition_identifiers i
         WHERE ${identifierMatch(input.identifiers, push)}`
     );
@@ -276,7 +276,8 @@ export async function searchEditions(input: {
   if (input.title) {
     const pattern = push(likePattern(input.title));
     branches.push(
-      `SELECT e.uri AS edition_uri, 1 AS rank FROM books e WHERE e.title ILIKE ${pattern}`
+      `SELECT e.uri AS edition_uri, 1 AS rank, 0::real AS score
+         FROM books e WHERE e.title ILIKE ${pattern}`
     );
     rankedHint = true;
   }
@@ -284,7 +285,8 @@ export async function searchEditions(input: {
   if (input.author) {
     const pattern = push(likePattern(input.author));
     branches.push(
-      `SELECT ec.edition_uri, 2 AS rank FROM edition_contributors ec
+      `SELECT ec.edition_uri, 2 AS rank, 0::real AS score
+         FROM edition_contributors ec
          JOIN contributors c ON c.id = ec.contributor_id
         WHERE c.name ILIKE ${pattern}`
     );
@@ -292,33 +294,31 @@ export async function searchEditions(input: {
   }
 
   if (input.q) {
-    const pattern = push(likePattern(input.q));
-    // The broad text match was an `OR` of these four branches; each one is
-    // served by a trigram index of its own.
+    // Free text is one tsvector match per book — title, subtitle, contributors,
+    // description and identifier values in one document — ranked by
+    // `ts_rank_cd`. It replaces the four trigram `ILIKE` branches that unioned
+    // title, description, contributor and identifier matches and then folded
+    // them with a hash aggregate: four GIN scans and an aggregate per search
+    // became one scan with a real score. See 0027.
+    const query = push(input.q);
     branches.push(
-      `SELECT e.uri AS edition_uri, 3 AS rank FROM books e WHERE e.title ILIKE ${pattern}`,
-      `SELECT s.edition_uri, 3 AS rank FROM edition_identifier_shape s
-        WHERE coalesce(s.description, '') ILIKE ${pattern}`,
-      `SELECT ec.edition_uri, 3 AS rank FROM edition_contributors ec
-         JOIN contributors c ON c.id = ec.contributor_id
-        WHERE c.name ILIKE ${pattern}`,
-      `SELECT i.edition_uri, 3 AS rank FROM edition_identifiers i
-        WHERE i.value ILIKE ${pattern}`
+      `SELECT bs.uri AS edition_uri, 3 AS rank,
+              ts_rank_cd(bs.document, websearch_to_tsquery('english', ${query})) AS score
+         FROM book_search bs
+        WHERE bs.document @@ websearch_to_tsquery('english', ${query})`
     );
+    rankedHint = true;
   }
 
   // A language is a filter, not a hint: it is ANDed with the match set.
   const where = input.language ? `WHERE ${editionLanguageClause(input.language, push)}` : '';
 
   // Local ranking is deliberately simple and stable: exact identifier matches
-  // first, then title matches, then author matches, then broad text matches. A
-  // body with none of the three ranked hints has no ranking key at all, so its
-  // page stays in uri order — which is the primary key, so the page is one index
-  // scan instead of a sort of the match set. `e.indexed_at DESC` used to lead
-  // here: it described ingest time, which no reader asked for, and it made every
-  // search sort the whole page on a box whose buffer pool is smaller than the
-  // catalogue.
-  const relevanceOrder = rankedHint ? 'r.rank, e.uri ASC' : 'e.uri ASC';
+  // first, then title matches, then author matches, then free text; within the
+  // free-text bucket the tsvector score orders, so a title hit outranks a
+  // description hit. A body with no hint at all keeps uri order — the primary
+  // key, so the page is one index scan instead of a sort of the match set.
+  const relevanceOrder = rankedHint ? 'r.rank, r.score DESC, e.uri ASC' : 'e.uri ASC';
 
   const limit = push(input.limit + 1);
   const offset = push(input.offset);
@@ -339,7 +339,8 @@ export async function searchEditions(input: {
       ? `WITH candidates AS (
        ${branches.join('\n       UNION ALL\n       ')}
      ), ranked AS (
-       SELECT edition_uri, min(rank) AS rank FROM candidates GROUP BY edition_uri
+       SELECT edition_uri, min(rank) AS rank, max(score) AS score
+         FROM candidates GROUP BY edition_uri
      )
      `
       : '';
@@ -366,7 +367,7 @@ export async function searchEditions(input: {
       ? await pool.query<{ n: number }>(
           `${cte}SELECT count(*)::int AS n
              FROM ${from}
-             ${BOOK_SHAPE_JOIN}
+             ${input.language ? BOOK_SHAPE_JOIN : ''}
              ${where}`,
           params.slice(0, params.length - 2)
         )

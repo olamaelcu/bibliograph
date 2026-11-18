@@ -14,6 +14,24 @@ export async function ensureSupportSchema(pool) {
     'CREATE INDEX IF NOT EXISTS catalog_enqueue_marks_enqueued_at_idx ON catalog_enqueue_marks (enqueued_at)'
   );
 
+  // The provider caches live in migrations 0001 and 0026. The worker creates
+  // the Goodreads one here as well: `providers/goodreads.js` reads it on every
+  // miss, and a deployment that upgrades the code before replaying `sql/` would
+  // otherwise fail every Goodreads request on a missing relation instead of
+  // just caching nothing. Keep both definitions in sync.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS goodreads_cache (
+      key text PRIMARY KEY,
+      url text NOT NULL,
+      body jsonb,
+      fetched_at timestamp with time zone NOT NULL DEFAULT now(),
+      expires_at timestamp with time zone NOT NULL
+    )
+  `);
+  await pool.query(
+    'CREATE INDEX IF NOT EXISTS goodreads_cache_expires_at_idx ON goodreads_cache (expires_at)'
+  );
+
   // Same shape as sql/0002-provider-usage.sql. The migration is the fresh-DB
   // path; this boot-time DDL upgrades an existing deployment with no manual
   // SQL step. Keep both definitions in sync.

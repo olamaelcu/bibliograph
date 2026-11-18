@@ -11,6 +11,7 @@ import { createTasks } from '../lib/tasks.js';
 import { isbn10To13, stripHtml } from '../lib/util.js';
 import { ensureSupportSchema } from '../lib/setup.js';
 import { createMetricsServer } from '../lib/metrics.js';
+import { DAILY_QUOTA_BLOCK } from '../lib/providers/usage.js';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph';
@@ -157,6 +158,19 @@ let goodreadsRequests = 0;
 let openlibraryRequests = 0;
 const providerOrder = [];
 const silentLogger = { log() {}, info() {}, warn() {}, error() {} };
+
+/**
+ * Today's ISBNdb counter, which counts calls reserved (bought in blocks), not
+ * calls made: an idle block makes the two differ by up to `DAILY_QUOTA_BLOCK`.
+ */
+async function dailyCalls(pool, provider = 'isbndb') {
+  const result = await pool.query(
+    'SELECT calls FROM provider_daily_usage WHERE provider = $1 ' +
+      "AND day = (now() AT TIME ZONE 'UTC')::date",
+    [provider]
+  );
+  return result.rows[0]?.calls;
+}
 
 // Every test set points OpenLibrary at the local stub. Without this a fallback
 // test that reaches the new provider would call the real public API.
@@ -967,7 +981,8 @@ test('an ISBNdb cache hit does not consume the daily quota', async () => {
       logger: silentLogger,
       env: {
         ISBNDB_API_KEY: 'test-key',
-        ISBNDB_DAILY_LIMIT: '2',
+        // Room for more than one block, so a second reservation would show.
+        ISBNDB_DAILY_LIMIT: String(DAILY_QUOTA_BLOCK * 2),
         ISBNDB_BASE_URL: `${baseUrl}/isbndb`
       }
     });
@@ -975,14 +990,14 @@ test('an ISBNdb cache hit does not consume the daily quota', async () => {
     const isbn = isbn13For(811);
 
     await isbndb.byIsbn(isbn);
+    const afterMiss = await dailyCalls(pool);
     await isbndb.byIsbn(isbn);
 
     expect(isbndbRequests, 'the second lookup is served from isbndb_cache').toBe(1);
-    const usage = await pool.query(
-      "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
-        "AND day = (now() AT TIME ZONE 'UTC')::date"
-    );
-    expect(usage.rows[0]?.calls).toBe(1);
+    // The counter records reserved calls (`createDailyQuota` buys them a block
+    // at a time), so the assertion is that the hit reserves nothing at all: the
+    // row is unchanged, not that it equals the number of network calls.
+    expect(await dailyCalls(pool), 'a cache hit spends no reservation').toBe(afterMiss);
   } finally {
     await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
     await pool.end();
@@ -995,7 +1010,8 @@ test('a previous UTC day at the limit does not block today', async () => {
     await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
     await pool.query(
       "INSERT INTO provider_daily_usage (provider, day, calls) " +
-        "VALUES ('isbndb', (now() AT TIME ZONE 'UTC')::date - 1, 2)"
+        "VALUES ('isbndb', (now() AT TIME ZONE 'UTC')::date - 1, $1)",
+      [DAILY_QUOTA_BLOCK * 2]
     );
     isbndbRequests = 0;
 
@@ -1004,7 +1020,7 @@ test('a previous UTC day at the limit does not block today', async () => {
       logger: silentLogger,
       env: {
         ISBNDB_API_KEY: 'test-key',
-        ISBNDB_DAILY_LIMIT: '2',
+        ISBNDB_DAILY_LIMIT: String(DAILY_QUOTA_BLOCK * 2),
         ISBNDB_BASE_URL: `${baseUrl}/isbndb`
       }
     });
@@ -1012,16 +1028,12 @@ test('a previous UTC day at the limit does not block today', async () => {
     await providers.providers.isbndb.byIsbn(isbn13For(821));
 
     expect(isbndbRequests, 'today starts a fresh budget after the UTC rollover').toBe(1);
-    const today = await pool.query(
-      "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
-        "AND day = (now() AT TIME ZONE 'UTC')::date"
-    );
-    expect(today.rows[0]?.calls).toBe(1);
+    expect(await dailyCalls(pool), 'today books its own block').toBe(DAILY_QUOTA_BLOCK);
     const yesterday = await pool.query(
       "SELECT calls FROM provider_daily_usage WHERE provider = 'isbndb' " +
         "AND day = (now() AT TIME ZONE 'UTC')::date - 1"
     );
-    expect(yesterday.rows[0]?.calls).toBe(2);
+    expect(yesterday.rows[0]?.calls, 'yesterday is untouched').toBe(DAILY_QUOTA_BLOCK * 2);
   } finally {
     await pool.query("DELETE FROM provider_daily_usage WHERE provider = 'isbndb'");
     await pool.end();

@@ -107,6 +107,27 @@ not: ingest fills a missing claim and never overwrites a stored one (a curator's
 edit and another provider's answer both outrank a re-import), so correcting a
 stored claim is a curation action, not an import side effect.
 
+## Catalog search
+
+`searchEditions` ranks four hint buckets — exact identifier, title, author, free
+text — so a title hit always outranks a description hit. The first three are
+trigram `ILIKE` scans over `books` and `edition_contributors`. Free text is one
+`book_search.document` match: a tsvector per book carrying title/subtitle (A),
+contributor names (B), the shape claim's description (C) and identifier values
+(D), ranked by `ts_rank_cd`. One GIN scan replaces the four trigram branches the
+method used (title, description, contributor, identifier), and the score orders
+within the text bucket — measured on a 234k-book catalog: 54 ms for a page and
+9 ms for the count, against 454 ms and 1 075 ms before.
+
+The document is maintained by statement-level triggers on `books`,
+`edition_contributors`, `edition_identifiers` and `edition_shape`; each visits
+every affected book once per statement and skips an unchanged document. A term
+shorter than three characters is refused — a trigram index cannot serve it, so
+every branch would seq-scan — and an `offset` past 10 000 is refused instead of
+re-scanning the match set. `searchEditions` draws from its own five-connection
+pool with a two-second statement bound, so one slow search cannot starve
+resolve, list or the admin reads.
+
 ## Entity records
 
 Contributors and publishers are published records too:
@@ -457,8 +478,9 @@ The worker starts a dependency-free Prometheus endpoint on
 `/metrics`. `bibliograph_worker_up` is `1` while the process answers. Each
 scrape reads the database and exposes the ISBNdb quota gauges
 `bibliograph_isbndb_calls_today`, `bibliograph_isbndb_daily_limit` (the hard
-cap `reserveDailyCall` enforces), `bibliograph_isbndb_daily_soft_limit` (95% of
-it — 4750 at the default 5000 — where an alert should fire),
+cap `createDailyQuota` reserves against in blocks of ten, so the gauge reports
+booked calls rather than network calls), `bibliograph_isbndb_daily_soft_limit`
+(95% of it — 4750 at the default 5000 — where an alert should fire),
 `bibliograph_isbndb_calls_remaining` (`max(0, limit - calls)`) and
 `bibliograph_isbndb_calls_remaining_soft` (`max(0, soft - calls)`), plus the outbox
 backlog for the configured publisher DID: `bibliograph_pds_outbox_ready`
