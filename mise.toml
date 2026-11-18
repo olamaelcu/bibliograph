@@ -39,5 +39,24 @@ run = ["mise run web-dev ::: worker-dev"]
 description = "Syntax-check and unit-test the HappyView Lua scripts"
 run = ["happyview/test/run.sh"]
 
+[tasks."test:web"]
+description = "Run the SvelteKit edge's vitest suite"
+run = ["pnpm --filter web test"]
+
+[tasks."test:worker"]
+description = """
+Run the catalog worker's node:test suite
+
+The suite talks to the database named by `DATABASE_URL` (the local
+`bibliograph` one from `[env]` above), creates its own schema and truncates
+between cases — point it at a scratch database before running it anywhere you
+care about. `docker compose up -d` starts the local one.
+"""
+run = ["pnpm --filter worker test"]
+
+[tasks.test]
+description = "Run every test tier: the edge's unit tests, the worker's suite and the HappyView scripts"
+depends = ["test:web", "test:worker", "hv-test"]
+
 [shell_alias]
 sql = "mise sql"
