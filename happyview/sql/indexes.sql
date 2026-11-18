@@ -25,9 +25,13 @@ CREATE INDEX IF NOT EXISTS happyview_record_shelfitem_book_idx
 CREATE INDEX IF NOT EXISTS happyview_record_review_subject_record_idx
   ON happyview.happyview_records (((record::jsonb)->>'subjectRecord'))
   WHERE collection = 'community.lexicon.media.book.review';
-CREATE INDEX IF NOT EXISTS happyview_record_review_identifiers_idx
-  ON happyview.happyview_records USING gin (((record::jsonb)->'subject'->'identifiers'))
-  WHERE collection = 'community.lexicon.media.book.review';
+-- Dropped: a GIN index over an expression on a `text` column has to parse the
+-- whole record and tokenize the identifier array on every insert, and
+-- `pg_stat_user_indexes` recorded 0 scans for it on a 371k-row table while the
+-- server was spending ~2.9s mean in `INSERT INTO happyview_records`. Nothing
+-- reads reviews by identifier set; the subject-record index above covers the
+-- reads that exist.
+DROP INDEX IF EXISTS happyview.happyview_record_review_identifiers_idx;
 
 CREATE INDEX IF NOT EXISTS happyview_record_follow_subject_idx
   ON happyview.happyview_records (((record::jsonb)->>'subject'))
