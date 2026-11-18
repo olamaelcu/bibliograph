@@ -1,3 +1,21 @@
+bibliograph-web (0.5.1-1) unstable; urgency=medium
+
+  * 0.5.1: restore the XRPC procedure NSIDs the storage rename rewrote.
+
+    - The rename replaced `searchEditions`/`resolveEditions` inside the NSID
+      string literals (`community.lexicon.media.book.searchEditions`), so
+      `dispatchPost` stopped matching both procedures and forwarded them to
+      HappyView, which answers 401 to a procedure without DPoP. The literals
+      are restored, along with the metric operation labels and the surfaced
+      method list that carried the same strings.
+    - A new test anchors both constants to their lexicon documents and asserts
+      each procedure is handled at the edge rather than forwarded. The surface
+      test could not catch this: the described surface is built from the
+      lexicon catalog, not from the dispatcher's constants.
+    - The worker package is unchanged in this release.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.5.0-1) unstable; urgency=medium
 
   * 0.5.0: the catalog reads name `books`; the XRPC surface is unchanged.

@@ -109,8 +109,8 @@
   // Read-only catalog discovery is served anonymously by the edge; every other
   // procedure writes to a PDS through a DPoP session.
   const catalogLookups = new Set([
-    'community.lexicon.media.book.resolveBooks',
-    'community.lexicon.media.book.searchBooks'
+    'community.lexicon.media.book.resolveEditions',
+    'community.lexicon.media.book.searchEditions'
   ]);
 
   const prefix = 'net.olamaelcu.livtet.biblio.';
@@ -158,7 +158,7 @@
     for (const field of endpoint.input.filter((f) => f.required)) body[field.name] = sample(field);
     // searchBooks has no required field, but an empty body is InvalidQuery;
     // show the smallest body the endpoint accepts.
-    if (Object.keys(body).length === 0 && endpoint.id.endsWith('searchBooks')) {
+    if (Object.keys(body).length === 0 && endpoint.id.endsWith('searchEditions')) {
       body.title = 'The Left Hand of Darkness';
     }
     return [

@@ -245,8 +245,8 @@ test('all ten entity methods are GET queries, resolvers included', () => {
     'net.olamaelcu.livtet.biblio.getContributor',
     'net.olamaelcu.livtet.biblio.getGenresOfBook',
     'net.olamaelcu.livtet.biblio.searchPublishers',
-    'net.olamaelcu.livtet.biblio.listBooks',
-    'net.olamaelcu.livtet.biblio.listBooksByContributor',
+    'net.olamaelcu.livtet.biblio.listEditions',
+    'net.olamaelcu.livtet.biblio.listEditionsByContributor',
     'net.olamaelcu.livtet.biblio.resolveContributors',
     'net.olamaelcu.livtet.biblio.resolvePublishers'
   ]) {
