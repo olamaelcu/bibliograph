@@ -322,6 +322,14 @@ def main() -> int:
 
         lexicons, scripts = upload(root, base, key)
 
+        # Applied on every run, `--no-indexes` or not: two ALTER ROLEs are
+        # instant, and a host whose connecting role is not a superuser records
+        # the skip as a notice instead of failing the upload that just
+        # succeeded. See sql/role-limits.sql for why these numbers.
+        with open(os.path.join(root, "sql", "role-limits.sql"), encoding="utf-8") as handle:
+            run_sql(handle.read())
+        print("role limits applied")
+
         if not args.no_indexes:
             with open(os.path.join(root, "sql", "indexes.sql"), encoding="utf-8") as handle:
                 run_sql(handle.read())
