@@ -136,8 +136,9 @@ What is created:
   fresh database creates `books` directly), and it sorts before `0001` because
   every file is replayed on every deploy;
 - `0021-editions-compat-view.sql` keeps the old name readable as an
-  auto-updatable view over `books` for one release — writes that use
-  `ON CONFLICT` must still name `books`, since a view exposes no constraints;
+  auto-updatable view over `books` for one release, and
+  `0022-drop-editions-view.sql` removes it — writes that use `ON CONFLICT`
+  must still name `books`, since a view exposes no constraints;
 - `0007-edition-identifier-info.sql` adds `edition_identifier_info` (one shape
   claim row per identifier, cascading from `edition_identifiers`) and the
   `edition_identifier_shape` view, backfills each edition's language,
