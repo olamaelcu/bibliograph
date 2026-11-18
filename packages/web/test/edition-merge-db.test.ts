@@ -12,7 +12,7 @@ import { expect, test, afterAll, beforeAll } from 'vitest';
 
 import pg from 'pg';
 
-import { MergeError, mergeEditions } from '../src/lib/server/admin/merge.ts';
+import { MergeError, mergeBooks } from '../src/lib/server/admin/merge.ts';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph';
@@ -44,7 +44,7 @@ const editionUri = (rkey: string): string => `at://${AUTHORITY}/${EDITION_COLLEC
 async function cleanup(): Promise<void> {
   if (!pool) return;
   const prefix = `at://${AUTHORITY}/%`;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE at_uri LIKE $1 OR name LIKE $2', [
     prefix,
     `${RUN}%`
@@ -88,7 +88,7 @@ async function seedEdition(input: {
   const uri = editionUri(rkey);
   const createdAt = '2020-01-02T03:04:05.000Z';
   await (pool as pg.Pool).query(
-    `INSERT INTO editions (uri, rkey, title, created_at, indexed_at)
+    `INSERT INTO books (uri, rkey, title, created_at, indexed_at)
      VALUES ($1, $2, $3, $4, $4)`,
     [uri, rkey, input.title, createdAt]
   );
@@ -201,7 +201,7 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
     [base.uri, other.uri]
   );
 
-  const result = await mergeEditions(db, {
+  const result = await mergeBooks(db, {
     base: base.uri,
     others: [other.uri],
     contributors: { mode: 'union' },
@@ -218,7 +218,7 @@ test('union merges identifiers, credits and per-identifier publisher links', asy
 
   // Only the base survives, with its own identity intact.
   const editions = await db.query<{ uri: string; rkey: string; title: string; created_at: Date }>(
-    'SELECT uri, rkey, title, created_at FROM editions WHERE uri = ANY($1::text[]) ORDER BY uri',
+    'SELECT uri, rkey, title, created_at FROM books WHERE uri = ANY($1::text[]) ORDER BY uri',
     [[base.uri, other.uri]]
   );
   expect(editions.rowCount).toBe(1);
@@ -310,7 +310,7 @@ test('publisher source mode applies the chosen record set to every identifier', 
     ]
   });
 
-  const result = await mergeEditions(db, {
+  const result = await mergeBooks(db, {
     base: base.uri,
     others: [source.uri],
     contributors: { mode: 'source', source: base.uri },
@@ -347,7 +347,7 @@ test('a rejected merge writes nothing', async (t) => {
     identifiers: [{ issuer: 'isbn10', value: '0000000006' }]
   });
 
-  await expect(mergeEditions(db, {
+  await expect(mergeBooks(db, {
       base: base.uri,
       others: [other.uri],
       sources: { title: 'at://did:plc:not-selected/community.lexicon.media.book.edition/x' },
@@ -357,13 +357,13 @@ test('a rejected merge writes nothing', async (t) => {
       error instanceof MergeError && error.status === 400 && /outside the selection/.test(error.message));
 
   // Both editions and the base's own link are untouched.
-  const editions = await db.query('SELECT uri FROM editions WHERE uri = ANY($1::text[])', [
+  const editions = await db.query('SELECT uri FROM books WHERE uri = ANY($1::text[])', [
     [base.uri, other.uri]
   ]);
   expect(editions.rowCount).toBe(2);
   expect((await publisherLinks(base.uri)).map((row) => [row.value, row.name])).toEqual([['9780000009005', `${RUN} Reject Press`]]);
 
   // A merge of one edition, or of an unknown base, is rejected before writing.
-  await expect(mergeEditions(db, { base: base.uri, others: [] })).rejects.toSatisfy((error: unknown) => error instanceof MergeError && error.status === 400);
-  await expect(mergeEditions(db, { base: editionUri('missing-edition'), others: [other.uri] })).rejects.toSatisfy((error: unknown) => error instanceof MergeError && error.status === 404);
+  await expect(mergeBooks(db, { base: base.uri, others: [] })).rejects.toSatisfy((error: unknown) => error instanceof MergeError && error.status === 400);
+  await expect(mergeBooks(db, { base: editionUri('missing-edition'), others: [other.uri] })).rejects.toSatisfy((error: unknown) => error instanceof MergeError && error.status === 404);
 });

@@ -5,14 +5,14 @@
 -- An edition can carry several identifiers (eight ISBNs after a provider import
 -- and a merge), and each provider record makes its own claim about the book's
 -- language, publication date, format, pages and description. Holding one merged
--- winner on `editions` destroyed the per-identifier evidence, so the five claims
+-- winner on `books` destroyed the per-identifier evidence, so the five claims
 -- move onto `edition_identifier_info` (one row per `edition_identifiers` pair)
 -- and the edition's public shape becomes a deterministic union over its
 -- identifiers (`edition_identifier_shape`): `isbn13` → `isbn10` → `asin` → any
 -- other issuer, ties by `(issuer, value)` ascending.
 --
 -- This file deliberately departs from 0001's "never drops a column" invariant:
--- the five columns leave `editions`. The drop is guarded, so re-applying the
+-- the five columns leave `books`. The drop is guarded, so re-applying the
 -- file is a no-op, and the backfill runs before it, so no value is lost.
 --
 -- The publisher is not a claim: 0008 replaces `edition_publishers` with a link
@@ -85,7 +85,7 @@ CREATE OR REPLACE TRIGGER pds_enqueue_identifier_info
 -- Read models: the edition's shape is the identifier union
 --
 -- Same columns and order as 0004 — only the five shape expressions change, and
--- they now come from the shape view instead of `editions`.
+-- they now come from the shape view instead of `books`.
 --
 -- 0008 moved the publisher links onto the identifier and dropped
 -- `edition_publishers`, so this definition only applies while that table still
@@ -164,7 +164,7 @@ SELECT
       FROM edition_identifiers i
      WHERE i.edition_uri = e.uri
   ), '[]'::jsonb) AS identifiers
-FROM editions e
+FROM books e
 LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri$book$;
 END
 $views$;
@@ -182,7 +182,7 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
      WHERE table_schema = current_schema()
-       AND table_name = 'editions'
+       AND table_name = 'books'
        AND column_name = 'format'
   ) THEN
     RETURN;
@@ -193,13 +193,13 @@ BEGIN
   SELECT i.edition_uri, i.issuer, i.value,
          e.format, e.language, e.published_date, e.pages, e.description
     FROM edition_identifiers i
-    JOIN editions e ON e.uri = i.edition_uri
+    JOIN books e ON e.uri = i.edition_uri
    WHERE e.format IS NOT NULL OR e.language IS NOT NULL
       OR e.published_date IS NOT NULL OR e.pages IS NOT NULL
       OR e.description IS NOT NULL
   ON CONFLICT (edition_uri, issuer, value) DO NOTHING;
 
-  ALTER TABLE editions
+  ALTER TABLE books
     DROP COLUMN format,
     DROP COLUMN language,
     DROP COLUMN published_date,

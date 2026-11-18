@@ -4,8 +4,8 @@ import { CatalogUnavailableError } from './errors';
 
 /**
  * The catalog lives in this deployment's own Postgres; queries read the
- * authoritative tables (editions, edition_identifiers, edition_contributors,
- * edition_publishers), never a PDS.
+ * authoritative tables (books, edition_identifiers, edition_contributors,
+ * edition_identifier_publishers), never a PDS.
  *
  * A missing `DATABASE_URL` is a deployment error, but it must not crash the
  * process at import time: XRPC passthrough still works without catalog access.

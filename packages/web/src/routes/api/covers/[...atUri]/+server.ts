@@ -73,7 +73,7 @@ async function serve(event: RequestEvent, method: 'GET' | 'HEAD'): Promise<Respo
   try {
     const result = await catalogPool().query<CoverRow>(
       `SELECT e.cover_url, f.content_type, f.byte_size
-         FROM editions e
+         FROM books e
          LEFT JOIN edition_cover_files f
                 ON f.edition_uri = e.uri AND f.source_url = e.cover_url
         WHERE e.uri = $1`,

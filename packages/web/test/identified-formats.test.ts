@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 
 import {
   EDITION_COLLECTION,
-  getEditionIdentifiedFormats
+  getBookIdentifiedFormats
 } from '../src/lib/server/catalog/identified-formats.ts';
 import type { EntityQueryable } from '../src/lib/server/catalog/entities.ts';
 
@@ -37,7 +37,7 @@ function fakePool(answers: {
   return { pool, calls };
 }
 
-test('getEditionIdentifiedFormats answers null when the edition is not in the catalog', async () => {
+test('getBookIdentifiedFormats answers null when the edition is not in the catalog', async () => {
   const { pool } = fakePool({
     present: false,
     identifiers: [
@@ -51,7 +51,7 @@ test('getEditionIdentifiedFormats answers null when the edition is not in the ca
       }
     ]
   });
-  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toBe(null);
+  expect(await getBookIdentifiedFormats(pool, EDITION_URI)).toBe(null);
 });
 
 test('a print identifier and an audio identifier keep rank order and their own units', async () => {
@@ -77,7 +77,7 @@ test('a print identifier and an audio identifier keep rank order and their own u
     ]
   });
 
-  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toEqual({
+  expect(await getBookIdentifiedFormats(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     chapters: 12,
     identifiers: [
@@ -114,7 +114,7 @@ test('an identifier with no provider claim is listed with no medium and no exten
     ]
   });
 
-  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toEqual({
+  expect(await getBookIdentifiedFormats(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     identifiers: [{ issuer: 'isbn13', value: '9781635575637' }]
   });
@@ -122,14 +122,14 @@ test('an identifier with no provider claim is listed with no medium and no exten
 
 test('both queries bind the URI and nothing else', async () => {
   const { pool, calls } = fakePool({ present: true, identifiers: [] });
-  expect(await getEditionIdentifiedFormats(pool, EDITION_URI)).toEqual({
+  expect(await getBookIdentifiedFormats(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     identifiers: []
   });
 
   expect(calls.length).toBe(2);
   for (const call of calls) expect(call.values).toEqual([EDITION_URI]);
-  expect(calls[0].sql).toMatch(/FROM editions WHERE uri = \$1/);
+  expect(calls[0].sql).toMatch(/FROM books WHERE uri = \$1/);
   // The claims query must not depend on `identifier_shape_rank` existing: the
   // rank is inline, so this read works on a database that predates 0007.
   expect(calls[1].sql).toMatch(/WHEN 'isbn13' THEN 0/);

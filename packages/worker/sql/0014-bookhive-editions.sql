@@ -1,4 +1,4 @@
--- 0014-bookhive-editions.sql
+-- 0014-bookhive-books.sql
 --
 -- The hive id -> edition join the Bookhive reads need.
 --

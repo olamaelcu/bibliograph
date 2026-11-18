@@ -1,3 +1,26 @@
+bibliograph-worker (0.5.0-1) unstable; urgency=medium
+
+  * 0.5.0: the catalog's top-level table is `books`.
+
+    - `0000-rename-editions-to-books.sql` renames `public.editions`. It sorts
+      before `0001` on purpose: every SQL file is replayed on every deploy, so
+      on an existing host the rename must run before the rewritten files, or
+      `CREATE TABLE IF NOT EXISTS books` would create an empty table first and
+      the rename would find the name taken. A database that holds both tables
+      raises instead of guessing.
+    - `0021-editions-compat-view.sql` exposes the old name as an auto-updatable
+      view for one release. `INSERT ... ON CONFLICT` cannot target a view —
+      PostgreSQL infers the arbiter from a table's unique constraints — so the
+      worker's upserts name `books`; rolling the worker back means
+      `DROP VIEW editions; ALTER TABLE books RENAME TO editions;`.
+    - Only the table is renamed. `edition_uri` and the other columns, the
+      satellite tables, index and constraint names, triggers and functions
+      (`editions_next_tid()`) keep their names.
+    - `scripts/normalize-isbndb-descriptions.mjs` is deleted: it wrote
+      `editions.description`, a column `0007` dropped, so it could only fail.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.4.1-1) unstable; urgency=medium
 
   * 0.4.1: a deadlocked ingest transaction is retried instead of failing the

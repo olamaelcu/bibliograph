@@ -20,7 +20,7 @@ export const EDITION_COLLECTION = 'community.lexicon.media.book.edition';
 
 export type GenreView = { name: string; source: string };
 
-export type EditionGenres = { uri: string; genres: GenreView[] };
+export type BookGenres = { uri: string; genres: GenreView[] };
 
 /**
  * The genres of one edition, ordered as the worker stored them (Goodreads
@@ -30,13 +30,13 @@ export type EditionGenres = { uri: string; genres: GenreView[] };
  * `RecordNotFound`; an edition with no genres yet is an empty `genres` array,
  * because the edition itself does exist.
  */
-export async function getEditionGenres(
+export async function getBookGenres(
   pool: EntityQueryable,
   uri: string
-): Promise<EditionGenres | null> {
+): Promise<BookGenres | null> {
   const [exists, rows] = await Promise.all([
     pool.query<{ present: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM editions WHERE uri = $1) AS present`,
+      `SELECT EXISTS (SELECT 1 FROM books WHERE uri = $1) AS present`,
       [uri]
     ),
     pool.query<{ name: string; source: string }>(

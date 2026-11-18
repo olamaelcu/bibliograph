@@ -64,8 +64,8 @@ function mocked(): { dependencies: XrpcDependencies; calls: string[] } {
     describeFeedGenerator: record('describeFeedGenerator'),
     getFeedSkeleton: record('getFeedSkeleton'),
     entityGet: record('entityGet'),
-    resolveEditions: record('resolveEditions'),
-    searchEditions: record('searchEditions'),
+    resolveBooks: record('resolveBooks'),
+    searchBooks: record('searchBooks'),
     proxyPdsRead: record('proxyPdsRead'),
     forward: record('forward')
   };

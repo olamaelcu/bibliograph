@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { EDITION_COLLECTION, getEditionGenres } from '../src/lib/server/catalog/genres.ts';
+import { EDITION_COLLECTION, getBookGenres } from '../src/lib/server/catalog/genres.ts';
 import type { EntityQueryable } from '../src/lib/server/catalog/entities.ts';
 
 const EDITION_URI = `at://did:plc:genretest/${EDITION_COLLECTION}/3abc`;
@@ -24,12 +24,12 @@ function fakePool(
   return { pool, calls };
 }
 
-test('getEditionGenres answers null when the edition is not in the catalog', async () => {
+test('getBookGenres answers null when the edition is not in the catalog', async () => {
   const { pool } = fakePool({ present: false, genres: [{ name: 'Fantasy', source: 'goodreads' }] });
-  expect(await getEditionGenres(pool, EDITION_URI)).toBe(null);
+  expect(await getBookGenres(pool, EDITION_URI)).toBe(null);
 });
 
-test('getEditionGenres maps the rows in query order', async () => {
+test('getBookGenres maps the rows in query order', async () => {
   const { pool } = fakePool({
     present: true,
     genres: [
@@ -38,7 +38,7 @@ test('getEditionGenres maps the rows in query order', async () => {
     ]
   });
 
-  expect(await getEditionGenres(pool, EDITION_URI)).toEqual({
+  expect(await getBookGenres(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     genres: [
       { name: 'Science Fiction', source: 'goodreads' },
@@ -47,9 +47,9 @@ test('getEditionGenres maps the rows in query order', async () => {
   });
 });
 
-test('getEditionGenres answers an empty list for a known edition with no genres', async () => {
+test('getBookGenres answers an empty list for a known edition with no genres', async () => {
   const { pool } = fakePool({ present: true, genres: [] });
-  expect(await getEditionGenres(pool, EDITION_URI)).toEqual({
+  expect(await getBookGenres(pool, EDITION_URI)).toEqual({
     uri: EDITION_URI,
     genres: []
   });
@@ -57,10 +57,10 @@ test('getEditionGenres answers an empty list for a known edition with no genres'
 
 test('both queries parameterize the URI and nothing else', async () => {
   const { pool, calls } = fakePool({ present: true, genres: [] });
-  await getEditionGenres(pool, EDITION_URI);
+  await getBookGenres(pool, EDITION_URI);
 
   expect(calls.length).toBe(2);
   for (const call of calls) expect(call.values).toEqual([EDITION_URI]);
-  expect(calls[0].sql).toMatch(/FROM editions WHERE uri = \$1/);
+  expect(calls[0].sql).toMatch(/FROM books WHERE uri = \$1/);
   expect(calls[1].sql).toMatch(/ORDER BY eg\.position, g\.name/);
 });

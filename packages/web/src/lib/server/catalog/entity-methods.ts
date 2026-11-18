@@ -2,14 +2,14 @@
  * The catalog XRPC methods the edge answers itself.
  *
  * They are anonymous catalog reads over the deployment's own tables, exactly
- * like `resolveEditions` / `searchEditions`, so they never reach HappyView and
+ * like `resolveBooks` / `searchBooks`, so they never reach HappyView and
  * are not part of `hv-deploy`'s uploaded surface. Keeping the NSIDs in a module
  * without SvelteKit imports makes the dispatch classification testable.
  */
 
 /** The books-wg procedures: `POST`-only by lexicon, answered here. */
-export const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
-export const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
+export const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveBooks';
+export const SEARCH_EDITIONS = 'community.lexicon.media.book.searchBooks';
 
 export const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS]);
 
@@ -19,8 +19,8 @@ export const GET_GENRES_OF_BOOK = 'net.olamaelcu.livtet.biblio.getGenresOfBook';
 export const GET_IDENTIFIED_FORMATS =
   'net.olamaelcu.livtet.biblio.getIdentifiedFormats';
 export const LIST_EDITIONS_BY_CONTRIBUTOR =
-  'net.olamaelcu.livtet.biblio.listEditionsByContributor';
-export const LIST_EDITIONS = 'net.olamaelcu.livtet.biblio.listEditions';
+  'net.olamaelcu.livtet.biblio.listBooksByContributor';
+export const LIST_EDITIONS = 'net.olamaelcu.livtet.biblio.listBooks';
 export const RESOLVE_CONTRIBUTORS = 'net.olamaelcu.livtet.biblio.resolveContributors';
 export const RESOLVE_PUBLISHERS = 'net.olamaelcu.livtet.biblio.resolvePublishers';
 export const SEARCH_CONTRIBUTORS = 'net.olamaelcu.livtet.biblio.searchContributors';

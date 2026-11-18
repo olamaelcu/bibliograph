@@ -4,7 +4,7 @@
 --
 -- Duration is a property of the audio product, exactly like `format` and
 -- `pages`: two ISBNs of the same book can be a 12-hour abridged reading and a
--- 20-hour unabridged one. Holding one merged value on `editions` destroyed that
+-- 20-hour unabridged one. Holding one merged value on `books` destroyed that
 -- evidence, so the claim joins the other five on `edition_identifier_info` and
 -- the edition's public value becomes the rank union in
 -- `edition_identifier_shape` (isbn13 → isbn10 → asin → any other issuer).
@@ -20,7 +20,7 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
      WHERE table_schema = current_schema()
-       AND table_name = 'editions'
+       AND table_name = 'books'
        AND column_name = 'duration_seconds'
   ) THEN
     RETURN;
@@ -33,13 +33,13 @@ BEGIN
          (edition_uri, issuer, value, duration_seconds)
   SELECT i.edition_uri, i.issuer, i.value, e.duration_seconds
     FROM edition_identifiers i
-    JOIN editions e ON e.uri = i.edition_uri
+    JOIN books e ON e.uri = i.edition_uri
    WHERE e.duration_seconds IS NOT NULL
   ON CONFLICT (edition_uri, issuer, value) DO UPDATE
     SET duration_seconds = EXCLUDED.duration_seconds, updated_at = now()
     WHERE edition_identifier_info.duration_seconds IS NULL;
 
-  ALTER TABLE editions DROP COLUMN duration_seconds;
+  ALTER TABLE books DROP COLUMN duration_seconds;
 END
 $migration$;
 

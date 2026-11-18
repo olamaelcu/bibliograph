@@ -63,7 +63,7 @@ BEGIN
 
   INSERT INTO pds_outbox (uri, collection, rkey, op)
   SELECT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
-    FROM editions e
+    FROM books e
    WHERE e.uri = target
   ON CONFLICT (uri) DO UPDATE SET
     op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
@@ -118,7 +118,7 @@ END;
 $function$;
 
 -- ---------------------------------------------------------------------------
--- Entity fan-out: only a real rename republishes the crediting editions
+-- Entity fan-out: only a real rename republishes the crediting books
 -- ---------------------------------------------------------------------------
 
 -- `AFTER UPDATE OF name, identifiers` fires whenever those columns appear in

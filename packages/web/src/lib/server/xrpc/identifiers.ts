@@ -18,7 +18,7 @@
  * Free of `$env` and SvelteKit imports (like `./dispatch.ts`) so it is testable.
  */
 
-import type { Identifier } from '../catalog/edition-view.ts';
+import type { Identifier } from '../catalog/book-view.ts';
 
 /** `null` means at least one entry was malformed; an empty array is no entries. */
 export function parseIdentifierParams(values: string[]): Identifier[] | null {

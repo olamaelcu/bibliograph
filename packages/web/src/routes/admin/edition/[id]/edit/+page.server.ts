@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { requireAdmin } from '$lib/server/admin/auth';
-import { EditionEditError, deleteAdminEdition, loadEditionForEdit } from '$lib/server/admin/edition-edit';
+import { BookEditError, deleteAdminBook, loadBookForEdit } from '$lib/server/admin/book-edit';
 import { catalogPool } from '$lib/server/catalog/db';
 import { CatalogUnavailableError } from '$lib/server/catalog/errors';
 
@@ -10,7 +10,7 @@ export const load: PageServerLoad = async ({ cookies, params }) => {
 
   let edition;
   try {
-    edition = await loadEditionForEdit(catalogPool(), params.id);
+    edition = await loadBookForEdit(catalogPool(), params.id);
   } catch (cause) {
     if (cause instanceof CatalogUnavailableError) error(503, cause.message);
     console.error('[admin] edition editor load failed', cause);
@@ -32,9 +32,9 @@ export const actions: Actions = {
     const revision = String(form.get('revision') ?? '').trim();
 
     try {
-      await deleteAdminEdition(catalogPool(), params.id, revision === '' ? null : revision);
+      await deleteAdminBook(catalogPool(), params.id, revision === '' ? null : revision);
     } catch (cause) {
-      if (cause instanceof EditionEditError) {
+      if (cause instanceof BookEditError) {
         return fail(cause.status, { message: cause.message });
       }
       if (cause instanceof CatalogUnavailableError) {

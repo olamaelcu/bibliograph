@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { parseEditionEdit } from '$lib/admin/edition-edit';
+  import { parseBookEdit } from '$lib/admin/book-edit';
   import {
     identifierText,
     type AdminEntityMatch,
@@ -259,7 +259,7 @@
     };
   }
 
-  const issues = $derived.by(() => parseEditionEdit(buildPayload()).errors);
+  const issues = $derived.by(() => parseBookEdit(buildPayload()).errors);
   const dirty = $derived(JSON.stringify(buildPayload()) !== baseline);
   const valid = $derived(issues.length === 0);
 

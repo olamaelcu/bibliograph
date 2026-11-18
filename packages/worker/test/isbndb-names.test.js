@@ -192,7 +192,7 @@ async function contributorRow(pool) {
 
 async function cleanupIngest(pool) {
   const prefix = `at://${AUTHORITY}/%`;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE identifiers @> $1::jsonb', [
     JSON.stringify(PROBE_IDENTIFIERS)
   ]);
@@ -443,7 +443,7 @@ const MERGE_NAMES = [
 async function cleanupMerge(db) {
   await db.query('DROP TRIGGER IF EXISTS probe_merge_failure ON contributors');
   await db.query('DROP FUNCTION IF EXISTS probe_merge_failure()');
-  await db.query('DELETE FROM editions WHERE uri LIKE $1', [
+  await db.query('DELETE FROM books WHERE uri LIKE $1', [
     `${MERGE_AUTHORITY}/community.lexicon.media.book.edition/mergeed%`
   ]);
   await db.query('DELETE FROM contributors WHERE name = ANY($1)', [MERGE_NAMES]);
@@ -569,7 +569,7 @@ test(
         [MERGE_EDITION_TWO, 'mergeed000002', 'Merge Probe Two']
       ]) {
         await client.query(
-          'INSERT INTO editions (uri, rkey, title, created_at) VALUES ($1, $2, $3, now())',
+          'INSERT INTO books (uri, rkey, title, created_at) VALUES ($1, $2, $3, now())',
           [uri, rkey, title]
         );
       }

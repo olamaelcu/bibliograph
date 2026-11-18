@@ -273,15 +273,15 @@ const XRPC_METHODS: Record<string, true> = {
   'com.atproto.sync.getRepo': true,
   'com.atproto.sync.getRepoStatus': true,
   'com.atproto.sync.listRepos': true,
-  'community.lexicon.media.book.resolveEditions': true,
-  'community.lexicon.media.book.searchEditions': true,
+  'community.lexicon.media.book.resolveBooks': true,
+  'community.lexicon.media.book.searchBooks': true,
   'community.lexicon.service.describe': true,
   'net.olamaelcu.livtet.biblio.getContributor': true,
   'net.olamaelcu.livtet.biblio.getPublisher': true,
   'net.olamaelcu.livtet.biblio.graph.isFollowing': true,
   'net.olamaelcu.livtet.biblio.graph.listFollowees': true,
-  'net.olamaelcu.livtet.biblio.listEditionsByContributor': true,
-  'net.olamaelcu.livtet.biblio.listEditions': true,
+  'net.olamaelcu.livtet.biblio.listBooksByContributor': true,
+  'net.olamaelcu.livtet.biblio.listBooks': true,
   'net.olamaelcu.livtet.biblio.listBooksOnShelf': true,
   'net.olamaelcu.livtet.biblio.listShelves': true,
   'net.olamaelcu.livtet.biblio.resolveContributors': true,
@@ -328,8 +328,8 @@ export function normalizeXrpcMethod(method: string): string {
 
 const CATALOG_OPERATIONS: Record<string, true> = {
   getGenresOfBook: true,
-  resolveEditions: true,
-  searchEditions: true
+  resolveBooks: true,
+  searchBooks: true
 };
 
 export function normalizeCatalogOperation(operation: string): string {
@@ -539,11 +539,11 @@ export function createWebMetrics(): WebMetrics {
     ),
     catalogSearchDecisions: registry.counter(
       'bibliograph_catalog_search_decision_total',
-      'searchEditions requests by provider-hydration decision.'
+      'searchBooks requests by provider-hydration decision.'
     ),
     catalogSearchMatches: registry.histogram(
       'bibliograph_catalog_search_first_page_matches',
-      'First-page total of each searchEditions call, to size the hydration threshold.',
+      'First-page total of each searchBooks call, to size the hydration threshold.',
       SEARCH_MATCH_BUCKETS
     ),
     feedRequests: registry.counter(

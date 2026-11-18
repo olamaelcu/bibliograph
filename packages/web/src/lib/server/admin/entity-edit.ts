@@ -231,7 +231,7 @@ export async function deleteAdminEntity(
       const credits = await client.query<{ n: number; example: string | null }>(
         `SELECT count(*)::int AS n, min(e.title) AS example
            FROM edition_contributors ec
-           JOIN editions e ON e.uri = ec.edition_uri
+           JOIN books e ON e.uri = ec.edition_uri
           WHERE ec.contributor_id = $1`,
         [current.id]
       );
@@ -251,7 +251,7 @@ export async function deleteAdminEntity(
       const links = await client.query<{ n: number; example: string | null }>(
         `SELECT count(*)::int AS n, min(e.title) AS example
            FROM edition_identifier_publishers ip
-           JOIN editions e ON e.uri = ip.edition_uri
+           JOIN books e ON e.uri = ip.edition_uri
           WHERE ip.publisher_id = $1`,
         [current.id]
       );

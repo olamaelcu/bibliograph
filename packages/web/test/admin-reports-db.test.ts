@@ -54,7 +54,7 @@ async function addEdition(
   }
 ): Promise<void> {
   await db.query(
-    `INSERT INTO editions (
+    `INSERT INTO books (
        uri, rkey, title, cover_url, created_at, indexed_at
      ) VALUES ($1, $2, $3, $4, $5, $5)`,
     [uri(edition.rkey), edition.rkey, edition.title, edition.cover, edition.indexedAt]

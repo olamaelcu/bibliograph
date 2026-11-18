@@ -1,3 +1,22 @@
+bibliograph-web (0.5.0-1) unstable; urgency=medium
+
+  * 0.5.0: the catalog reads name `books`; the XRPC surface is unchanged.
+
+    - Every catalog query — resolve, search, list, genres, identified formats,
+      stats, cover lookup, the admin reports and read/edit/merge paths, and the
+      feed — reads `books`. The record's collection is still
+      `community.lexicon.media.book.edition`, the report ids are still
+      `edition-*`, and the lexicon descriptions still say edition.
+    - The storage and read modules follow the table: `catalog/editions.ts` →
+      `books.ts`, `edition-view.ts` → `book-view.ts`, `admin/edition-read.ts`,
+      `edition-edit.ts` and `editions.ts` → `book-*.ts`, with `EditionShape` →
+      `BookShape` and the rest of their exported names. The record builder and
+      the publish snapshot keep their names: they build the XRPC record.
+    - `catalog/entities.ts` imports the catalog view as `CatalogBookView` so the
+      lexicon-shaped `defs#bookView` type keeps its own name.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.4.1-1) unstable; urgency=medium
 
   * 0.4.1: catalog pages are ordered by `uri`, not ingest time.

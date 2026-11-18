@@ -206,7 +206,11 @@ Quick check selection:
 
 Before a release or a full deploy, run the complete suite regardless of the
 matrix: `pnpm web:check`, `pnpm web:test`, `pnpm web:build`, `pnpm worker:test`,
-`pnpm verify:lex`, `mise run hv-test`, `mise run catalog-schema-check`.
+`pnpm verify:lex`, `mise run hv-test`, `mise run catalog-schema-check`. A release
+that changes the catalog SQL also runs `mise run catalog-upgrade-check`, which
+replays the working tree's files over a database built from the last pre-change
+release (`CATALOG_UPGRADE_BASE`, default `v0.4.1`) — `catalog-schema-check` only
+proves the fresh build, and every file is re-applied on every deploy.
 
 ## What `mise run deploy` does
 

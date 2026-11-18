@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { parseEditionEdit } from '../src/lib/admin/edition-edit.ts';
+import { parseBookEdit } from '../src/lib/admin/book-edit.ts';
 
 const valid = () => ({
   title: 'Dune',
@@ -21,11 +21,11 @@ const withIdentifier = (extra: Record<string, unknown>) => ({
 });
 
 function paths(body: unknown): string[] {
-  return parseEditionEdit(body).errors.map((issue) => issue.path);
+  return parseBookEdit(body).errors.map((issue) => issue.path);
 }
 
 test('accepts a minimal edition and normalises defaults', () => {
-  const parsed = parseEditionEdit(valid());
+  const parsed = parseBookEdit(valid());
   expect(parsed.errors).toEqual([]);
   expect(parsed.value).toBeTruthy();
   expect(parsed.value.title).toBe('Dune');
@@ -64,7 +64,7 @@ test('canonicalises valid BCP 47 language tags', () => {
     ['ja-Latn-hepburn-heploc', 'ja-Latn-alalc97'],
     ['English', 'english']
   ]) {
-    const parsed = parseEditionEdit(withInfo({ language: input }));
+    const parsed = parseBookEdit(withInfo({ language: input }));
     expect(parsed.errors, input).toEqual([]);
     expect(parsed.value?.identifiers[0]?.info?.language, input).toBe(expected);
   }
@@ -72,7 +72,7 @@ test('canonicalises valid BCP 47 language tags', () => {
 
 test('treats empty or missing language as null', () => {
   for (const value of [undefined, null, '', '   ']) {
-    const parsed = parseEditionEdit(withInfo({ language: value }));
+    const parsed = parseBookEdit(withInfo({ language: value }));
     expect(parsed.errors).toEqual([]);
     expect(parsed.value?.identifiers[0]?.info?.language).toBe(null);
   }
@@ -80,7 +80,7 @@ test('treats empty or missing language as null', () => {
 
 test('rejects invalid BCP 47 language tags', () => {
   for (const value of ['en_US', 'en-', 'en--US', '123', 'not a tag']) {
-    const errors = parseEditionEdit(withInfo({ language: value })).errors;
+    const errors = parseBookEdit(withInfo({ language: value })).errors;
     expect(errors.some((issue) => issue.path === 'identifiers.0.info.language'), `expected a language error for ${JSON.stringify(value)}`).toBeTruthy();
   }
 });
@@ -104,7 +104,7 @@ test('validates published dates, including calendar days', () => {
 });
 
 test('identifier claims are optional, nullable and typed', () => {
-  const parsed = parseEditionEdit(
+  const parsed = parseBookEdit(
     withInfo({ pages: '12', format: 'hardcover', durationSeconds: 12 })
   );
   expect(parsed.errors).toEqual([]);
@@ -117,7 +117,7 @@ test('identifier claims are optional, nullable and typed', () => {
     durationSeconds: 12
   });
 
-  const durationOnly = parseEditionEdit(withInfo({ durationSeconds: 1 }));
+  const durationOnly = parseBookEdit(withInfo({ durationSeconds: 1 }));
   expect(durationOnly.errors, 'a duration alone is a claim').toEqual([]);
   expect(durationOnly.value?.identifiers[0]?.info).toEqual({
     format: null,
@@ -128,7 +128,7 @@ test('identifier claims are optional, nullable and typed', () => {
     durationSeconds: 1
   });
 
-  const cleared = parseEditionEdit(withInfo(null));
+  const cleared = parseBookEdit(withInfo(null));
   expect(cleared.errors).toEqual([]);
   expect(cleared.value?.identifiers[0]?.info).toBe(null);
 
@@ -157,7 +157,7 @@ test('rejects duplicate or empty identifiers', () => {
 });
 
 test('normalises legacy roles and rejects unknown role tokens', () => {
-  const editor = parseEditionEdit({
+  const editor = parseBookEdit({
     ...valid(),
     contributors: [{ name: 'A', role: 'editor' }]
   });
@@ -177,11 +177,11 @@ test('normalises legacy roles and rejects unknown role tokens', () => {
     ['A01', 'A01'],
     ['Z99', 'Z99']
   ]) {
-    const parsed = parseEditionEdit({ ...valid(), contributors: [{ name: 'A', role }] });
+    const parsed = parseBookEdit({ ...valid(), contributors: [{ name: 'A', role }] });
     expect(parsed.errors, role).toEqual([]);
     expect(parsed.value?.contributors[0]?.role, role).toBe(expected);
   }
-  const blank = parseEditionEdit({
+  const blank = parseBookEdit({
     ...valid(),
     contributors: [{ name: 'A', role: '' }]
   });
@@ -222,7 +222,7 @@ test('publisher links hang off the identifier and accept ids or new names', () =
     )).toBeTruthy();
   expect(paths(withIdentifier({ publishers: 'Ace' })).includes('identifiers.0.publishers')).toBeTruthy();
   // Omitted links are not resent, so a partial client cannot clear them.
-  const parsed = parseEditionEdit(valid());
+  const parsed = parseBookEdit(valid());
   expect('publishers' in (parsed.value?.identifiers[0] as object)).toBe(false);
 });
 

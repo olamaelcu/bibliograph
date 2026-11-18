@@ -44,7 +44,7 @@ async function existingByIdentifiers(client, identifiers) {
   const result = await client.query(
     `SELECT e.uri
        FROM edition_identifiers i
-       JOIN editions e ON e.uri = i.edition_uri
+       JOIN books e ON e.uri = i.edition_uri
       WHERE (i.issuer, i.value) IN (${tuples})
       LIMIT 1`,
     params
@@ -61,7 +61,7 @@ async function insertEdition(client, uri, rkey, candidate) {
   const title = candidate.title;
   const series = candidate.series ? JSON.stringify(candidate.series) : null;
   const inserted = await client.query(
-    `INSERT INTO editions (
+    `INSERT INTO books (
        uri, rkey, title, subtitle, chapters, series,
        book_edition, cover_url, created_at, indexed_at
      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, now(), now())
@@ -91,7 +91,7 @@ async function fillMissingFields(client, uri, candidate) {
   };
 
   await client.query(
-    `UPDATE editions SET
+    `UPDATE books SET
        subtitle = COALESCE(subtitle, $2),
        chapters = COALESCE(chapters, $3),
        series = COALESCE(series, $4::jsonb),

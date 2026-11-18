@@ -38,7 +38,7 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS edition_shape (
-  edition_uri text PRIMARY KEY REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text PRIMARY KEY REFERENCES books (uri) ON DELETE CASCADE,
   format text,
   language text,
   published_date text,
@@ -137,7 +137,7 @@ CREATE OR REPLACE TRIGGER refresh_edition_shape
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS edition_publisher_list (
-  edition_uri text PRIMARY KEY REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text PRIMARY KEY REFERENCES books (uri) ON DELETE CASCADE,
   publisher_ids bigint[] NOT NULL DEFAULT '{}'
 );
 

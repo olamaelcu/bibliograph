@@ -82,7 +82,7 @@ async function applySchema() {
 async function cleanup() {
   if (!pool) return;
   const prefix = `at://${AUTHORITY}/%`;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE name LIKE $1', ['Catalog Schema Probe%']);
@@ -112,6 +112,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
         AND table_name = ANY($1)
       ORDER BY table_name`,
     [[
+      'books',
       'contributors',
       'edition_contributors',
       'edition_cover_fetches',
@@ -122,7 +123,6 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'edition_identifiers',
       'edition_publisher_list',
       'edition_shape',
-      'editions',
       'genres',
       'google_books_cache',
       'isbndb_cache',
@@ -134,6 +134,7 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     ]]
   );
   expect(tables.rows.map((row) => row.table_name)).toEqual([
+      'books',
       'contributors',
       'edition_contributors',
       'edition_cover_fetches',
@@ -144,7 +145,6 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'edition_identifiers',
       'edition_publisher_list',
       'edition_shape',
-      'editions',
       'genres',
       'google_books_cache',
       'isbndb_cache',
@@ -251,7 +251,7 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   expect(result.uri).toMatch(new RegExp(`^at://${AUTHORITY}/${COLLECTION}/[234567abcdefghijklmnopqrstuvwxyz]{13}$`));
   editionUri = result.uri;
 
-  const edition = await pool.query('SELECT * FROM editions WHERE uri = $1', [editionUri]);
+  const edition = await pool.query('SELECT * FROM books WHERE uri = $1', [editionUri]);
   expect(edition.rowCount).toBe(1);
   const row = edition.rows[0];
   editionRkey = row.rkey;
@@ -318,7 +318,7 @@ test('ingest mints a TID edition, links entities and queues one create', { skip:
   // 0010 moved the duration onto the identifier; no edition keeps one.
   const durationColumn = await pool.query(
     `SELECT 1 FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'editions'
+      WHERE table_schema = 'public' AND table_name = 'books'
         AND column_name = 'duration_seconds'`
   );
   expect(durationColumn.rowCount, 'editions no longer holds a duration').toBe(0);
@@ -413,7 +413,7 @@ test('an extent keeps only the unit its format uses, and the shape publishes one
   try {
     await client.query('BEGIN');
     await client.query(
-      `INSERT INTO editions (uri, title, created_at)
+      `INSERT INTO books (uri, title, created_at)
        VALUES ($1, 'Audio Only Probe', now()), ($2, 'Mixed Format Probe', now())`,
       [audioOnly, mixed]
     );
@@ -489,13 +489,13 @@ test('re-ingesting the same identifier bag updates in place without downgrading 
   expect(result).toEqual({ uri: editionUri, created: false });
 
   const count = await pool.query(
-    'SELECT count(*)::int AS n FROM editions WHERE uri = $1',
+    'SELECT count(*)::int AS n FROM books WHERE uri = $1',
     [editionUri]
   );
   expect(count.rows[0].n).toBe(1);
 
   const edition = await pool.query(
-    'SELECT subtitle, title FROM editions WHERE uri = $1',
+    'SELECT subtitle, title FROM books WHERE uri = $1',
     [editionUri]
   );
   expect(edition.rows[0].subtitle).toBe('Filled by a later provider');
@@ -707,7 +707,7 @@ test('contributor/publisher edits and edition deletes enqueue update/delete and 
   expect(claimed[0].op).toBe('update');
   expect(await completeEntry(pool, claimed[0], { cid: 'bafyreicatalogschemacheck3' })).toBe(true);
 
-  await pool.query('DELETE FROM editions WHERE uri = $1', [editionUri]);
+  await pool.query('DELETE FROM books WHERE uri = $1', [editionUri]);
 
   const deleted = await pool.query('SELECT op, rkey FROM pds_outbox WHERE uri = $1', [
     editionUri
@@ -829,4 +829,18 @@ test('language claims are normalized to a single BCP 47 spelling', { skip: SKIP 
     unknown: 'zzz',
     blank: null
   });
+});
+
+// The catalog table is `books`; `editions` survives only as the one-release
+// compatibility view 0021 creates. A table named `editions` here means a
+// historical file still creates one, which is exactly the replay bug 0000 exists
+// to prevent.
+test('the catalog table is books, and editions is only the compatibility view', { skip: SKIP }, async () => {
+  const { rows } = await pool.query(
+    `SELECT to_regclass('public.books') IS NOT NULL AS has_books,
+            (SELECT relkind::text FROM pg_class
+              WHERE oid = to_regclass('public.editions')) AS editions_kind`
+  );
+  expect(rows[0].has_books).toBe(true);
+  expect(rows[0].editions_kind).not.toBe('r');
 });

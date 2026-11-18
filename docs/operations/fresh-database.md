@@ -68,7 +68,7 @@ Most files are **idempotent and additive**:
 Re-running them on a live catalog is safe. They are **forward-only**, though, not
 purely additive: a migration file may backfill rows and then drop a column or
 table behind a guard — `0007`/`0008` moved the edition shape claims and publisher
-links onto `edition_identifiers` and dropped the five `editions` columns and
+links onto `edition_identifiers` and dropped the five `books` columns and
 `edition_publishers`. Each file is one transaction, so a failing file rolls back
 on its own while earlier files stay applied; those drops are not reversible, so
 take a `pg_dump` before a release that adds one. Files do not
@@ -130,13 +130,19 @@ Watch `bibliograph_pds_outbox_parked` while it drains.
 
 What is created:
 
-- `editions`, `edition_identifiers`, `contributors`, `edition_contributors`,
+- `books`, `edition_identifiers`, `contributors`, `edition_contributors`,
   `publishers`;
+- `0000-rename-editions-to-books.sql` renames an existing `editions` table (a
+  fresh database creates `books` directly), and it sorts before `0001` because
+  every file is replayed on every deploy;
+- `0021-editions-compat-view.sql` keeps the old name readable as an
+  auto-updatable view over `books` for one release — writes that use
+  `ON CONFLICT` must still name `books`, since a view exposes no constraints;
 - `0007-edition-identifier-info.sql` adds `edition_identifier_info` (one shape
   claim row per identifier, cascading from `edition_identifiers`) and the
   `edition_identifier_shape` view, backfills each edition's language,
   publication date, format, pages and description onto its identifiers, and
-  then drops those five columns from `editions`;
+  then drops those five columns from `books`;
 - `0008-edition-identifier-publishers.sql` adds `edition_identifier_publishers`
   (FK to `publishers`, cascading from `edition_identifiers`) and the
   `edition_publishers_shape` view, backfills each edition's publisher links onto

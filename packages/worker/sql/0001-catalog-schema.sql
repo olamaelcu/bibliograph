@@ -62,7 +62,7 @@ $function$;
 -- Catalog entities
 -- ---------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS editions (
+CREATE TABLE IF NOT EXISTS books (
   uri text PRIMARY KEY,
   rkey text NOT NULL DEFAULT editions_next_tid() UNIQUE,
   title text NOT NULL,
@@ -82,10 +82,10 @@ CREATE TABLE IF NOT EXISTS editions (
 );
 
 CREATE INDEX IF NOT EXISTS editions_created_at_idx
-  ON editions (created_at DESC, uri);
+  ON books (created_at DESC, uri);
 
 CREATE TABLE IF NOT EXISTS edition_identifiers (
-  edition_uri text NOT NULL REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text NOT NULL REFERENCES books (uri) ON DELETE CASCADE,
   issuer text NOT NULL,
   value text NOT NULL,
   PRIMARY KEY (edition_uri, issuer, value)
@@ -107,7 +107,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS contributors_identity_idx
   ON contributors (lower(name), identifiers);
 
 CREATE TABLE IF NOT EXISTS edition_contributors (
-  edition_uri text NOT NULL REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text NOT NULL REFERENCES books (uri) ON DELETE CASCADE,
   contributor_id bigint NOT NULL REFERENCES contributors (id) ON DELETE RESTRICT,
   position integer NOT NULL,
   role text NOT NULL DEFAULT 'author',
@@ -235,7 +235,7 @@ BEGIN
 
   INSERT INTO pds_outbox (uri, collection, rkey, op)
   SELECT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
-    FROM editions e
+    FROM books e
    WHERE e.uri = target
   ON CONFLICT (uri) DO UPDATE SET
     op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
@@ -254,7 +254,7 @@ BEGIN
   INSERT INTO pds_outbox (uri, collection, rkey, op)
   SELECT DISTINCT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
     FROM edition_contributors ec
-    JOIN editions e ON e.uri = ec.edition_uri
+    JOIN books e ON e.uri = ec.edition_uri
    WHERE ec.contributor_id = NEW.id
   ON CONFLICT (uri) DO UPDATE SET
     op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
@@ -265,7 +265,7 @@ END;
 $function$;
 
 CREATE OR REPLACE TRIGGER pds_enqueue_editions
-  AFTER INSERT OR UPDATE OR DELETE ON editions
+  AFTER INSERT OR UPDATE OR DELETE ON books
   FOR EACH ROW EXECUTE FUNCTION pds_enqueue_edition();
 
 CREATE OR REPLACE TRIGGER pds_enqueue_identifiers
@@ -306,7 +306,7 @@ BEGIN
   SELECT EXISTS (
     SELECT 1 FROM information_schema.columns
      WHERE table_schema = current_schema()
-       AND table_name = 'editions'
+       AND table_name = 'books'
        AND column_name = 'format'
   ) INTO had_shape;
 
@@ -372,7 +372,7 @@ SELECT
       FROM edition_identifiers i
      WHERE i.edition_uri = e.uri
   ), '[]'::jsonb) AS identifiers
-FROM editions e$book$;
+FROM books e$book$;
 
   EXECUTE $lua$CREATE OR REPLACE VIEW appview_book_lua AS
 SELECT

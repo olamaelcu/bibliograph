@@ -1,5 +1,5 @@
 /**
- * `searchEditions` ordering and language filtering against the development
+ * `searchBooks` ordering and language filtering against the development
  * catalog.
  *
  * `sort`/`order`/`language` are local extensions over the lexicon's
@@ -12,8 +12,8 @@ import { expect, test, afterAll, beforeAll } from 'vitest';
 
 import pg from 'pg';
 
-import { listEditionsByContributor } from '../src/lib/server/catalog/entities.ts';
-import { searchEditions } from '../src/lib/server/catalog/editions.ts';
+import { listBooksByContributor } from '../src/lib/server/catalog/entities.ts';
+import { searchBooks } from '../src/lib/server/catalog/books.ts';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph';
@@ -36,7 +36,7 @@ function requiredPool(t: { skip: (message?: string) => void }): pg.Pool | null {
 
 async function cleanup(): Promise<void> {
   if (!pool) return;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${AUTHORITY}/%`]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [`at://${AUTHORITY}/%`]);
 }
 
 type Fixture = {
@@ -52,7 +52,7 @@ async function seedEdition(fixture: Fixture): Promise<void> {
   const rkey = fixture.identifier;
   const uri = `at://${AUTHORITY}/${EDITION_COLLECTION}/${rkey}`;
   await db.query(
-    `INSERT INTO editions (uri, rkey, title, created_at, indexed_at)
+    `INSERT INTO books (uri, rkey, title, created_at, indexed_at)
      VALUES ($1, $2, $3, now(), now())`,
     [uri, rkey, fixture.title]
   );
@@ -70,8 +70,8 @@ async function seedEdition(fixture: Fixture): Promise<void> {
 }
 
 /** Titles of the fixture editions a query returned, in result order. */
-async function titles(input: Parameters<typeof searchEditions>[0]): Promise<string[]> {
-  const results = await searchEditions(input, pool as pg.Pool);
+async function titles(input: Parameters<typeof searchBooks>[0]): Promise<string[]> {
+  const results = await searchBooks(input, pool as pg.Pool);
   return results.items.map((item) => item.title);
 }
 
@@ -125,7 +125,7 @@ async function creditFixtures(): Promise<void> {
   );
   await db.query(
     `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role)
-     SELECT e.uri, $1, 1, 'A01' FROM editions e WHERE e.uri LIKE $2
+     SELECT e.uri, $1, 1, 'A01' FROM books e WHERE e.uri LIKE $2
      ON CONFLICT DO NOTHING`,
     [Number(contributor.rows[0]?.id), `at://${AUTHORITY}/%`]
   );
@@ -219,7 +219,7 @@ async function creditedTitles(input: {
   order?: 'asc' | 'desc';
 }): Promise<string[]> {
   await creditFixtures();
-  const page = await listEditionsByContributor(pool as pg.Pool, {
+  const page = await listBooksByContributor(pool as pg.Pool, {
     contributor: CONTRIBUTOR_URI,
     offset: 0,
     limit: 25,
@@ -238,7 +238,7 @@ test('the contributor listing sorts exactly like a search', async (t) => {
     { sort: 'publishedYear' as const },
     { sort: 'publishedYear' as const, order: 'desc' as const }
   ]) {
-    expect(await creditedTitles(params), `contributor listing matches searchEditions for ${JSON.stringify(params)}`).toEqual(await titles({ ...base, ...params }));
+    expect(await creditedTitles(params), `contributor listing matches searchBooks for ${JSON.stringify(params)}`).toEqual(await titles({ ...base, ...params }));
   }
 
   // `relevance` is the listing's own order (newest first), not the search's.
@@ -252,7 +252,7 @@ test('the contributor listing filters by language and counts what it returns', a
   if (!db) return;
   await creditFixtures();
 
-  const english = await listEditionsByContributor(db, {
+  const english = await listBooksByContributor(db, {
     contributor: CONTRIBUTOR_URI,
     language: 'en',
     offset: 0,
@@ -263,7 +263,7 @@ test('the contributor listing filters by language and counts what it returns', a
   expect(english?.total).toBe(2);
   expect(english?.cursor).toBe(undefined);
 
-  const spanish = await listEditionsByContributor(db, {
+  const spanish = await listBooksByContributor(db, {
     contributor: CONTRIBUTOR_URI,
     language: 'ES',
     offset: 0,
@@ -272,7 +272,7 @@ test('the contributor listing filters by language and counts what it returns', a
   expect((spanish?.items ?? []).map((item) => item.edition.title).sort()).toEqual([`${TOKEN} Delta`, `${TOKEN} Gamma`]);
   expect(spanish?.total).toBe(2);
 
-  const all = await listEditionsByContributor(db, {
+  const all = await listBooksByContributor(db, {
     contributor: CONTRIBUTOR_URI,
     offset: 0,
     limit: 25

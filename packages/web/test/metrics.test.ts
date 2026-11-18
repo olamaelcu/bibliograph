@@ -125,8 +125,8 @@ test('proxy counters collapse unknown NSIDs to other and mark thrown calls', () 
 
 test('catalog operations and feed kinds are fixed label sets', () => {
   const metrics = createWebMetrics();
-  recordCatalogQuery(metrics, 'resolveEditions', 'ok', 0.02);
-  recordCatalogQuery(metrics, 'searchEditions', 'unavailable', 0.03);
+  recordCatalogQuery(metrics, 'resolveBooks', 'ok', 0.02);
+  recordCatalogQuery(metrics, 'searchBooks', 'unavailable', 0.03);
   recordCatalogQuery(metrics, 'bogus', 'error', 0.01);
   recordFeedRequest(metrics, 'public', 200);
   recordFeedRequest(metrics, 'following', 401);
@@ -134,10 +134,10 @@ test('catalog operations and feed kinds are fixed label sets', () => {
   recordFeedRequest(metrics, 'weird', 500);
 
   const text = renderWebMetrics(metrics);
-  expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="resolveEditions",outcome="ok"\} 1$/m);
-  expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="searchEditions",outcome="unavailable"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="resolveBooks",outcome="ok"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="searchBooks",outcome="unavailable"\} 1$/m);
   expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="other",outcome="error"\} 1$/m);
-  expect(text).toMatch(/^bibliograph_catalog_query_duration_seconds_count\{operation="resolveEditions"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_catalog_query_duration_seconds_count\{operation="resolveBooks"\} 1$/m);
   expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="public",outcome="ok"\} 1$/m);
   expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="following",outcome="auth_required"\} 1$/m);
   expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="invalid",outcome="invalid_request"\} 1$/m);
@@ -247,7 +247,7 @@ test('an untouched registry still exposes every contracted family header', () =>
 test('XRPC and upstream histograms are labelled by method, backend and outcome', () => {
   const metrics = createWebMetrics();
   recordXrpcRequest(metrics, {
-    method: 'community.lexicon.media.book.searchEditions',
+    method: 'community.lexicon.media.book.searchBooks',
     backend: 'catalog',
     status: 200,
     durationSeconds: 0.02
@@ -275,7 +275,7 @@ test('XRPC and upstream histograms are labelled by method, backend and outcome',
   const text = renderWebMetrics(metrics);
   // The backend that answered is the split the dashboard needs: the same NSID
   // must never share a series between the edge and the proxied AppView.
-  expect(text).toMatch(/^bibliograph_xrpc_request_duration_seconds_bucket\{method="community\.lexicon\.media\.book\.searchEditions",backend="catalog",outcome="ok",le="0\.025"\} 1$/m);
+  expect(text).toMatch(/^bibliograph_xrpc_request_duration_seconds_bucket\{method="community\.lexicon\.media\.book\.searchBooks",backend="catalog",outcome="ok",le="0\.025"\} 1$/m);
   expect(text).toMatch(/^bibliograph_xrpc_request_duration_seconds_bucket\{method="net\.olamaelcu\.livtet\.biblio\.getReviewsByBook",backend="happyview",outcome="error",le="0\.5"\} 1$/m);
   // An NSID outside the allowlist collapses instead of minting a series.
   expect(text).toMatch(/^bibliograph_xrpc_request_duration_seconds_bucket\{method="other",backend="pds",outcome="exception",le="\+Inf"\} 1$/m);

@@ -18,27 +18,27 @@
 import type { Pool, PoolClient } from 'pg';
 import type { AdminEdition } from '../../admin/types.ts';
 import {
-  parseEditionEdit,
-  type EditionEditContributor,
-  type EditionEditIdentifier,
-  type EditionEditIdentifierInfo,
-  type EditionEditInput,
-  type EditionEditPublisher
-} from '../../admin/edition-edit.ts';
-import { loadAdminEditionsFrom } from './edition-read.ts';
+  parseBookEdit,
+  type BookEditContributor,
+  type BookEditIdentifier,
+  type BookEditIdentifierInfo,
+  type BookEditInput,
+  type BookEditPublisher
+} from '../../admin/book-edit.ts';
+import { loadAdminBooksFrom } from './book-read.ts';
 import { canonicalIdentifiersJson } from '../../../../../worker/lib/record-fields.js';
 
 const CONTRIBUTOR_COLLECTION = 'net.olamaelcu.livtet.biblio.contributor';
 const PUBLISHER_COLLECTION = 'net.olamaelcu.livtet.biblio.publisher';
 
-export class EditionEditError extends Error {
+export class BookEditError extends Error {
   readonly status: number;
   readonly code: string;
   readonly field?: string;
 
   constructor(status: number, message: string, code: string, field?: string) {
     super(message);
-    this.name = 'EditionEditError';
+    this.name = 'BookEditError';
     this.status = status;
     this.code = code;
     this.field = field;
@@ -62,26 +62,26 @@ function normalizeRef(raw: string): string {
 
 async function findEditionUri(client: Pool, ref: string): Promise<string | null> {
   const result = await client.query<{ uri: string }>(
-    'SELECT uri FROM editions WHERE uri = $1 OR rkey = $1 LIMIT 1',
+    'SELECT uri FROM books WHERE uri = $1 OR rkey = $1 LIMIT 1',
     [normalizeRef(ref)]
   );
   return result.rows[0]?.uri ?? null;
 }
 
 /** The editor's read path: rkey or at-URI to the full editable record. */
-export async function loadEditionForEdit(
+export async function loadBookForEdit(
   pool: Pool,
   ref: string
 ): Promise<AdminEdition | null> {
   const uri = await findEditionUri(pool, ref);
   if (uri === null) return null;
-  const records = await loadAdminEditionsFrom(pool, [uri]);
+  const records = await loadAdminBooksFrom(pool, [uri]);
   return records[0] ?? null;
 }
 
 function sameCredits(
   current: AdminEdition['contributors'],
-  next: EditionEditContributor[]
+  next: BookEditContributor[]
 ): boolean {
   return (
     current.length === next.length &&
@@ -104,7 +104,7 @@ function sameCredits(
 async function resolveEntity(
   client: PoolClient,
   kind: 'contributor' | 'publisher',
-  entry: { id: number | null; name: string | null; identifiers: EditionEditIdentifier[] },
+  entry: { id: number | null; name: string | null; identifiers: BookEditIdentifier[] },
   authority: string
 ): Promise<number> {
   const table = kind === 'contributor' ? 'contributors' : 'publishers';
@@ -114,7 +114,7 @@ async function resolveEntity(
       [entry.id]
     );
     if (found.rowCount === 0) {
-      throw new EditionEditError(
+      throw new BookEditError(
         400,
         `unknown ${kind} id ${entry.id}`,
         kind === 'contributor' ? 'UnknownContributor' : 'UnknownPublisher'
@@ -124,7 +124,7 @@ async function resolveEntity(
   }
 
   if (entry.name === null) {
-    throw new EditionEditError(
+    throw new BookEditError(
       400,
       `a new ${kind} needs a display name`,
       kind === 'contributor' ? 'UnknownContributor' : 'UnknownPublisher'
@@ -152,7 +152,7 @@ async function resolveEntity(
   );
   const row = existing.rows[0];
   if (!row) {
-    throw new EditionEditError(
+    throw new BookEditError(
       409,
       `${kind} changed while saving; reload and retry`,
       'Conflict'
@@ -169,22 +169,22 @@ async function resolveEntity(
   return Number(row.id);
 }
 
-export async function updateAdminEdition(
+export async function updateAdminBook(
   pool: Pool,
   ref: string,
   body: unknown
 ): Promise<AdminEdition> {
-  const parsed = parseEditionEdit(body);
+  const parsed = parseBookEdit(body);
   if (parsed.value === null) {
     const first = parsed.errors[0];
-    throw new EditionEditError(
+    throw new BookEditError(
       400,
       first?.path ? `${first.path}: ${first.message}` : (first?.message ?? 'invalid edition'),
       'InvalidEdition',
       first?.path
     );
   }
-  const input: EditionEditInput = parsed.value;
+  const input: BookEditInput = parsed.value;
 
   const client = await pool.connect();
   let uri: string;
@@ -192,20 +192,20 @@ export async function updateAdminEdition(
     await client.query('BEGIN');
 
     const found = await client.query<{ uri: string }>(
-      `SELECT uri FROM editions WHERE uri = $1 OR rkey = $1 LIMIT 1 FOR UPDATE`,
+      `SELECT uri FROM books WHERE uri = $1 OR rkey = $1 LIMIT 1 FOR UPDATE`,
       [normalizeRef(ref)]
     );
     const foundUri = found.rows[0]?.uri;
     if (!foundUri) {
-      throw new EditionEditError(404, 'edition not found', 'NotFound');
+      throw new BookEditError(404, 'edition not found', 'NotFound');
     }
     uri = foundUri;
 
-    const current = (await loadAdminEditionsFrom(client, [uri], { forUpdate: true }))[0];
-    if (!current) throw new EditionEditError(404, 'edition not found', 'NotFound');
+    const current = (await loadAdminBooksFrom(client, [uri], { forUpdate: true }))[0];
+    if (!current) throw new BookEditError(404, 'edition not found', 'NotFound');
 
     if (input.expectedRevision !== null && input.expectedRevision !== current.revision) {
-      throw new EditionEditError(
+      throw new BookEditError(
         409,
         'this edition changed since it was loaded; reload before saving',
         'EditionChanged'
@@ -214,11 +214,11 @@ export async function updateAdminEdition(
 
     const authority = /^at:\/\/([^/]+)\//.exec(uri)?.[1];
     if (!authority) {
-      throw new EditionEditError(409, 'edition URI has no repo authority', 'InvalidEditionUri');
+      throw new BookEditError(409, 'edition URI has no repo authority', 'InvalidEditionUri');
     }
 
     await client.query(
-      `UPDATE editions SET
+      `UPDATE books SET
          title = $2, subtitle = $3, chapters = $4,
          series = $5::jsonb, book_edition = $6, cover_url = $7
        WHERE uri = $1`,
@@ -272,8 +272,8 @@ export async function updateAdminEdition(
 
     // Claims: absent `info` leaves the stored row alone, null (or an all-empty
     // object) clears it, and an object replaces every field.
-    const claims: Array<EditionEditIdentifier & { info: EditionEditIdentifierInfo }> = [];
-    const cleared: EditionEditIdentifier[] = [];
+    const claims: Array<BookEditIdentifier & { info: BookEditIdentifierInfo }> = [];
+    const cleared: BookEditIdentifier[] = [];
     for (const identifier of input.identifiers) {
       const info = identifier.info;
       if (info === undefined) continue;
@@ -400,7 +400,7 @@ export async function updateAdminEdition(
       'code' in error &&
       (error.code === '23505' || error.code === '23503')
     ) {
-      throw new EditionEditError(
+      throw new BookEditError(
         error.code === '23505' ? 409 : 400,
         error.code === '23505'
           ? 'a conflicting catalog row exists; reload and retry'
@@ -413,9 +413,9 @@ export async function updateAdminEdition(
     client.release();
   }
 
-  const records = await loadAdminEditionsFrom(pool, [uri]);
+  const records = await loadAdminBooksFrom(pool, [uri]);
   const saved = records[0];
-  if (!saved) throw new EditionEditError(404, 'edition not found after saving', 'NotFound');
+  if (!saved) throw new BookEditError(404, 'edition not found after saving', 'NotFound');
   return saved;
 }
 
@@ -431,7 +431,7 @@ export async function updateAdminEdition(
  * `expectedRevision` is the editor's optimistic concurrency token; `null` skips
  * the check, like the update path.
  */
-export async function deleteAdminEdition(
+export async function deleteAdminBook(
   pool: Pool,
   ref: string,
   expectedRevision: string | null
@@ -442,21 +442,21 @@ export async function deleteAdminEdition(
     await client.query('BEGIN');
 
     const found = await client.query<{ uri: string }>(
-      `SELECT uri FROM editions WHERE uri = $1 OR rkey = $1 LIMIT 1 FOR UPDATE`,
+      `SELECT uri FROM books WHERE uri = $1 OR rkey = $1 LIMIT 1 FOR UPDATE`,
       [normalizeRef(ref)]
     );
     uri = found.rows[0]?.uri as string;
     const foundUri = found.rows[0]?.uri;
     if (foundUri === undefined) {
-      throw new EditionEditError(404, 'edition not found', 'NotFound');
+      throw new BookEditError(404, 'edition not found', 'NotFound');
     }
     uri = foundUri;
 
     if (expectedRevision !== null) {
-      const current = (await loadAdminEditionsFrom(client, [uri], { forUpdate: true }))[0];
-      if (!current) throw new EditionEditError(404, 'edition not found', 'NotFound');
+      const current = (await loadAdminBooksFrom(client, [uri], { forUpdate: true }))[0];
+      if (!current) throw new BookEditError(404, 'edition not found', 'NotFound');
       if (current.revision !== expectedRevision) {
-        throw new EditionEditError(
+        throw new BookEditError(
           409,
           'this edition changed since it was loaded; reload before deleting',
           'EditionChanged'
@@ -464,7 +464,7 @@ export async function deleteAdminEdition(
       }
     }
 
-    await client.query('DELETE FROM editions WHERE uri = $1', [uri]);
+    await client.query('DELETE FROM books WHERE uri = $1', [uri]);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

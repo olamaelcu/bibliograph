@@ -11,7 +11,7 @@
 -- `edition_view` has no genre column).
 --
 -- `genres` is a shared vocabulary: one row per canonical name, linked to many
--- editions through `edition_genres`. Provider labels are mapped to canonical
+-- books through `edition_genres`. Provider labels are mapped to canonical
 -- names by the worker before they get here (`lib/genres.js`), so a row in
 -- `genres` is always a curated name — `nyt:mass-market-monthly=2021-11-07` and
 -- `Dune (Imaginary place)` never become rows.
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS genres (
 CREATE UNIQUE INDEX IF NOT EXISTS genres_identity_idx ON genres (lower(name));
 
 CREATE TABLE IF NOT EXISTS edition_genres (
-  edition_uri text NOT NULL REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text NOT NULL REFERENCES books (uri) ON DELETE CASCADE,
   genre_id bigint NOT NULL REFERENCES genres (id) ON DELETE RESTRICT,
   position integer NOT NULL,
   source text NOT NULL CHECK (source IN ('openlibrary', 'goodreads')),
@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS edition_genres_genre_idx ON edition_genres (genre_id)
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS edition_genre_fetches (
-  edition_uri text PRIMARY KEY REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text PRIMARY KEY REFERENCES books (uri) ON DELETE CASCADE,
   requested_at timestamp with time zone NOT NULL DEFAULT now(),
   outcome text CHECK (outcome IN ('found', 'none'))
 );
@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS edition_genre_fetches_retry_idx
 -- ---------------------------------------------------------------------------
 -- Sweep index
 --
--- `catalog.genres.sweep` walks editions that have no genres in `indexed_at`
+-- `catalog.genres.sweep` walks books that have no genres in `indexed_at`
 -- order and stops at its LIMIT. 0001 indexes `created_at` but nothing indexed
 -- `indexed_at`, so without this the sweep is a full scan of the largest table
 -- plus a top-N sort every time it runs. With it the limit stops the walk after
@@ -91,7 +91,7 @@ CREATE INDEX IF NOT EXISTS edition_genre_fetches_retry_idx
 -- matches the index order exactly and the planner never needs a sort node.
 -- ---------------------------------------------------------------------------
 
-CREATE INDEX IF NOT EXISTS editions_indexed_at_idx ON editions (indexed_at, uri);
+CREATE INDEX IF NOT EXISTS editions_indexed_at_idx ON books (indexed_at, uri);
 
 -- ---------------------------------------------------------------------------
 -- The single enqueue entry point

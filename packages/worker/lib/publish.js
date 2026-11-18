@@ -125,7 +125,7 @@ async function loadEditionSnapshot(pool, uri) {
                 SELECT 1 FROM edition_cover_files f
                  WHERE f.edition_uri = e.uri AND f.source_url = e.cover_url
               ) AS cover_cached
-         FROM editions e
+         FROM books e
          LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri
         WHERE e.uri = $1`,
       [uri]

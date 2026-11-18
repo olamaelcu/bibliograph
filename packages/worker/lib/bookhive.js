@@ -318,7 +318,7 @@ async function knownEditions(pool, hiveIds) {
             ) AS has_publisher
        FROM edition_identifiers i
        JOIN ids ON ids.edition_uri = i.edition_uri
-       JOIN editions e ON e.uri = i.edition_uri
+       JOIN books e ON e.uri = i.edition_uri
        LEFT JOIN edition_identifier_info info
               ON info.edition_uri = i.edition_uri
              AND info.issuer = i.issuer

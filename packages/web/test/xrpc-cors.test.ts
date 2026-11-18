@@ -28,8 +28,8 @@ import {
  */
 
 const CATALOG_GET = 'net.olamaelcu.livtet.biblio.getContributor';
-const CATALOG_POST = 'community.lexicon.media.book.resolveEditions';
-const CATALOG_SEARCH = 'community.lexicon.media.book.searchEditions';
+const CATALOG_POST = 'community.lexicon.media.book.resolveBooks';
+const CATALOG_SEARCH = 'community.lexicon.media.book.searchBooks';
 const ENTITY_RESOLVE = 'net.olamaelcu.livtet.biblio.resolvePublishers';
 const FORWARDED = 'app.bsky.feed.getTimeline';
 const PDS_READ = 'com.atproto.repo.getRecord';
@@ -72,13 +72,13 @@ function mocked(): Mocked {
       calls.push({ handler: 'entityGet', method });
       return respond('entityGet');
     },
-    resolveEditions: () => {
-      calls.push({ handler: 'resolveEditions', method: CATALOG_POST });
-      return respond('resolveEditions');
+    resolveBooks: () => {
+      calls.push({ handler: 'resolveBooks', method: CATALOG_POST });
+      return respond('resolveBooks');
     },
-    searchEditions: () => {
-      calls.push({ handler: 'searchEditions', method: CATALOG_SEARCH });
-      return respond('searchEditions');
+    searchBooks: () => {
+      calls.push({ handler: 'searchBooks', method: CATALOG_SEARCH });
+      return respond('searchBooks');
     },
     proxyPdsRead: (method) => {
       calls.push({ handler: 'proxyPdsRead', method });
@@ -167,8 +167,8 @@ test('every GET branch carries CORS, including forwarded and proxied reads', asy
 
 test('every POST branch carries CORS, including forwarded writes', async () => {
   const cases: Array<{ method: string; handler: string }> = [
-    { method: CATALOG_POST, handler: 'resolveEditions' },
-    { method: CATALOG_SEARCH, handler: 'searchEditions' },
+    { method: CATALOG_POST, handler: 'resolveBooks' },
+    { method: CATALOG_SEARCH, handler: 'searchBooks' },
     { method: FORWARDED, handler: 'forward' }
   ];
 

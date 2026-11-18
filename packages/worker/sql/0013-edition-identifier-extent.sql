@@ -90,12 +90,12 @@ BEGIN
              THEN (extent->>'durationSeconds')::integer END
       ) STORED;
 
-  -- The published shape changes for editions with mixed-format identifiers,
+  -- The published shape changes for books with mixed-format identifiers,
   -- so republish every edition once. The backfill already queued rows it
-  -- touched; this also covers editions whose claims did not change.
+  -- touched; this also covers books whose claims did not change.
   INSERT INTO pds_outbox (uri, collection, rkey, op)
   SELECT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
-    FROM editions e
+    FROM books e
   ON CONFLICT (uri) DO UPDATE SET
     op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
     value = NULL,

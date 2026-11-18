@@ -1,5 +1,5 @@
 /**
- * Trigger policy for provider hydration of `searchEditions`.
+ * Trigger policy for provider hydration of `searchBooks`.
  *
  * This module is the single home of the numbers and the predicate, and it has
  * no imports on purpose: `jobs.ts` reaches `$env` through `./db`, so a test can
@@ -26,7 +26,7 @@ export function searchHydrationThreshold(raw?: string): number {
 }
 
 /**
- * What one handled `searchEditions` call decided about provider hydration.
+ * What one handled `searchBooks` call decided about provider hydration.
  * `thin` is the only value that enqueues; all four are metric label values.
  */
 export type SearchHydrationDecision = 'thin' | 'enough' | 'paged' | 'no_text';
@@ -41,7 +41,7 @@ export function searchHydrationDecision(input: {
   /** At least one of q/title/author is non-blank. */
   hasText: boolean;
   offset: number;
-  /** `EditionResults.total`, present only at `offset === 0`. */
+  /** `BookResults.total`, present only at `offset === 0`. */
   total: number | undefined;
   threshold: number;
 }): SearchHydrationDecision {

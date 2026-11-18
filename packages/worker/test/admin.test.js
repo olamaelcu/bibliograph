@@ -72,7 +72,7 @@ function createProviders(options = {}) {
 async function cleanup() {
   if (!pool) return;
   const prefix = `at://${AUTHORITY}/%`;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE name = $1', [CONTRIBUTOR]);
   await pool.query('DELETE FROM contributors WHERE name = $1', [BIO_AUTHOR]);
   await pool.query('DELETE FROM publishers WHERE name = $1', [PUBLISHER]);
@@ -478,7 +478,7 @@ test('ingest creates an edition with a TID under the did:plc authority', async (
 
   const stored = await pool.query(
     `SELECT e.title, o.op
-       FROM editions e LEFT JOIN pds_outbox o ON o.uri = e.uri
+       FROM books e LEFT JOIN pds_outbox o ON o.uri = e.uri
       WHERE e.uri = $1`,
     [body.uri]
   );
@@ -700,7 +700,7 @@ test('publisher import ingests books and dedupes on a second run', async () => {
   expect(secondBody.stopped).toBe('end');
 
   const stored = await pool.query(
-    `SELECT count(*)::int AS count FROM editions WHERE title = 'Publisher Probe Edition'`
+    `SELECT count(*)::int AS count FROM books WHERE title = 'Publisher Probe Edition'`
   );
   expect(stored.rows[0].count).toBe(1);
 });
