@@ -111,13 +111,15 @@ stored claim is a curation action, not an import side effect.
 
 `searchEditions` ranks four hint buckets — exact identifier, title, author, free
 text — so a title hit always outranks a description hit. The first three are
-trigram `ILIKE` scans over `books` and `edition_contributors`. Free text is one
-`book_search.document` match: a tsvector per book carrying title/subtitle (A),
+trigram `ILIKE` scans over `books` and `edition_contributors`. Free text is a
+`book_search.document` match — a tsvector per book carrying title/subtitle (A),
 contributor names (B), the shape claim's description (C) and identifier values
-(D), ranked by `ts_rank_cd`. One GIN scan replaces the four trigram branches the
-method used (title, description, contributor, identifier), and the score orders
-within the text bucket — measured on a 234k-book catalog: 54 ms for a page and
-9 ms for the count, against 454 ms and 1 075 ms before.
+(D), ranked by `ts_rank_cd` — plus the title, contributor and identifier trigram
+branches, which keep substring matching for the fields callers type into (the
+vector matches whole lexemes with stemming, so "Frank Herber" would otherwise
+stop finding "Frank Herbert"). The description, which was the expensive trigram
+scan, is vector-only. Measured on a 234k-book catalog: 54 ms for a page and
+9 ms for the count of one term, against 454 ms and 1 075 ms before.
 
 The document is maintained by statement-level triggers on `books`,
 `edition_contributors`, `edition_identifiers` and `edition_shape`; each visits
