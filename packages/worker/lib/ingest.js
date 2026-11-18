@@ -7,6 +7,15 @@ import { canonicalIdentifiersJson, clippedText } from './record-fields.js';
 
 const COLLECTION = 'community.lexicon.media.book.edition';
 
+/**
+ * Postgres deadlocks and serialization failures are safe to re-run here: one
+ * candidate is one transaction, and every statement it runs is an upsert or an
+ * `ON CONFLICT DO NOTHING`, so a rolled-back attempt leaves nothing behind.
+ * `40P01` is a deadlock, `40001` a serialization failure; nothing else retries.
+ */
+const RETRYABLE_SQLSTATES = new Set(['40P01', '40001']);
+const TRANSACTION_ATTEMPTS = 3;
+
 // Lexicon bounds for the contributor record's description (8192 bytes / 1024 graphemes).
 const DESCRIPTION_LIMITS = { maxGraphemes: 1024, maxBytes: 8192 };
 
@@ -371,13 +380,30 @@ export function createIngest({ pool, publisherDid, publisherHost }) {
     }
     const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-      const result = await ingestOn(client, candidate, prepared);
-      await client.query('COMMIT');
-      return result;
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw error;
+      // `linkPublisher` and the contributor upserts take their row locks in
+      // whatever order the candidate names them, so two candidates sharing a
+      // publisher deadlock against each other (measured: `deadlock detected` in
+      // linkPublisher, which crash-looped this worker until systemd gave up and
+      // left the catalog unindexed). Retrying the transaction costs a few
+      // statements and keeps one deadlock from failing the whole task.
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await client.query('BEGIN');
+          const result = await ingestOn(client, candidate, prepared);
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => undefined);
+          if (!RETRYABLE_SQLSTATES.has(error?.code) || attempt >= TRANSACTION_ATTEMPTS) {
+            throw error;
+          }
+          // Jittered so two workers that deadlocked together do not retry in
+          // step and deadlock again on the same rows.
+          await new Promise((resolve) =>
+            setTimeout(resolve, 20 * attempt + Math.random() * 40)
+          );
+        }
+      }
     } finally {
       client.release();
     }
