@@ -957,9 +957,14 @@ export function createTasks({
 
       if (found === null) {
         await pool.query(
-          `UPDATE edition_isbn_backfill
-              SET requested_at = now(), outcome = 'none'
-            WHERE edition_uri = $1`,
+          // Upsert, not update: the sweep's claim normally creates the row, but
+          // an operator (or a future caller) can enqueue the job directly, and
+          // losing the outcome would make the budget blind and the retry pass
+          // re-queue the same edition.
+          `INSERT INTO edition_isbn_backfill (edition_uri, requested_at, outcome)
+           VALUES ($1, now(), 'none')
+           ON CONFLICT (edition_uri) DO UPDATE
+             SET requested_at = now(), outcome = 'none'`,
           [uri]
         );
         helpers.logger.info(`catalog.isbn.backfill ${uri}: no ISBN found`);
@@ -982,9 +987,10 @@ export function createTasks({
       );
       if (owner.rowCount > 0) {
         await pool.query(
-          `UPDATE edition_isbn_backfill
-              SET requested_at = now(), outcome = 'conflict', source = $2, isbn = $3
-            WHERE edition_uri = $1`,
+          `INSERT INTO edition_isbn_backfill (edition_uri, requested_at, outcome, source, isbn)
+           VALUES ($1, now(), 'conflict', $2, $3)
+           ON CONFLICT (edition_uri) DO UPDATE
+             SET requested_at = now(), outcome = 'conflict', source = $2, isbn = $3`,
           [uri, found.source, found.isbn13]
         );
         helpers.logger.warn(
@@ -1035,9 +1041,10 @@ export function createTasks({
           ]
         );
         await client.query(
-          `UPDATE edition_isbn_backfill
-              SET requested_at = now(), outcome = 'found', source = $2, isbn = $3
-            WHERE edition_uri = $1`,
+          `INSERT INTO edition_isbn_backfill (edition_uri, requested_at, outcome, source, isbn)
+           VALUES ($1, now(), 'found', $2, $3)
+           ON CONFLICT (edition_uri) DO UPDATE
+             SET requested_at = now(), outcome = 'found', source = $2, isbn = $3`,
           [uri, found.source, found.isbn13]
         );
         await client.query('COMMIT');

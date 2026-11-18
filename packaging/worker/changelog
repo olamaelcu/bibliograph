@@ -1,3 +1,16 @@
+bibliograph-worker (0.7.1-1) unstable; urgency=medium
+
+  * 0.7.1: the ISBN backfill records its outcome even when the job was queued
+    without the sweep's claim row.
+
+    - The three outcome writes are upserts now. The sweep's
+      `catalog_enqueue_isbn_backfill` normally creates the ledger row, but a
+      direct enqueue (an operator, a future caller) had no row to update, so the
+      attempt was invisible: the daily budget stayed blind and the retry pass
+      would queue the same edition again.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.7.0-1) unstable; urgency=medium
 
   * 0.7.0: an ISBN backfill job, the placeholder author removed, and a compact
