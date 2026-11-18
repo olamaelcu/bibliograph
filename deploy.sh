@@ -174,6 +174,11 @@ cleanup() {
         /etc/bibliograph/happyview.env.dpkg-dist \
         /etc/bibliograph/worker.env.dpkg-dist \
         /etc/bibliograph/web.env.dpkg-dist 2>/dev/null || true
+  # A catalog-schema replay runs with the readers stopped; if the deploy aborts
+  # midway, bring them back instead of leaving the site down.
+  if [ "${READERS_STOPPED:-0}" = 1 ]; then
+    systemctl start happyview.service bibliograph-web.service >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
@@ -439,9 +444,19 @@ if [ "$SKIP_DB" = 0 ]; then
 
   # A migration takes AccessExclusiveLock on the relations it recreates
   # (`CREATE OR REPLACE VIEW` included), while HappyView and the edge keep
-  # reading them: the two can deadlock, and a plain `psql` waits indefinitely.
-  # `lock_timeout` makes the migration fail fast instead of deadlocking, and a
-  # re-runnable file is simply retried a few seconds later.
+  # reading them. Under traffic the two sides deadlock in a cycle that a retry
+  # cannot break — measured twice while replaying 0007/0013 against a live
+  # catalogue — so the readers are stopped for the replay; the ordered restarts
+  # below bring both back. `lock_timeout` still makes a lock wait fail fast
+  # instead of parking the transaction while it holds other relations.
+  READERS_STOPPED=1
+  for unit in bibliograph-web.service happyview.service; do
+    if systemctl is-active --quiet "$unit"; then
+      say "Stopping $unit for the catalog schema replay"
+      systemctl stop "$unit" || true
+    fi
+  done
+
   for file in "${sql_files[@]}"; do
     say "Catalog schema: $(basename "$file")"
     attempt=1
@@ -464,6 +479,7 @@ if [ "$SKIP_DB" = 0 ]; then
     done
   done
   note "Catalog schema applied (re-runnable; migrations are forward-only)"
+  READERS_STOPPED=0
 else
   note "--skip-db: catalog schema skipped"
 fi

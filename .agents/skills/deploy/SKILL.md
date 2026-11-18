@@ -294,6 +294,13 @@ keeps local edits to the env conffiles and the nginx vhost.
    package against a database a newer one has migrated.
    `0003-feed-read.sql` skips itself when `happyview.happyview_records` does not
    exist yet.
+   The replay runs with `bibliograph-web` and `happyview` **stopped**: both read
+   these tables, and under traffic their `AccessShareLock`s cycle against the
+   replay's `AccessExclusiveLock` — a deadlock the file-level retry cannot break
+   (measured twice on the `books` rename, at `0007` and `0013`). The ordered
+   restarts below bring both back; if the deploy aborts before them, the EXIT
+   trap starts them. Expect the site to be down for the replay, not just for the
+   restarts.
 4. **Web** install last → `verify_version`.
 
 ### 5. Ordered restarts and the 0003 re-apply
@@ -553,6 +560,15 @@ nginx access/error logs are `/var/log/nginx/bibliograph.access.log` and
   success.
 - **`No space left on device` while packaging** — payloads are staged under
   `packaging/payload/` and `dist/` keeps every package; prune old debs/payloads.
+- **The deploy aborts with `deadlock detected` at a catalog file** — a reader
+  (`bibliograph-web` or `happyview`) acquired its locks in the opposite order to
+  the replay. Current `deploy.sh` stops both around the replay, so this means an
+  older script or a reader that is still running: apply the files by hand with
+  the readers stopped,
+  `psql "$(sudo grep -h '^DATABASE_URL=' /etc/bibliograph/worker.env | cut -d= -f2-)" -f …`
+  for each `/usr/lib/bibliograph-worker/sql/*.sql` in lexical order, start the
+  units, then finish with `mise run deploy -- --skip-db` (the files are
+  re-runnable, so a partial pass is safe).
 
 ## Key files
 
