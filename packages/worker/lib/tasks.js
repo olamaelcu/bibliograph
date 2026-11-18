@@ -6,6 +6,7 @@ import { createBookhiveMetrics } from './bookhive.js';
 import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
 import { prepareEntityRecords } from './prepare-entities.js';
 import { mergeGenres } from './genres.js';
+import { isbn10FromIsbn13, lookupIsbn } from './providers/isbn-lookup.js';
 import {
   CoverRejectedError,
   cachedCoverSize,
@@ -30,6 +31,16 @@ export const COVER_SWEEP_BATCH = 500;
 // The sweep only enqueues; download politeness is the gate inside
 // `downloadCover`, so a wide sweep is what lets a ~300k-edition backfill finish.
 export const COVER_SWEEP_BATCH_MAX = 5000;
+
+/** Editions one ISBN backfill sweep claims: one daily batch, spent by the budget. */
+export const ISBN_BACKFILL_BATCH = 50;
+/**
+ * Real lookup attempts one day may spend when `ISBN_BACKFILL_PER_DAY` is unset.
+ * A hundred-thousand-edition backlog must not turn into a hundred thousand
+ * provider queries in one night, so the budget is the throttle and the batch
+ * size is only the shape of one cron tick.
+ */
+export const ISBN_BACKFILL_PER_DAY_DEFAULT = 250;
 
 function validIdentifier(identifier) {
   return (
@@ -146,6 +157,10 @@ export function createTasks({
   // Same contract for the Bookhive walk: the counters are process-local, so
   // the endpoint must be handed the instance the task writes to.
   bookhiveMetrics = createBookhiveMetrics(),
+  // The daily ceiling on real ISBN lookups (`ISBN_BACKFILL_PER_DAY`). Passed
+  // through so a test (or an operator script) can spend a smaller budget; the
+  // task itself never mutates it.
+  isbnBackfillPerDay = Number.parseInt(process.env.ISBN_BACKFILL_PER_DAY ?? '', 10),
   // Aborted when the process is asked to stop, before graphile's per-job abort
   // fires. Combined with `helpers.abortSignal` below.
   signal = null
@@ -164,6 +179,10 @@ export function createTasks({
   // `coversBaseUrl` may arrive unset (tests, older callers); derive it from the
   // publisher host so a record never advertises a bare path.
   const coversBase = coversBaseUrl || coversBaseUrlFromEnv({}, publisherHost);
+  const isbnBudget =
+    Number.isFinite(isbnBackfillPerDay) && isbnBackfillPerDay > 0
+      ? isbnBackfillPerDay
+      : ISBN_BACKFILL_PER_DAY_DEFAULT;
 
   // Without configured credentials the task still exists and fails with the
   // exact missing settings; it must never quietly drop outbox rows.
@@ -831,6 +850,278 @@ export function createTasks({
         `catalog.covers.sweep: ${candidates.length} candidate(s) ` +
           `(${uncached.rows.length} uncached, ${fresh.rows.length} new, ` +
           `${retries.rows.length} retry), ${enqueued} enqueued`
+      );
+    },
+
+    // Finds the ISBN of an edition that has none.
+    //
+    // The guards run cheapest first, so a day's work stays bounded:
+    //
+    //   1. an edition that already carries an ISBN is recorded `skipped` (the
+    //      claim can race an ingest that filled the field first);
+    //   2. the daily budget refuses once today's real attempts reach
+    //      `ISBN_BACKFILL_PER_DAY` — `edition_isbn_backfill` is the spend record
+    //      already, so today's `found` + `none` + `conflict` count is the whole
+    //      ledger read, with no new table;
+    //   3. the lookup itself only ever asks the free providers
+    //      (`lookupIsbn`), never the metered ISBNdb.
+    //
+    // A found ISBN is attached in one transaction — the identifier row, the
+    // claim row carrying what the candidate knew, and the ledger's `found`. The
+    // `edition_identifiers` trigger queues the republication, so nothing here
+    // writes to `pds_outbox`. An ISBN another edition already owns is a
+    // `conflict` and writes nothing: attaching it would make the identifier bag
+    // resolve later ingests to the wrong book, and minting a second book for a
+    // known ISBN is worse than one edition staying ISBN-less.
+    'catalog.isbn.backfill': async (payload, helpers) => {
+      const uri =
+        typeof payload?.editionUri === 'string' && payload.editionUri !== ''
+          ? payload.editionUri
+          : null;
+      if (uri === null) {
+        helpers.logger.warn('catalog.isbn.backfill: invalid payload');
+        return { status: 'invalid' };
+      }
+
+      const edition = await pool.query('SELECT title FROM books WHERE uri = $1', [uri]);
+      if (edition.rowCount === 0) {
+        // The ledger row cascaded away with the edition.
+        helpers.logger.warn(`catalog.isbn.backfill ${uri}: edition not found`);
+        return { status: 'missing' };
+      }
+      const title = cleanString(edition.rows[0].title);
+
+      const identifiers = (
+        await pool.query(
+          `SELECT issuer, value
+             FROM edition_identifiers
+            WHERE edition_uri = $1
+            ORDER BY issuer, value`,
+          [uri]
+        )
+      ).rows;
+      if (
+        identifiers.some((identifier) =>
+          ['isbn13', 'isbn10', 'isbn'].includes(cleanString(identifier?.issuer)?.toLowerCase())
+        )
+      ) {
+        await pool.query(
+          `UPDATE edition_isbn_backfill
+              SET requested_at = now(), outcome = 'skipped'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.info(`catalog.isbn.backfill ${uri}: already has an ISBN`);
+        return { status: 'skipped' };
+      }
+
+      // Today is the server's day, the same clock the ledger writes.
+      const spent = await pool.query(
+        `SELECT count(*)::int AS attempts
+           FROM edition_isbn_backfill
+          WHERE requested_at >= date_trunc('day', now())
+            AND outcome IN ('found', 'none', 'conflict')`
+      );
+      const attempts = Number(spent.rows[0]?.attempts ?? 0);
+      if (attempts >= isbnBudget) {
+        // The claim row stays `skipped` with a fresh `requested_at`, so this
+        // edition waits out the seven-day window instead of hot-looping.
+        helpers.logger.info(
+          `catalog.isbn.backfill ${uri}: daily budget spent (${attempts}/${isbnBudget})`
+        );
+        return { status: 'budget' };
+      }
+
+      const authors = (
+        await pool.query(
+          `SELECT c.name
+             FROM edition_contributors ec
+             JOIN contributors c ON c.id = ec.contributor_id
+            WHERE ec.edition_uri = $1 AND ec.role = 'author'
+            ORDER BY ec.position`,
+          [uri]
+        )
+      ).rows
+        .map((row) => cleanString(row.name))
+        .filter(Boolean);
+
+      // A thrown lookup (every provider down) propagates: the claim is held, so
+      // graphile's retry does not wait out the window, and no absence is filed.
+      const found = await lookupIsbn({
+        providers: providers?.providers,
+        title,
+        authors,
+        identifiers,
+        logger: helpers.logger
+      });
+
+      if (found === null) {
+        await pool.query(
+          `UPDATE edition_isbn_backfill
+              SET requested_at = now(), outcome = 'none'
+            WHERE edition_uri = $1`,
+          [uri]
+        );
+        helpers.logger.info(`catalog.isbn.backfill ${uri}: no ISBN found`);
+        return { status: 'none' };
+      }
+
+      // The catalog stores both issuers, so the same book printed as its
+      // ten-digit ISBN is the same owner. A 979 ISBN has no ISBN-10 form, and
+      // `value = NULL` simply never matches.
+      const owner = await pool.query(
+        `SELECT edition_uri
+           FROM edition_identifiers
+          WHERE edition_uri <> $2
+            AND (
+                  (issuer = 'isbn13' AND value = $1)
+               OR (issuer = 'isbn10' AND value = $3)
+                )
+          LIMIT 1`,
+        [found.isbn13, uri, isbn10FromIsbn13(found.isbn13)]
+      );
+      if (owner.rowCount > 0) {
+        await pool.query(
+          `UPDATE edition_isbn_backfill
+              SET requested_at = now(), outcome = 'conflict', source = $2, isbn = $3
+            WHERE edition_uri = $1`,
+          [uri, found.source, found.isbn13]
+        );
+        helpers.logger.warn(
+          `catalog.isbn.backfill ${uri}: ${found.isbn13} already belongs to ` +
+            `${owner.rows[0].edition_uri} (${found.source})`
+        );
+        return { status: 'conflict', isbn: found.isbn13, source: found.source };
+      }
+
+      const candidate = found.candidate ?? {};
+      // `pages` is a projection of `extent` (0013), so the page count is what the
+      // claim carries. A candidate with no valid count contributes no extent.
+      const pages = Number(candidate.pages);
+      const extent = Number.isInteger(pages) && pages > 0 ? JSON.stringify({ pages }) : null;
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO edition_identifiers (edition_uri, issuer, value)
+           VALUES ($1, 'isbn13', $2)
+           ON CONFLICT (edition_uri, issuer, value) DO NOTHING`,
+          [uri, found.isbn13]
+        );
+        // The claim row carries only what the candidate actually knows; every
+        // COALESCE keeps an existing, curated claim ahead of the provider's.
+        await client.query(
+          `INSERT INTO edition_identifier_info
+                  (edition_uri, issuer, value, language, published_date, description, extent)
+           VALUES ($1, 'isbn13', $2, $3, $4, $5, $6::jsonb)
+           ON CONFLICT (edition_uri, issuer, value) DO UPDATE SET
+             language = COALESCE(edition_identifier_info.language, EXCLUDED.language),
+             published_date = COALESCE(
+               edition_identifier_info.published_date, EXCLUDED.published_date
+             ),
+             description = COALESCE(edition_identifier_info.description, EXCLUDED.description),
+             extent = normalize_identifier_extent(
+               COALESCE(EXCLUDED.extent, '{}'::jsonb)
+                 || COALESCE(edition_identifier_info.extent, '{}'::jsonb)
+             ),
+             updated_at = now()`,
+          [
+            uri,
+            found.isbn13,
+            cleanString(candidate.language) ?? null,
+            cleanString(candidate.publishedDate) ?? null,
+            cleanString(candidate.description) ?? null,
+            extent
+          ]
+        );
+        await client.query(
+          `UPDATE edition_isbn_backfill
+              SET requested_at = now(), outcome = 'found', source = $2, isbn = $3
+            WHERE edition_uri = $1`,
+          [uri, found.source, found.isbn13]
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+
+      helpers.logger.info(
+        `catalog.isbn.backfill ${uri}: ${found.isbn13} from ${found.source}`
+      );
+      return { status: 'found', isbn: found.isbn13, source: found.source };
+    },
+
+    // Files ISBN-less editions into the queue, one bounded batch per cron tick.
+    //
+    // Two passes, both driven by the `books.indexed_at` index and each stopping
+    // at the batch size: editions never attempted, then ledger rows older than
+    // the seven-day window (ordered by `edition_isbn_backfill_retry_idx`). Both
+    // carry the same ISBN predicate, expressed as a `NOT EXISTS` against the
+    // `(edition_uri, issuer, value)` primary key so the planner never materialises
+    // the identifier set. An edition that gained an ISBN since its ledger row
+    // was written is excluded by that predicate, so the retry pass is only ever
+    // genuinely ISBN-less books.
+    //
+    // The claim lives in `catalog_enqueue_isbn_backfill`, so two sweeps racing
+    // each other never queue the same edition twice.
+    'catalog.isbn.backfill.sweep': async (payload, helpers) => {
+      const limit = Number.isInteger(payload?.limit)
+        ? Math.min(Math.max(payload.limit, 1), ISBN_BACKFILL_BATCH)
+        : ISBN_BACKFILL_BATCH;
+      const candidates = [];
+
+      const fresh = await pool.query(
+        `SELECT e.uri
+           FROM books e
+          WHERE NOT EXISTS (
+                  SELECT 1 FROM edition_identifiers i
+                   WHERE i.edition_uri = e.uri AND i.issuer IN ('isbn13', 'isbn10')
+                )
+            AND NOT EXISTS (
+                  SELECT 1 FROM edition_isbn_backfill l WHERE l.edition_uri = e.uri
+                )
+          ORDER BY e.indexed_at ASC, e.uri ASC
+          LIMIT $1`,
+        [limit]
+      );
+      candidates.push(...fresh.rows);
+
+      const retries =
+        candidates.length < limit
+          ? await pool.query(
+              `SELECT l.edition_uri AS uri
+                 FROM edition_isbn_backfill l
+                WHERE l.requested_at < now() - interval '7 days'
+                  AND NOT EXISTS (
+                        SELECT 1 FROM edition_identifiers i
+                         WHERE i.edition_uri = l.edition_uri
+                           AND i.issuer IN ('isbn13', 'isbn10')
+                      )
+                ORDER BY l.requested_at ASC
+                LIMIT $1`,
+              [limit - candidates.length]
+            )
+          : { rows: [] };
+      candidates.push(...retries.rows);
+
+      // Same batching as the genre and cover sweeps: one claim call for the
+      // whole list, candidate order kept by `WITH ORDINALITY`.
+      const claimed =
+        candidates.length === 0
+          ? { rows: [] }
+          : await pool.query(
+              `SELECT catalog_enqueue_isbn_backfill(t.uri) AS enqueued
+                 FROM unnest($1::text[]) WITH ORDINALITY AS t(uri, ord)
+                ORDER BY t.ord`,
+              [candidates.map((row) => row.uri)]
+            );
+      const enqueued = claimed.rows.filter((row) => row.enqueued === true).length;
+      helpers.logger.info(
+        `catalog.isbn.backfill.sweep: ${candidates.length} candidate(s) ` +
+          `(${fresh.rows.length} new, ${retries.rows.length} retry), ${enqueued} enqueued`
       );
     },
 

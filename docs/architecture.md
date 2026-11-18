@@ -339,6 +339,8 @@ one anonymous call cannot turn its full identifier list into paid provider work.
 | `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest up to 50 candidates into the identifier bag |
 | `catalog.search` | edge on a search whose first-page `total` is below `SEARCH_HYDRATION_THRESHOLD` (`job_key` deduped, 1 h TTL, ≤120 enqueues per rolling hour) | provider search → ingest up to 50 candidates |
 | `catalog.isbn` | edge on `searchEditions` with ISBN identifiers (`job_key` `isbn:<isbn13>` deduped, 24 h TTL) | direct ISBNdb by-ISBN lookup → ingest up to 50 candidates; falls back to the resolve chain when ISBNdb is unconfigured or returns nothing |
+| `catalog.isbn.backfill` | graphile cron daily (`0 4 * * *`), claimed by `catalog_enqueue_isbn_backfill` | one edition with no `isbn13`/`isbn10`: title+author lookup through the free providers (OpenLibrary, Goodreads, Google Books), the best matching title's ISBN attached to that edition; `conflict` when another edition already owns it. `ISBN_BACKFILL_PER_DAY` (250) bounds the day |
+| `catalog.marks.prune` | graphile cron hourly (`17 * * * *`) | delete `catalog_enqueue_marks` rows older than 24 h |
 | `pds-publish` | graphile cron every minute, plus once at boot | drain `pds_outbox` into the publisher PDS |
 | `catalog.bookhive` | graphile cron weekly (`0 3 * * 1`), or `node index.js --import-bookhive[=<pages>]` | walk Bookhive's `buzz.bookhive.catalogBook` (100 books per page, 5000 pages at most) and ingest each book so its `hiveId` names an edition |
 
@@ -347,6 +349,8 @@ both ISBN lookups and text searches, stopping at the first provider that
 returns candidates (no fan-out merge across providers). OpenLibrary's public
 API needs no key, so it is the final fallback after the two keyed providers
 and Goodreads. When `ISBNDB_API_KEY` is unset the chain starts at Google Books.
+The ISBN backfill is the one exception: it never calls ISBNdb, because a
+sweep over the editions that lack an ISBN must not spend the metered quota.
 `googlebooks`, `openlibrary` and `goodreads` identifiers still resolve directly
 against their own provider; OpenLibrary accepts edition (`OL…M`) and work
 (`OL…W`) keys and expands a work through its editions endpoint.

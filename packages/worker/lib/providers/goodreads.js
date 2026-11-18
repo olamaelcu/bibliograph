@@ -192,14 +192,25 @@ export class GoodreadsRedirectLoopError extends Error {
 /**
  * What a cached page keeps.
  *
- * The whole fetched page is `{ text, url, status, headers }`, and `headers` is a
- * `Headers` instance, which does not survive JSON. Nothing reads a cached
- * page's headers either — `isChallengePage` only ever sees a freshly fetched
- * page, and a challenged page is never cached — so the body is text, url and
- * status, and the cache round-trips through `jsonb` unchanged.
+ * The fetched page is `{ text, url, status, headers }`, and `headers` is a
+ * `Headers` instance, which does not survive JSON. The old body stored `text`,
+ * i.e. the whole HTML — Goodreads pages average ~170 KB, which made this the
+ * largest relation in the database (331 MB for 1,921 rows). The cache now keeps
+ * the *parsed* candidates, which is all any caller ever used: a book page and
+ * a search page are parsed by different functions, so both results are kept and
+ * each caller reads its own. `url` is kept because a search can redirect to a
+ * book page and the caller inspects it.
  */
-function cachedPage(page) {
-  return { text: page.text, url: page.url, status: page.status };
+function parsedPage(page) {
+  return {
+    url: page.url,
+    status: page.status,
+    genres: genresFromBookPage(page.text),
+    candidates: {
+      book: candidatesFromBookPage(page.text),
+      search: candidatesFromSearchPage(page.text)
+    }
+  };
 }
 
 function role(value) {
@@ -420,7 +431,9 @@ export function createGoodreads({
     const url = `${baseUrl}${path}`;
     const cacheKey = `${url}|${kind}`;
     const cached = await cache?.get(cacheKey);
-    if (cached) return cached;
+    // A row in the old shape keeps `text` and has no `candidates`: ignore it and
+    // refetch rather than returning something the callers cannot read.
+    if (cached?.candidates) return cached;
 
     for (let attempt = 0; attempt <= redirectRetries; attempt += 1) {
       const headers = headersFor(kind, attempt + 1);
@@ -476,10 +489,11 @@ export function createGoodreads({
       // A 404, an empty body and a challenge all fall through to here without a
       // write, so only a page worth re-reading is cached. The TTL is Goodreads'
       // own `max-age`.
+      const parsed = parsedPage(page);
       if (typeof page.text === 'string' && page.text.trim() !== '') {
-        await cache?.put(cacheKey, url, cachedPage(page), cacheTtlMs);
+        await cache?.put(cacheKey, url, parsed, cacheTtlMs);
       }
-      return page;
+      return parsed;
     }
 
     throw new GoodreadsRedirectLoopError(url);
@@ -489,8 +503,8 @@ export function createGoodreads({
     const page = await get(`/search?q=${encodeURIComponent(query)}`, 'search');
     if (!page) return [];
     return /\/book\/show\//.test(new URL(page.url).pathname)
-      ? candidatesFromBookPage(page.text)
-      : candidatesFromSearchPage(page.text);
+      ? page.candidates.book
+      : page.candidates.search;
   }
 
   return {
@@ -499,7 +513,7 @@ export function createGoodreads({
 
     async byId(id) {
       const page = await get(`/book/show/${encodeURIComponent(id)}`);
-      return page ? candidatesFromBookPage(page.text) : [];
+      return page ? page.candidates.book : [];
     },
 
     async byIdentifier(value) {
@@ -508,7 +522,7 @@ export function createGoodreads({
       const isbn = normalizeIsbn13(value);
       if (isbn) {
         const page = await get(`/book/isbn/${isbn}`);
-        const candidates = page ? candidatesFromBookPage(page.text) : [];
+        const candidates = page ? page.candidates.book : [];
         if (candidates.length > 0) return candidates;
       }
       return searchResults(isbn ?? value);
@@ -517,7 +531,7 @@ export function createGoodreads({
     async search(text) {
       const page = await get(`/search?q=${encodeURIComponent(text)}`, 'search');
       if (!page) return [];
-      return [candidatesFromBookPage(page.text), candidatesFromSearchPage(page.text)].flat();
+      return [...page.candidates.book, ...page.candidates.search];
     },
 
     /**
@@ -539,7 +553,7 @@ export function createGoodreads({
 
       if (bookId) {
         const page = await get(`/book/show/${encodeURIComponent(bookId)}`);
-        return page ? genresFromBookPage(page.text) : [];
+        return page ? page.genres : [];
       }
 
       const isbn = normalizeIsbn13(
@@ -551,7 +565,7 @@ export function createGoodreads({
       );
       if (!isbn) return [];
       const page = await get(`/book/isbn/${isbn}`);
-      return page ? genresFromBookPage(page.text) : [];
+      return page ? page.genres : [];
     },
   };
 }

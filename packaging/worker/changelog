@@ -1,3 +1,31 @@
+bibliograph-worker (0.7.0-1) unstable; urgency=medium
+
+  * 0.7.0: an ISBN backfill job, the placeholder author removed, and a compact
+    Goodreads cache.
+
+    - `0028`: `edition_isbn_backfill` (a ledger like the genre and cover ones)
+      and `catalog_enqueue_isbn_backfill`. The `catalog.isbn.backfill` task
+      resolves a missing ISBN through the free providers only — OpenLibrary,
+      Goodreads, Google Books; never the metered ISBNdb — and attaches it to the
+      edition that lacked it. A candidate must match the first 20 characters of
+      the title *and* 0.8 token overlap, so a series neighbour cannot be picked.
+      A found ISBN already owned by another edition is recorded as `conflict`
+      and written nowhere, so the job cannot mint a second book. The daily cron
+      claims 50 fresh plus 50 retry editions; `ISBN_BACKFILL_PER_DAY` (250)
+      bounds the day.
+    - `0029`: the `Unknown Author` placeholder is gone — 14,783 credits and its
+      contributor row deleted, which republishes the affected editions and
+      deletes the published contributor record. Ingest now drops that name
+      (trim, collapse whitespace, lowercase), so the feeds cannot recreate it.
+    - `0030` and the provider change: the Goodreads page cache stored whole HTML
+      pages (~170 KB a row; 331 MB for 1,921 rows, the largest relation in the
+      database). It now stores the parsed candidates and genres, and
+      `createJsonCache` refuses any body over 256 KB. Old rows are deleted; the
+      file is reclaimed with a one-time
+      `VACUUM (FULL, ANALYZE) goodreads_cache` after the deploy.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.6.0-1) unstable; urgency=medium
 
   * 0.6.0: less work per ingest, per sweep and per publish; a search index.

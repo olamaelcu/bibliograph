@@ -14,6 +14,14 @@ const CACHE_TABLES = new Map([
   ['goodreads_cache', 'url']
 ]);
 
+/**
+ * A cached body larger than this is not written. The caches are disposable, so
+ * skipping a write costs one provider request later; storing it costs the
+ * database permanently. The Goodreads cache is why this exists: it held whole
+ * HTML pages (~170 KB each) and became the largest relation in the database.
+ */
+const MAX_CACHED_BODY_BYTES = 256 * 1024;
+
 /** Read-through cache over one of `CACHE_TABLES`. */
 export function createJsonCache(pool, table) {
   const requestColumn = CACHE_TABLES.get(table);
@@ -30,6 +38,8 @@ export function createJsonCache(pool, table) {
       return result.rows[0]?.body ?? undefined;
     },
     async put(key, request, body, ttlMs = 7 * DAY) {
+      const encoded = JSON.stringify(body);
+      if (Buffer.byteLength(encoded) > MAX_CACHED_BODY_BYTES) return;
       await pool.query(
         `INSERT INTO ${table} (key, ${requestColumn}, body, fetched_at, expires_at)
          VALUES ($1, $2, $3::jsonb, now(), now() + ($4::text || ' milliseconds')::interval)
@@ -38,7 +48,7 @@ export function createJsonCache(pool, table) {
            body = EXCLUDED.body,
            fetched_at = now(),
            expires_at = EXCLUDED.expires_at`,
-        [key, request, JSON.stringify(body), ttlMs]
+        [key, request, encoded, ttlMs]
       );
     }
   };

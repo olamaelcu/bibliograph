@@ -404,7 +404,7 @@ test('a redirect loop that succeeds on the single retry is not an error', async 
   expect(requests.length).toBe(2);
 });
 
-test('successful HTML is cached so repeated ISBN lookups skip the network', async () => {
+test('a successful page caches its parsed candidates, never the HTML', async () => {
   const { requests, fetchImpl } = recorder({
     [`/book/isbn/${ISBN13}`]: (url) => response({ url, body: bookPageHtml })
   });
@@ -422,8 +422,12 @@ test('successful HTML is cached so repeated ISBN lookups skip the network', asyn
   expect(key.endsWith(`/book/isbn/${ISBN13}|book`), 'the key is URL + page kind').toBe(true);
   expect(entry.request, 'the url column keeps the request').toBe(`${BASE}/book/isbn/${ISBN13}`);
   expect(entry.ttlMs, "the TTL is Goodreads' own max-age").toBe(24 * 60 * 60 * 1000);
-  expect(entry.value, 'headers do not survive jsonb and nothing reads them back')
-    .toEqual({ text: bookPageHtml, url: `${BASE}/book/isbn/${ISBN13}`, status: 200 });
+  const cached = entry.value;
+  expect(cached, 'the whole page is not kept: it was ~170 KB a row').not.toHaveProperty('text');
+  expect(cached.url).toBe(`${BASE}/book/isbn/${ISBN13}`);
+  expect(cached.status).toBe(200);
+  expect(cached.candidates.book[0].format).toBe('Hardcover');
+  expect(Array.isArray(cached.genres)).toBe(true);
 
   cache.entries.clear();
   expect((await provider.byIdentifier(ISBN13))[0].format).toBe('Hardcover');

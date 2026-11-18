@@ -19,6 +19,31 @@ const TRANSACTION_ATTEMPTS = 3;
 // Lexicon bounds for the contributor record's description (8192 bytes / 1024 graphemes).
 const DESCRIPTION_LIMITS = { maxGraphemes: 1024, maxBytes: 8192 };
 
+/**
+ * The names a feed uses as a placeholder for "nobody is credited".
+ *
+ * Goodreads and ISBNdb both answer `Unknown Author` for a volume they cannot
+ * attribute, and before this list it travelled the ordinary path: the upsert
+ * minted a contributor row, gave it an `at_uri` and published it as an entity
+ * record that thousands of editions credited. It must not become an entity, so
+ * it is dropped at preparation time — before it takes a position on the
+ * edition.
+ */
+const PLACEHOLDER_CONTRIBUTOR_NAMES = new Set(['unknown author']);
+
+/**
+ * The form a name is compared in for the placeholder list above: trimmed,
+ * internal whitespace collapsed, lower-cased. Feeds vary the case and the
+ * spacing of the same placeholder.
+ *
+ * This is not the identity rule — the `(lower(name), identifiers)` arbiter is
+ * (see `contributorKey`), and two genuinely different spellings stay different
+ * contributors.
+ */
+function normalizedContributorName(name) {
+  return String(name).trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 function editionUri(publisherDid, rkey) {
   return `at://${publisherDid}/${COLLECTION}/${rkey}`;
 }
@@ -241,6 +266,11 @@ async function linkContributors(client, uri, contributors, authority) {
           ? contributor.name
           : undefined;
     if (!displayName) continue;
+    // A feed's placeholder is not a person: skip it before it becomes a row.
+    // Positions are assigned from the accepted list below, so the next real
+    // contributor takes the next position and an edition whose credits are all
+    // placeholders simply carries none.
+    if (PLACEHOLDER_CONTRIBUTOR_NAMES.has(normalizedContributorName(displayName))) continue;
     // `nameInverted` is provider metadata, not identity: an ISBNdb name owns
     // it, but the manual editor also writes it. Fill it only when the row does
     // not already have one so a curation edit is never overwritten.

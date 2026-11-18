@@ -268,6 +268,21 @@ cronItems.push({
     maxAttempts: 2
   }
 });
+cronItems.push({
+  // One batch a day, spent under the task's `ISBN_BACKFILL_PER_DAY` budget: the
+  // work is free-provider lookups over a ~100k-edition backlog, so the point is
+  // a steady trickle, not a flood. The per-edition jobs run on the
+  // `isbn-backfill` queue, which graphile-worker serializes to concurrency 1
+  // (see `catalog_enqueue_isbn_backfill`); the sweep keeps its own queue so a
+  // busy backfill never delays it.
+  task: 'catalog.isbn.backfill.sweep',
+  match: '0 4 * * *',
+  options: {
+    queueName: 'isbn-backfill-sweep',
+    jobKey: 'catalog.isbn.backfill.sweep:cron',
+    maxAttempts: 3
+  }
+});
 const parsedCronItems = parseCronItems(cronItems);
 
 const runner = await run({
