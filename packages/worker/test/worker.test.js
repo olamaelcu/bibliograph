@@ -16,11 +16,26 @@ const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph';
 const PUBLISHER = 'test.example';
 
+// Fixture identifiers must never name a real edition. This suite runs against
+// the development catalog, which already owns every real ISBN, Google volume
+// id, Goodreads id and ASIN these fixtures used to carry; hydration resolves an
+// identifier bag to the edition that owns it, so a real identifier makes the
+// test update that edition instead of minting one under the test authority
+// (and the assertion then finds no row). `isbn13For` builds checksum-valid,
+// unassigned ISBNs; the volume, Goodreads and ASIN values are unassigned too.
+const GOOGLE_VOLUME_ID = 'testworkerVolume1';
+const GOOGLE_ISBN = isbn13For(100);
+const PLC_ISBN = isbn13For(101);
+const GOODREADS_BOOK_ID = '990001';
+const GOODREADS_ISBN = isbn13For(102);
+const GOODREADS_ASIN = 'B00TESTWRK';
+const ISBNDB_ISBN = isbn13For(103);
+
 const googleBody = {
   totalItems: 1,
   items: [
     {
-      id: 'efdyneVzATwC',
+      id: GOOGLE_VOLUME_ID,
       volumeInfo: {
         title: 'The Left Hand of Darkness',
         authors: ['Ursula K. Le Guin'],
@@ -29,7 +44,7 @@ const googleBody = {
         language: 'en',
         pageCount: 304,
         description: '<p>A novel of the Ekumen.</p>',
-        industryIdentifiers: [{ type: 'ISBN_13', identifier: '9780441478125' }],
+        industryIdentifiers: [{ type: 'ISBN_13', identifier: GOOGLE_ISBN }],
         imageLinks: { thumbnail: 'http://books.example/cover.jpg' }
       }
     }
@@ -44,7 +59,7 @@ const plcBody = {
       volumeInfo: {
         title: 'PLC Authority Edition',
         language: 'en',
-        industryIdentifiers: [{ type: 'ISBN_13', identifier: '9781111111111' }]
+        industryIdentifiers: [{ type: 'ISBN_13', identifier: PLC_ISBN }]
       }
     }
   ]
@@ -58,17 +73,14 @@ const isbndbBook = {
   date_published: '2020',
   pages: 200,
   language: 'en',
-  // A fresh ISBN: the development catalog may already own a real one, and a
-  // direct lookup updates the edition that owns the identifier instead of
-  // minting a test-authority row.
-  isbn13: '9780306406164',
+  isbn13: ISBNDB_ISBN,
   image: 'http://img.example/direct.jpg',
   synopsis: 'A direct ISBNdb lookup.'
 };
 
 const goodreadsSearchHtml = `<table><tr itemscope>
-<td><a href="/book/show/18423"><img class="bookCover" itemprop="image" src="https://img.example/18423.jpg" /></a></td>
-<td><a class="bookTitle" itemprop="url" href="/book/show/18423.The_Left_Hand"><span itemprop='name' role='heading'>The Left Hand of Darkness</span></a>
+<td><a href="/book/show/${GOODREADS_BOOK_ID}"><img class="bookCover" itemprop="image" src="https://img.example/${GOODREADS_BOOK_ID}.jpg" /></a></td>
+<td><a class="bookTitle" itemprop="url" href="/book/show/${GOODREADS_BOOK_ID}.The_Left_Hand"><span itemprop='name' role='heading'>The Left Hand of Darkness</span></a>
 <span itemprop='author' itemscope='' itemtype='http://schema.org/Person'><div class='authorName__container'><a class="authorName" itemprop="url" href="/author/show/874602"><span itemprop="name">Ursula K. Le Guin</span></a></div></span></td>
 </tr></table>`;
 
@@ -79,15 +91,14 @@ const goodreadsBookHtml = `<html><head></head><body>
       apolloState: {
         'Book:kca://book/1': {
           __typename: 'Book',
-          legacyId: 118028,
+          legacyId: Number(GOODREADS_BOOK_ID),
           title: 'The Left Hand of Darkness',
           titleComplete: 'The Left Hand of Darkness',
-          imageUrl: 'https://img.example/118028.jpg',
+          imageUrl: `https://img.example/${GOODREADS_BOOK_ID}.jpg`,
           description: '<i>See alternate editions</i> A novel.',
           details: {
-            isbn13: '9780441478125',
-            isbn: '0441478123',
-            asin: 'B0073N8XKQ',
+            isbn13: GOODREADS_ISBN,
+            asin: GOODREADS_ASIN,
             numPages: 366,
             format: 'Paperback',
             publisher: 'Ace',
@@ -214,17 +225,17 @@ before(async () => {
       googleRequests += 1;
       providerOrder.push('googlebooks');
       const query = url.searchParams.get('q');
-      if (query === 'isbn:9781111111111') send(plcBody);
+      if (query === `isbn:${PLC_ISBN}`) send(plcBody);
       else if (query === 'google-fills') send(googleBody);
       else send(query?.startsWith('isbn:') ? googleBody : { totalItems: 0, items: [] });
       return;
     }
-    if (url.pathname === '/isbndb/book/9780306406164') {
+    if (url.pathname === `/isbndb/book/${ISBNDB_ISBN}`) {
       isbndbRequests += 1;
       send({ book: isbndbBook });
       return;
     }
-    if (url.pathname === '/isbndb/book/9780441478125') {
+    if (url.pathname === `/isbndb/book/${GOOGLE_ISBN}`) {
       // A configured ISBNdb that has no record for the ISBN.
       isbndbRequests += 1;
       send({ book: null });
@@ -369,8 +380,8 @@ test('parses a Google Books volume into an edition candidate', () => {
   const candidate = candidateFromVolume(googleBody.items[0]);
   assert.equal(candidate.title, 'The Left Hand of Darkness');
   assert.deepEqual(candidate.identifiers, [
-    { issuer: 'googlebooks', value: 'efdyneVzATwC' },
-    { issuer: 'isbn13', value: '9780441478125' }
+    { issuer: 'googlebooks', value: GOOGLE_VOLUME_ID },
+    { issuer: 'isbn13', value: GOOGLE_ISBN }
   ]);
   assert.equal(candidate.publishedDate, '1969');
   assert.equal(candidate.coverUrl, 'https://books.example/cover.jpg');
@@ -386,7 +397,7 @@ test('parses ISBNdb, Goodreads search and Goodreads book pages', () => {
     date_published: '1969',
     pages: 304,
     language: 'en',
-    isbn13: '9780441478125',
+    isbn13: ISBNDB_ISBN,
     image: 'http://img.example/isbndb.jpg',
     synopsis: 'A novel.'
   });
@@ -395,15 +406,15 @@ test('parses ISBNdb, Goodreads search and Goodreads book pages', () => {
 
   const fromSearch = candidatesFromSearchPage(goodreadsSearchHtml);
   assert.equal(fromSearch.length, 1);
-  assert.deepEqual(fromSearch[0].identifiers, [{ issuer: 'goodreads', value: '18423' }]);
+  assert.deepEqual(fromSearch[0].identifiers, [{ issuer: 'goodreads', value: GOODREADS_BOOK_ID }]);
   assert.equal(fromSearch[0].contributors[0].name, 'Ursula K. Le Guin');
 
   const fromBook = candidatesFromBookPage(goodreadsBookHtml)[0];
   assert.equal(fromBook.title, 'The Left Hand of Darkness');
   assert.deepEqual(fromBook.identifiers, [
-    { issuer: 'goodreads', value: '118028' },
-    { issuer: 'isbn13', value: '9780441478125' },
-    { issuer: 'asin', value: 'B0073N8XKQ' }
+    { issuer: 'goodreads', value: GOODREADS_BOOK_ID },
+    { issuer: 'isbn13', value: GOODREADS_ISBN },
+    { issuer: 'asin', value: GOODREADS_ASIN }
   ]);
   assert.equal(fromBook.pages, 366);
   assert.equal(fromBook.publisher.name, 'Ace');
@@ -430,7 +441,7 @@ test('resolve hydrates the catalog from provider results', async () => {
     await pool.query("DELETE FROM google_books_cache WHERE key LIKE $1", [`${baseUrl}/%`]);
 
     await tasks['catalog.resolve'](
-      { identifier: { issuer: 'isbn13', value: '9780441478125' } },
+      { identifier: { issuer: 'isbn13', value: GOOGLE_ISBN } },
       helpers
     );
 
@@ -462,8 +473,8 @@ test('resolve hydrates the catalog from provider results', async () => {
       [edition.rows[0].uri]
     );
     assert.deepEqual(identifiers.rows, [
-      { issuer: 'googlebooks', value: 'efdyneVzATwC' },
-      { issuer: 'isbn13', value: '9780441478125' }
+      { issuer: 'googlebooks', value: GOOGLE_VOLUME_ID },
+      { issuer: 'isbn13', value: GOOGLE_ISBN }
     ]);
 
     const contributors = await pool.query(
@@ -484,7 +495,7 @@ test('resolve hydrates the catalog from provider results', async () => {
     // Idempotent: a second resolution updates in place, never duplicates.
     const firstUri = edition.rows[0].uri;
     await tasks['catalog.resolve'](
-      { identifier: { issuer: 'isbn13', value: '9780441478125' } },
+      { identifier: { issuer: 'isbn13', value: GOOGLE_ISBN } },
       helpers
     );
     const after = await pool.query(
@@ -538,7 +549,7 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
     await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
 
     await tasks['catalog.resolve'](
-      { identifier: { issuer: 'isbn13', value: '9781111111111' } },
+      { identifier: { issuer: 'isbn13', value: PLC_ISBN } },
       helpers
     );
 
@@ -558,7 +569,10 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
     ]);
 
     // A different identifier bag mints a different TID under the same authority.
-    await tasks['catalog.resolve']({ identifier: { issuer: 'goodreads', value: '18423' } }, helpers);
+    await tasks['catalog.resolve'](
+      { identifier: { issuer: 'goodreads', value: GOODREADS_BOOK_ID } },
+      helpers
+    );
     const editions = await pool.query(
       'SELECT rkey FROM editions WHERE uri LIKE $1 ORDER BY rkey',
       [`at://${publisherDid}/%`]
@@ -616,7 +630,7 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
     assert.equal(edition.rowCount, 1);
     assertTid(edition.rows[0].rkey);
     assert.equal(edition.rows[0].title, 'The Left Hand of Darkness');
-    assert.equal(edition.rows[0].cover_url, 'https://img.example/18423.jpg');
+    assert.equal(edition.rows[0].cover_url, `https://img.example/${GOODREADS_BOOK_ID}.jpg`);
     assert.equal(goodreadsRequests, 1, 'Goodreads answers before OpenLibrary');
     assert.equal(openlibraryRequests, 0, 'OpenLibrary is not reached when Goodreads answers');
   } finally {
@@ -653,7 +667,7 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
     await cleanupHydrationRows(pool, 'isbn-direct.example');
     isbndbRequests = 0;
 
-    await tasks['catalog.isbn']({ isbn: '9780306406164' }, helpers);
+    await tasks['catalog.isbn']({ isbn: ISBNDB_ISBN }, helpers);
 
     const edition = await pool.query(
       "SELECT uri, rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
@@ -674,7 +688,7 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
       'SELECT issuer, value FROM edition_identifiers WHERE edition_uri = $1 ORDER BY issuer',
       [edition.rows[0].uri]
     );
-    assert.deepEqual(identifiers.rows, [{ issuer: 'isbn13', value: '9780306406164' }]);
+    assert.deepEqual(identifiers.rows, [{ issuer: 'isbn13', value: ISBNDB_ISBN }]);
 
     const outbox = await pool.query('SELECT collection, op FROM pds_outbox WHERE uri = $1', [
       edition.rows[0].uri
@@ -709,7 +723,7 @@ test('catalog.isbn falls back to the resolve chain without ISBNdb', async () => 
     await cleanupHydrationRows(pool, 'isbn-fallback.example');
     isbndbRequests = 0;
 
-    await tasks['catalog.isbn']({ isbn: '9780441478125' }, helpers);
+    await tasks['catalog.isbn']({ isbn: GOOGLE_ISBN }, helpers);
 
     const edition = await pool.query(
       "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-fallback.example/%'"
@@ -745,7 +759,7 @@ test('catalog.isbn falls back to the resolve chain when ISBNdb has no record', a
     isbndbRequests = 0;
     googleRequests = 0;
 
-    await tasks['catalog.isbn']({ isbn: '9780441478125' }, helpers);
+    await tasks['catalog.isbn']({ isbn: GOOGLE_ISBN }, helpers);
 
     const edition = await pool.query(
       "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-empty.example/%'"
