@@ -6,7 +6,7 @@
 
 import { isKnownContributorRole, normalizeContributorRole } from '../contributor-roles.ts';
 
-export type EditionEditIdentifierInfo = {
+export type BookEditIdentifierInfo = {
   format: string | null;
   language: string | null;
   publishedDate: string | null;
@@ -15,47 +15,47 @@ export type EditionEditIdentifierInfo = {
   durationSeconds: number | null;
 };
 
-export type EditionEditIdentifier = {
+export type BookEditIdentifier = {
   issuer: string;
   value: string;
   /** Absent = leave any stored claim untouched; null or all-empty = clear it. */
-  info?: EditionEditIdentifierInfo | null;
+  info?: BookEditIdentifierInfo | null;
   /** Absent = leave the stored publisher links untouched; `[]` clears them. */
-  publishers?: EditionEditPublisher[];
+  publishers?: BookEditPublisher[];
 };
 
-export type EditionEditContributor = {
+export type BookEditContributor = {
   id: number | null;
   name: string | null;
-  identifiers: EditionEditIdentifier[];
+  identifiers: BookEditIdentifier[];
   role: string;
   ref: string | null;
 };
 
-export type EditionEditPublisher = {
+export type BookEditPublisher = {
   id: number | null;
   name: string | null;
-  identifiers: EditionEditIdentifier[];
+  identifiers: BookEditIdentifier[];
 };
 
-export type EditionEditSeries = { name: string; position?: string; display?: string };
+export type BookEditSeries = { name: string; position?: string; display?: string };
 
-export type EditionEditInput = {
+export type BookEditInput = {
   title: string;
   subtitle: string | null;
   chapters: number | null;
-  series: EditionEditSeries | null;
+  series: BookEditSeries | null;
   bookEdition: string | null;
   coverUrl: string | null;
-  identifiers: EditionEditIdentifier[];
-  contributors: EditionEditContributor[];
+  identifiers: BookEditIdentifier[];
+  contributors: BookEditContributor[];
   expectedRevision: string | null;
 };
 
-export type EditionEditIssue = { path: string; message: string };
-export type EditionEditParse = { errors: EditionEditIssue[]; value: EditionEditInput | null };
+export type BookEditIssue = { path: string; message: string };
+export type BookEditParse = { errors: BookEditIssue[]; value: BookEditInput | null };
 
-export const EDITION_EDIT_LIMITS = {
+export const BOOK_EDIT_LIMITS = {
   title: 500,
   subtitle: 500,
   language: 35,
@@ -112,8 +112,8 @@ function publishedDateProblem(value: string): string | null {
  * Parse a browser- or API-supplied edit body. Every issue is collected so the
  * form can highlight fields; the server rejects the body when any remain.
  */
-export function parseEditionEdit(body: unknown): EditionEditParse {
-  const errors: EditionEditIssue[] = [];
+export function parseBookEdit(body: unknown): BookEditParse {
+  const errors: BookEditIssue[] = [];
   const issue = (path: string, message: string): void => {
     errors.push({ path, message });
   };
@@ -155,9 +155,9 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     if (
       !Number.isInteger(parsed) ||
       parsed < 0 ||
-      parsed > EDITION_EDIT_LIMITS.maxInteger
+      parsed > BOOK_EDIT_LIMITS.maxInteger
     ) {
-      issue(path, `must be a non-negative integer up to ${EDITION_EDIT_LIMITS.maxInteger}`);
+      issue(path, `must be a non-negative integer up to ${BOOK_EDIT_LIMITS.maxInteger}`);
       return null;
     }
     return parsed;
@@ -175,7 +175,7 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
 
   /** Domain-keyed language tag: canonical BCP 47 or an issue on `path`. */
   function languageTag(value: unknown, path: string): string | null {
-    const raw = text(value, path, EDITION_EDIT_LIMITS.language);
+    const raw = text(value, path, BOOK_EDIT_LIMITS.language);
     if (raw === null) return null;
     if (!BCP47_TAG.test(raw)) {
       issue(path, BCP47_ERROR);
@@ -213,7 +213,7 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
   function identifierInfo(
     value: unknown,
     path: string
-  ): EditionEditIdentifierInfo | null | undefined {
+  ): BookEditIdentifierInfo | null | undefined {
     if (value === undefined) return undefined;
     if (value === null) return null;
     if (typeof value !== 'object' || Array.isArray(value)) {
@@ -222,11 +222,11 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     }
     const record = value as Record<string, unknown>;
     return {
-      format: text(record.format, `${path}.format`, EDITION_EDIT_LIMITS.format),
+      format: text(record.format, `${path}.format`, BOOK_EDIT_LIMITS.format),
       language: languageTag(record.language, `${path}.language`),
       publishedDate: publishedDateField(record.publishedDate, `${path}.publishedDate`),
       pages: integer(record.pages, `${path}.pages`),
-      description: text(record.description, `${path}.description`, EDITION_EDIT_LIMITS.description),
+      description: text(record.description, `${path}.description`, BOOK_EDIT_LIMITS.description),
       durationSeconds: integer(record.durationSeconds, `${path}.durationSeconds`)
     };
   }
@@ -235,17 +235,17 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
    * One identifier's publisher links. Absent keeps the stored links; an array
    * replaces them, and an empty array clears them.
    */
-  function publisherList(value: unknown, path: string): EditionEditPublisher[] | undefined {
+  function publisherList(value: unknown, path: string): BookEditPublisher[] | undefined {
     if (value === undefined) return undefined;
     if (!Array.isArray(value)) {
       issue(path, 'must be an array');
       return undefined;
     }
-    if (value.length > EDITION_EDIT_LIMITS.maxPublishers) {
-      issue(path, `must contain at most ${EDITION_EDIT_LIMITS.maxPublishers} publishers`);
+    if (value.length > BOOK_EDIT_LIMITS.maxPublishers) {
+      issue(path, `must contain at most ${BOOK_EDIT_LIMITS.maxPublishers} publishers`);
       return undefined;
     }
-    const result: EditionEditPublisher[] = [];
+    const result: BookEditPublisher[] = [];
     value.forEach((entry, index) => {
       const at = `${path}.${index}`;
       if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
@@ -255,14 +255,14 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
       const publisher = entry as Record<string, unknown>;
       const id = entityId(publisher.id, `${at}.id`);
       const name =
-        id === null ? text(publisher.name, `${at}.name`, EDITION_EDIT_LIMITS.name, true) : null;
+        id === null ? text(publisher.name, `${at}.name`, BOOK_EDIT_LIMITS.name, true) : null;
       const publisherIdentifiers =
         publisher.identifiers === undefined
           ? []
           : identifiers(
               publisher.identifiers,
               `${at}.identifiers`,
-              EDITION_EDIT_LIMITS.maxEntityIdentifiers
+              BOOK_EDIT_LIMITS.maxEntityIdentifiers
             );
       result.push({ id, name, identifiers: publisherIdentifiers });
     });
@@ -274,7 +274,7 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
     path: string,
     maxCount: number,
     required = false
-  ): EditionEditIdentifier[] {
+  ): BookEditIdentifier[] {
     if (!Array.isArray(value)) {
       if (required) issue(path, 'must be an array with at least one identifier');
       return [];
@@ -283,7 +283,7 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
       issue(path, `must contain at most ${maxCount} identifiers`);
       return [];
     }
-    const result: EditionEditIdentifier[] = [];
+    const result: BookEditIdentifier[] = [];
     const seen = new Set<string>();
     value.forEach((entry, index) => {
       const at = `${path}.${index}`;
@@ -294,13 +294,13 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
       const issuer = text(
         entry.issuer,
         `${at}.issuer`,
-        EDITION_EDIT_LIMITS.identifierIssuer,
+        BOOK_EDIT_LIMITS.identifierIssuer,
         true
       );
       const value = text(
         entry.value,
         `${at}.value`,
-        EDITION_EDIT_LIMITS.identifierValue,
+        BOOK_EDIT_LIMITS.identifierValue,
         true
       );
       if (issuer === null || value === null) return;
@@ -333,7 +333,7 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
   }
 
   function ref(value: unknown, path: string): string | null {
-    const valueText = text(value, path, EDITION_EDIT_LIMITS.ref);
+    const valueText = text(value, path, BOOK_EDIT_LIMITS.ref);
     if (valueText === null) return null;
     if (!AT_URI.test(valueText)) {
       issue(path, 'must be an at:// record URI');
@@ -347,10 +347,10 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
   }
 
   const fields = body as Record<string, unknown>;
-  const title = text(fields.title, 'title', EDITION_EDIT_LIMITS.title, true);
-  const subtitle = text(fields.subtitle, 'subtitle', EDITION_EDIT_LIMITS.subtitle);
-  const bookEdition = text(fields.bookEdition, 'bookEdition', EDITION_EDIT_LIMITS.bookEdition);
-  const coverUrl = text(fields.coverUrl, 'coverUrl', EDITION_EDIT_LIMITS.coverUrl);
+  const title = text(fields.title, 'title', BOOK_EDIT_LIMITS.title, true);
+  const subtitle = text(fields.subtitle, 'subtitle', BOOK_EDIT_LIMITS.subtitle);
+  const bookEdition = text(fields.bookEdition, 'bookEdition', BOOK_EDIT_LIMITS.bookEdition);
+  const coverUrl = text(fields.coverUrl, 'coverUrl', BOOK_EDIT_LIMITS.coverUrl);
   if (coverUrl !== null) {
     let protocol: string | null = null;
     try {
@@ -365,23 +365,23 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
 
   const chapters = integer(fields.chapters, 'chapters');
 
-  let series: EditionEditSeries | null = null;
+  let series: BookEditSeries | null = null;
   if (fields.series !== undefined && fields.series !== null) {
     const rawSeries = fields.series;
     if (rawSeries === null || typeof rawSeries !== 'object' || Array.isArray(rawSeries)) {
       issue('series', 'must be an object with a name');
     } else {
       const seriesFields = rawSeries as Record<string, unknown>;
-      const name = text(seriesFields.name, 'series.name', EDITION_EDIT_LIMITS.seriesName);
+      const name = text(seriesFields.name, 'series.name', BOOK_EDIT_LIMITS.seriesName);
       const position = text(
         seriesFields.position,
         'series.position',
-        EDITION_EDIT_LIMITS.seriesPosition
+        BOOK_EDIT_LIMITS.seriesPosition
       );
       const display = text(
         seriesFields.display,
         'series.display',
-        EDITION_EDIT_LIMITS.seriesDisplay
+        BOOK_EDIT_LIMITS.seriesDisplay
       );
       if (name === null) {
         if (position !== null || display !== null) issue('series.name', 'is required');
@@ -398,19 +398,19 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
   const editionIdentifiers = identifiers(
     fields.identifiers,
     'identifiers',
-    EDITION_EDIT_LIMITS.maxIdentifiers,
+    BOOK_EDIT_LIMITS.maxIdentifiers,
     true
   );
 
-  const contributors: EditionEditContributor[] = [];
+  const contributors: BookEditContributor[] = [];
   if (!Array.isArray(fields.contributors)) {
     issue('contributors', 'must be an array with at least one contributor');
   } else if (fields.contributors.length === 0) {
     issue('contributors', 'must contain at least one contributor');
-  } else if (fields.contributors.length > EDITION_EDIT_LIMITS.maxContributors) {
+  } else if (fields.contributors.length > BOOK_EDIT_LIMITS.maxContributors) {
     issue(
       'contributors',
-      `must contain at most ${EDITION_EDIT_LIMITS.maxContributors} contributors`
+      `must contain at most ${BOOK_EDIT_LIMITS.maxContributors} contributors`
     );
   } else {
     fields.contributors.forEach((entry, index) => {
@@ -423,8 +423,8 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
       const id = entityId(contributor.id, `${at}.id`);
       const name =
         id === null
-          ? text(contributor.name, `${at}.name`, EDITION_EDIT_LIMITS.name, true)
-          : text(contributor.name, `${at}.name`, EDITION_EDIT_LIMITS.name);
+          ? text(contributor.name, `${at}.name`, BOOK_EDIT_LIMITS.name, true)
+          : text(contributor.name, `${at}.name`, BOOK_EDIT_LIMITS.name);
       const contributorRole = role(contributor.role, `${at}.role`);
       const contributorRef = ref(contributor.ref, `${at}.ref`);
       const contributorIdentifiers =
@@ -433,7 +433,7 @@ export function parseEditionEdit(body: unknown): EditionEditParse {
           : identifiers(
               contributor.identifiers,
               `${at}.identifiers`,
-              EDITION_EDIT_LIMITS.maxEntityIdentifiers
+              BOOK_EDIT_LIMITS.maxEntityIdentifiers
             );
       contributors.push({
         id,

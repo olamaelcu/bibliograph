@@ -160,7 +160,7 @@ async function makeEdition({
   const uri = `${PREFIX}${rkey}`;
   const createdAt = new Date('2026-02-03T04:05:06.000Z');
   await pool.query(
-    `INSERT INTO editions (
+    `INSERT INTO books (
        uri, rkey, title, subtitle, chapters, series,
        book_edition, cover_url, created_at, indexed_at
      ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,now())`,
@@ -270,9 +270,9 @@ async function makeEdition({
 
 async function cleanup() {
   await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [`${PREFIX}%`]);
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`${PREFIX}%`]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [`${PREFIX}%`]);
   await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [`${PLC_PREFIX}%`]);
   await pool.query('DELETE FROM contributors WHERE name LIKE $1', [`${CONTRIBUTOR_PREFIX}%`]);
   await pool.query('DELETE FROM publishers WHERE name LIKE $1', ['PDS Test Publisher%']);
   // Row deletes queue outbox rows (entity deletes included), so sweep last.
@@ -486,7 +486,7 @@ test('an update uses the recorded CID and replaces it', async () => {
   await tasks['pds-publish']({ limit: 10 }, helpers());
   expect(stub.state.applyWrites.length).toBe(1);
 
-  await pool.query("UPDATE editions SET title = 'Renamed Edition' WHERE uri = $1", [fixture.uri]);
+  await pool.query("UPDATE books SET title = 'Renamed Edition' WHERE uri = $1", [fixture.uri]);
   const queued = await pool.query('SELECT op FROM pds_outbox WHERE uri = $1', [fixture.uri]);
   expect(queued.rows[0].op).toBe('update');
 
@@ -646,7 +646,7 @@ test('a rotated refresh token replaces the in-memory session token', async () =>
   };
   await tasks['pds-publish']({ limit: 10 }, helpers());
 
-  await pool.query("UPDATE editions SET title = 'Rotated Session Edition' WHERE uri = $1", [
+  await pool.query("UPDATE books SET title = 'Rotated Session Edition' WHERE uri = $1", [
     fixture.uri
   ]);
   stub.state.applyWriteNext = {
@@ -722,7 +722,7 @@ test('a trigger update during publishing is not swallowed', async () => {
   const real = createPdsPublisher({ config: validConfig(stub.url) });
   const racing = {
     applyWrite: async (write) => {
-      await pool.query("UPDATE editions SET title = 'Changed mid-publish' WHERE uri = $1", [
+      await pool.query("UPDATE books SET title = 'Changed mid-publish' WHERE uri = $1", [
         fixture.uri
       ]);
       return real.applyWrite(write);
@@ -883,10 +883,10 @@ test('deletes and creates share a call without losing their operations', async (
 
   await tasks['pds-publish']({ limit: 10 }, helpers());
   // One row to update and one to delete, so the next claim is genuinely mixed.
-  await pool.query("UPDATE editions SET title = 'Renamed While Deleting' WHERE uri = $1", [
+  await pool.query("UPDATE books SET title = 'Renamed While Deleting' WHERE uri = $1", [
     created.uri
   ]);
-  await pool.query('DELETE FROM editions WHERE uri = $1', [removed.uri]);
+  await pool.query('DELETE FROM books WHERE uri = $1', [removed.uri]);
 
   stub.state.applyWrites.length = 0;
   stub.state.requests.length = 0;

@@ -3,12 +3,12 @@ import { expect, test, afterAll, beforeAll } from 'vitest';
 import pg from 'pg';
 
 import {
-  EditionEditError,
-  deleteAdminEdition,
-  loadEditionForEdit,
-  updateAdminEdition
-} from '../src/lib/server/admin/edition-edit.ts';
-import type { EditionEditIdentifier } from '../src/lib/admin/edition-edit.ts';
+  BookEditError,
+  deleteAdminBook,
+  loadBookForEdit,
+  updateAdminBook
+} from '../src/lib/server/admin/book-edit.ts';
+import type { BookEditIdentifier } from '../src/lib/admin/book-edit.ts';
 import type { AdminEdition } from '../src/lib/admin/types.ts';
 
 const DATABASE_URL =
@@ -39,7 +39,7 @@ function requiredPool(t: { skip: (message?: string) => void }): pg.Pool | null {
 async function cleanup(): Promise<void> {
   if (!pool) return;
   const prefix = `at://${AUTHORITY}/%`;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE at_uri LIKE $1 OR name LIKE $2', [
     prefix,
     `${RUN}%`
@@ -78,7 +78,7 @@ async function seedEdition(
   const rkey = label();
   const uri = `at://${AUTHORITY}/${EDITION_COLLECTION}/${rkey}`;
   await (pool as pg.Pool).query(
-    `INSERT INTO editions (uri, rkey, title, created_at, indexed_at)
+    `INSERT INTO books (uri, rkey, title, created_at, indexed_at)
      VALUES ($1, $2, $3, '2020-01-02T03:04:05.000Z', '2020-01-02T03:04:05.000Z')`,
     [uri, rkey, title]
   );
@@ -125,7 +125,7 @@ function bodyFrom(edition: AdminEdition, overrides: Record<string, unknown> = {}
 }
 
 async function loaded(ref: string): Promise<AdminEdition> {
-  const edition = await loadEditionForEdit(pool as pg.Pool, ref);
+  const edition = await loadBookForEdit(pool as pg.Pool, ref);
   expect(edition, 'expected the seeded edition to load').toBeTruthy();
   return edition;
 }
@@ -153,7 +153,7 @@ test('loads an edition by rkey and by a URL-encoded at-uri', async (t) => {
   if (!db) return;
   const seeded = await seedEdition('Loadable');
 
-  const byRkey = await loadEditionForEdit(db, seeded.rkey);
+  const byRkey = await loadBookForEdit(db, seeded.rkey);
   expect(byRkey).toBeTruthy();
   expect(byRkey.uri).toBe(seeded.uri);
   expect(byRkey.title).toBe('Loadable');
@@ -162,7 +162,7 @@ test('loads an edition by rkey and by a URL-encoded at-uri', async (t) => {
   expect(byRkey.identifiers[0]?.value).toBe('9780000000001');
   expect(byRkey.revision).toMatch(/^[a-f0-9]{64}$/);
 
-  const byUri = await loadEditionForEdit(db, encodeURIComponent(seeded.uri));
+  const byUri = await loadBookForEdit(db, encodeURIComponent(seeded.uri));
   expect(byUri).toBeTruthy();
   expect(byUri.uri).toBe(seeded.uri);
 });
@@ -176,7 +176,7 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
   const secondPublisher = await createPublisher(`${RUN} Second Press ${seeded.rkey}`);
   const ref = `at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/override${sequence}`;
 
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  const saved = await updateAdminBook(db, seeded.rkey, bodyFrom(original, {
     title: 'Edited title',
     subtitle: 'An edited subtitle',
     chapters: 12,
@@ -232,7 +232,7 @@ test('updates scalars, identifiers, contributor order/roles and publisher order 
   expect(saved.contributors[0]?.ref).toBe(ref);
   expect(saved.contributors[1]?.id).toBe(seeded.contributorId);
   const row = await db.query<{ title: string; created_at: Date; rkey: string }>(
-    'SELECT title, created_at, rkey FROM editions WHERE uri = $1',
+    'SELECT title, created_at, rkey FROM books WHERE uri = $1',
     [seeded.uri]
   );
   expect(row.rows[0]?.title).toBe('Edited title');
@@ -307,7 +307,7 @@ test('creates a contributor from name and identifiers, then dedupes it', async (
   const name = `${RUN} Deduped Person ${seeded.rkey}`;
   const identifiers = [{ issuer: 'isni', value: '0000000123456789' }];
 
-  const first = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  const first = await updateAdminBook(db, seeded.rkey, bodyFrom(original, {
     contributors: [
       { name, identifiers, role: 'B01', ref: `at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/edge` },
       { id: seeded.contributorId, role: 'A01', ref: null }
@@ -317,7 +317,7 @@ test('creates a contributor from name and identifiers, then dedupes it', async (
   expect(created).toBeTruthy();
   expect(created.id > 0).toBeTruthy();
 
-  const second = await updateAdminEdition(db, seeded.rkey, bodyFrom(first, {
+  const second = await updateAdminBook(db, seeded.rkey, bodyFrom(first, {
     contributors: [
       { name, identifiers, role: 'B01', ref: `at://${AUTHORITY}/${CONTRIBUTOR_COLLECTION}/edge` },
       { id: seeded.contributorId, role: 'A01', ref: null }
@@ -343,12 +343,12 @@ test('dedupes a contributor whose identifier bag arrives in another order', asyn
   const name = `${RUN} Reordered Person ${seeded.rkey}`;
   const isni = { issuer: 'isni', value: '0000000987654321' };
   const viaf = { issuer: 'viaf', value: '987654321' };
-  const credits = (identifiers: EditionEditIdentifier[]) => [
+  const credits = (identifiers: BookEditIdentifier[]) => [
     { name, identifiers, role: 'B01', ref: null },
     { id: seeded.contributorId, role: 'A01', ref: null }
   ];
 
-  const first = await updateAdminEdition(
+  const first = await updateAdminBook(
     db,
     seeded.rkey,
     bodyFrom(original, { contributors: credits([isni, viaf]) })
@@ -358,7 +358,7 @@ test('dedupes a contributor whose identifier bag arrives in another order', asyn
 
   // The same identity, bag reversed: `(lower(name), identifiers)` compares the
   // stored jsonb positionally, so the row must not fork into a second address.
-  const second = await updateAdminEdition(
+  const second = await updateAdminBook(
     db,
     seeded.rkey,
     bodyFrom(first, { contributors: credits([viaf, isni]) })
@@ -380,7 +380,7 @@ test('removes a credit without deleting the shared contributor or publisher', as
   const secondContributor = await createContributor(`${RUN} Unlinked Author ${seeded.rkey}`);
   const secondPublisher = await createPublisher(`${RUN} Unlinked Press ${seeded.rkey}`);
 
-  await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  await updateAdminBook(db, seeded.rkey, bodyFrom(original, {
     contributors: [
       { id: seeded.contributorId, role: 'A01', ref: null },
       { id: secondContributor, role: 'B01', ref: null }
@@ -395,7 +395,7 @@ test('removes a credit without deleting the shared contributor or publisher', as
   }));
 
   const mid = await loaded(seeded.rkey);
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(mid, {
+  const saved = await updateAdminBook(db, seeded.rkey, bodyFrom(mid, {
     contributors: [{ id: seeded.contributorId, role: 'A01', ref: null }],
     identifiers: [
       { issuer: 'isbn13', value: '9780000000001', publishers: [{ id: seeded.publisherId }] }
@@ -418,15 +418,15 @@ test('rejects an unknown contributor id and rolls back the scalar change', async
   const seeded = await seedEdition('Unchanged title');
   const original = await loaded(seeded.rkey);
 
-  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  await expect(updateAdminBook(db, seeded.rkey, bodyFrom(original, {
       title: 'Must roll back',
       contributors: [{ id: 9_000_000_000_000, role: 'A01', ref: null }]
     }))).rejects.toSatisfy((error: unknown) =>
-      error instanceof EditionEditError &&
+      error instanceof BookEditError &&
       error.status === 400 &&
       error.code === 'UnknownContributor');
 
-  const row = await db.query<{ title: string }>('SELECT title FROM editions WHERE uri = $1', [
+  const row = await db.query<{ title: string }>('SELECT title FROM books WHERE uri = $1', [
     seeded.uri
   ]);
   expect(row.rows[0]?.title).toBe('Unchanged title');
@@ -438,14 +438,14 @@ test('rejects a stale revision with 409', async (t) => {
   const seeded = await seedEdition('Revision A');
   const original = await loaded(seeded.rkey);
 
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  const saved = await updateAdminBook(db, seeded.rkey, bodyFrom(original, {
     title: 'Revision B'
   }));
   expect(saved.title).toBe('Revision B');
 
-  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, { title: 'Revision C' }))).rejects.toSatisfy((error: unknown) =>
-      error instanceof EditionEditError && error.status === 409 && error.code === 'EditionChanged');
-  const row = await db.query<{ title: string }>('SELECT title FROM editions WHERE uri = $1', [
+  await expect(updateAdminBook(db, seeded.rkey, bodyFrom(original, { title: 'Revision C' }))).rejects.toSatisfy((error: unknown) =>
+      error instanceof BookEditError && error.status === 409 && error.code === 'EditionChanged');
+  const row = await db.query<{ title: string }>('SELECT title FROM books WHERE uri = $1', [
     seeded.uri
   ]);
   expect(row.rows[0]?.title).toBe('Revision B');
@@ -459,7 +459,7 @@ test('accepts the current revision with no changes', async (t) => {
   const second = await loaded(seeded.rkey);
   expect(first.revision).toBe(second.revision);
 
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(second));
+  const saved = await updateAdminBook(db, seeded.rkey, bodyFrom(second));
   expect(saved.title).toBe('Stable revision');
   expect(saved.revision).toBe(second.revision);
 });
@@ -477,7 +477,7 @@ test('editing the cover URL clears the cover ledger, so the sweep refetches at o
   );
   const original = await loaded(seeded.rkey);
 
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  const saved = await updateAdminBook(db, seeded.rkey, bodyFrom(original, {
     coverUrl: 'https://covers.example/real.jpg'
   }));
 
@@ -495,11 +495,11 @@ test('rejects invalid bodies before opening a transaction', async (t) => {
   const seeded = await seedEdition('Valid title');
   const original = await loaded(seeded.rkey);
 
-  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, { title: '   ' }))).rejects.toSatisfy((error: unknown) =>
-      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition');
-  await expect(updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  await expect(updateAdminBook(db, seeded.rkey, bodyFrom(original, { title: '   ' }))).rejects.toSatisfy((error: unknown) =>
+      error instanceof BookEditError && error.status === 400 && error.code === 'InvalidEdition');
+  await expect(updateAdminBook(db, seeded.rkey, bodyFrom(original, {
       coverUrl: 'javascript:alert(1)'
-    }))).rejects.toSatisfy((error: unknown) => error instanceof EditionEditError && error.status === 400);
+    }))).rejects.toSatisfy((error: unknown) => error instanceof BookEditError && error.status === 400);
 });
 
 test('claims are kept when omitted, cleared with null and written per identifier', async (t) => {
@@ -543,41 +543,41 @@ test('claims are kept when omitted, cleared with null and written per identifier
     });
 
   // Invalid claim field: rejected before the transaction, nothing changes.
-  await expect(updateAdminEdition(
+  await expect(updateAdminBook(
       db,
       seeded.rkey,
       bodyFrom(await loaded(seeded.rkey), {
         identifiers: [{ ...isbn, info: { language: 'en_US' } }]
       })
     )).rejects.toSatisfy((error: unknown) =>
-      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition');
-  await expect(updateAdminEdition(
+      error instanceof BookEditError && error.status === 400 && error.code === 'InvalidEdition');
+  await expect(updateAdminBook(
       db,
       seeded.rkey,
       bodyFrom(await loaded(seeded.rkey), {
         contributors: [{ id: seeded.contributorId, role: 'A55', ref: null }]
       })
     )).rejects.toSatisfy((error: unknown) =>
-      error instanceof EditionEditError && error.status === 400 && error.code === 'InvalidEdition');
+      error instanceof BookEditError && error.status === 400 && error.code === 'InvalidEdition');
   expect((await claimRow())?.format).toBe('hardcover');
 
   // An unchanged claim is not rewritten: `updated_at` survives a plain save.
   const reloaded = await loaded(seeded.rkey);
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(reloaded, {
+  const saved = await updateAdminBook(db, seeded.rkey, bodyFrom(reloaded, {
     title: 'Claim editing 2'
   }));
   expect(saved.title).toBe('Claim editing 2');
   expect((await claimRow())?.updated_at.toISOString()).toBe(seededClaim?.updated_at.toISOString());
 
   // An identifier with no `info` key keeps the stored claim untouched.
-  const omitted = await updateAdminEdition(db, seeded.rkey, bodyFrom(saved, {
+  const omitted = await updateAdminBook(db, seeded.rkey, bodyFrom(saved, {
     identifiers: [isbn]
   }));
   expect(omitted.identifiers[0]?.info?.format).toBe('hardcover');
   expect((await claimRow())?.pages).toBe(320);
 
   // A new identifier carries its own claim.
-  const added = await updateAdminEdition(db, seeded.rkey, bodyFrom(omitted, {
+  const added = await updateAdminBook(db, seeded.rkey, bodyFrom(omitted, {
     identifiers: [
       isbn,
       {
@@ -602,7 +602,7 @@ test('claims are kept when omitted, cleared with null and written per identifier
   expect(shape.rows[0]).toEqual({ format: 'hardcover', pages: 320, duration_seconds: null });
 
   // Null clears the row; the isbn13 claim still wins the union.
-  const cleared = await updateAdminEdition(db, seeded.rkey, bodyFrom(added, {
+  const cleared = await updateAdminBook(db, seeded.rkey, bodyFrom(added, {
     identifiers: [
       { ...isbn, info: null },
       { issuer: 'isbn10', value: '0441013597' }
@@ -612,7 +612,7 @@ test('claims are kept when omitted, cleared with null and written per identifier
   expect(await claimRow()).toBe(undefined);
 
   // Canonicalisation happens on the claim, exactly as it did on the edition.
-  const canonical = await updateAdminEdition(db, seeded.rkey, bodyFrom(cleared, {
+  const canonical = await updateAdminBook(db, seeded.rkey, bodyFrom(cleared, {
     identifiers: [{ ...isbn, info: { language: 'EN-us' } }]
   }));
   expect(canonical.identifiers.find((identifier) => identifier.issuer === 'isbn13')?.info?.language).toBe('en-US');
@@ -622,12 +622,12 @@ test('claims are kept when omitted, cleared with null and written per identifier
 test('returns 404 for an unknown edition', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
-  expect(await loadEditionForEdit(db, `missing${RUN}`)).toBe(null);
-  await expect(updateAdminEdition(db, `missing${RUN}`, {
+  expect(await loadBookForEdit(db, `missing${RUN}`)).toBe(null);
+  await expect(updateAdminBook(db, `missing${RUN}`, {
       title: 'x',
       identifiers: [{ issuer: 'isbn13', value: '1' }],
       contributors: [{ name: 'A' }]
-    })).rejects.toSatisfy((error: unknown) => error instanceof EditionEditError && error.status === 404);
+    })).rejects.toSatisfy((error: unknown) => error instanceof BookEditError && error.status === 404);
 });
 
 test('queues new contributor and publisher entity rows through triggers', async (t) => {
@@ -638,7 +638,7 @@ test('queues new contributor and publisher entity rows through triggers', async 
   const name = `${RUN} Outbox Person ${seeded.rkey}`;
   const publisherName = `${RUN} Outbox Press ${seeded.rkey}`;
 
-  const saved = await updateAdminEdition(db, seeded.rkey, bodyFrom(original, {
+  const saved = await updateAdminBook(db, seeded.rkey, bodyFrom(original, {
     contributors: [
       { id: seeded.contributorId, role: 'A01', ref: null },
       { name, identifiers: [{ issuer: 'isni', value: '999' }], role: 'B01', ref: null }
@@ -694,7 +694,7 @@ test('deletes an edition with its children and queues the record deletion', asyn
   expect((await db.query<{ op: string }>('SELECT op FROM pds_outbox WHERE uri = $1', [seeded.uri])).rows[0]
       ?.op, 'a fresh seeded edition is queued as a create').toBe('create');
 
-  const deleted = await deleteAdminEdition(db, seeded.rkey, original.revision);
+  const deleted = await deleteAdminBook(db, seeded.rkey, original.revision);
 
   expect(deleted).toBe(seeded.uri);
   const counts = await db.query<{
@@ -706,7 +706,7 @@ test('deletes an edition with its children and queues the record deletion', asyn
     covers: number;
     genres: number;
   }>(
-    `SELECT (SELECT count(*)::int FROM editions WHERE uri = $1) AS editions,
+    `SELECT (SELECT count(*)::int FROM books WHERE uri = $1) AS editions,
             (SELECT count(*)::int FROM edition_identifiers WHERE edition_uri = $1) AS identifiers,
             (SELECT count(*)::int FROM edition_identifier_info WHERE edition_uri = $1) AS claims,
             (SELECT count(*)::int FROM edition_contributors WHERE edition_uri = $1) AS credits,
@@ -729,7 +729,7 @@ test('deletes an edition with its children and queues the record deletion', asyn
     seeded.uri
   ]);
   expect(outbox.rows, 'the parked create is rewritten to a delete').toEqual([{ op: 'delete' }]);
-  expect(await loadEditionForEdit(db, seeded.rkey)).toBe(null);
+  expect(await loadBookForEdit(db, seeded.rkey)).toBe(null);
 });
 
 test('refuses to delete an edition that changed since it was loaded', async (t) => {
@@ -737,22 +737,22 @@ test('refuses to delete an edition that changed since it was loaded', async (t) 
   if (!db) return;
   const seeded = await seedEdition('Stale delete');
   const original = await loaded(seeded.rkey);
-  await updateAdminEdition(
+  await updateAdminBook(
     db,
     seeded.rkey,
     bodyFrom(original, { title: 'Renamed before delete' })
   );
 
-  await expect(() => deleteAdminEdition(db, seeded.rkey, original.revision)).rejects.toSatisfy((error: unknown) =>
-      error instanceof EditionEditError &&
+  await expect(() => deleteAdminBook(db, seeded.rkey, original.revision)).rejects.toSatisfy((error: unknown) =>
+      error instanceof BookEditError &&
       error.status === 409 &&
       error.code === 'EditionChanged');
-  expect((await loadEditionForEdit(db, seeded.rkey)) !== null, 'a refused delete leaves the edition in place').toBeTruthy();
+  expect((await loadBookForEdit(db, seeded.rkey)) !== null, 'a refused delete leaves the edition in place').toBeTruthy();
 });
 
 test('reports an unknown edition as 404 on delete', async (t) => {
   const db = requiredPool(t);
   if (!db) return;
-  await expect(() => deleteAdminEdition(db, `missing${RUN}`, null)).rejects.toSatisfy((error: unknown) =>
-      error instanceof EditionEditError && error.status === 404 && error.code === 'NotFound');
+  await expect(() => deleteAdminBook(db, `missing${RUN}`, null)).rejects.toSatisfy((error: unknown) =>
+      error instanceof BookEditError && error.status === 404 && error.code === 'NotFound');
 });

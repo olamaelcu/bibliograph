@@ -8,7 +8,7 @@
 
 import { expect, test } from 'vitest';
 
-import { listEditions } from '../src/lib/server/catalog/editions.ts';
+import { listEditions } from '../src/lib/server/catalog/books.ts';
 import { decodeKeysetCursor, encodeKeysetCursor } from '../src/lib/server/catalog/sql.ts';
 
 const PREFIX = 'at://did:plc:e2x3ihw2ntxt7pcgzmtu3abi/community.lexicon.media.book.edition/';

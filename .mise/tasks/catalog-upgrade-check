@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+#MISE description="Replay the current catalog SQL over a pre-rename catalog (creates and drops a scratch database)"
+#
+# `catalog-schema-check` only proves the fresh build. The rename's risk is the
+# *upgrade* path: `deploy.sh` replays every SQL file over an existing catalogue,
+# so `0000-rename-editions-to-books.sql` has to sort before the rewritten schema
+# files and every later file has to converge on an already-renamed database.
+#
+# This task builds a scratch database from the last release that still called
+# the table `editions` (tag v0.4.1 by default), seeds a small catalog, applies
+# the working tree's SQL over it, and asserts the rows, the identifier identity,
+# the enqueued outbox rows and the compatibility view survived. It drops the
+# scratch database on exit, even when an assertion fails.
+#
+# The base ref is a parameter, not a moving target: once the rename is on main,
+# `main` holds the new SQL, so the default names the tag. Point it at another
+# release with CATALOG_UPGRADE_BASE=<ref>.
+#
+# DATABASE_URL (or CATALOG_DATABASE_URL) is used only to create and drop the
+# scratch database; the main database is never touched.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+ADMIN_URL="${CATALOG_DATABASE_URL:-${DATABASE_URL:-}}"
+BASE_REF="${CATALOG_UPGRADE_BASE:-v0.4.1}"
+: "${ADMIN_URL:?set CATALOG_DATABASE_URL or DATABASE_URL}"
+command -v psql >/dev/null || { printf 'ERROR: psql is required\n' >&2; exit 1; }
+command -v git >/dev/null || { printf 'ERROR: git is required\n' >&2; exit 1; }
+
+DB_NAME="bibliograph_catalog_upgrade_check_$$"
+WORK="$(mktemp -d)"
+SCRATCH_URL="$(
+  node -e '
+    const url = new URL(process.argv[1]);
+    url.pathname = "/" + process.argv[2];
+    process.stdout.write(url.toString());
+  ' "$ADMIN_URL" "$DB_NAME"
+)"
+
+cleanup() {
+  psql "$ADMIN_URL" -X --quiet --set ON_ERROR_STOP=1 \
+    --command "DROP DATABASE IF EXISTS \"$DB_NAME\"" >/dev/null 2>&1 || true
+  rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
+
+printf '==> catalog upgrade check: creating %s\n' "$DB_NAME"
+psql "$ADMIN_URL" -X --quiet --set ON_ERROR_STOP=1 \
+  --command "DROP DATABASE IF EXISTS \"$DB_NAME\""
+psql "$ADMIN_URL" -X --quiet --set ON_ERROR_STOP=1 \
+  --command "CREATE DATABASE \"$DB_NAME\""
+
+printf '==> catalog upgrade check: applying the pre-rename SQL from %s\n' "$BASE_REF"
+git -C "$ROOT" archive "$BASE_REF" packages/worker/sql | tar -x -C "$WORK"
+for file in "$WORK"/packages/worker/sql/*.sql; do
+  psql "$SCRATCH_URL" -X --quiet --set ON_ERROR_STOP=1 -f "$file" >/dev/null
+done
+
+printf '==> catalog upgrade check: seeding %s\n' "$DB_NAME"
+psql "$SCRATCH_URL" -X --quiet --set ON_ERROR_STOP=1 <<'SQL' >/dev/null
+INSERT INTO editions (uri, rkey, title, created_at) VALUES
+  ('at://did:plc:upgradecheck/community.lexicon.media.book.edition/3aa', '3aa', 'Upgrade Probe One', now()),
+  ('at://did:plc:upgradecheck/community.lexicon.media.book.edition/3ab', '3ab', 'Upgrade Probe Two', now()),
+  ('at://did:plc:upgradecheck/community.lexicon.media.book.edition/3ac', '3ac', 'Upgrade Probe Three', now());
+
+INSERT INTO edition_identifiers (edition_uri, issuer, value) VALUES
+  ('at://did:plc:upgradecheck/community.lexicon.media.book.edition/3aa', 'isbn13', '9780306406157'),
+  ('at://did:plc:upgradecheck/community.lexicon.media.book.edition/3ab', 'isbn13', '9780306406158'),
+  ('at://did:plc:upgradecheck/community.lexicon.media.book.edition/3ac', 'goodreads', '990100');
+
+INSERT INTO contributors (name) VALUES ('Upgrade Probe Author');
+
+INSERT INTO edition_contributors (edition_uri, contributor_id, position)
+SELECT uri, (SELECT id FROM contributors WHERE name = 'Upgrade Probe Author'), 0
+  FROM editions WHERE rkey = '3aa';
+SQL
+
+printf '==> catalog upgrade check: applying the working tree SQL over it\n'
+CATALOG_DATABASE_URL="$SCRATCH_URL" "$ROOT/.mise/tasks/catalog-schema" >/dev/null
+
+printf '==> catalog upgrade check: asserting the upgrade survived\n'
+psql "$SCRATCH_URL" -X --quiet --set ON_ERROR_STOP=1 <<'SQL'
+DO $check$
+DECLARE
+  books_count integer;
+  identifiers_count integer;
+  credits_count integer;
+  outbox_count integer;
+  editions_kind "char";
+BEGIN
+  IF to_regclass('public.books') IS NULL THEN
+    RAISE EXCEPTION 'upgrade: public.books does not exist after the replay';
+  END IF;
+
+  SELECT relkind INTO editions_kind FROM pg_class WHERE oid = to_regclass('public.editions');
+  IF editions_kind = 'r' THEN
+    RAISE EXCEPTION 'upgrade: public.editions is still a table';
+  END IF;
+
+  SELECT count(*) INTO books_count FROM books;
+  IF books_count <> 3 THEN
+    RAISE EXCEPTION 'upgrade: expected 3 books, found %', books_count;
+  END IF;
+
+  SELECT count(*) INTO identifiers_count FROM edition_identifiers;
+  IF identifiers_count <> 3 THEN
+    RAISE EXCEPTION 'upgrade: expected 3 identifiers, found %', identifiers_count;
+  END IF;
+
+  SELECT count(*) INTO credits_count FROM edition_contributors;
+  IF credits_count <> 1 THEN
+    RAISE EXCEPTION 'upgrade: expected 1 credit, found %', credits_count;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM books
+     WHERE uri = 'at://did:plc:upgradecheck/community.lexicon.media.book.edition/3aa'
+  ) THEN
+    RAISE EXCEPTION 'upgrade: the seeded book lost its identity';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM edition_identifiers
+     WHERE edition_uri = 'at://did:plc:upgradecheck/community.lexicon.media.book.edition/3ab'
+       AND issuer = 'isbn13' AND value = '9780306406158'
+  ) THEN
+    RAISE EXCEPTION 'upgrade: an identifier lost its identity';
+  END IF;
+
+  SELECT count(*) INTO outbox_count FROM pds_outbox WHERE collection = 'community.lexicon.media.book.edition';
+  IF outbox_count < 3 THEN
+    RAISE EXCEPTION 'upgrade: expected the seeded inserts to enqueue >= 3 outbox rows, found %', outbox_count;
+  END IF;
+
+  -- Release A ships the compatibility view; release B drops it. Either is fine,
+  -- but a view must be readable and updatable, and a bare `editions` relation
+  -- must not be a table (checked above).
+  IF editions_kind = 'v' THEN
+    IF (SELECT count(*) FROM editions) <> 3 THEN
+      RAISE EXCEPTION 'upgrade: the compatibility view does not expose the catalog';
+    END IF;
+    IF pg_relation_is_updatable('public.editions'::regclass, true) = 0 THEN
+      RAISE EXCEPTION 'upgrade: the compatibility view is not updatable';
+    END IF;
+  END IF;
+
+  RAISE NOTICE 'upgrade ok: % books, % identifiers, % credits, % outbox rows, editions relkind=%',
+    books_count, identifiers_count, credits_count, outbox_count, editions_kind;
+END
+$check$;
+SQL
+
+printf '==> catalog upgrade check: ok (scratch database will be dropped)\n'

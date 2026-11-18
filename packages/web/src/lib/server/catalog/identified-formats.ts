@@ -41,7 +41,7 @@ export type IdentifiedFormat = {
   progressUnit?: ProgressUnit;
 };
 
-export type EditionIdentifiedFormats = {
+export type BookIdentifiedFormats = {
   uri: string;
   chapters?: number;
   identifiers: IdentifiedFormat[];
@@ -75,13 +75,13 @@ const RANK = `CASE i.issuer
  * edit, a hand merge) has no `edition_identifier_info` row and comes back with
  * `issuer` and `value` only — the identifier is still known, the medium is not.
  */
-export async function getEditionIdentifiedFormats(
+export async function getBookIdentifiedFormats(
   pool: EntityQueryable,
   uri: string
-): Promise<EditionIdentifiedFormats | null> {
+): Promise<BookIdentifiedFormats | null> {
   const [exists, rows] = await Promise.all([
     pool.query<{ present: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM editions WHERE uri = $1) AS present`,
+      `SELECT EXISTS (SELECT 1 FROM books WHERE uri = $1) AS present`,
       [uri]
     ),
     pool.query<Row>(
@@ -91,7 +91,7 @@ export async function getEditionIdentifiedFormats(
               info.format,
               info.pages,
               info.duration_seconds
-         FROM editions e
+         FROM books e
          JOIN edition_identifiers i ON i.edition_uri = e.uri
          LEFT JOIN edition_identifier_info info
                 ON info.edition_uri = i.edition_uri

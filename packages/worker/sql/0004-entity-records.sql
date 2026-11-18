@@ -131,7 +131,7 @@ BEGIN
   SELECT EXISTS (
     SELECT 1 FROM information_schema.columns
      WHERE table_schema = current_schema()
-       AND table_name = 'editions'
+       AND table_name = 'books'
        AND column_name = 'format'
   ) INTO had_shape;
 
@@ -205,7 +205,7 @@ SELECT
       FROM edition_identifiers i
      WHERE i.edition_uri = e.uri
   ), '[]'::jsonb) AS identifiers
-FROM editions e$book$;
+FROM books e$book$;
 
   EXECUTE $lua$CREATE OR REPLACE VIEW appview_book_lua AS
 SELECT

@@ -1,3 +1,56 @@
+bibliograph-web (0.5.2-1) unstable; urgency=medium
+
+  * 0.5.2: the XRPC-facing functions keep their method names.
+
+    - `searchBooks`/`resolveBooks`/`listBooks`/`listBooksByContributor` are
+      `searchEditions`/`resolveEditions`/`listEditions`/
+      `listEditionsByContributor` again, and the dispatcher's dependency slots
+      with them. Those functions implement the lexicon's procedures and
+      queries, so their names belong to the XRPC vocabulary; only the storage
+      modules and types keep the new name (`books.ts`, `book-view.ts`,
+      `BookShape`, the admin read/edit modules).
+    - No behaviour change: the NSIDs, the SQL and the metric labels were
+      already correct.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
+bibliograph-web (0.5.1-1) unstable; urgency=medium
+
+  * 0.5.1: restore the XRPC procedure NSIDs the storage rename rewrote.
+
+    - The rename replaced `searchEditions`/`resolveEditions` inside the NSID
+      string literals (`community.lexicon.media.book.searchEditions`), so
+      `dispatchPost` stopped matching both procedures and forwarded them to
+      HappyView, which answers 401 to a procedure without DPoP. The literals
+      are restored, along with the metric operation labels and the surfaced
+      method list that carried the same strings.
+    - A new test anchors both constants to their lexicon documents and asserts
+      each procedure is handled at the edge rather than forwarded. The surface
+      test could not catch this: the described surface is built from the
+      lexicon catalog, not from the dispatcher's constants.
+    - The worker package is unchanged in this release.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
+bibliograph-web (0.5.0-1) unstable; urgency=medium
+
+  * 0.5.0: the catalog reads name `books`; the XRPC surface is unchanged.
+
+    - Every catalog query — resolve, search, list, genres, identified formats,
+      stats, cover lookup, the admin reports and read/edit/merge paths, and the
+      feed — reads `books`. The record's collection is still
+      `community.lexicon.media.book.edition`, the report ids are still
+      `edition-*`, and the lexicon descriptions still say edition.
+    - The storage and read modules follow the table: `catalog/editions.ts` →
+      `books.ts`, `edition-view.ts` → `book-view.ts`, `admin/edition-read.ts`,
+      `edition-edit.ts` and `editions.ts` → `book-*.ts`, with `EditionShape` →
+      `BookShape` and the rest of their exported names. The record builder and
+      the publish snapshot keep their names: they build the XRPC record.
+    - `catalog/entities.ts` imports the catalog view as `CatalogBookView` so the
+      lexicon-shaped `defs#bookView` type keeps its own name.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.4.1-1) unstable; urgency=medium
 
   * 0.4.1: catalog pages are ordered by `uri`, not ingest time.

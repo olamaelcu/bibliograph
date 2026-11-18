@@ -1,6 +1,6 @@
 // Explicit extension: node's test runner loads this module without Vite.
 import { normalizeContributorRole } from '../../contributor-roles.ts';
-import { loadAdminEditionsFrom } from './edition-read.ts';
+import { loadAdminBooksFrom } from './book-read.ts';
 import type { Pool, PoolClient } from 'pg';
 import {
   MERGE_FIELDS,
@@ -134,7 +134,7 @@ async function replacePublisherLinks(
  * The pool is injected rather than read from the environment so a node test can
  * drive the whole transaction against a scratch database.
  */
-export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeResponse> {
+export async function mergeBooks(pool: Pool, input: unknown): Promise<MergeResponse> {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new MergeError(400, 'merge body must be an object');
   }
@@ -156,7 +156,7 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
 
     // Lock in a stable order so two overlapping merges cannot deadlock; keep
     // the operator's order for contributor/publisher unions.
-    const records = await loadAdminEditionsFrom(client, [...all].sort(), { forUpdate: true });
+    const records = await loadAdminBooksFrom(client, [...all].sort(), { forUpdate: true });
     const byUri = new Map(records.map((record) => [record.uri, record]));
     if (records.length !== all.length) {
       const missing = all.filter((uri) => !byUri.has(uri));
@@ -194,7 +194,7 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
       return key === 'series' && value !== null ? JSON.stringify(value) : value;
     });
     await client.query(
-      `UPDATE editions SET
+      `UPDATE books SET
          title = $2, subtitle = $3, chapters = $4,
          series = $5::jsonb, book_edition = $6, cover_url = $7
        WHERE uri = $1`,
@@ -276,7 +276,7 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
     await replacePublisherLinks(client, base, publisherPlan);
 
     const deletedResult = await client.query<{ uri: string }>(
-      'DELETE FROM editions WHERE uri = ANY($1::text[]) RETURNING uri',
+      'DELETE FROM books WHERE uri = ANY($1::text[]) RETURNING uri',
       [others]
     );
     if (deletedResult.rowCount !== others.length) {
@@ -287,7 +287,7 @@ export async function mergeEditions(pool: Pool, input: unknown): Promise<MergeRe
     // if an earlier failed publish had parked a delete row for it.
     await client.query(
       `INSERT INTO pds_outbox (uri, collection, rkey, op)
-       SELECT e.uri, $2, e.rkey, 'update' FROM editions e WHERE e.uri = $1
+       SELECT e.uri, $2, e.rkey, 'update' FROM books e WHERE e.uri = $1
        ON CONFLICT (uri) DO UPDATE SET
          op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
          value = NULL,

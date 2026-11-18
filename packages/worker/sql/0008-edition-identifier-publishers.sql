@@ -138,7 +138,7 @@ SELECT
       FROM edition_identifiers i
      WHERE i.edition_uri = e.uri
   ), '[]'::jsonb) AS identifiers
-FROM editions e
+FROM books e
 LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri;
 
 CREATE OR REPLACE VIEW appview_book_lua AS
@@ -200,7 +200,7 @@ BEGIN
   INSERT INTO pds_outbox (uri, collection, rkey, op)
   SELECT DISTINCT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
     FROM edition_identifier_publishers ip
-    JOIN editions e ON e.uri = ip.edition_uri
+    JOIN books e ON e.uri = ip.edition_uri
    WHERE ip.publisher_id = NEW.id
   ON CONFLICT (uri) DO UPDATE SET
     op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,

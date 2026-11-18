@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import type { EditionEditResponse } from '$lib/admin/types';
 import { requireAdmin } from '$lib/server/admin/auth';
-import { EditionEditError, updateAdminEdition } from '$lib/server/admin/edition-edit';
+import { BookEditError, updateAdminBook } from '$lib/server/admin/book-edit';
 import { readAdminBody } from '$lib/server/admin/request';
 import { catalogPool } from '$lib/server/catalog/db';
 import { CatalogUnavailableError } from '$lib/server/catalog/errors';
@@ -15,11 +15,11 @@ export const POST: RequestHandler = async ({ cookies, params, request }) => {
   const body = await readAdminBody(request);
 
   try {
-    const edition = await updateAdminEdition(catalogPool(), params.id, body);
+    const edition = await updateAdminBook(catalogPool(), params.id, body);
     const response: EditionEditResponse = { edition };
     return json(response, { headers: NO_STORE });
   } catch (error) {
-    if (error instanceof EditionEditError) {
+    if (error instanceof BookEditError) {
       return json(
         { error: error.code, message: error.message, field: error.field },
         { status: error.status, headers: NO_STORE }

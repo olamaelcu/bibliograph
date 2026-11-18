@@ -4,13 +4,13 @@
  *
  * The module takes a pg query surface instead of reaching for `catalogPool()`
  * itself, so it has no SvelteKit/env import and node tests can drive it with a
- * mock. `editions.ts` re-exports these types for the route and jobs modules.
+ * mock. `books.ts` re-exports these types for the route and jobs modules.
  */
 
 import type { Pool } from 'pg';
 import { normalizeContributorRole } from '../../contributor-roles.ts';
 
-export type EditionQueryable = Pick<Pool, 'query'>;
+export type BookQueryable = Pick<Pool, 'query'>;
 
 export type Identifier = {
   issuer: string;
@@ -30,7 +30,7 @@ export type PublisherView = { name: string; identifiers?: Identifier[]; ref?: st
 
 export type SeriesView = { name: string; position?: string; display?: string };
 
-export type EditionView = {
+export type BookView = {
   title: string;
   identifiers: Identifier[];
   contributors: ContributorView[];
@@ -49,12 +49,12 @@ export type EditionView = {
   description?: string;
 };
 
-export type EditionResults = { items: EditionView[]; hasMore: boolean; total?: number };
+export type BookResults = { items: BookView[]; hasMore: boolean; total?: number };
 
 /** A global token for "this value is the atproto URI of the edition". */
 export const AT_URI_ISSUER = 'atproto';
 
-export type EditionRow = {
+export type BookRow = {
   uri: string;
   title: string;
   subtitle: string | null;
@@ -88,23 +88,23 @@ export type PublisherRow = {
   ref: string | null;
 };
 
-export const EDITION_COLUMNS = `
+export const BOOK_COLUMNS = `
   e.uri, e.title, e.subtitle, s.duration_seconds, e.chapters, e.series,
   e.book_edition, e.cover_url, e.created_at, s.language AS shape_language,
   s.published_date AS shape_published_date, s.format AS shape_format,
   s.pages AS shape_pages, s.description AS shape_description,
   (cf.edition_uri IS NOT NULL) AS cover_cached`;
 
-/** The shape claim union; every `EDITION_COLUMNS` query needs it. */
-export const EDITION_SHAPE_JOIN =
+/** The shape claim union; every `BOOK_COLUMNS` query needs it. */
+export const BOOK_SHAPE_JOIN =
   'LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri';
 
 /**
- * The cover cache claim; every `EDITION_COLUMNS` query needs it. Paired on
+ * The cover cache claim; every `BOOK_COLUMNS` query needs it. Paired on
  * `source_url` so a cache row for a previous provider URL does not count: the
  * edge would be serving bytes the edition no longer points at.
  */
-export const EDITION_COVERS_JOIN =
+export const BOOK_COVERS_JOIN =
   'LEFT JOIN edition_cover_files cf ON cf.edition_uri = e.uri AND cf.source_url = e.cover_url';
 
 /**
@@ -128,12 +128,12 @@ function optional<T>(value: T | null | undefined): T | undefined {
 }
 
 export function editionView(
-  row: EditionRow,
+  row: BookRow,
   identifiers: IdentifierRow[],
   contributors: ContributorRow[],
   publisher: PublisherRow | undefined,
   coversBaseUrl = ''
-): EditionView {
+): BookView {
   // The edition view has no `uri` field, so the record URI travels as an
   // identifier: clients rebuild links such as /book/<did>/<rkey> from it.
   const seen = new Set<string>();
@@ -149,7 +149,7 @@ export function editionView(
     bag.push(identifier);
   }
 
-  const view: EditionView = {
+  const view: BookView = {
     title: row.title,
     identifiers: bag,
     contributors: contributors
@@ -209,10 +209,10 @@ export function editionView(
 }
 
 export async function hydrate(
-  pool: EditionQueryable,
-  rows: EditionRow[],
+  pool: BookQueryable,
+  rows: BookRow[],
   coversBaseUrl = ''
-): Promise<EditionView[]> {
+): Promise<BookView[]> {
   if (rows.length === 0) return [];
   const uris = rows.map((row) => row.uri);
 

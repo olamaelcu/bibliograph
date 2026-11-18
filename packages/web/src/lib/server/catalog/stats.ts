@@ -33,7 +33,7 @@ const STATS_TTL_MS = 60_000;
 async function countCatalog(): Promise<CatalogStats> {
   const { rows } = await catalogPool().query<StatsRow>(`
     SELECT
-      (SELECT count(*) FROM editions) AS editions,
+      (SELECT count(*) FROM books) AS editions,
       (SELECT count(*) FROM contributors) AS contributors,
       (SELECT count(*) FROM publishers) AS publishers,
       (SELECT count(*) FROM edition_identifiers) AS identifiers

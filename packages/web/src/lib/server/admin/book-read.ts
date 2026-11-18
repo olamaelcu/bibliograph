@@ -13,7 +13,7 @@ import type { AdminEdition, AdminSeries, Identifier } from '../../admin/types.ts
 
 export type Queryable = Pool | PoolClient;
 
-export type EditionRow = {
+export type BookRow = {
   uri: string;
   rkey: string;
   title: string;
@@ -57,7 +57,7 @@ export type PublisherRow = {
   identifiers: Identifier[] | null;
 };
 
-export const EDITION_COLUMNS = `
+export const BOOK_COLUMNS = `
   e.uri, e.rkey, e.title, e.subtitle, e.chapters, e.series,
   e.book_edition, e.cover_url, e.created_at, e.indexed_at,
   o.updated_at AS outbox_updated_at`;
@@ -96,7 +96,7 @@ function revisionOf(record: AdminEdition): string {
 }
 
 export function editionRecord(
-  row: EditionRow,
+  row: BookRow,
   identifiers: IdentifierRow[],
   infoRows: IdentifierInfoRow[],
   contributors: ContributorRow[],
@@ -157,9 +157,9 @@ export function editionRecord(
   return record;
 }
 
-export async function hydrateAdminEditions(
+export async function hydrateAdminBooks(
   client: Queryable,
-  rows: EditionRow[]
+  rows: BookRow[]
 ): Promise<AdminEdition[]> {
   if (rows.length === 0) return [];
   const uris = rows.map((row) => row.uri);
@@ -234,7 +234,7 @@ export async function hydrateAdminEditions(
 }
 
 /** Typeahead over local editions by title, at-URI or identifier. */
-export async function searchAdminEditionsFrom(
+export async function searchAdminBooksFrom(
   client: Queryable,
   input: { q: string; limit?: number }
 ): Promise<AdminEdition[]> {
@@ -243,9 +243,9 @@ export async function searchAdminEditionsFrom(
   const limit = Math.min(Math.max(input.limit ?? 15, 1), 25);
   const pattern = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
 
-  const result = await client.query<EditionRow>(
-    `SELECT ${EDITION_COLUMNS}
-       FROM editions e
+  const result = await client.query<BookRow>(
+    `SELECT ${BOOK_COLUMNS}
+       FROM books e
        LEFT JOIN pds_outbox o ON o.uri = e.uri
       WHERE e.title ILIKE $1 ESCAPE '\\'
          OR e.uri = $2
@@ -274,29 +274,29 @@ export async function searchAdminEditionsFrom(
       LIMIT $3`,
     [pattern, q, limit]
   );
-  return hydrateAdminEditions(client, result.rows);
+  return hydrateAdminBooks(client, result.rows);
 }
 
 /**
  * Load specific editions, optionally locking them for a write. Child rows are
  * read after the edition lock so the caller sees one consistent snapshot.
  */
-export async function loadAdminEditionsFrom(
+export async function loadAdminBooksFrom(
   client: Queryable,
   uris: string[],
   options: { forUpdate?: boolean } = {}
 ): Promise<AdminEdition[]> {
   const unique = [...new Set(uris)];
   if (unique.length === 0) return [];
-  const result = await client.query<EditionRow>(
-    `SELECT ${EDITION_COLUMNS}
-       FROM editions e
+  const result = await client.query<BookRow>(
+    `SELECT ${BOOK_COLUMNS}
+       FROM books e
        LEFT JOIN pds_outbox o ON o.uri = e.uri
       WHERE e.uri = ANY($1::text[])
       ${options.forUpdate ? 'FOR UPDATE OF e' : ''}`,
     [unique]
   );
-  const records = await hydrateAdminEditions(client, result.rows);
+  const records = await hydrateAdminBooks(client, result.rows);
   const byUri = new Map(records.map((record) => [record.uri, record]));
   return uris
     .map((uri) => byUri.get(uri))

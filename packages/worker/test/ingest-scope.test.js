@@ -33,8 +33,8 @@ function fakeClient() {
       // Only the TID query. The entity inserts call `editions_next_tid()` too,
       // to mint their `at_uri`, so a loose match would answer for them.
       if (text.startsWith('SELECT editions_next_tid()')) return { rows: [{ rkey: '3probe' }] };
-      if (text.startsWith('INSERT INTO editions')) return { rows: [{ uri: EDITION }], rowCount: 1 };
-      if (text.startsWith('UPDATE editions')) return { rows: [], rowCount: 0 };
+      if (text.startsWith('INSERT INTO books')) return { rows: [{ uri: EDITION }], rowCount: 1 };
+      if (text.startsWith('UPDATE books')) return { rows: [], rowCount: 0 };
       if (text.startsWith('INSERT INTO edition_identifiers')) {
         written.identifiers.push({ issuer: params[1], value: params[2] });
         return { rows: [], rowCount: 1 };

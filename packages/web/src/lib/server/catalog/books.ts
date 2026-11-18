@@ -1,24 +1,24 @@
 
 import { encodeKeysetCursor, likePattern } from './sql.ts';
 import {
-  EDITION_COLUMNS,
-  EDITION_COVERS_JOIN,
-  EDITION_SHAPE_JOIN,
+  BOOK_COLUMNS,
+  BOOK_COVERS_JOIN,
+  BOOK_SHAPE_JOIN,
   hydrate,
-  type EditionQueryable,
-  type EditionResults,
-  type EditionRow,
+  type BookQueryable,
+  type BookResults,
+  type BookRow,
   type Identifier
-} from './edition-view.ts';
+} from './book-view.ts';
 
 export type {
   ContributorView,
-  EditionResults,
-  EditionView,
+  BookResults,
+  BookView,
   Identifier,
   PublisherView,
   SeriesView
-} from './edition-view';
+} from './book-view';
 
 /**
  * Result ordering for `searchEditions`.
@@ -27,8 +27,8 @@ export type {
  * `publishedYear` are local extensions over it.
  */
 
-export type EditionSortOrder = 'asc' | 'desc';
-export type EditionSort = 'relevance' | 'title' | 'publishedYear';
+export type BookSortOrder = 'asc' | 'desc';
+export type BookSort = 'relevance' | 'title' | 'publishedYear';
 
 
 /**
@@ -38,20 +38,20 @@ export type EditionSort = 'relevance' | 'title' | 'publishedYear';
  * newest-first for a contributor listing. Sharing the vocabulary keeps the two
  * surfaces describing the same three choices while each keeps its own default.
  */
-export const EDITION_SORTS: Readonly<Record<EditionSort, true>> = {
+export const EDITION_SORTS: Readonly<Record<BookSort, true>> = {
   relevance: true,
   title: true,
   publishedYear: true
 };
 
-export const EDITION_SORT_ORDERS: Readonly<Record<EditionSortOrder, true>> = {
+export const EDITION_SORT_ORDERS: Readonly<Record<BookSortOrder, true>> = {
   asc: true,
   desc: true
 };
 
 /** A validated order pair, or the message a 400 should carry. */
-export type EditionOrderParams =
-  | { sort: EditionSort; order: EditionSortOrder }
+export type BookOrderParams =
+  | { sort: BookSort; order: BookSortOrder }
   | { error: string };
 
 /**
@@ -61,10 +61,10 @@ export type EditionOrderParams =
  * `listEditionsByContributor` cannot drift in what they accept or in how the
  * default reads.
  */
-export function parseEditionOrder(input: {
+export function parseBookOrder(input: {
   sort?: string | null;
   order?: string | null;
-}): EditionOrderParams {
+}): BookOrderParams {
   const sort = input.sort ?? 'relevance';
   const order = input.order ?? 'asc';
   if (!Object.hasOwn(EDITION_SORTS, sort)) {
@@ -73,7 +73,7 @@ export function parseEditionOrder(input: {
   if (!Object.hasOwn(EDITION_SORT_ORDERS, order)) {
     return { error: `order must be one of ${Object.keys(EDITION_SORT_ORDERS).join(', ')}` };
   }
-  return { sort: sort as EditionSort, order: order as EditionSortOrder };
+  return { sort: sort as BookSort, order: order as BookSortOrder };
 }
 
 /**
@@ -102,8 +102,8 @@ export function editionLanguageClause(
  * tie, so pages cannot shuffle.
  */
 export function editionOrderBy(input: {
-  sort?: EditionSort;
-  order?: EditionSortOrder;
+  sort?: BookSort;
+  order?: BookSortOrder;
   fallback: string;
 }): string {
   const direction = input.order === 'desc' ? 'DESC' : 'ASC';
@@ -138,7 +138,7 @@ export async function resolveEditions(input: {
   limit: number;
   /** Public origin for `/api/covers` URLs; absent keeps provider URLs. */
   coversBaseUrl?: string;
-}, pool: EditionQueryable): Promise<EditionResults> {
+}, pool: BookQueryable): Promise<BookResults> {
   const params: Array<string | number> = [];
   const push = (value: string | number): string => {
     params.push(value);
@@ -149,14 +149,14 @@ export async function resolveEditions(input: {
   const limit = push(input.limit + 1);
   const offset = push(input.offset);
 
-  const page = await pool.query<EditionRow>(
+  const page = await pool.query<BookRow>(
     `WITH matches AS (
        SELECT DISTINCT i.edition_uri FROM edition_identifiers i WHERE ${matches}
      )
-     SELECT ${EDITION_COLUMNS}
-     FROM editions e JOIN matches m ON m.edition_uri = e.uri
-     ${EDITION_SHAPE_JOIN}
-     ${EDITION_COVERS_JOIN}
+     SELECT ${BOOK_COLUMNS}
+     FROM books e JOIN matches m ON m.edition_uri = e.uri
+     ${BOOK_SHAPE_JOIN}
+     ${BOOK_COVERS_JOIN}
      ORDER BY m.edition_uri ASC
      LIMIT ${limit} OFFSET ${offset}`,
     params
@@ -195,12 +195,12 @@ export async function resolveEditions(input: {
  * edition. The keyset cursor resumes after the last uri returned, so inserting
  * a row mid-walk cannot shift a page boundary and make the crawl skip one.
  */
-export type EditionListing = { uri: string; title: string; indexedAt: string };
+export type BookListing = { uri: string; title: string; indexedAt: string };
 
 export async function listEditions(
   input: { after: string | null; limit: number },
-  pool: EditionQueryable
-): Promise<{ items: EditionListing[]; cursor?: string }> {
+  pool: BookQueryable
+): Promise<{ items: BookListing[]; cursor?: string }> {
   const params: Array<string | number> = [];
   const push = (value: string | number): string => {
     params.push(value);
@@ -213,7 +213,7 @@ export async function listEditions(
 
   const page = await pool.query<{ uri: string; title: string; indexed_at: Date }>(
     `SELECT uri, title, indexed_at
-       FROM editions
+       FROM books
        ${where}
       ORDER BY uri
       LIMIT ${limit}`,
@@ -243,11 +243,11 @@ export async function searchEditions(input: {
   identifiers: Identifier[];
   offset: number;
   limit: number;
-  sort?: EditionSort;
-  order?: EditionSortOrder;
+  sort?: BookSort;
+  order?: BookSortOrder;
   /** Public origin for `/api/covers` URLs; absent keeps provider URLs. */
   coversBaseUrl?: string;
-}, pool: EditionQueryable): Promise<EditionResults> {
+}, pool: BookQueryable): Promise<BookResults> {
   const params: Array<string | number> = [];
   const push = (value: string | number): string => {
     params.push(value);
@@ -276,7 +276,7 @@ export async function searchEditions(input: {
   if (input.title) {
     const pattern = push(likePattern(input.title));
     branches.push(
-      `SELECT e.uri AS edition_uri, 1 AS rank FROM editions e WHERE e.title ILIKE ${pattern}`
+      `SELECT e.uri AS edition_uri, 1 AS rank FROM books e WHERE e.title ILIKE ${pattern}`
     );
     rankedHint = true;
   }
@@ -296,7 +296,7 @@ export async function searchEditions(input: {
     // The broad text match was an `OR` of these four branches; each one is
     // served by a trigram index of its own.
     branches.push(
-      `SELECT e.uri AS edition_uri, 3 AS rank FROM editions e WHERE e.title ILIKE ${pattern}`,
+      `SELECT e.uri AS edition_uri, 3 AS rank FROM books e WHERE e.title ILIKE ${pattern}`,
       `SELECT s.edition_uri, 3 AS rank FROM edition_identifier_shape s
         WHERE coalesce(s.description, '') ILIKE ${pattern}`,
       `SELECT ec.edition_uri, 3 AS rank FROM edition_contributors ec
@@ -344,13 +344,13 @@ export async function searchEditions(input: {
      `
       : '';
   const from =
-    branches.length > 0 ? 'editions e JOIN ranked r ON r.edition_uri = e.uri' : 'editions e';
+    branches.length > 0 ? 'books e JOIN ranked r ON r.edition_uri = e.uri' : 'books e';
 
-  const page = await pool.query<EditionRow>(
-    `${cte}SELECT ${EDITION_COLUMNS}
+  const page = await pool.query<BookRow>(
+    `${cte}SELECT ${BOOK_COLUMNS}
      FROM ${from}
-     ${EDITION_SHAPE_JOIN}
-     ${EDITION_COVERS_JOIN}
+     ${BOOK_SHAPE_JOIN}
+     ${BOOK_COVERS_JOIN}
      ${where}
      ORDER BY ${ordering}
      LIMIT ${limit} OFFSET ${offset}`,
@@ -366,7 +366,7 @@ export async function searchEditions(input: {
       ? await pool.query<{ n: number }>(
           `${cte}SELECT count(*)::int AS n
              FROM ${from}
-             ${EDITION_SHAPE_JOIN}
+             ${BOOK_SHAPE_JOIN}
              ${where}`,
           params.slice(0, params.length - 2)
         )

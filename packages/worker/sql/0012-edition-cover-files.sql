@@ -1,12 +1,12 @@
 -- 0012-edition-cover-files.sql
 --
 -- Cover bytes live on disk, keyed by the edition at-URI. This file records
--- which editions have a usable cached image and what it is, so the edge can
+-- which books have a usable cached image and what it is, so the edge can
 -- answer Content-Type/Length without touching the image header, and the sweep
 -- can tell "not cached yet" from "cached".
 --
 -- `source_url` is the provider URL the bytes were fetched from: when a curator
--- edits `editions.cover_url`, the cache row no longer matches and the worker
+-- edits `books.cover_url`, the cache row no longer matches and the worker
 -- re-downloads. `edition_cover_fetches` gains the same column so a `rejected`
 -- outcome is terminal only for the URL that was actually rejected.
 --
@@ -15,7 +15,7 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS edition_cover_files (
-  edition_uri text PRIMARY KEY REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text PRIMARY KEY REFERENCES books (uri) ON DELETE CASCADE,
   source_url text NOT NULL,
   content_type text NOT NULL,
   byte_size integer NOT NULL CHECK (byte_size > 0),
@@ -35,7 +35,7 @@ ALTER TABLE edition_cover_fetches
 -- The sweep's "has a source URL but no cached file" walk, ordered by
 -- `indexed_at` so the LIMIT ends it.
 CREATE INDEX IF NOT EXISTS editions_cover_url_idx
-  ON editions (indexed_at, uri)
+  ON books (indexed_at, uri)
   WHERE cover_url IS NOT NULL AND btrim(cover_url) <> '';
 
 DO $do$

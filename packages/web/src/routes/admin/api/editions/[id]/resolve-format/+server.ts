@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { requireAdmin } from '$lib/server/admin/auth';
-import { loadEditionForEdit } from '$lib/server/admin/edition-edit';
+import { loadBookForEdit } from '$lib/server/admin/book-edit';
 import {
   FormatResolutionError,
   proxyFormatResolution
@@ -22,7 +22,7 @@ export const POST: RequestHandler = async ({ cookies, params, request }) => {
     const result = await proxyFormatResolution({
       body,
       loadIdentifiers: async () => {
-        const edition = await loadEditionForEdit(catalogPool(), params.id);
+        const edition = await loadBookForEdit(catalogPool(), params.id);
         return edition ? edition.identifiers : null;
       },
       postWorker: (workerBody) => workerAdminPost('/resolve-format', workerBody)

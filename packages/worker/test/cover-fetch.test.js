@@ -181,7 +181,7 @@ test('a cached edition is never downloaded again', async (t) => {
 
   expect(download.calls, 'the cached bytes are reused').toEqual([]);
   expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'found'/);
-  expect(statementsLike(statements, 'UPDATE editions'), 'no edition write').toEqual([]);
+  expect(statementsLike(statements, 'UPDATE books'), 'no edition write').toEqual([]);
 });
 
 test('a downloaded cover is cached, recorded, and the record is republished', async (t) => {
@@ -205,7 +205,7 @@ test('a downloaded cover is cached, recorded, and the record is republished', as
   expect(upsert[0].values).toEqual([EDITION, COVER, 'image/jpeg', bytes.length]);
   expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'found'/);
   expect(statementsLike(statements, 'INSERT INTO pds_outbox').length).toBe(1);
-  expect(statementsLike(statements, 'UPDATE editions'), 'an existing provider URL is left alone').toEqual([]);
+  expect(statementsLike(statements, 'UPDATE books'), 'an existing provider URL is left alone').toEqual([]);
 });
 
 test('a placeholder-sized image is rejected, and the URL is cleared', async (t) => {
@@ -222,7 +222,7 @@ test('a placeholder-sized image is rejected, and the URL is cleared', async (t) 
 
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
-  const cleared = statementsLike(statements, 'UPDATE editions SET cover_url = NULL');
+  const cleared = statementsLike(statements, 'UPDATE books SET cover_url = NULL');
   expect(cleared[0]?.values).toEqual([EDITION, COVER]);
   const rejected = ledger(statements);
   expect(rejected?.sql ?? '').toMatch(/outcome = 'rejected'/);
@@ -246,7 +246,7 @@ test('a transport failure rejects the job and writes no terminal outcome', async
   await expect(() => tasks['catalog.covers']({ editionUri: EDITION }, { logger: log })).rejects.toThrow(/socket hang up/);
 
   expect(ledger(statements), 'the claim is kept so the retry does not wait').toBe(undefined);
-  expect(statementsLike(statements, 'UPDATE editions')).toEqual([]);
+  expect(statementsLike(statements, 'UPDATE books')).toEqual([]);
 });
 
 test('a provider 5xx is retried rather than treated as a missing cover', async (t) => {
@@ -288,7 +288,7 @@ test('a 403 is terminal for its URL, and the outcome is counted', async (t) => {
   await tasks['catalog.covers']({ editionUri: EDITION }, { logger: log });
 
   expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'rejected'/);
-  expect(statementsLike(statements, 'UPDATE editions')[0]?.sql ?? '').toMatch(/cover_url = NULL/);
+  expect(statementsLike(statements, 'UPDATE books')[0]?.sql ?? '').toMatch(/cover_url = NULL/);
   expect(coverMetrics.snapshot()).toEqual([{ result: 'rejected', status: '403', count: 1 }]);
 });
 
@@ -313,7 +313,7 @@ test('an edition without a cover URL discovers one, then caches it', async (t) =
   expect(download.calls, 'the discovered URL is what gets downloaded').toEqual([COVER]);
   expect(providers.calls.google, 'Google Books is only the fallback').toBe(0);
   // The guarded write is what keeps a concurrent curator edit winning.
-  const discovered = statementsLike(statements, 'UPDATE editions SET cover_url = $2');
+  const discovered = statementsLike(statements, 'UPDATE books SET cover_url = $2');
   expect(discovered[0]?.values).toEqual([EDITION, COVER]);
   expect(discovered[0]?.sql ?? '').toMatch(/cover_url IS NULL OR btrim\(cover_url\) = ''/);
   expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'found'/);
@@ -365,7 +365,7 @@ test('a "no cover" answer is recorded and no edition is touched', async (t) => {
 
   expect(download.calls, 'nothing to download').toEqual([]);
   expect(ledger(statements)?.sql ?? '').toMatch(/outcome = 'none'/);
-  expect(statementsLike(statements, 'UPDATE editions')).toEqual([]);
+  expect(statementsLike(statements, 'UPDATE books')).toEqual([]);
 });
 
 test('an outage during discovery fails the job instead of recording no cover', async (t) => {

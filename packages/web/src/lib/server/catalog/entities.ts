@@ -15,19 +15,19 @@ import type { Pool } from 'pg';
 // The extension is explicit so node's test runner can load this module directly
 // (the rest of the app resolves extensionless imports through Vite).
 import {
-  EDITION_COLUMNS,
-  EDITION_COVERS_JOIN,
-  EDITION_SHAPE_JOIN,
+  BOOK_COLUMNS,
+  BOOK_COVERS_JOIN,
+  BOOK_SHAPE_JOIN,
   hydrate,
-  type EditionRow,
-  type EditionView
-} from './edition-view.ts';
+  type BookRow,
+  type BookView as CatalogBookView
+} from './book-view.ts';
 import {
   editionLanguageClause,
   editionOrderBy,
-  type EditionSort,
-  type EditionSortOrder
-} from './editions.ts';
+  type BookSort,
+  type BookSortOrder
+} from './books.ts';
 import { decodeOffsetCursor, encodeOffsetCursor, likePattern, likePrefix } from './sql.ts';
 
 export const CONTRIBUTOR_COLLECTION = 'net.olamaelcu.livtet.biblio.contributor';
@@ -403,7 +403,7 @@ export async function searchPublishers(
 }
 
 /** `net.olamaelcu.livtet.biblio.defs#bookView`. */
-export type BookView = { uri: string; edition: EditionView };
+export type BookView = { uri: string; edition: CatalogBookView };
 
 export type BookResults = { items: BookView[]; cursor?: string; total?: number };
 
@@ -413,7 +413,7 @@ export type BookResults = { items: BookView[]; cursor?: string; total?: number }
  * The contributor is resolved by its exact `at_uri` (the caller has already
  * validated the collection); no row is `null`, which the route maps to 404. The
  * join is `EXISTS`, so a person credited twice on one edition appears once.
- * Default order is `editions.created_at DESC, uri ASC` — stable for offset
+ * Default order is `books.created_at DESC, uri ASC` — stable for offset
  * paging and newest-first for display. `sort`/`order` and `language` are the
  * same ones `searchEditions` accepts (`editionOrderBy` /
  * `editionLanguageClause`), and `total` counts what the filters returned. Only
@@ -425,8 +425,8 @@ export async function listEditionsByContributor(
     contributor: string;
     /** Union language claim, matched on the primary subtag; absent means no filter. */
     language?: string;
-    sort?: EditionSort;
-    order?: EditionSortOrder;
+    sort?: BookSort;
+    order?: BookSortOrder;
     offset: number;
     limit: number;
     /** Public origin for `/api/covers` URLs; absent keeps provider URLs. */
@@ -467,16 +467,16 @@ export async function listEditionsByContributor(
   });
 
   const page = await pool.query(
-    `SELECT ${EDITION_COLUMNS}
-       FROM editions e
-       ${EDITION_SHAPE_JOIN}
-       ${EDITION_COVERS_JOIN}
+    `SELECT ${BOOK_COLUMNS}
+       FROM books e
+       ${BOOK_SHAPE_JOIN}
+       ${BOOK_COVERS_JOIN}
       WHERE ${where}
       ORDER BY ${ordering}
       LIMIT ${limit} OFFSET ${offset}`,
     params
   );
-  const rows = (page.rows as EditionRow[]).slice(0, input.limit);
+  const rows = (page.rows as BookRow[]).slice(0, input.limit);
 
   // The same predicate as the page, so a language filter narrows the total too.
   // A first page shorter than `limit` is the whole listing, so its length is the
@@ -486,8 +486,8 @@ export async function listEditionsByContributor(
     input.offset === 0 && rows.length === input.limit
       ? await pool.query(
           `SELECT count(*)::int AS n
-       FROM editions e
-       ${EDITION_SHAPE_JOIN}
+       FROM books e
+       ${BOOK_SHAPE_JOIN}
             WHERE ${where}`,
           params.slice(0, params.length - 2)
         )

@@ -47,7 +47,7 @@ function requiredPool(t: { skip: (message?: string) => void }): pg.Pool | null {
 async function cleanup(): Promise<void> {
   if (!pool) return;
   const prefix = `at://${AUTHORITY}/%`;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [prefix]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM contributors WHERE name LIKE $1', [`${RUN}%`]);
   await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [prefix]);
   await pool.query('DELETE FROM pds_cids WHERE uri LIKE $1', [prefix]);
@@ -118,7 +118,7 @@ async function seedEdition(credits: Array<{ contributorId: number; position: num
   const rkey = label();
   const uri = `at://${AUTHORITY}/${EDITION_COLLECTION}/${rkey}`;
   await (pool as pg.Pool).query(
-    `INSERT INTO editions (uri, rkey, title, created_at, indexed_at)
+    `INSERT INTO books (uri, rkey, title, created_at, indexed_at)
      VALUES ($1, $2, 'Merge fixture', now(), now())`,
     [uri, rkey]
   );

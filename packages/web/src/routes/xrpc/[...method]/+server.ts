@@ -15,11 +15,11 @@ import { catalogPool, isCatalogPoolTimeout } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import {
   resolveEditions,
-  parseEditionOrder,
+  parseBookOrder,
   searchEditions,
   listEditions,
   type Identifier,
-} from "$lib/server/catalog/editions";
+} from "$lib/server/catalog/books";
 import { withXrpcCors } from "$lib/server/xrpc/cors";
 import { parseIdentifierParams } from "$lib/server/xrpc/identifiers";
 import {
@@ -62,8 +62,8 @@ import {
   SEARCH_PUBLISHERS,
 } from "$lib/server/catalog/entity-methods";
 import { decodeKeysetCursor, decodeOffsetCursor } from "$lib/server/catalog/sql";
-import { EDITION_COLLECTION, getEditionGenres } from "$lib/server/catalog/genres";
-import { getEditionIdentifiedFormats } from "$lib/server/catalog/identified-formats";
+import { EDITION_COLLECTION, getBookGenres } from "$lib/server/catalog/genres";
+import { getBookIdentifiedFormats } from "$lib/server/catalog/identified-formats";
 import {
   enqueueResolveMiss,
   enqueueGenreFetch,
@@ -85,7 +85,7 @@ const MAX_IDENTIFIERS = 100;
  */
 const MAX_EDITION_PAGE = 5000;
 
-// The editor's own bound on a language value (`EDITION_EDIT_LIMITS.language`).
+// The editor's own bound on a language value (`BOOK_EDIT_LIMITS.language`).
 const MAX_LANGUAGE_LENGTH = 35;
 
 // A queued hydration job spends up to CANDIDATES_PER_TASK (50) paid provider
@@ -260,7 +260,7 @@ async function handleSearch(request: Request): Promise<Response> {
   if (sort === null) return fail(400, "InvalidRequest", "sort must be a string");
   if (order === null) return fail(400, "InvalidRequest", "order must be a string");
 
-  const parsedOrder = parseEditionOrder({ sort, order });
+  const parsedOrder = parseBookOrder({ sort, order });
   if ("error" in parsedOrder) return fail(400, "InvalidRequest", parsedOrder.error);
 
   const started = performance.now();
@@ -345,7 +345,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
 
       const started = performance.now();
       try {
-        const result = await getEditionGenres(pool, uri);
+        const result = await getBookGenres(pool, uri);
         if (result === null) {
           return fail(404, "RecordNotFound", "no edition has that URI");
         }
@@ -382,7 +382,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
 
       const started = performance.now();
       try {
-        const result = await getEditionIdentifiedFormats(pool, uri);
+        const result = await getBookIdentifiedFormats(pool, uri);
         if (result === null) {
           return fail(404, "RecordNotFound", "no edition has that URI");
         }
@@ -454,7 +454,7 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
           `language must be at most ${MAX_LANGUAGE_LENGTH} characters`,
         );
       }
-      const parsedOrder = parseEditionOrder({
+      const parsedOrder = parseBookOrder({
         sort: params.get("sort"),
         order: params.get("order"),
       });

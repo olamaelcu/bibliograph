@@ -165,7 +165,7 @@ function editionReport(config: EditionReportConfig): ReportDefinition {
   const from = config.from ? `\n       ${config.from}` : '';
   const orderBy = config.orderBy ?? 'e.indexed_at DESC, e.uri';
   const text = `SELECT e.uri, e.rkey, e.title, e.indexed_at${select}
-       FROM editions e${from}
+       FROM books e${from}
       WHERE ${config.where}
       ORDER BY ${orderBy}`;
 
@@ -246,7 +246,7 @@ export function identifierCountQuery(filters: IdentifierCountFilters): {
 } {
   const text = `SELECT e.uri, e.rkey, e.title, e.indexed_at,
        count(i.*)::int AS matching_identifiers
-       FROM editions e
+       FROM books e
        LEFT JOIN edition_identifiers i
          ON i.edition_uri = e.uri
         AND ($1::text IS NULL OR i.issuer = $1)
@@ -404,7 +404,7 @@ const duplicateIdentifierReport: ReportDefinition = {
          ORDER BY e.uri
        ) AS editions
        FROM edition_identifiers i
-       JOIN editions e ON e.uri = i.edition_uri
+       JOIN books e ON e.uri = i.edition_uri
       GROUP BY i.issuer, i.value
      HAVING count(DISTINCT i.edition_uri) > 1
       ORDER BY edition_count DESC, i.issuer, i.value`,
@@ -495,7 +495,7 @@ const identifierInfoReport: ReportDefinition = {
        ), '') AS publisher,
        left(c.description, 160) AS description
        FROM edition_identifiers i
-       JOIN editions e ON e.uri = i.edition_uri
+       JOIN books e ON e.uri = i.edition_uri
        LEFT JOIN edition_identifier_info c
          ON c.edition_uri = i.edition_uri AND c.issuer = i.issuer AND c.value = i.value
       WHERE ($1::text IS NULL OR i.issuer = $1)
@@ -561,7 +561,7 @@ function outboxReport(config: OutboxReportConfig): ReportDefinition {
        o.next_at, o.claimed_at, o.last_error,
        o.updated_at AS outbox_updated_at${extra}
        FROM pds_outbox o
-       JOIN editions e ON e.uri = o.uri
+       JOIN books e ON e.uri = o.uri
       WHERE ${config.where}
       ORDER BY ${config.orderBy}`;
 

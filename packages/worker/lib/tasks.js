@@ -453,7 +453,7 @@ export function createTasks({
       // a subset of editions, so equal counts prove the set is empty for the
       // price of two index-only counts.
       const counts = await pool.query(
-        `SELECT (SELECT count(*) FROM editions) AS editions,
+        `SELECT (SELECT count(*) FROM books) AS editions,
                 (SELECT count(*) FROM edition_genre_fetches) AS attempts`
       );
       const hasFresh =
@@ -466,7 +466,7 @@ export function createTasks({
         // instead of scanning `editions` and sorting it.
         const fresh = await pool.query(
           `SELECT e.uri
-             FROM editions e
+             FROM books e
             WHERE NOT EXISTS (
                     SELECT 1 FROM edition_genres g WHERE g.edition_uri = e.uri
                   )
@@ -553,7 +553,7 @@ export function createTasks({
 
       const edition = await pool.query(
         `SELECT e.cover_url, f.source_url AS cached_source, f.content_type, f.byte_size
-           FROM editions e
+           FROM books e
            LEFT JOIN edition_cover_files f
                   ON f.edition_uri = e.uri AND f.source_url = e.cover_url
           WHERE e.uri = $1`,
@@ -616,7 +616,7 @@ export function createTasks({
           await client.query('BEGIN');
           await client.query('DELETE FROM edition_cover_files WHERE edition_uri = $1', [uri]);
           await client.query(
-            `UPDATE editions SET cover_url = NULL
+            `UPDATE books SET cover_url = NULL
               WHERE uri = $1 AND cover_url = $2`,
             [uri, source]
           );
@@ -666,7 +666,7 @@ export function createTasks({
         if (discovered) {
           // The same guard as ingest: a curator edit that landed meanwhile wins.
           await client.query(
-            `UPDATE editions SET cover_url = $2
+            `UPDATE books SET cover_url = $2
               WHERE uri = $1 AND (cover_url IS NULL OR btrim(cover_url) = '')`,
             [uri, source]
           );
@@ -678,7 +678,7 @@ export function createTasks({
           await client.query(
             `INSERT INTO pds_outbox (uri, collection, rkey, op)
              SELECT e.uri, 'community.lexicon.media.book.edition', e.rkey, 'update'
-               FROM editions e
+               FROM books e
               WHERE e.uri = $1
              ON CONFLICT (uri) DO UPDATE SET
                op = CASE WHEN pds_outbox.op = 'create' THEN 'create' ELSE 'update' END,
@@ -747,7 +747,7 @@ export function createTasks({
         // (`editions_cover_url_idx`). Every queued edition leaves this pass, so
         // it always makes progress through the catalog.
         `SELECT e.uri
-           FROM editions e
+           FROM books e
            LEFT JOIN edition_cover_files f
                   ON f.edition_uri = e.uri AND f.source_url = e.cover_url
           WHERE e.cover_url IS NOT NULL AND btrim(e.cover_url) <> ''
@@ -772,7 +772,7 @@ export function createTasks({
               // Never attempted: no usable URL and no ledger row. The claim
               // function is what discovers a URL for these.
               `SELECT e.uri
-                 FROM editions e
+                 FROM books e
                 WHERE (e.cover_url IS NULL OR btrim(e.cover_url) = '')
                   AND NOT EXISTS (
                         SELECT 1 FROM edition_cover_fetches f WHERE f.edition_uri = e.uri
@@ -794,7 +794,7 @@ export function createTasks({
               // `fillMissingFields` clears it when a provider offers a new one.
               `SELECT l.edition_uri AS uri
                  FROM edition_cover_fetches l
-                 JOIN editions e ON e.uri = l.edition_uri
+                 JOIN books e ON e.uri = l.edition_uri
                  LEFT JOIN edition_cover_files f
                         ON f.edition_uri = e.uri AND f.source_url = e.cover_url
                 WHERE l.requested_at < now() - interval '7 days'

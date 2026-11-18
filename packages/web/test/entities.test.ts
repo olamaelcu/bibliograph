@@ -264,7 +264,7 @@ test('listEditionsByContributor returns bookViews for every credited edition', a
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
     if (sql.includes('count(*)::int AS n')) return [{ n: 2 }];
-    if (sql.includes('FROM editions e')) return rows;
+    if (sql.includes('FROM books e')) return rows;
     return [];
   });
 
@@ -284,7 +284,7 @@ test('listEditionsByContributor returns bookViews for every credited edition', a
   expect(page.total).toBe(2);
   expect(decodeOffsetCursor(page.cursor)).toBe(1);
 
-  const pageCall = calls.find((call) => call.sql.includes('FROM editions e'));
+  const pageCall = calls.find((call) => call.sql.includes('FROM books e'));
   expect(pageCall).toBeTruthy();
   expect(pageCall.sql).toMatch(/WHERE EXISTS/);
   // A contributor credited twice on one edition must not duplicate the row.
@@ -297,7 +297,7 @@ test('listEditionsByContributor uses the shared order and language clauses', asy
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
     if (sql.includes('count(*)::int AS n')) return [{ n: 1 }];
-    if (sql.includes('FROM editions e')) return rows;
+    if (sql.includes('FROM books e')) return rows;
     return [];
   });
 
@@ -330,7 +330,7 @@ test('listEditionsByContributor counts only a full first page', async () => {
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
     if (sql.includes('count(*)::int AS n')) return [{ n: 27 }];
-    if (sql.includes('FROM editions e')) return rows;
+    if (sql.includes('FROM books e')) return rows;
     return [];
   });
 
@@ -362,7 +362,7 @@ test('listEditionsByContributor pages by offset and omits the total after page o
   const rows = [editionRow(`${EDITION_PREFIX}1`)];
   const { pool, calls } = fakePool((sql) => {
     if (sql.includes('WHERE at_uri = $1')) return [{ id: 42 }];
-    if (sql.includes('FROM editions e')) return rows;
+    if (sql.includes('FROM books e')) return rows;
     return [];
   });
 
@@ -377,7 +377,7 @@ test('listEditionsByContributor pages by offset and omits the total after page o
   expect(page.cursor).toBe(undefined);
   expect(page.total).toBe(undefined);
   expect(calls.some((call) => call.sql.includes('count(*)::int AS n'))).toBe(false);
-  const pageCall = calls.find((call) => call.sql.includes('FROM editions e'));
+  const pageCall = calls.find((call) => call.sql.includes('FROM books e'));
   expect(pageCall).toBeTruthy();
   expect(pageCall.values).toEqual([42, 26, 1]);
 });

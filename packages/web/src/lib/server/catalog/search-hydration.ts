@@ -41,7 +41,7 @@ export function searchHydrationDecision(input: {
   /** At least one of q/title/author is non-blank. */
   hasText: boolean;
   offset: number;
-  /** `EditionResults.total`, present only at `offset === 0`. */
+  /** `BookResults.total`, present only at `offset === 0`. */
   total: number | undefined;
   threshold: number;
 }): SearchHydrationDecision {

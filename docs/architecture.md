@@ -155,7 +155,7 @@ queues a delete for the absorbed record.
 
 ## Publication
 
-Triggers on `editions`, its child tables, `contributors` and `publishers` write
+Triggers on `books`, its child tables, `contributors` and `publishers` write
 `pds_outbox` rows for three collections: the edition record, the contributor
 record and the publisher record. The `pds-publish` graphile task drains every
 collection in one pass with `com.atproto.repo.applyWrites`; `pds_cids` records
@@ -430,7 +430,7 @@ bounds the metered spend to well under the default daily limit.
 
 ### Covers
 
-A cover belongs to the edition (`editions.cover_url`), not to an identifier:
+A cover belongs to the edition (`books.cover_url`), not to an identifier:
 the picture is one artefact for the book, while duration and the other shape
 claims describe the specific product an ISBN names. Ingest fills the column
 when the candidate that creates the edition carries one; `catalog.covers`
@@ -887,7 +887,7 @@ Common parameters are `limit` (1–100, default 25) and `offset` (0–1e9, defau
 the full match count, `params` echoes the applied filters, and rows are ordered
 by a stable key that ends in a unique column (so offset paging is repeatable).
 Timestamps are ISO 8601 strings. Every edition row carries `uri` — the canonical
-`at://<pds>/<recordType>/<rkey>` stored in `editions.uri` — plus `rkey` and
+`at://<pds>/<recordType>/<rkey>` stored in `books.uri` — plus `rkey` and
 `title`; report-specific columns are appended.
 
 Reports:

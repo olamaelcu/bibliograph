@@ -21,7 +21,7 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS edition_cover_fetches (
-  edition_uri text PRIMARY KEY REFERENCES editions (uri) ON DELETE CASCADE,
+  edition_uri text PRIMARY KEY REFERENCES books (uri) ON DELETE CASCADE,
   requested_at timestamp with time zone NOT NULL DEFAULT now(),
   outcome text CHECK (outcome IN ('found', 'none'))
 );
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS edition_cover_fetches (
 -- Serves the sweep's first pass: the walk is index-only-sized when nothing is
 -- coverless, and the LIMIT stops it after a handful of entries otherwise.
 CREATE INDEX IF NOT EXISTS editions_missing_cover_idx
-  ON editions (indexed_at, uri)
+  ON books (indexed_at, uri)
   WHERE cover_url IS NULL OR btrim(cover_url) = '';
 
 -- Retry pass: oldest attempt first, and `found` rows are not retried.

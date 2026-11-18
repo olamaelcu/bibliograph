@@ -68,7 +68,7 @@ beforeAll(async () => {
 
     for (const uri of [EDITION_ONE, EDITION_TWO]) {
       await pool.query(
-        `INSERT INTO editions (uri, title, created_at)
+        `INSERT INTO books (uri, title, created_at)
          VALUES ($1, $2, now())
          ON CONFLICT (uri) DO NOTHING`,
         [uri, `Feed probe ${RUN}`]
@@ -105,7 +105,7 @@ beforeAll(async () => {
 
     // One edition, reachable only through the Popfeed record's ISBN.
     await pool.query(
-      `INSERT INTO editions (uri, title, created_at)
+      `INSERT INTO books (uri, title, created_at)
        VALUES ($1, $2, now())
        ON CONFLICT (uri) DO NOTHING`,
       [POPFEED_EDITION, `Popfeed probe ${RUN}`]
@@ -182,7 +182,7 @@ afterAll(async () => {
       ])
       .catch(() => undefined);
     await pool
-      .query('DELETE FROM editions WHERE uri = ANY($1::text[])', [
+      .query('DELETE FROM books WHERE uri = ANY($1::text[])', [
         [EDITION_ONE, EDITION_TWO, POPFEED_EDITION]
       ])
       .catch(() => undefined);

@@ -111,7 +111,7 @@ test('the resolve-format route requires admin and proxies the worker status', ()
     'utf8'
   );
   expect(source).toMatch(/requireAdmin\(cookies\)/);
-  expect(source).toMatch(/loadEditionForEdit\(catalogPool\(\), params\.id\)/);
+  expect(source).toMatch(/loadBookForEdit\(catalogPool\(\), params\.id\)/);
   expect(source).toMatch(/workerAdminPost\('\/resolve-format', workerBody\)/);
   expect(source).toMatch(/status: result\.status/);
   expect(source).not.toMatch(/pds_outbox/);

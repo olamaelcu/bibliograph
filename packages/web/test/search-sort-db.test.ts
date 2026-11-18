@@ -13,7 +13,7 @@ import { expect, test, afterAll, beforeAll } from 'vitest';
 import pg from 'pg';
 
 import { listEditionsByContributor } from '../src/lib/server/catalog/entities.ts';
-import { searchEditions } from '../src/lib/server/catalog/editions.ts';
+import { searchEditions } from '../src/lib/server/catalog/books.ts';
 
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://bibliograph:bibliograph@localhost:5432/bibliograph';
@@ -36,7 +36,7 @@ function requiredPool(t: { skip: (message?: string) => void }): pg.Pool | null {
 
 async function cleanup(): Promise<void> {
   if (!pool) return;
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${AUTHORITY}/%`]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [`at://${AUTHORITY}/%`]);
 }
 
 type Fixture = {
@@ -52,7 +52,7 @@ async function seedEdition(fixture: Fixture): Promise<void> {
   const rkey = fixture.identifier;
   const uri = `at://${AUTHORITY}/${EDITION_COLLECTION}/${rkey}`;
   await db.query(
-    `INSERT INTO editions (uri, rkey, title, created_at, indexed_at)
+    `INSERT INTO books (uri, rkey, title, created_at, indexed_at)
      VALUES ($1, $2, $3, now(), now())`,
     [uri, rkey, fixture.title]
   );
@@ -125,7 +125,7 @@ async function creditFixtures(): Promise<void> {
   );
   await db.query(
     `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role)
-     SELECT e.uri, $1, 1, 'A01' FROM editions e WHERE e.uri LIKE $2
+     SELECT e.uri, $1, 1, 'A01' FROM books e WHERE e.uri LIKE $2
      ON CONFLICT DO NOTHING`,
     [Number(contributor.rows[0]?.id), `at://${AUTHORITY}/%`]
   );

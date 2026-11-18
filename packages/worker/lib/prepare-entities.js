@@ -90,7 +90,7 @@ async function queueEditionsForIds(client, contributorIds, publisherIds) {
   const result = await client.query(
     `INSERT INTO pds_outbox (uri, collection, rkey, op)
      SELECT e.uri, $3, e.rkey, 'update'
-       FROM editions e
+       FROM books e
       WHERE EXISTS (
               SELECT 1 FROM edition_contributors ec
                WHERE ec.edition_uri = e.uri
@@ -115,7 +115,7 @@ async function queueEditionsForMintedEntities(client) {
   const result = await client.query(
     `INSERT INTO pds_outbox (uri, collection, rkey, op)
      SELECT e.uri, $1, e.rkey, 'update'
-       FROM editions e
+       FROM books e
       WHERE EXISTS (
               SELECT 1 FROM edition_contributors ec
                 JOIN contributors c ON c.id = ec.contributor_id

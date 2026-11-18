@@ -10,7 +10,7 @@
  * edition editor so both admin forms bound the shared fields identically.
  */
 
-import { EDITION_EDIT_LIMITS } from './edition-edit.ts';
+import { BOOK_EDIT_LIMITS } from './book-edit.ts';
 
 export type EntityKind = 'contributor' | 'publisher';
 
@@ -46,14 +46,14 @@ export type EntityEditParse<T extends EntityEditInput = EntityEditInput> = {
 };
 
 export const ENTITY_EDIT_LIMITS = {
-  name: EDITION_EDIT_LIMITS.name,
-  nameInverted: EDITION_EDIT_LIMITS.name,
-  description: EDITION_EDIT_LIMITS.description,
-  imageUrl: EDITION_EDIT_LIMITS.coverUrl,
+  name: BOOK_EDIT_LIMITS.name,
+  nameInverted: BOOK_EDIT_LIMITS.name,
+  description: BOOK_EDIT_LIMITS.description,
+  imageUrl: BOOK_EDIT_LIMITS.coverUrl,
   date: 10,
-  identifierIssuer: EDITION_EDIT_LIMITS.identifierIssuer,
-  identifierValue: EDITION_EDIT_LIMITS.identifierValue,
-  maxIdentifiers: EDITION_EDIT_LIMITS.maxEntityIdentifiers,
+  identifierIssuer: BOOK_EDIT_LIMITS.identifierIssuer,
+  identifierValue: BOOK_EDIT_LIMITS.identifierValue,
+  maxIdentifiers: BOOK_EDIT_LIMITS.maxEntityIdentifiers,
   expectedRevision: 128
 } as const;
 

@@ -5,13 +5,13 @@
 -- The search body matched a title, a description, a contributor name and an
 -- identifier value in one `OR` of four subplans. A leading-wildcard pattern
 -- cannot use a btree and none of those columns had any other index, so every
--- search read `editions` end to end (127k rows, measured 3947 ms on the edge's
+-- search read `books` end to end (127k rows, measured 3947 ms on the edge's
 -- own database) with three correlated subplans per row, and the `OR` could not
 -- fall back to a `BitmapOr` because two of its branches are `EXISTS`
 -- subqueries. The read now asks each of the four as its own candidate set, so
 -- each needs an index of its own:
 --
---   * `editions.title` and `edition_identifiers.value` are plain columns.
+--   * `books.title` and `edition_identifiers.value` are plain columns.
 --   * The description index is on `coalesce(description, '')` because that is
 --     the expression the query compares — an index on the bare column would
 --     never be matched.
@@ -34,7 +34,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE INDEX IF NOT EXISTS editions_title_trgm_idx
-  ON editions USING gin (title gin_trgm_ops);
+  ON books USING gin (title gin_trgm_ops);
 
 CREATE INDEX IF NOT EXISTS edition_shape_description_trgm_idx
   ON edition_shape USING gin ((coalesce(description, '')) gin_trgm_ops);

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Pool } from 'pg';
 import { catalogPool } from './db';
-import type { Identifier } from './editions';
+import type { Identifier } from './books';
 import { metrics, recordCatalogHydration } from '$lib/server/metrics';
 import { SEARCH_HYDRATION_MARK_PREFIX, SEARCH_HYDRATION_PER_HOUR } from './search-hydration';
 

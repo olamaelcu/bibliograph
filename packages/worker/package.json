@@ -1,12 +1,11 @@
 {
   "name": "worker",
-  "version": "0.4.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node index.js",
     "test": "vitest run",
-    "normalize:descriptions": "node scripts/normalize-isbndb-descriptions.mjs",
     "normalize:isbndb-authors": "node scripts/normalize-isbndb-author-names.mjs"
   },
   "dependencies": {

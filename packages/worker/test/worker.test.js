@@ -190,7 +190,7 @@ async function releaseTestEntityUris(pool, authority) {
 }
 
 async function cleanupHydrationRows(pool, host) {
-  await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
+  await pool.query('DELETE FROM books WHERE uri LIKE $1', [`at://did:web:${host}/%`]);
   await pool.query(
     `DELETE FROM contributors c
       WHERE c.name IN ('Isbn Test Author', 'Ursula K. Le Guin', 'Isbn Order Author')
@@ -424,7 +424,7 @@ test('resolve hydrates the catalog from provider results', async () => {
   const helpers = { logger: { info() {}, warn() {}, error() {} } };
 
   try {
-    await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
+    await pool.query("DELETE FROM books WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query("DELETE FROM google_books_cache WHERE key LIKE $1", [`${baseUrl}/%`]);
 
@@ -434,7 +434,7 @@ test('resolve hydrates the catalog from provider results', async () => {
     );
 
     const edition = await pool.query(
-      "SELECT uri, rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
+      "SELECT uri, rkey, title, cover_url FROM books WHERE uri LIKE 'at://did:web:test.example/%'"
     );
     expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
@@ -484,15 +484,15 @@ test('resolve hydrates the catalog from provider results', async () => {
       helpers
     );
     const after = await pool.query(
-      "SELECT count(*)::int AS n FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
+      "SELECT count(*)::int AS n FROM books WHERE uri LIKE 'at://did:web:test.example/%'"
     );
     expect(after.rows[0].n).toBe(1);
     const same = await pool.query(
-      "SELECT uri FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
+      "SELECT uri FROM books WHERE uri LIKE 'at://did:web:test.example/%'"
     );
     expect(same.rows[0].uri, 'identity is the identifier bag, not the rkey').toBe(firstUri);
   } finally {
-    await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
+    await pool.query("DELETE FROM books WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query(
       `DELETE FROM contributors c
         WHERE c.name = 'Ursula K. Le Guin'
@@ -530,7 +530,7 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
   const prefix = `at://${publisherDid}/community.lexicon.media.book.edition/`;
 
   try {
-    await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+    await pool.query('DELETE FROM books WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
     await pool.query('DELETE FROM pds_outbox WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
 
     await tasks['catalog.resolve'](
@@ -538,7 +538,7 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
       helpers
     );
 
-    const edition = await pool.query('SELECT uri, rkey, title FROM editions WHERE uri LIKE $1', [
+    const edition = await pool.query('SELECT uri, rkey, title FROM books WHERE uri LIKE $1', [
       `at://${publisherDid}/%`
     ]);
     expect(edition.rowCount).toBe(1);
@@ -559,14 +559,14 @@ test('mints edition URIs under an explicit did:plc publisher authority', async (
       helpers
     );
     const editions = await pool.query(
-      'SELECT rkey FROM editions WHERE uri LIKE $1 ORDER BY rkey',
+      'SELECT rkey FROM books WHERE uri LIKE $1 ORDER BY rkey',
       [`at://${publisherDid}/%`]
     );
     expect(editions.rowCount).toBe(2);
     for (const row of editions.rows) assertTid(row.rkey);
     expect(new Set(editions.rows.map((row) => row.rkey)).size).toBe(2);
   } finally {
-    await pool.query('DELETE FROM editions WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
+    await pool.query('DELETE FROM books WHERE uri LIKE $1', [`at://${publisherDid}/%`]);
     await pool.query(
       `DELETE FROM contributors c
         WHERE c.name = 'Ursula K. Le Guin'
@@ -602,7 +602,7 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
   const helpers = { logger: { info() {}, warn() {}, error() {} } };
 
   try {
-    await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
+    await pool.query("DELETE FROM books WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query("DELETE FROM pds_outbox WHERE uri LIKE 'at://did:web:test.example/%'");
 
     openlibraryRequests = 0;
@@ -610,7 +610,7 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
     await tasks['catalog.search']({ title: 'Left Hand' }, helpers);
 
     const edition = await pool.query(
-      "SELECT rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:test.example/%'"
+      "SELECT rkey, title, cover_url FROM books WHERE uri LIKE 'at://did:web:test.example/%'"
     );
     expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
@@ -619,7 +619,7 @@ test('search falls back to Goodreads when ISBNdb is unconfigured and Google find
     expect(goodreadsRequests, 'Goodreads answers before OpenLibrary').toBe(1);
     expect(openlibraryRequests, 'OpenLibrary is not reached when Goodreads answers').toBe(0);
   } finally {
-    await pool.query("DELETE FROM editions WHERE uri LIKE 'at://did:web:test.example/%'");
+    await pool.query("DELETE FROM books WHERE uri LIKE 'at://did:web:test.example/%'");
     await pool.query(
       `DELETE FROM contributors c
         WHERE c.name = 'Ursula K. Le Guin'
@@ -655,7 +655,7 @@ test('catalog.isbn hydrates directly from ISBNdb by ISBN', async () => {
     await tasks['catalog.isbn']({ isbn: ISBNDB_ISBN }, helpers);
 
     const edition = await pool.query(
-      "SELECT uri, rkey, title, cover_url FROM editions WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
+      "SELECT uri, rkey, title, cover_url FROM books WHERE uri LIKE 'at://did:web:isbn-direct.example/%'"
     );
     expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
@@ -711,7 +711,7 @@ test('catalog.isbn falls back to the resolve chain without ISBNdb', async () => 
     await tasks['catalog.isbn']({ isbn: GOOGLE_ISBN }, helpers);
 
     const edition = await pool.query(
-      "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-fallback.example/%'"
+      "SELECT rkey, title FROM books WHERE uri LIKE 'at://did:web:isbn-fallback.example/%'"
     );
     expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
@@ -747,7 +747,7 @@ test('catalog.isbn falls back to the resolve chain when ISBNdb has no record', a
     await tasks['catalog.isbn']({ isbn: GOOGLE_ISBN }, helpers);
 
     const edition = await pool.query(
-      "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:isbn-empty.example/%'"
+      "SELECT rkey, title FROM books WHERE uri LIKE 'at://did:web:isbn-empty.example/%'"
     );
     expect(edition.rowCount).toBe(1);
     assertTid(edition.rows[0].rkey);
@@ -786,7 +786,7 @@ test('search tries ISBNdb first and never reaches Google when it returns candida
     await tasks['catalog.search']({ title: 'isbndb-first' }, helpers);
 
     const edition = await pool.query(
-      "SELECT rkey, title FROM editions WHERE uri LIKE 'at://did:web:search-order.example/%'"
+      "SELECT rkey, title FROM books WHERE uri LIKE 'at://did:web:search-order.example/%'"
     );
     expect(edition.rows.map((row) => row.title), 'only the ISBNdb candidate is ingested').toEqual(['ISBNdb First Volume']);
     assertTid(edition.rows[0].rkey);
@@ -825,7 +825,7 @@ test('search falls back to Google on an empty ISBNdb, then to Goodreads', async 
     expect(goodreadsRequests, 'Goodreads is not reached when Google answers').toBe(0);
 
     const fromGoogle = await pool.query(
-      "SELECT title FROM editions WHERE uri LIKE 'at://did:web:search-empty.example/%'"
+      "SELECT title FROM books WHERE uri LIKE 'at://did:web:search-empty.example/%'"
     );
     expect(fromGoogle.rows.map((row) => row.title)).toEqual(['The Left Hand of Darkness']);
 
@@ -835,7 +835,7 @@ test('search falls back to Google on an empty ISBNdb, then to Goodreads', async 
     expect(goodreadsRequests, 'Goodreads fills the gap when Google is empty too').toBe(1);
 
     const titles = await pool.query(
-      "SELECT title FROM editions WHERE uri LIKE 'at://did:web:search-empty.example/%' ORDER BY title"
+      "SELECT title FROM books WHERE uri LIKE 'at://did:web:search-empty.example/%' ORDER BY title"
     );
     expect(titles.rows.map((row) => row.title)).toEqual([
       'The Left Hand of Darkness',
@@ -869,7 +869,7 @@ test('search ingests at most 50 candidates', async () => {
     await tasks['catalog.search']({ title: 'cap-test' }, helpers);
 
     const editions = await pool.query(
-      "SELECT rkey FROM editions WHERE uri LIKE 'at://did:web:cap.example/%'"
+      "SELECT rkey FROM books WHERE uri LIKE 'at://did:web:cap.example/%'"
     );
     expect(editions.rowCount, 'the provider returned 60 candidates').toBe(50);
     for (const row of editions.rows) assertTid(row.rkey);
@@ -904,7 +904,7 @@ test('search tries OpenLibrary after Google and Goodreads', async () => {
     await tasks['catalog.search']({ title: 'openlibrary-fills' }, helpers);
 
     const edition = await pool.query(
-      "SELECT title FROM editions WHERE uri LIKE 'at://did:web:openlibrary.example/%'"
+      "SELECT title FROM books WHERE uri LIKE 'at://did:web:openlibrary.example/%'"
     );
     expect(edition.rows.map((row) => row.title)).toEqual(['OpenLibrary Fallback Volume']);
     expect(providerOrder).toEqual(['googlebooks', 'goodreads', 'openlibrary']);
