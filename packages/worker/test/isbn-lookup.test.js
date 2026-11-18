@@ -15,6 +15,7 @@ import {
   normaliseTitle,
   rankTitleMatches,
   titleOverlap,
+  titleForLookup,
   titlesMatch
 } from '../lib/providers/isbn-lookup.js';
 
@@ -214,4 +215,37 @@ test('a 978 ISBN-13 has an ISBN-10 form, a 979 one does not', () => {
   expect(isbn10FromIsbn13('9780553293357')).toBe('0553293354');
   expect(isbn10FromIsbn13('9791090636071')).toBeNull();
   expect(isbn10FromIsbn13('not an isbn')).toBeNull();
+});
+
+test('the lookup title drops an author or series suffix but keeps an edition note', () => {
+  expect(titleForLookup('Neuromancer - William Gibson')).toBe('Neuromancer');
+  expect(titleForLookup('The Left Hand of Darkness by Ursula K. Le Guin')).toBe(
+    'The Left Hand of Darkness'
+  );
+  expect(titleForLookup('Dune (Dune Chronicles, #1)')).toBe('Dune');
+  // A format or series suffix is part of what names the edition: dropping it
+  // would let the base edition's ISBN attach to a deluxe one.
+  expect(titleForLookup('Dune - Deluxe Edition')).toBe('Dune - Deluxe Edition');
+  expect(titleForLookup('Dune - Book 2')).toBe('Dune - Book 2');
+  expect(titleForLookup("Harry Potter and the Philosopher's Stone")).toBe(
+    "Harry Potter and the Philosopher's Stone"
+  );
+});
+
+test('a dirty catalog title resolves through the cleaned query', async () => {
+  const offered = [isbnCandidate('Neuromancer', '9780441569595')];
+  const providers = {
+    openlibrary: { search: async () => offered },
+    goodreads: { search: async () => [] },
+    google: { search: async () => [] }
+  };
+
+  const found = await lookupIsbn({
+    providers,
+    title: 'Neuromancer - William Gibson',
+    logger: log
+  });
+
+  expect(found?.isbn13).toBe('9780441569595');
+  expect(found?.source).toBe('openlibrary');
 });

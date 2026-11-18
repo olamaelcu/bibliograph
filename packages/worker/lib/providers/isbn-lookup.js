@@ -50,6 +50,42 @@ export const OPENING_CHARS = 20;
 /** Share of the reference title's tokens the candidate must repeat. */
 export const TOKEN_OVERLAP = 0.8;
 
+/** Words that mark a trailing segment as a format/series note, not an author. */
+const EDITION_NOISE =
+  /\b(edition|deluxe|annotated|illustrated|box|boxed|set|series|volume|vol|omnibus|collection|complete|unabridged)\b/i;
+
+/**
+ * The title to ask a provider for.
+ *
+ * Catalog titles arrive dirty from the feeds: `Neuromancer - William Gibson`,
+ * `The Left Hand of Darkness by Ursula K. Le Guin`, `Dune (Dune Chronicles,
+ * #1)`. A search for the raw string finds nothing — OpenLibrary answered
+ * `numFound: 0` for the first of those — because the trailing author and series
+ * notes are not part of the title index. The suffix is dropped only when it
+ * looks like a person's name (or a parenthetical), so `Dune - Deluxe Edition`
+ * keeps its suffix and cannot resolve to the base edition's ISBN.
+ */
+export function titleForLookup(value) {
+  let text = cleanString(value) ?? '';
+  text = text.replace(/\s*\([^()]*\)\s*$/, '').trim();
+
+  const separator = /^(.*\S)\s+(?:[-–—|]|\bby\b)\s+(.+)$/i.exec(text);
+  if (separator) {
+    const head = separator[1].trim();
+    const tail = separator[2].trim();
+    const words = tail.split(/\s+/);
+    const looksLikeName =
+      words.length >= 2 &&
+      words.length <= 4 &&
+      words.every((word) => /^\p{Lu}/u.test(word)) &&
+      !/[0-9]/.test(tail) &&
+      !EDITION_NOISE.test(tail);
+    if (head.length >= 3 && looksLikeName) text = head;
+  }
+
+  return text;
+}
+
 /** Lowercase, strip diacritics and punctuation, collapse whitespace. */
 export function normaliseTitle(value) {
   if (typeof value !== 'string') return '';
@@ -187,7 +223,10 @@ export async function lookupIsbn({
   identifiers = [],
   logger
 } = {}) {
-  const reference = cleanString(title);
+  // Both the query and the match use the cleaned title: a provider cannot find
+  // `Neuromancer - William Gibson`, and a candidate found for `Neuromancer`
+  // would fail the opening rule against the raw string.
+  const reference = titleForLookup(title);
   if (!reference) return null;
 
   const author = (Array.isArray(authors) ? authors : [])

@@ -1,3 +1,19 @@
+bibliograph-worker (0.7.2-1) unstable; urgency=medium
+
+  * 0.7.2: the ISBN backfill asks the providers for the cleaned title.
+
+    - Catalog titles arrive with trailing author and series notes —
+      `Neuromancer - William Gibson`, `… by Ursula K. Le Guin`, `Dune (Dune
+      Chronicles, #1)`. The raw string was used as the search query, and
+      OpenLibrary answered `numFound: 0` for it, so the job recorded `none` on
+      books that are trivially resolvable. The query and the match now use the
+      title with that suffix removed.
+    - A ` - Deluxe Edition` / ` - Book 2` style suffix is kept: it names the
+      edition, and dropping it would let the base edition's ISBN attach to a
+      different one.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.7.1-1) unstable; urgency=medium
 
   * 0.7.1: the ISBN backfill records its outcome even when the job was queued
