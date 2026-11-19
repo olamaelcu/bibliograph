@@ -112,7 +112,6 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
         AND table_name = ANY($1)
       ORDER BY table_name`,
     [[
-      'book_search',
       'books',
       'catalog_enqueue_marks',
       'contributor_claims',
@@ -145,7 +144,6 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
     ]]
   );
   expect(tables.rows.map((row) => row.table_name)).toEqual([
-      'book_search',
       'books',
       'catalog_enqueue_marks',
       'contributor_claims',
@@ -236,18 +234,6 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       ORDER BY tgname`
   );
   expect(triggers.rows.map((row) => row.tgname)).toEqual([
-      'book_search_books_delete',
-      'book_search_books_insert',
-      'book_search_books_update',
-      'book_search_edition_contributors_delete',
-      'book_search_edition_contributors_insert',
-      'book_search_edition_contributors_update',
-      'book_search_edition_identifiers_delete',
-      'book_search_edition_identifiers_insert',
-      'book_search_edition_identifiers_update',
-      'book_search_edition_shape_delete',
-      'book_search_edition_shape_insert',
-      'book_search_edition_shape_update',
       'normalize_identifier_extent',
       'normalize_identifier_language',
       'pds_enqueue_contributor_edits',
@@ -267,6 +253,14 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'refresh_edition_shape_insert',
       'refresh_edition_shape_update',
       'search_dirty_books_delete',
+      'search_dirty_books_insert',
+      'search_dirty_books_update',
+      'search_dirty_edition_contributors_insert',
+      'search_dirty_edition_contributors_update',
+      'search_dirty_edition_identifiers_insert',
+      'search_dirty_edition_identifiers_update',
+      'search_dirty_edition_shape_insert',
+      'search_dirty_edition_shape_update',
       'search_dirty_genres_delete',
       'search_dirty_genres_insert'
     ]);
