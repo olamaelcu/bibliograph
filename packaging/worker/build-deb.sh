@@ -29,7 +29,7 @@ import json
 print(json.load(open("packages/worker/package.json"))["version"])
 ')"
 VERSION="${WORKER_VERSION:-$package_version}"
-REVISION="${WORKER_REVISION:-1}"
+REVISION="${WORKER_REVISION:-2}"
 ARCH="all"
 STAGE="packaging/build/bibliograph-worker_${VERSION}-${REVISION}_${ARCH}"
 UNIT_DIR="$STAGE/usr/lib/systemd/system"

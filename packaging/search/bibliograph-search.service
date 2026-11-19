@@ -13,7 +13,7 @@ Group=bibliograph
 # configuration are read-only to it.
 StateDirectory=bibliograph-search
 Environment=SEARCH_INDEX_DIR=/var/lib/bibliograph-search/index
-Environment=SEARCH_BIND=127.0.0.1:3102
+Environment=SEARCH_BIND=127.0.0.1:3103
 EnvironmentFile=-/etc/bibliograph/search.env
 ExecStart=/usr/lib/bibliograph-search/bibliograph-search
 Restart=on-failure

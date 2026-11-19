@@ -1,3 +1,10 @@
+bibliograph-search (0.1.0-2) unstable; urgency=medium
+
+  * Default bind is 127.0.0.1:3103: 3102 belongs to Loki on the host, and the
+    service failed with "Address in use" there.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-search (0.1.0-1) unstable; urgency=medium
 
   * Initial package: loopback Tantivy index for the catalog search.

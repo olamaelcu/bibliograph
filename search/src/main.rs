@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use index::Engine;
 
-const DEFAULT_BIND: &str = "127.0.0.1:3102";
+const DEFAULT_BIND: &str = "127.0.0.1:3103";
 const DEFAULT_INDEX_DIR: &str = "/var/lib/bibliograph-search/index";
 
 fn usage() -> ! {

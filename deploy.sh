@@ -163,7 +163,7 @@ SKIP_DB="$7"
 SKIP_NGINX="$8"
 REPLACE_LEGACY="${9:-0}"
 SKIP_BOOKHIVE="${10:-0}"
-SEARCH_DEB="${11:+/tmp/}$11"
+SEARCH_DEB="${11:+/tmp/${11}}"
 SEARCH_SHA="${12:-}"
 
 export DEBIAN_FRONTEND=noninteractive
@@ -420,6 +420,10 @@ apt_install "$WORKER_DEB"
 # a worker whose catalog tables are applied a few seconds later. It is started
 # again in the ordered restart below.
 systemctl stop bibliograph-worker.service >/dev/null 2>&1 || true
+# A stop that hits systemd's timeout leaves the unit `failed` even though the
+# deploy meant to stop it; clear that state so the verification reads it as
+# scheduled-off rather than broken.
+systemctl reset-failed bibliograph-worker.service >/dev/null 2>&1 || true
 verify_version bibliograph-worker "$WORKER_VERSION"
 
 if [ "$SKIP_DB" = 0 ]; then
@@ -735,8 +739,11 @@ xrpc_code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
   "http://127.0.0.1:$port/xrpc/community.lexicon.media.book.searchEditions" || true)"
 printf 'XRPC searchEditions %s\n' "$xrpc_code"
 
+search_port="$(sed -n 's/^SEARCH_BIND=.*:\([0-9][0-9]*\)$/\1/p' \
+  /etc/bibliograph/search.env 2>/dev/null | tail -1)"
+: "${search_port:=3103}"
 search_health="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
-  http://127.0.0.1:3102/healthz || true)"
+  "http://127.0.0.1:$search_port/healthz" || true)"
 printf 'SEARCH healthz %s\n' "$search_health"
 
 bad=0

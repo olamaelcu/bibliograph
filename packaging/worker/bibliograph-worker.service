@@ -33,7 +33,10 @@ SuccessExitStatus=143 130
 # their place. systemd must wait past that window: a SIGKILL leaves graphile's
 # job and queue locks held for four hours and stalls pds-publish.
 KillSignal=SIGTERM
-TimeoutStopSec=60s
+# A job can be mid-provider-call when a deploy stops the worker; force-killing it
+# leaves graphile locks behind for four hours. Give the graceful path room.
+TimeoutStopSec=120s
+
 LimitNOFILE=65536
 SyslogIdentifier=bibliograph-worker
 
