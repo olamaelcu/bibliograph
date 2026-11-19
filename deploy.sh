@@ -460,6 +460,10 @@ if [ "$SKIP_DB" = 0 ]; then
   [ "${#sql_files[@]}" -gt 0 ] \
     || fail "no *.sql files in $sql_dir; the worker package is incomplete"
 
+  psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())" \
+    || fail "could not create schema_migrations; the deploy needs a writable catalog database"
+
   # A migration takes AccessExclusiveLock on the relations it recreates
   # (`CREATE OR REPLACE VIEW` included), while HappyView and the edge keep
   # reading them. Under traffic the two sides deadlock in a cycle that a retry
@@ -476,7 +480,17 @@ if [ "$SKIP_DB" = 0 ]; then
   done
 
   for file in "${sql_files[@]}"; do
-    say "Catalog schema: $(basename "$file")"
+    name=$(basename "$file")
+    # The ledger is what keeps a deploy short: the files are forward-only, so
+    # re-applying all 37 on every release re-ran the data migrations (0011's
+    # language UPDATE measured 31s, 0015 the whole shape table) for no change.
+    # A file that is edited after being applied does not re-run by design; add a
+    # new numbered file instead. 0003/0020 are still re-applied explicitly below.
+    if [ -n "$(psql "$worker_url" -X -q -tA --no-psqlrc -c "SELECT 1 FROM schema_migrations WHERE filename = '$name'")" ]; then
+      note "Catalog schema: $name (already applied)"
+      continue
+    fi
+    say "Catalog schema: $name (new)"
     attempt=1
     while :; do
       if output=$(PGOPTIONS='-c lock_timeout=15000' psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc -f "$file" 2>&1); then
@@ -495,8 +509,11 @@ if [ "$SKIP_DB" = 0 ]; then
       printf '%s\n' "$output"
       fail "catalog schema failed at $(basename "$file"). Each file is one transaction, so this one was rolled back; earlier files in this run stay applied. Data migrated by an earlier file is not reverted. Fix the error and re-run (the files are re-runnable)."
     done
+    psql "$worker_url" -X -q -v ON_ERROR_STOP=1 --no-psqlrc \
+      -c "INSERT INTO schema_migrations (filename) VALUES ('$name') ON CONFLICT DO NOTHING" \
+      || fail "could not record $name in schema_migrations; it will be re-applied next deploy"
   done
-  note "Catalog schema applied (re-runnable; migrations are forward-only)"
+  note "Catalog schema applied (forward-only; applied files are skipped)"
   READERS_STOPPED=0
 else
   note "--skip-db: catalog schema skipped"
