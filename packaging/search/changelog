@@ -1,3 +1,15 @@
+bibliograph-search (0.1.0-4) unstable; urgency=medium
+
+  * Every request logs a span close line (`http{method=POST route=search}: close
+    time.busy=…`), so the journal can answer what the service served; before
+    this, a span with no events printed nothing.
+  * OTLP: `OTEL_EXPORTER_OTLP_ENDPOINT` attaches a `tracing-opentelemetry`
+    layer with a blocking HTTP/protobuf exporter and a batch processor; unset
+    means fmt-only, no exporter thread. Verified against a stub collector
+    (`POST /v1/traces`, 473 bytes, application/x-protobuf).
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-search (0.1.0-3) unstable; urgency=medium
 
   * Observability: `tracing` spans and logs (journald) for every request and

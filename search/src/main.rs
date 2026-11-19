@@ -20,18 +20,63 @@ fn usage() -> ! {
     std::process::exit(2)
 }
 
-fn init_tracing() {
+fn init_tracing() -> Option<opentelemetry_sdk::trace::SdkTracerProvider> {
     use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
     // Tantivy logs every segment save at INFO, which would drown the journal
     // during a backfill; its own WARN+ is what an operator needs from it.
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,tantivy=warn"));
-    // Logs go to stderr, which is the journal under systemd.
-    let _ = fmt().with_env_filter(filter).with_writer(std::io::stderr).try_init();
+    // Logs go to stderr (the journal under systemd), and a span close line makes
+    // every request visible there: without it a span with no events prints
+    // nothing and the journal cannot answer "what did we serve".
+    let fmt_layer = fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_span_events(fmt::format::FmtSpan::CLOSE);
+
+    let provider = otlp_provider();
+    let otel_layer = provider.as_ref().map(|provider| {
+        // Explicit tracer, not the global one: the layer keeps whatever tracer
+        // it is built with, and a global set after the layer would not be seen.
+        use opentelemetry::trace::TracerProvider as _;
+        tracing_opentelemetry::layer().with_tracer(provider.tracer("bibliograph-search"))
+    });
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(otel_layer)
+        .init();
+    provider
+}
+
+/// An OTLP exporter only when the environment names one; otherwise tracing is
+/// fmt-only and the process carries no exporter thread.
+fn otlp_provider() -> Option<opentelemetry_sdk::trace::SdkTracerProvider> {
+    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
+    if endpoint.trim().is_empty() {
+        return None;
+    }
+    let exporter = match opentelemetry_otlp::SpanExporter::builder().with_http().build() {
+        Ok(exporter) => exporter,
+        Err(error) => {
+            eprintln!("otel: cannot build the OTLP exporter: {error}");
+            return None;
+        }
+    };
+    let resource = opentelemetry_sdk::Resource::builder()
+        .with_service_name("bibliograph-search")
+        .build();
+    Some(
+        opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_resource(resource)
+            .build(),
+    )
 }
 
 fn main() {
-    init_tracing();
+    let tracing_provider = init_tracing();
 
     // Real buckets, not per-process summaries: the dashboard needs
     // `histogram_quantile(rate(...))` over the scrape window, which summaries
@@ -86,5 +131,8 @@ fn main() {
     if let Err(error) = http::serve(engine, &bind, metrics) {
         tracing::error!(%error, "serve failed");
         std::process::exit(1)
+    }
+    if let Some(provider) = tracing_provider {
+        let _ = provider.shutdown();
     }
 }
