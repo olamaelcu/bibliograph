@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
 #MISE description="Run the catalog worker against the local database (hydration + pds-publish)"
+#MISE depends=["labeler-key"]
 #
 # Environment comes from mise's [env] (DATABASE_URL) and the shell. pds-publish
 # needs PDS_URL, the publisher DID and PDS_ACCOUNT_PASSWORD or PDS_ACCESS_TOKEN;
 # without them the worker logs that pds-publish is disabled and still runs the
 # hydration tasks.
+#
+# The labeler key is a dependency so the worker signs the labels it queues
+# instead of logging `labeler DISABLED` and leaving them in `label_outbox`; the
+# edge's dev task reads the same file, so the DID document it renders carries the
+# matching public half.
 
 set -euo pipefail
 
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
+
+# `src` must name the DID whose document carries the key. Locally that is the
+# edge's own dev identity (`LIVTET_DID_HOSTNAME`, also used for the space
+# manager), not the installed host's `did:web:biblio.livtet.olamaelcu.net`.
+export LABELER_KEY_FILE="$ROOT/.cache/labeler/labeler.key"
+export LABELER_DID="${LABELER_DID:-did:web:172-17-0-1.sslip.io}"
+export LABELER_PORT="${LABELER_PORT:-9466}"
 
 exec pnpm --filter worker start

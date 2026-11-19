@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+#MISE description="Generate the local labeler key the worker signs labels with"
+#
+# The worker needs `LABELER_KEY_FILE` or it refuses to sign anything: queued
+# labels then pile up in `label_outbox` and the log says the labeler is disabled.
+#
+# The pair lives under `.cache/`, is generated once and reused afterwards — a
+# fresh key on every restart would invalidate the signature of every label the
+# worker already emitted. Its `public=` line is what the edge publishes as
+# `#atproto_label`; `mise run web` reads it from the same file, so the worker and
+# the DID document cannot disagree.
+#
+# Rotating means deleting the file; labels already signed verify only under the
+# key that signed them.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+KEY="$ROOT/.cache/labeler/labeler.key"
+
+if [ ! -s "$KEY" ]; then
+  mkdir -p "$(dirname "$KEY")"
+  (
+    cd "$ROOT/packages/worker"
+    node scripts/gen-labeler-key.mjs >"$KEY.tmp"
+  )
+  chmod 600 "$KEY.tmp"
+  mv "$KEY.tmp" "$KEY"
+  printf 'labeler: generated %s\n' "$KEY"
+fi
+
+printf 'labeler key: %s\n' "$KEY"
+printf 'labeler public: %s\n' "$(sed -n 's/^public=//p' "$KEY")"

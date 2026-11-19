@@ -32,12 +32,12 @@ description = "Open a psql shell against the local bibliograph database"
 run = ["psql ${DATABASE_URL}"]
 
 [tasks.worker-dev]
-dir = "packages/worker"
-run = ["pnpm run start"]
+description = "Run the catalog worker, generating the labeler key first"
+run = ["mise run worker"]
 
 [tasks.web-dev]
-dir = "packages/web"
-run = ["docker compose up -d", "pnpm run dev"]
+description = "Bring up the local stack and run the edge on :5176 with the labeler key"
+run = ["docker compose up -d", "mise run web"]
 
 [tasks.dev]
 run = ["mise run web-dev ::: worker-dev"]
