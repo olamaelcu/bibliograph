@@ -117,6 +117,12 @@ services:
       # which is what the previous PDS's ALLOW_PRIVATE_FETCH did.
       PDS_DEV_MODE: "true"
       PDS_DID_PLC_URL: http://plc:2582
+      # The account that publishes this stack's lexicons (`mise run
+      # publish-lex`). A permission set is resolved through its NSID authority,
+      # whose public TXT names production's publisher; this names the local one
+      # instead, so the record is read from this PDS and sign-in never reaches
+      # production. Patch: vendor/patches/rsky-lexicon-authority-override.patch.
+      PDS_LEXICON_AUTHORITY_DID: ${HAPPYVIEW_ACCOUNT_DID:-}
       PDS_INVITE_REQUIRED: "false"
       PDS_RATE_LIMITS_ENABLED: "false"
       # Empty on purpose: unset, the PDS announces every new repo to eight
@@ -232,6 +238,10 @@ services:
           # reachable from a container), while on the host it resolves through
           # sslip.io to the same Caddy — one name, both sides.
           - 172-17-0-1.sslip.io
+          # The Bibliograph edge's origin (`mise run web-origin`). The PDS
+          # fetches the OAuth client metadata from this name, so it has to
+          # answer from Caddy *inside* the network.
+          - biblio.172-17-0-1.sslip.io
     healthcheck:
       test: ["CMD-SHELL", "test -f /data/caddy/pki/authorities/local/root.crt"]
       interval: 2s
