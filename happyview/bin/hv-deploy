@@ -65,6 +65,12 @@ RECORD_LEXICONS = [
     # Replies to a review: written into the replier's own repo, indexed so a
     # review's conversation is one query rather than a per-author fan-out.
     "net.olamaelcu.livtet.biblio.reviewReply",
+    # A reader's request to be recognised as a catalog contributor. Indexed so a
+    # librarian can see new requests; nothing reads it through HappyView XRPC —
+    # the worker's claims queue and the edge read the tables directly. Deliberately
+    # not in BACKFILL_LEXICONS: claims do not exist before this ships, so a
+    # network crawl of the collection buys nothing.
+    "net.olamaelcu.livtet.biblio.contributorClaim",
     # Bookhive's own per-book record, indexed so the `review` text it carries
     # can be served as a review. The lexicon is Bookhive's, copied verbatim
     # into lexicons/buzz/bookhive/; only the collection is registered here.

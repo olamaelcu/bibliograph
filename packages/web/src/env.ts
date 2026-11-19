@@ -63,6 +63,26 @@ export const variables = defineEnvVars({
     description:
       'Service endpoint published as #livtet_space_manager; the base URL a PDS calls to mint and check club spaces.'
   },
+  LIVTET_LABELER_KEY_MULTIBASE: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'Public half of the labeler key, published as #atproto_label. Unset omits the verification method, and consumers cannot verify the labels the worker signs.'
+  },
+  LIVTET_LABELER_ORIGIN: {
+    schema: (value) => value?.trim() || 'https://biblio.livtet.olamaelcu.net',
+    description:
+      'Origin published as #atproto_labeler. The labeler is served from this host through nginx, so it must be the origin the two label endpoints answer on — a path-less origin, as the label spec requires.'
+  },
+  LIBRARIAN_DIDS: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'Comma- or space-separated DIDs allowed into /librarian. Unset disables the whole tree (404).'
+  },
+  LIBRARIAN_SESSION_SECRET: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'HMAC key for the librarian session cookie. Unset disables the whole /librarian tree (404).'
+  },
   COVERS_CACHE_DIR: {
     schema: (value) => value?.trim() || undefined,
     description:

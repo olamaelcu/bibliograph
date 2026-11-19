@@ -89,7 +89,7 @@ test('the described surface is exactly the registries it is built from', () => {
     ...FORWARDED_PROCEDURES
   ]);
   expect(serviceMethods()).toEqual([...expected].sort());
-  expect(serviceMethods().length).toBe(51);
+  expect(serviceMethods().length).toBe(52);
 });
 
 test('every described method is a valid NSID, listed once', () => {

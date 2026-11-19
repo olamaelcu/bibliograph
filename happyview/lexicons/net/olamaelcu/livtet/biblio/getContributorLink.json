@@ -1,0 +1,54 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.getContributorLink",
+  "description": "The verified-account links for one contributor, and the link/claim state for one DID. Answered by the bibliograph edge from the catalog tables and the activity index; never handled by HappyView.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "properties": {
+          "contributor": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "Contributor record URI. When supplied, `identities` lists the accounts verified as this contributor."
+          },
+          "did": {
+            "type": "string",
+            "format": "did",
+            "description": "Account DID. When supplied, `identity` and `claim` describe that account."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "identities": {
+              "type": "array",
+              "items": {
+                "type": "ref",
+                "ref": "net.olamaelcu.livtet.biblio.defs#contributorIdentity"
+              }
+            },
+            "identity": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#contributorIdentity"
+            },
+            "claim": {
+              "type": "ref",
+              "ref": "net.olamaelcu.livtet.biblio.defs#contributorClaimView"
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "InvalidRequest",
+          "description": "Neither `contributor` nor `did` was supplied, or a value is malformed."
+        }
+      ]
+    }
+  }
+}

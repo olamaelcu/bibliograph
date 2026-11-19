@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.knownContributor",
+  "description": "A verified link from one catalog contributor record to the ATProto account that proved it is that person. Published by the catalog publisher; keyed by TID.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["contributor", "subject", "createdAt"],
+        "properties": {
+          "contributor": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the net.olamaelcu.livtet.biblio.contributor record this account is."
+          },
+          "subject": {
+            "type": "string",
+            "format": "did",
+            "description": "The account DID. A label with value `known-author` is also issued on this account."
+          },
+          "issuedBy": {
+            "type": "string",
+            "format": "did",
+            "description": "The librarian account that approved the claim."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

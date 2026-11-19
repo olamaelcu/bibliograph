@@ -7,6 +7,12 @@
  * without SvelteKit imports makes the dispatch classification testable.
  */
 
+// The claim/link query's NSID lives with its implementation, so the method and
+// the SQL that answers it cannot be registered under different names.
+import { GET_CONTRIBUTOR_LINK } from './contributor-links.ts';
+
+export { GET_CONTRIBUTOR_LINK };
+
 /** The books-wg procedures: `POST`-only by lexicon, answered here. */
 export const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
 export const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
@@ -28,6 +34,7 @@ export const SEARCH_PUBLISHERS = 'net.olamaelcu.livtet.biblio.searchPublishers';
 
 export const ENTITY_QUERIES = new Set([
   GET_CONTRIBUTOR,
+  GET_CONTRIBUTOR_LINK,
   GET_GENRES_OF_BOOK,
   GET_IDENTIFIED_FORMATS,
   GET_PUBLISHER,

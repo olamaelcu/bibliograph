@@ -15,6 +15,7 @@ import { createGutenberg } from './lib/providers/gutenberg.js';
 import { seedCatalogFromProvider } from './lib/seed.js';
 import { createBookhiveMetrics, importBookhiveCatalog } from './lib/bookhive.js';
 import { coversBaseUrlFromEnv } from './lib/cover-cache.js';
+import { DEFAULT_LABELER_PORT, loadLabelerKeypair, startLabeler } from './lib/labeler.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -170,6 +171,31 @@ if (process.argv.some((arg) => arg.startsWith('--import-bookhive'))) {
 const isbndbDailyLimit = parseDailyLimit(process.env.ISBNDB_DAILY_LIMIT);
 const providers = createProviders({ pool, isbndbDailyLimit });
 
+// The labeler signs the `known-author` labels a librarian's approval queues. Its
+// identity is the did:web this host already serves — the key is published as
+// `#atproto_label` in that document — so no PDS account is involved. Without a
+// key file the whole feature is off: the endpoint does not start and the queue
+// keeps its rows, exactly like an unconfigured `pds-publish`.
+const labelerKeyFile = (process.env.LABELER_KEY_FILE ?? '').trim();
+const labelerDid =
+  (process.env.LABELER_DID ?? '').trim() || `did:web:${publisherHost}`;
+const labelerPort = positiveInteger(process.env.LABELER_PORT, DEFAULT_LABELER_PORT);
+let labelerKeypair;
+if (labelerKeyFile !== '') {
+  try {
+    labelerKeypair = await loadLabelerKeypair(labelerKeyFile);
+  } catch (error) {
+    console.error(
+      `worker: labeler DISABLED — cannot read LABELER_KEY_FILE=${labelerKeyFile}: ${error.message}`
+    );
+  }
+} else {
+  console.error(
+    'worker: labeler DISABLED — LABELER_KEY_FILE is not set, so queued labels are ' +
+      'never signed. Generate a key with scripts/gen-labeler-key.mjs and restart.'
+  );
+}
+
 // The admin API is how an operator searches providers and ingests a result.
 // It is loopback-only by default and absent when ADMIN_TOKEN is unset; a bind
 // failure must not stop catalog hydration or publishing.
@@ -195,6 +221,22 @@ try {
   });
 } catch (error) {
   console.error(`worker: metrics server disabled — ${error.message}`);
+}
+
+// The labeler serves the labels this worker signs. Like the admin API it is
+// best-effort: a bound port must not stop hydration or publishing, and the
+// queued rows wait for it.
+let labelerServer;
+if (labelerKeypair) {
+  try {
+    labelerServer = await startLabeler({
+      pool,
+      src: labelerDid,
+      port: labelerPort
+    });
+  } catch (error) {
+    console.error(`worker: labeler endpoint disabled — ${error.message}`);
+  }
 }
 
 // The PDS publisher is configured or loud about it. The worker still runs the
@@ -230,7 +272,10 @@ const taskList = createTasks({
   coversBaseUrl,
   coverMetrics,
   bookhiveMetrics,
-  signal: shutdown.signal
+  signal: shutdown.signal,
+  // Null when the key is missing, which is what makes `labels.emit` refuse the
+  // job instead of signing nothing.
+  labels: labelerKeypair ? { keypair: labelerKeypair, src: labelerDid } : null
 });
 
 // One publisher at a time: the task queue serializes the jobs, so two batches
@@ -256,6 +301,19 @@ if (publisher) {
     }
   });
 }
+cronItems.push({
+  // A librarian's approval queues a label; signing it from the table means a
+  // restart during that window re-emits it. `maxAttempts: 1` is deliberate: a
+  // failed batch is already backed off row by row inside `emitLabels`, so a
+  // graphile retry would only sign the same rows twice.
+  task: 'labels.emit',
+  match: '* * * * *',
+  options: {
+    queueName: 'labels',
+    jobKey: 'labels.emit:cron',
+    maxAttempts: 1
+  }
+});
 cronItems.push({
   task: 'catalog.genres.sweep',
   match: '*/10 * * * *',
@@ -349,7 +407,8 @@ console.log(
     `isbndb-daily-limit=${isbndbDailyLimit}, ` +
     `metrics=${metricsServer ? 'enabled' : 'disabled'}, ` +
     `admin=${adminServer ? adminServer.url : 'disabled'}, ` +
-    `pds-publish=${publisher ? 'enabled' : 'disabled'})`
+    `pds-publish=${publisher ? 'enabled' : 'disabled'}, ` +
+    `labeler=${labelerServer ? `${labelerDid} @ ${labelerServer.url}` : 'disabled'})`
 );
 
 // Cron fires at the top of each minute; drain once at boot so a backlog from a
@@ -360,6 +419,16 @@ if (publisher) {
     maxAttempts: 3,
     // A restart loop must not pile up boot jobs; one queued drain is enough.
     jobKey: 'pds-publish:boot',
+    jobKeyMode: 'unsafe_dedupe'
+  });
+}
+
+// A queued label should not wait a minute for the cron after a restart.
+if (labelerServer) {
+  await runner.addJob('labels.emit', {}, {
+    queueName: 'labels',
+    maxAttempts: 1,
+    jobKey: 'labels.emit:boot',
     jobKeyMode: 'unsafe_dedupe'
   });
 }
@@ -389,5 +458,6 @@ try {
   if (metricsServer) {
     await new Promise((resolve) => metricsServer.close(resolve));
   }
+  if (labelerServer) await labelerServer.close();
   await pool.end();
 }

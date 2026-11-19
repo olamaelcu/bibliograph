@@ -22,6 +22,12 @@
  * that points at the absorbed row's at-URI is cleared so the read model falls
  * back to the survivor's URI instead of a deleted record.
  *
+ * A verified-account binding (`contributor_identities`) is one row per person,
+ * so the merged person keeps the survivor's when both had one — deleting the
+ * absorbed row, which queues the delete of the record it published — and the
+ * absorbed row's binding is otherwise moved to the survivor, which the same
+ * trigger requeues under the survivor's URI.
+ *
  * No SvelteKit or environment imports: the route passes `catalogPool()` and the
  * scratch-database tests pass their own pool.
  */
@@ -408,6 +414,27 @@ export async function mergeContributors(
         ]
       );
     }
+
+    // A verified-account binding is one row per person. When both rows had one
+    // the survivor keeps its own and the absorbed row's is dropped — its trigger
+    // queues the delete of the record it published. Otherwise the absorbed row's
+    // binding moves over, and the same trigger requeues the record under the
+    // survivor's URI.
+    await client.query(
+      `DELETE FROM contributor_identities
+        WHERE contributor_id = $1
+          AND EXISTS (
+            SELECT 1 FROM contributor_identities WHERE contributor_id = $2
+          )`,
+      [source.id, target.id]
+    );
+    await client.query(
+      `UPDATE contributor_identities
+          SET contributor_id = $2,
+              updated_at = now()
+        WHERE contributor_id = $1`,
+      [source.id, target.id]
+    );
 
     const removed = await client.query<{ id: string; at_uri: string | null }>(
       'DELETE FROM contributors WHERE id = $1 RETURNING id, at_uri',

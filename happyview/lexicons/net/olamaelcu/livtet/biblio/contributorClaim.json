@@ -1,0 +1,32 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.contributorClaim",
+  "description": "A reader's request to be recognised as a catalog contributor. Written into the claimant's own repo with rkey `self`, so a PDS holds at most one claim per account; a claim is withdrawn by deleting the record.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["contributor", "createdAt"],
+        "properties": {
+          "contributor": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the net.olamaelcu.livtet.biblio.contributor record the claimant asserts they are."
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2048,
+            "maxGraphemes": 512,
+            "description": "Why the claimant is this person, for the librarian reviewing the request."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

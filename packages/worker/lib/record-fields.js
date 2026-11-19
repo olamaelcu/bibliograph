@@ -113,6 +113,25 @@ export function httpUrl(value) {
   }
 }
 
+const AT_URI = /^at:\/\/([^/]+)\/([^/]+)\/([^/]+)$/;
+
+/**
+ * An `at://<did>/<collection>/<rkey>` address in one collection, or undefined.
+ *
+ * The builders only ever emit a reference to a record of a known collection, so
+ * a value pointing elsewhere is a broken row rather than a valid link: returning
+ * undefined lets the caller refuse it instead of publishing a link that resolves
+ * to the wrong kind of record.
+ */
+export function atUriOf(value, collection) {
+  const text = nonEmptyString(value);
+  if (!text) return undefined;
+  const match = AT_URI.exec(text);
+  if (!match) return undefined;
+  if (match[2] !== collection) return undefined;
+  return text;
+}
+
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**

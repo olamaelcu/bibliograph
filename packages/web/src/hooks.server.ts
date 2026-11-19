@@ -36,7 +36,9 @@ export const handle: Handle = async ({ event, resolve }) => {
         buildServiceDidDocument({
           hostname: env.LIVTET_DID_HOSTNAME ?? '',
           interactionKeyMultibase: env.LIVTET_INTERACTION_KEY_MULTIBASE ?? null,
-          spaceManagerEndpoint: env.LIVTET_SPACE_MANAGER_ENDPOINT ?? ''
+          spaceManagerEndpoint: env.LIVTET_SPACE_MANAGER_ENDPOINT ?? '',
+          labelerKeyMultibase: env.LIVTET_LABELER_KEY_MULTIBASE ?? null,
+          labelerEndpoint: env.LIVTET_LABELER_ORIGIN ?? ''
         }),
         {
           headers: {

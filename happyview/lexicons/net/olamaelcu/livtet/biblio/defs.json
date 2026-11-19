@@ -608,6 +608,64 @@
           "description": "When the publisher record was created."
         }
       }
+    },
+    "contributorIdentity": {
+      "type": "object",
+      "description": "One verified account for a contributor, as published by net.olamaelcu.livtet.biblio.knownContributor.",
+      "required": ["uri", "did", "contributor", "createdAt"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the knownContributor record."
+        },
+        "did": {
+          "type": "string",
+          "format": "did",
+          "description": "The verified account."
+        },
+        "contributor": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "The contributor record the account is."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime"
+        }
+      }
+    },
+    "contributorClaimView": {
+      "type": "object",
+      "description": "One reader's contributor claim and where it stands.",
+      "required": ["uri", "contributor", "state", "createdAt"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri",
+          "description": "AT-URI of the claim record."
+        },
+        "contributor": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "state": {
+          "type": "string",
+          "knownValues": ["pending", "approved", "rejected", "revoked"]
+        },
+        "message": {
+          "type": "string",
+          "maxGraphemes": 512
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "decidedAt": {
+          "type": "string",
+          "format": "datetime"
+        }
+      }
     }
   }
 }
