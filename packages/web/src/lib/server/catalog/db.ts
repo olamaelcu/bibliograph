@@ -54,8 +54,12 @@ export function catalogPool(): Pool {
     // timeouts answer 503 through `catalogFailure`, labelled `pool_timeout`
     // when the acquire is what timed out.
     connectionTimeoutMillis: 2_000,
-    statement_timeout: 5_000,
-    query_timeout: 5_000
+    // The bound is the server's `statement_timeout`, not pg's client-side
+    // `query_timeout`. The client timer abandons the promise while PostgreSQL
+    // keeps executing the statement, so that connection answers nothing else
+    // for the rest of the query's life; five of them and the pool stops
+    // serving. Cancellation on the server keeps the connection healthy.
+    statement_timeout: 5_000
   });
 
   return shared.__bibliographCatalogPool;
@@ -101,15 +105,22 @@ export function searchPool(): Pool {
     max: 5,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 2_000,
-    // The deployment host has 2 vCPUs, 3.9 GB of RAM and a working set
-    // (`book_search` + `edition_shape` + `happyview_records`) larger than the
-    // buffer pool, so a search stalls behind IO for seconds while the catalog
-    // pool's cheap reads stay fast. A two-second bound turned every one of
-    // those stalls into a 503 (measured: exactly 2.005 s, then "Query read
-    // timeout"); ten seconds lets the statement finish. The pool is separate,
-    // so a slow search still cannot starve resolve or list.
+    // The deployment host has 2 vCPUs, 3.9 GB of RAM and a working set larger
+    // than the buffer pool, so a search can stall behind IO. A client-side
+    // `query_timeout` used to abandon those statements while PostgreSQL kept
+    // running them; five such connections wedged the pool for good (a fresh
+    // process answered the same query in 130–197 ms). The bound is the server's
+    // `statement_timeout` now, so a slow search is cancelled and the connection
+    // stays usable. The pool is separate, so it cannot starve resolve or list.
     statement_timeout: 10_000,
-    query_timeout: 10_000
+    // node-postgres sends unnamed statements, so the planner never sees the
+    // pattern values and estimates every `ILIKE $n` at its 0.5% default. On
+    // this catalogue that turned the three substring branches into sequential
+    // scans of `books`, `contributors` and `edition_identifiers` — over ten
+    // seconds under the host's IO pressure, while the same statement with
+    // literals ran in 41–84 ms. Every branch has a trigram index (the vector
+    // branch has a GIN), and this pool runs nothing else.
+    options: '-c enable_seqscan=off'
   });
 
   return shared.__bibliographSearchPool;

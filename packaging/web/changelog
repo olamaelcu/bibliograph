@@ -1,3 +1,24 @@
+bibliograph-web (0.6.2-1) unstable; urgency=medium
+
+  * 0.6.2: the catalog pools stop abandoning statements, and search keeps to
+    its indexes.
+
+    - pg's client-side `query_timeout` rejected the promise while PostgreSQL
+      kept executing the statement, so that connection answered nothing else
+      for the rest of the query's life. Five of those and the search pool was
+      wedged: every search then failed at exactly the bound (2.005 s, later
+      10.005 s), while a freshly restarted edge answered the same query in
+      130–197 ms. Both catalog pools now bound statements with the server's
+      `statement_timeout` only, so cancellation keeps the connection healthy.
+    - node-postgres sends unnamed statements, so the planner never sees the
+      `ILIKE $n` values and estimates every substring branch at 0.5%; through
+      the same protocol the edge uses, that cost 554 ms cold against 38–64 ms
+      with sequential scans disabled. Every search branch has a trigram index
+      (the vector one a GIN), so the search pool sets
+      `options: '-c enable_seqscan=off'`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.6.1-1) unstable; urgency=medium
 
   * 0.6.1: the search pool tolerates this host's IO latency.
