@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy};
 
-use crate::query::{search, SearchRequest, SearchResponse};
+use crate::query::{search, typeahead, SearchRequest, SearchResponse, TypeaheadRequest, TypeaheadResponse};
 use crate::schema::{self, Doc, Fields, Health};
 
 const WRITER_HEAP_BYTES: usize = 128 * 1024 * 1024;
@@ -99,6 +99,10 @@ impl Engine {
 
     pub fn search(&self, req: &SearchRequest) -> Result<SearchResponse, String> {
         search(self, req)
+    }
+
+    pub fn typeahead(&self, req: &TypeaheadRequest) -> Result<TypeaheadResponse, String> {
+        typeahead(self, req)
     }
 
     pub fn health(&self) -> Health {
