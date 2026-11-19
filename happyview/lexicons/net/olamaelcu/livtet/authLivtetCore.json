@@ -21,6 +21,8 @@
             "net.olamaelcu.livtet.biblio.bookReview",
             "net.olamaelcu.livtet.biblio.readingProgress",
             "net.olamaelcu.livtet.biblio.topBook",
+            "net.olamaelcu.livtet.biblio.contributorClaim",
+            "net.olamaelcu.livtet.biblio.reviewReply",
             "net.olamaelcu.livtet.bookReview"
           ]
         }
