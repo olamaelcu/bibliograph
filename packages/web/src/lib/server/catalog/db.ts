@@ -112,7 +112,9 @@ export function searchPool(): Pool {
     // process answered the same query in 130–197 ms). The bound is the server's
     // `statement_timeout` now, so a slow search is cancelled and the connection
     // stays usable. The pool is separate, so it cannot starve resolve or list.
-    statement_timeout: 10_000,
+    // Five seconds: an XRPC caller gives up long before ten, and every second
+    // spent past the client's patience only holds one of the five connections.
+    statement_timeout: 5_000,
     // node-postgres sends unnamed statements, so the planner never sees the
     // pattern values and estimates every `ILIKE $n` at its 0.5% default. On
     // this catalogue that turned the three substring branches into sequential

@@ -127,7 +127,7 @@ every affected book once per statement and skips an unchanged document. A term
 shorter than three characters is refused — a trigram index cannot serve it, so
 every branch would seq-scan — and an `offset` past 10 000 is refused instead of
 re-scanning the match set. `searchEditions` draws from its own five-connection
-pool with a ten-second server-side `statement_timeout` and a two-second
+pool with a five-second server-side `statement_timeout` and a two-second
 connection wait, so one slow search cannot starve resolve, list or the admin
 reads. Measured behaviour of that bound, and the failure modes around it, are
 recorded in [search-baseline.md](operations/search-baseline.md).
