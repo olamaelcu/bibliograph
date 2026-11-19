@@ -65,6 +65,13 @@ RECORD_LEXICONS = [
     # Replies to a review: written into the replier's own repo, indexed so a
     # review's conversation is one query rather than a per-author fan-out.
     "net.olamaelcu.livtet.biblio.reviewReply",
+    # An author's giveaway and each entrant's entry. Both are records in readers'
+    # own repos, and the edge's three giveaway queries read them from this index
+    # rather than from a table, so an unindexed collection means an empty
+    # `/giveaways` and an empty draw. Listed here rather than in QUERY_LEXICONS:
+    # those queries are edge-served and have no Lua script to upload.
+    "net.olamaelcu.livtet.biblio.giveaway.event",
+    "net.olamaelcu.livtet.biblio.giveaway.entry",
     # A reader's request to be recognised as a catalog contributor. Indexed so a
     # librarian can see new requests; nothing reads it through HappyView XRPC —
     # the worker's claims queue and the edge read the tables directly. Deliberately
@@ -139,6 +146,29 @@ PROCEDURE_LEXICONS = [
     ("net.olamaelcu.livtet.biblio.review.delete", "community.lexicon.media.book.review"),
 ]
 
+EDGE_LEXICONS = [
+    # Answered by the edge (see `xrpc/entity-methods.ts`), so there is no Lua
+    # script to upload. The target collection is still required: HappyView
+    # refuses a list query whose lexicon names no collection to read, and the
+    # document is what resolves the `giveaway` authority in the first place.
+    (
+        "net.olamaelcu.livtet.biblio.giveaway.listGiveaways",
+        "net.olamaelcu.livtet.biblio.giveaway.event",
+    ),
+    (
+        "net.olamaelcu.livtet.biblio.giveaway.listEntries",
+        "net.olamaelcu.livtet.biblio.giveaway.entry",
+    ),
+    (
+        "net.olamaelcu.livtet.biblio.giveaway.getReport",
+        "net.olamaelcu.livtet.biblio.giveaway.entry",
+    ),
+    (
+        "net.olamaelcu.livtet.biblio.giveaway.draw",
+        "net.olamaelcu.livtet.biblio.giveaway.event",
+    ),
+]
+
 # Pure `defs` lexicons: no defs.main, so no dispatch and no target_collection.
 DEFS_LEXICONS = [
     "net.olamaelcu.livtet.biblio.defs",
@@ -197,9 +227,27 @@ def wait_for_health(base: str, seconds: int) -> None:
 
 
 def read_lexicon(root: str, nsid: str):
-    path = os.path.join(root, "lexicons", *nsid.split(".")) + ".json"
-    with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
+    """Read one lexicon document by NSID.
+
+    Two layouts exist in the tree: every segment its own directory
+    (`giveaway/event.json`) and the multi-segment name kept as one file
+    (`giveaway.event.json`). Both derive the same NSID from the path, so the
+    lookup tries the directory form first and then joins the trailing segments
+    with dots until a file answers. Picking one layout for every file would mean
+    renaming documents that are already published.
+    """
+    parts = nsid.split(".")
+    candidates = [
+        os.path.join(root, "lexicons", *parts[:cut], ".".join(parts[cut:])) + ".json"
+        for cut in range(len(parts), 0, -1)
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as handle:
+                return json.load(handle)
+    raise FileNotFoundError(
+        f"no lexicon document for {nsid} under {os.path.join(root, 'lexicons')}"
+    )
 
 
 def expand(root: str, body: str, seen=None) -> str:
@@ -269,6 +317,8 @@ def upload(root: str, base: str, key: str) -> tuple[int, int]:
         post_lexicon(nsid, target, "lexicon")
     for nsid, target in PROCEDURE_LEXICONS:
         post_lexicon(nsid, target, "procedure lexicon")
+    for nsid, target in EDGE_LEXICONS:
+        post_lexicon(nsid, target, "edge lexicon")
     for nsid in DEFS_LEXICONS:
         post_lexicon(nsid, None, "defs lexicon")
 

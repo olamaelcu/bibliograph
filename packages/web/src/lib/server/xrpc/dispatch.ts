@@ -11,6 +11,8 @@
 import {
   EDGE_PROCEDURES,
   ENTITY_QUERIES,
+  GIVEAWAY_DRAW,
+  GIVEAWAY_EXTEND,
   RESOLVE_EDITIONS,
   SEARCH_EDITIONS
 } from '../catalog/entity-methods.ts';
@@ -37,6 +39,8 @@ export type XrpcDependencies = {
   entityGet: (request: Request, method: string) => Response | Promise<Response>;
   resolveEditions: (request: Request) => Response | Promise<Response>;
   searchEditions: (request: Request) => Response | Promise<Response>;
+  giveawayDraw: (request: Request) => Response | Promise<Response>;
+  giveawayExtend: (request: Request) => Response | Promise<Response>;
   proxyPdsRead: (method: string, request: Request) => Response | Promise<Response>;
   forward: (method: string, request: Request) => Response | Promise<Response>;
 };
@@ -90,6 +94,8 @@ export function dispatchPost(
   }
   if (method === RESOLVE_EDITIONS) return dependencies.resolveEditions(request);
   if (method === SEARCH_EDITIONS) return dependencies.searchEditions(request);
+  if (method === GIVEAWAY_DRAW) return dependencies.giveawayDraw(request);
+  if (method === GIVEAWAY_EXTEND) return dependencies.giveawayExtend(request);
   // Every entity method is a getter, search or resolver: GET-only.
   if (ENTITY_QUERIES.has(method)) return methodNotAllowed();
   return dependencies.forward(method, request);

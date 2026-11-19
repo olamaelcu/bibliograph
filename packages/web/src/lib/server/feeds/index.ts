@@ -12,7 +12,8 @@ import {
   recordFeedRequestDuration
 } from '$lib/server/metrics';
 import { createDidResolver } from './did';
-import { FeedAuthError, verifyFeedServiceJwt, type DidResolver } from './auth';
+import { ServiceAuthError, verifyServiceAuthJwt, type DidResolver } from '../xrpc/service-auth.ts';
+import { GET_FEED_SKELETON } from './methods';
 import {
   FEED_KINDS,
   decodeCursor,
@@ -166,12 +167,13 @@ export async function getFeedSkeleton(request: Request): Promise<Response> {
       );
     }
     try {
-      viewerDid = await verifyFeedServiceJwt(token, {
+      viewerDid = await verifyServiceAuthJwt(token, {
         audience: `${did}#atproto_feed`,
+        lxm: GET_FEED_SKELETON,
         resolveDid: didResolver(plc)
       });
     } catch (error) {
-      if (error instanceof FeedAuthError) {
+      if (error instanceof ServiceAuthError) {
         recordFeedAuthFailure(metrics, error.reason);
         return respond(fail(401, ERROR_AUTH_REQUIRED, error.message));
       }

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+#MISE description="Create the verified fixture author and one open giveaway for it (sign in with it to see the author half)"
+# The one account the catalogue calls an author: it is bound to a contributor a
+# published edition already credits, so the book page offers the author CTA and
+# the giveaway create form lets it through. `getContributorLink` reads exactly
+# the row this writes; `contributor_identities` has an AFTER INSERT trigger that
+# queues the `net.olamaelcu.livtet.biblio.knownContributor` record, so the
+# binding is published to the repo as well.
+#
+# Also writes one `giveaway.event` in that account's repo and, by default, three
+# `giveaway.entry` records from the seeded fixture accounts, then backfills
+# HappyView so the edge's queries answer. Idempotent: fixed rkeys, upserted rows.
+#
+# Prints the handle and password to sign in with, and the book page the author
+# is verified for. `HV_SEED_ACCOUNTS` controls how many entrants to expect;
+# `--entries N` overrides how many are written, `--no-giveaway` seeds the
+# account and the link only.
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec python3 scripts/dev-seed.py author \
+  --count "${HV_SEED_ACCOUNTS:-8}" \
+  --password "${HV_SEED_PASSWORD:-${HV_ACCOUNT_PASSWORD:-Dev-account-password1}}" \
+  "$@"

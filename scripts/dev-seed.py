@@ -28,6 +28,7 @@ remote origin.
 Usage:
   scripts/dev-seed.py accounts [--count 8] [--handle H] [--email E] [--password P]
   scripts/dev-seed.py fixtures [--count 8] [--reset] [--password P]
+  scripts/dev-seed.py author [--entries 3] [--no-giveaway] [--password P]
 """
 
 from __future__ import annotations
@@ -88,6 +89,24 @@ COSMIK_COLLECTION = "network.cosmik.collection"
 COSMIK_CARD = "network.cosmik.card"
 COSMIK_LINK = "network.cosmik.collectionLink"
 
+# Giveaways. The author's record is in their own repo, one entry record per
+# entrant is in each entrant's own repo, and `contributor_identities` is what
+# makes the catalogue call that account a verified author of the book.
+GIVEAWAY_EVENT = "net.olamaelcu.livtet.biblio.giveaway.event"
+GIVEAWAY_ENTRY = "net.olamaelcu.livtet.biblio.giveaway.entry"
+KNOWN_CONTRIBUTOR = "net.olamaelcu.livtet.biblio.knownContributor"
+
+# The fixture author: an account the catalogue verifies as an author of a real
+# edition, so a developer can sign in and exercise the author half of the
+# giveaway flow. `mise run hv-author` prints its handle and password.
+AUTHOR_LOCAL_PART = "giveaway-author"
+AUTHOR_HANDLE = f"{AUTHOR_LOCAL_PART}.{HANDLE_DOMAIN}"
+# TID-shaped literals: `key: tid` collections need realistic rkeys, and a
+# constant keeps a re-run rewriting the same records instead of adding more.
+GIVEAWAY_EVENT_RKEY = "3kgauthor0001"
+GIVEAWAY_ENTRY_RKEY = "3kgentry000"
+KNOWNCONTRIBUTOR_RKEY = "3kgknownc001"
+
 # Collections HappyView indexes. One `{did}` backfill walks the repo and keeps
 # only these, so a single job per account is enough.
 INDEXED_COLLECTIONS = [
@@ -100,6 +119,10 @@ INDEXED_COLLECTIONS = [
     REVIEW,
     REVIEW_REPLY,
     REACTION,
+    # The giveaway reads go over the index, so these two have to be backfilled
+    # like the rest: an unindexed entry is an entry the draw cannot see.
+    GIVEAWAY_EVENT,
+    GIVEAWAY_ENTRY,
 ]
 # Everything the fixtures write; `--reset` deletes all of it.
 SEEDED_COLLECTIONS = INDEXED_COLLECTIONS + [
@@ -456,6 +479,180 @@ def edition_ref(edition: dict) -> dict:
 
 def strong_ref(edition: dict) -> dict:
     return {"uri": edition["uri"], "cid": edition["cid"]}
+
+
+# --------------------------------------------------------------------------
+# the fixture author
+# --------------------------------------------------------------------------
+
+# Roles that make a contributor an author of the book. `isAuthorLikeRole` in the
+# app accepts exactly these, and the give-away check depends on it: an editor or
+# a translator cannot give the book away.
+AUTHOR_ROLES_SQL = "('author', 'A01', 'intro_author', 'foreword_author', 'epilogue_author')"
+
+
+def sql_literal(value: str) -> str:
+    """A single-quoted SQL literal. Values here come from the database or a DID."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def psql_execute(query: str) -> None:
+    try:
+        result = subprocess.run(
+            ["psql", DATABASE_URL, "-v", "ON_ERROR_STOP=1", "-qc", query],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        raise SystemExit("ERROR: psql is required to seed the contributor link") from None
+    if result.returncode != 0:
+        raise SystemExit(f"ERROR: psql failed: {result.stderr.strip()}")
+
+
+def _author_candidates(sole_author: bool) -> list[dict]:
+    """Contributors with a record and a published, covered edition, in a fixed order.
+
+    Ordered by the contributor's own record uri and then the edition's, so two
+    runs against the same catalog pick the same fixture author. `sole_author`
+    restricts to editions this contributor authors alone, which is what makes the
+    book page's card unambiguous (`verified as an author of this book`, not one of
+    four authors).
+    """
+    sole = (
+        f"""
+           AND (SELECT count(*) FROM public.edition_contributors other
+                 WHERE other.edition_uri = e.uri
+                   AND other.role IN {AUTHOR_ROLES_SQL}) = 1
+        """
+        if sole_author
+        else ""
+    )
+    rows = psql_json(
+        f"""
+        SELECT json_agg(row_to_json(x)) FROM (
+          SELECT c.id           AS contributor_id,
+                 c.at_uri       AS contributor_uri,
+                 c.name         AS contributor_name,
+                 e.uri          AS edition_uri,
+                 e.rkey         AS edition_rkey,
+                 e.title        AS title,
+                 e.cover_url    AS cover_url,
+                 k.cid          AS cid
+            FROM public.contributors c
+            JOIN public.edition_contributors ec ON ec.contributor_id = c.id
+            JOIN public.appview_book_lua e ON e.uri = ec.edition_uri
+            JOIN public.pds_cids k ON k.uri = e.uri
+           WHERE c.at_uri IS NOT NULL
+             AND e.cover_url IS NOT NULL
+             AND ec.role IN {AUTHOR_ROLES_SQL}
+             AND e.contributors::jsonb @>
+                 jsonb_build_array(jsonb_build_object('ref', c.at_uri))
+             {sole}
+           ORDER BY c.at_uri, e.uri
+        ) x
+        """
+    )
+    return rows or []
+
+
+def select_author_contributor() -> dict:
+    """The contributor the fixture author is verified as, plus its editions.
+
+    Sole-author editions are preferred and a shared credit is the fallback: a
+    catalog that has nothing single-authored still yields a working fixture.
+    """
+    for sole_author in (True, False):
+        rows = _author_candidates(sole_author)
+        if not rows:
+            continue
+        if not sole_author:
+            print("no sole-authored edition in the catalog; using a shared credit")
+        chosen: dict = {}
+        for row in rows:
+            entry = chosen.setdefault(
+                row["contributor_uri"],
+                {
+                    "contributor_id": row["contributor_id"],
+                    "contributor_uri": row["contributor_uri"],
+                    "contributor_name": row["contributor_name"],
+                    "editions": [],
+                },
+            )
+            if len(entry["editions"]) < 2:
+                entry["editions"].append(row)
+        # The first contributor in the fixed order that has a usable edition.
+        for uri in sorted(chosen):
+            if chosen[uri]["editions"]:
+                return chosen[uri]
+    raise SystemExit(
+        "ERROR: no contributor is linked to a published, covered edition; "
+        "run `mise run catalog-seed` first"
+    )
+
+
+def bind_author_identity(contributor: dict, did: str) -> str:
+    """Record the verified link; answer the `knownContributor` uri it publishes as.
+
+    The row is the whole point: `getContributorLink` reads this table, so the
+    catalogue tells the app that this account is that contributor. The trigger on
+    the table queues the `knownContributor` record at `at_uri`, so the binding is
+    published to the repo as well and a real AppView agrees.
+    """
+    publisher = contributor["contributor_uri"].split("/")[2]
+    known_uri = f"at://{publisher}/{KNOWN_CONTRIBUTOR}/{KNOWNCONTRIBUTOR_RKEY}"
+    psql_execute(
+        f"""
+        INSERT INTO public.contributor_identities (contributor_id, did, at_uri, issued_by)
+        VALUES ({int(contributor['contributor_id'])},
+                {sql_literal(did)},
+                {sql_literal(known_uri)},
+                'mise run hv-author')
+        ON CONFLICT (did) DO UPDATE
+           SET contributor_id = EXCLUDED.contributor_id,
+               at_uri = EXCLUDED.at_uri,
+               issued_by = EXCLUDED.issued_by,
+               updated_at = now()
+        """
+    )
+    return known_uri
+
+
+def giveaway_event_record(edition: dict) -> dict:
+    """An open giveaway for one edition.
+
+    Time-relative on purpose, unlike the rest of the fixtures: a giveaway whose
+    window has closed cannot be entered and cannot show the book page's card, so
+    a fixed date would make the fixture useless a fortnight after it was written.
+    """
+    now = datetime.now(timezone.utc)
+    return {
+        "$type": GIVEAWAY_EVENT,
+        "edition": edition["edition_uri"],
+        "title": f"{edition['title']} — signed copy giveaway",
+        "prizeType": "print",
+        "prizeQuantity": 2,
+        "countries": ["*"],
+        "rulesText": (
+            "One entry per reader, worldwide. Two signed copies go to two readers "
+            "drawn at random once the giveaway closes."
+        ),
+        "opensAt": (now - timedelta(days=2)).isoformat().replace("+00:00", "Z"),
+        "closesAt": (now + timedelta(days=14)).isoformat().replace("+00:00", "Z"),
+        "closingNote": "Thank you all for entering.",
+        "createdAt": now.isoformat().replace("+00:00", "Z"),
+        **({"coverUrl": edition["cover_url"]} if edition.get("cover_url") else {}),
+    }
+
+
+def giveaway_entry_record(giveaway_uri: str, giveaway_cid: str, country: str) -> dict:
+    now = datetime.now(timezone.utc)
+    return {
+        "$type": GIVEAWAY_ENTRY,
+        "giveaway": {"uri": giveaway_uri, "cid": giveaway_cid},
+        "country": country,
+        "createdAt": now.isoformat().replace("+00:00", "Z"),
+    }
 
 
 def fetch_records(did: str, collection: str, token: str) -> list[dict]:
@@ -1336,11 +1533,166 @@ def main() -> int:
         help="delete the seed accounts' records and index rows before seeding",
     )
 
+    author = subparsers.add_parser(
+        "author", help="create the verified fixture author and its giveaway"
+    )
+    author.add_argument("--count", type=int, default=None)
+    author.add_argument("--password", default=None)
+    author.add_argument(
+        "--entries",
+        type=int,
+        default=3,
+        help="how many seeded accounts enter the giveaway (0 writes none)",
+    )
+    author.add_argument(
+        "--no-giveaway",
+        action="store_true",
+        help="seed the account and the contributor link only",
+    )
+
     args = parser.parse_args()
     if args.command == "accounts":
         return command_accounts(args)
+    if args.command == "author":
+        return command_author(args)
     return command_fixtures(args)
 
+
+def command_author(args: argparse.Namespace) -> int:
+    """Create the fixture author and seed one open giveaway for it.
+
+    Three things the app needs and only this stack can provide:
+
+      * an account to sign in as;
+      * a `contributor_identities` row, which is the record `getContributorLink`
+        reads — so the catalogue answers with this account for a contributor that
+        a published edition already credits (the same check the giveaway's create
+        form runs);
+      * a `giveaway.event` in that account's repo plus a few entries from the
+        fixture accounts, so `/giveaways`, the book page's card and the author's
+        funnel all have something in them.
+
+    Idempotent: the account is reused, the identity row is upserted by DID and the
+    records are rewritten at fixed rkeys. `--no-giveaway` seeds only the account
+    and the link.
+    """
+    password = args.password or DEFAULT_PASSWORD
+    preflight()
+
+    contributor = select_author_contributor()
+    edition = contributor["editions"][0]
+    did = ensure_account(
+        AUTHOR_HANDLE, f"{AUTHOR_LOCAL_PART}@example.invalid", password
+    )
+    known_uri = bind_author_identity(contributor, did)
+    print(f"author: {AUTHOR_HANDLE} -> {did}")
+    print(f"verified as {contributor['contributor_name']} ({contributor['contributor_uri']})")
+    print(f"knownContributor record: {known_uri}")
+    print(f"book page: /book/{edition['edition_uri'].split('at://')[1]}")
+
+    touched = [did]
+    giveaways: list[dict] = []
+    if args.no_giveaway:
+        print("skipped the giveaway record (--no-giveaway)")
+    else:
+        session = http(
+            "POST",
+            f"{PDS}/xrpc/com.atproto.server.createSession",
+            {"identifier": AUTHOR_HANDLE, "password": password},
+        )
+        token = session["accessJwt"]
+        event = giveaway_event_record(edition)
+        written = upsert_writes(
+            did,
+            token,
+            [{"collection": GIVEAWAY_EVENT, "rkey": GIVEAWAY_EVENT_RKEY, "value": event}],
+            {GIVEAWAY_EVENT: fetch_record_keys(did, GIVEAWAY_EVENT, token)},
+        )
+        event_uri = f"at://{did}/{GIVEAWAY_EVENT}/{GIVEAWAY_EVENT_RKEY}"
+        event_cid = written.get(event_uri)
+        if not event_cid:
+            raise SystemExit(f"ERROR: the PDS did not answer a cid for {event_uri}")
+        print(f"giveaway: {event_uri}")
+
+        # Entries are records in each entrant's own repo, so each needs its own
+        # session. They are what gives the funnel numbers and the draw a pool.
+        entries = args.entries
+        if entries > 0:
+            accounts = ensure_accounts(args.count or DEFAULT_COUNT, password)
+            countries = ["FR", "BE", "CH", "GB", "ES"]
+            wrote = 0
+            for index in sorted(accounts)[:entries]:
+                handle, entrant = accounts[index]
+                entrant_session = http(
+                    "POST",
+                    f"{PDS}/xrpc/com.atproto.server.createSession",
+                    {"identifier": handle, "password": password},
+                )
+                entrant_token = entrant_session["accessJwt"]
+                rkey = f"{GIVEAWAY_ENTRY_RKEY}{index:02d}"
+                upsert_writes(
+                    entrant,
+                    entrant_token,
+                    [
+                        {
+                            "collection": GIVEAWAY_ENTRY,
+                            "rkey": rkey,
+                            "value": giveaway_entry_record(
+                                event_uri, event_cid, countries[index % len(countries)]
+                            ),
+                        }
+                    ],
+                    {GIVEAWAY_ENTRY: fetch_record_keys(entrant, GIVEAWAY_ENTRY, entrant_token)},
+                )
+                touched.append(entrant)
+                wrote += 1
+            print(f"entries: {wrote} (one per seeded account)")
+
+        # The edge queries read HappyView, whose only intake is backfill.
+        # The edge queries read HappyView, whose only intake is backfill. The
+        # expectation is what this run wrote, summed across the repos it wrote
+        # into, so a collection the indexer does not keep times out here rather
+        # than surfacing later as an empty page.
+        for subject in touched:
+            backfill(subject)
+        expected = {GIVEAWAY_EVENT: 1}
+        if len(touched) > 1:
+            expected[GIVEAWAY_ENTRY] = len(touched) - 1
+        actual = wait_for_index(touched, expected)
+        print(
+            f"indexed: {actual.get(GIVEAWAY_EVENT, 0)} giveaway(s), "
+            f"{actual.get(GIVEAWAY_ENTRY, 0)} entr(y/ies)"
+        )
+        # Read the record back from the PDS, which is the one source that needs no
+        # lexicon at all. The three giveaway queries are edge-served, not HappyView
+        # scripts, so asking HappyView for the NSID would answer its own list shape
+        # and prove nothing about what the app sees.
+        try:
+            record = http(
+                "GET",
+                f"{PDS}/xrpc/com.atproto.repo.getRecord?"
+                + urlencode(
+                    {"repo": did, "collection": GIVEAWAY_EVENT, "rkey": GIVEAWAY_EVENT_RKEY}
+                ),
+            )
+            giveaways = [record.get("value") or {}]
+        except ApiError as err:
+            print(f"the giveaway record could not be read back ({err})")
+            giveaways = []
+
+    if giveaways:
+        first = giveaways[0]
+        print(
+            f"the author's giveaway record reads back (prize: {first.get('prizeType')} "
+            f"x{first.get('prizeQuantity')})"
+        )
+        print(f"giveaway page: /giveaways/{did}/{GIVEAWAY_EVENT_RKEY}")
+    elif not args.no_giveaway:
+        print("WARNING: the giveaway record could not be read back from the PDS")
+
+    print(f"\nsign in as {AUTHOR_HANDLE}")
+    print(f"password: {password}")
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())

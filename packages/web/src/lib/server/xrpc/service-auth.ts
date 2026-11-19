@@ -1,14 +1,20 @@
 import { verifySignature } from '@atproto/crypto';
 
 /**
- * Service-JWT authentication for the personalized feeds.
+ * atproto service-JWT authentication for the edge's authenticated methods.
  *
- * atproto feed generators receive a short-lived service JWT minted by the
- * caller's PDS: `Authorization: Bearer <jwt>`, signed by the account whose
- * `did` appears in `iss`, with `aud` naming this generator and `lxm` naming
- * `com.atproto.feed.getFeedSkeleton`. The signature is verified against the
- * `#atproto` Multikey of the issuer's DID document, never against a caller
- * supplied DID header: `x-viewer-did` is ignored on purpose.
+ * A caller's PDS mints a short-lived service JWT for it: `Authorization: Bearer
+ * <jwt>`, signed by the account whose `did` appears in `iss`, with `aud` naming
+ * this host's service `did:web` and `lxm` naming the one method it may be used
+ * for. The signature is verified against the `#atproto` Multikey of the issuer's
+ * DID document, never against a caller-supplied DID header: `x-viewer-did` is
+ * ignored on purpose, and so is any other header naming a user.
+ *
+ * Two methods use it today: the personalized feed skeleton
+ * (`com.atproto.feed.getFeedSkeleton`, `aud` = `<did>#atproto_feed`) and the
+ * giveaway draw (`net.olamaelcu.livtet.biblio.giveaway.draw`, `aud` = the
+ * service `did:web` with no fragment). The audience and the method are both
+ * options, so this module holds the rules and each caller pins its own target.
  */
 
 export type DidVerificationMethod = {
@@ -25,9 +31,11 @@ export type DidDocument = {
 
 export type DidResolver = (did: string) => Promise<DidDocument | null>;
 
-export type VerifyFeedJwtOptions = {
-  /** Exact `aud` this generator accepts, `<did>#atproto_feed`. */
+export type VerifyServiceAuthOptions = {
+  /** Exact `aud` this method accepts. */
   audience: string;
+  /** Exact `lxm` this method is bound to; a token for another method is refused. */
+  lxm: string;
   /** Resolves the issuer DID document. */
   resolveDid: DidResolver;
   /** Current time in seconds; injectable for tests. */
@@ -35,21 +43,25 @@ export type VerifyFeedJwtOptions = {
 };
 
 /** Bounded reason codes so the edge can label rejections without parsing messages. */
-export const FEED_AUTH_REASONS = ['format', 'claims', 'expired', 'issuer', 'signature'] as const;
-export type FeedAuthReason = (typeof FEED_AUTH_REASONS)[number];
+export const SERVICE_AUTH_REASONS = [
+  'format',
+  'claims',
+  'expired',
+  'issuer',
+  'signature'
+] as const;
+export type ServiceAuthReason = (typeof SERVICE_AUTH_REASONS)[number];
 
 /** Every rejection is a `401`; the message says what failed without leaking crypto detail. */
-export class FeedAuthError extends Error {
-  readonly reason: FeedAuthReason;
+export class ServiceAuthError extends Error {
+  readonly reason: ServiceAuthReason;
 
-  constructor(reason: FeedAuthReason, message: string) {
+  constructor(reason: ServiceAuthReason, message: string) {
     super(message);
-    this.name = 'FeedAuthError';
+    this.name = 'ServiceAuthError';
     this.reason = reason;
   }
 }
-
-export const FEED_SKELETON_LXM = 'com.atproto.feed.getFeedSkeleton';
 
 const ALLOWED_ALGS: Record<string, true> = { ES256K: true, ES256: true };
 // Service tokens are valid for about a minute; a longer lifetime is not a
@@ -93,16 +105,16 @@ function isInteger(value: unknown): value is number {
 /**
  * Verify one atproto service JWT and return the issuing DID.
  *
- * Rejections throw `FeedAuthError`. A DID document that cannot be resolved is
+ * Rejections throw `ServiceAuthError`. A DID document that cannot be resolved is
  * a rejection too: an unknown signer cannot be trusted.
  */
-export async function verifyFeedServiceJwt(
+export async function verifyServiceAuthJwt(
   token: string,
-  options: VerifyFeedJwtOptions
+  options: VerifyServiceAuthOptions
 ): Promise<string> {
   const parts = token.split('.');
   if (parts.length !== 3) {
-    throw new FeedAuthError('format', 'the service token is not a compact JWT');
+    throw new ServiceAuthError('format', 'the service token is not a compact JWT');
   }
   const [encodedHeader, encodedPayload, encodedSignature] = parts as [string, string, string];
 
@@ -110,57 +122,57 @@ export async function verifyFeedServiceJwt(
   const payloadBytes = decodeBase64Url(encodedPayload);
   const signature = decodeBase64Url(encodedSignature);
   if (!headerBytes || !payloadBytes || !signature) {
-    throw new FeedAuthError('format', 'the service token is not base64url encoded');
+    throw new ServiceAuthError('format', 'the service token is not base64url encoded');
   }
 
   const header = decodeJsonObject(headerBytes) as JwtHeader | null;
   const payload = decodeJsonObject(payloadBytes) as JwtPayload | null;
   if (!header || !payload) {
-    throw new FeedAuthError('format', 'the service token is not valid JSON');
+    throw new ServiceAuthError('format', 'the service token is not valid JSON');
   }
 
   if (typeof header.alg !== 'string' || ALLOWED_ALGS[header.alg] !== true) {
-    throw new FeedAuthError('claims', 'the service token uses an unsupported algorithm');
+    throw new ServiceAuthError('claims', 'the service token uses an unsupported algorithm');
   }
   if (header.typ !== undefined && header.typ !== 'JWT' && header.typ !== 'at+jwt') {
-    throw new FeedAuthError('claims', 'the service token has an unsupported type');
+    throw new ServiceAuthError('claims', 'the service token has an unsupported type');
   }
 
   const { iss, aud, lxm, exp, iat } = payload;
-  if (!isDid(iss)) throw new FeedAuthError('claims', 'the service token issuer is not a DID');
+  if (!isDid(iss)) throw new ServiceAuthError('claims', 'the service token issuer is not a DID');
   if (aud !== options.audience) {
-    throw new FeedAuthError('claims', 'the service token audience is not this feed generator');
+    throw new ServiceAuthError('claims', 'the service token audience is not this service');
   }
-  if (lxm !== FEED_SKELETON_LXM) {
-    throw new FeedAuthError(
+  if (lxm !== options.lxm) {
+    throw new ServiceAuthError(
       'claims',
-      'the service token is not for com.atproto.feed.getFeedSkeleton'
+      `the service token is not for ${options.lxm}`
     );
   }
   if (!isInteger(exp) || !isInteger(iat)) {
-    throw new FeedAuthError('claims', 'the service token has no integer exp/iat');
+    throw new ServiceAuthError('claims', 'the service token has no integer exp/iat');
   }
 
   const now = options.now ?? Math.floor(Date.now() / 1000);
-  if (exp <= now) throw new FeedAuthError('expired', 'the service token has expired');
+  if (exp <= now) throw new ServiceAuthError('expired', 'the service token has expired');
   if (iat > now + CLOCK_SKEW_SECONDS) {
-    throw new FeedAuthError('expired', 'the service token was issued in the future');
+    throw new ServiceAuthError('expired', 'the service token was issued in the future');
   }
   if (exp <= iat) {
-    throw new FeedAuthError('expired', 'the service token expires before it was issued');
+    throw new ServiceAuthError('expired', 'the service token expires before it was issued');
   }
   if (exp - iat > MAX_TOKEN_LIFETIME_SECONDS) {
-    throw new FeedAuthError('expired', 'the service token lifetime is too long');
+    throw new ServiceAuthError('expired', 'the service token lifetime is too long');
   }
 
   let document: DidDocument | null;
   try {
     document = await options.resolveDid(iss);
   } catch {
-    throw new FeedAuthError('issuer', 'the service token issuer could not be resolved');
+    throw new ServiceAuthError('issuer', 'the service token issuer could not be resolved');
   }
   if (!document || typeof document !== 'object') {
-    throw new FeedAuthError('issuer', 'the service token issuer could not be resolved');
+    throw new ServiceAuthError('issuer', 'the service token issuer could not be resolved');
   }
 
   const method = Array.isArray(document.verificationMethod)
@@ -169,13 +181,13 @@ export async function verifyFeedServiceJwt(
       )
     : undefined;
   if (!method) {
-    throw new FeedAuthError('issuer', 'the issuer has no #atproto verification method');
+    throw new ServiceAuthError('issuer', 'the issuer has no #atproto verification method');
   }
   if (method.type !== 'Multikey' || typeof method.publicKeyMultibase !== 'string') {
-    throw new FeedAuthError('issuer', 'the issuer #atproto key is not a Multikey');
+    throw new ServiceAuthError('issuer', 'the issuer #atproto key is not a Multikey');
   }
   if (method.controller !== undefined && method.controller !== iss) {
-    throw new FeedAuthError('issuer', 'the issuer #atproto key is controlled by another DID');
+    throw new ServiceAuthError('issuer', 'the issuer #atproto key is controlled by another DID');
   }
 
   // `verifySignature` hashes with SHA-256, expects a compact `r || s` ECDSA
@@ -192,7 +204,9 @@ export async function verifyFeedServiceJwt(
   } catch {
     valid = false;
   }
-  if (!valid) throw new FeedAuthError('signature', 'the service token signature does not verify');
+  if (!valid) {
+    throw new ServiceAuthError('signature', 'the service token signature does not verify');
+  }
 
   return iss;
 }

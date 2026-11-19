@@ -66,6 +66,8 @@ function mocked(): { dependencies: XrpcDependencies; calls: string[] } {
     entityGet: record('entityGet'),
     resolveEditions: record('resolveEditions'),
     searchEditions: record('searchEditions'),
+    giveawayDraw: record('giveawayDraw'),
+    giveawayExtend: record('giveawayExtend'),
     proxyPdsRead: record('proxyPdsRead'),
     forward: record('forward')
   };
@@ -89,7 +91,7 @@ test('the described surface is exactly the registries it is built from', () => {
     ...FORWARDED_PROCEDURES
   ]);
   expect(serviceMethods()).toEqual([...expected].sort());
-  expect(serviceMethods().length).toBe(52);
+  expect(serviceMethods().length).toBe(57);
 });
 
 test('every described method is a valid NSID, listed once', () => {
