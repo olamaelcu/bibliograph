@@ -101,6 +101,24 @@ export const variables = defineEnvVars({
     description:
       'Per-client-IP allowance on /api/covers, also the burst size. Raise it for a busy shared egress; lower it to bound a scraper.'
   },
+  SEARCH_BACKEND: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'Which engine answers a text search: `postgres`, `shadow` (serve Postgres, only measure the index) or `tantivy` (serve the index, fall back to Postgres on any failure). Unset or unrecognised keeps Postgres authoritative.'
+  },
+  SEARCH_URL: {
+    schema: (value) => value?.trim() || undefined,
+    description:
+      'Loopback base URL of bibliograph-search. Unset keeps the index off whatever SEARCH_BACKEND names.'
+  },
+  SEARCH_ENGINE_TIMEOUT_MS: {
+    schema: (value) => {
+      const parsed = Number.parseInt(value ?? '', 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    },
+    description:
+      'Budget for one index call before the request falls back to Postgres. Blank or invalid falls back to 400 ms in code.'
+  },
   SEARCH_HYDRATION_THRESHOLD: {
     schema: (value) => value?.trim() || undefined,
     description:
