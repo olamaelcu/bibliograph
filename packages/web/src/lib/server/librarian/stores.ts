@@ -4,7 +4,7 @@
  * The two interfaces are trivial (`get`/`set`/`del`), and the tables are what
  * make a librarian's sign-in survive a deploy: the DPoP key and token set live in
  * `librarian_sessions`, keyed by DID. Both tables are created by
- * `packages/worker/sql/0031-contributor-identity.sql`.
+ * `packages/worker/sql/0032-contributor-identity.sql`.
  *
  * Only the edge writes them, so the rows are not something an operator edits.
  */

@@ -1,4 +1,4 @@
--- 0031-contributor-identity.sql
+-- 0032-contributor-identity.sql
 --
 -- Contributor claims: the link from a catalog contributor to the ATProto account
 -- that proved it is that person, the librarian decisions behind it, and the

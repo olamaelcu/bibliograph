@@ -17,7 +17,7 @@
  *   revoke  → delete the binding (trigger queues the record delete) +
  *             `contributor_claims` row marked `revoked` + negated label
  *
- * The tables are created by `sql/0031-contributor-identity.sql`.
+ * The tables are created by `sql/0032-contributor-identity.sql`.
  */
 
 import { KNOWN_CONTRIBUTOR_COLLECTION } from './known-contributor-record.js';
