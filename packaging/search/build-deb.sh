@@ -27,7 +27,7 @@ command -v cargo >/dev/null || die "cargo is required"
 VERSION="${SEARCH_VERSION:-$(
   sed -n 's/^version = "\(.*\)"$/\1/p' "$CRATE/Cargo.toml" | head -1
 )}"
-REVISION="${SEARCH_REVISION:-4}"
+REVISION="${SEARCH_REVISION:-1}"
 ARCH="amd64"
 [[ -n "$VERSION" ]] || die "could not read the version from $CRATE/Cargo.toml"
 

@@ -1,3 +1,13 @@
+bibliograph-search (0.2.0-1) unstable; urgency=medium
+
+  * 0.2.0: observability. `tracing` span-close lines make every request visible
+    in the journal, `GET /metrics` serves Prometheus counters and histograms
+    with real buckets (query/HTTP latency, results, commit duration, posts,
+    index docs/segments), and `OTEL_EXPORTER_OTLP_ENDPOINT` attaches an OTLP
+    trace exporter.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-search (0.1.0-4) unstable; urgency=medium
 
   * Every request logs a span close line (`http{method=POST route=search}: close

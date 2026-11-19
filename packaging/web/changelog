@@ -1,3 +1,13 @@
+bibliograph-web (0.8.0-1) unstable; urgency=medium
+
+  * 0.8.0: the search index release. searchEditions can be answered by
+    bibliograph-search (`SEARCH_BACKEND=shadow|tantivy`), with Postgres
+    hydration in the engine's order, the breaker fallback and the
+    `engine_fallback` outcome. The search enqueues run in parallel with the
+    search and cannot fail the response.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.7.4-1) unstable; urgency=medium
 
   * `SEARCH_BACKEND` selects `postgres` (default), `shadow` or `tantivy` for

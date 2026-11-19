@@ -1,3 +1,12 @@
+bibliograph-worker (0.9.0-1) unstable; urgency=medium
+
+  * 0.9.0: the search index release. `catalog.search.index` drains
+    `public.search_dirty` into bibliograph-search at priority 900, and
+    `WORKER_ALWAYS_ON=1` switches the package to an always-on service. The
+    migration is `0035-search-index.sql`, after the giveaway pair.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.8.5-1) unstable; urgency=medium
 
   * Search index maintenance: `catalog.search.index` drains
