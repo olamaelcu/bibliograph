@@ -1,0 +1,16 @@
+[package]
+name = "bibliograph-search"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Loopback Tantivy index for the Bibliograph catalog"
+
+[dependencies]
+tantivy = "0.26.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
