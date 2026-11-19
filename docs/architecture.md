@@ -350,6 +350,16 @@ edge-triggered enrichment stays at 0, and the sweeps' per-edition work is 100,
 because one edition's genre is not urgent and its ledger retries it. See
 `0031-hydration-priorities.sql`.
 
+The worker does not run all day. `bibliograph-worker-window.timer` starts it at
+01:00 and `bibliograph-worker-window-end.timer` stops it at 08:00
+(`America/New_York`, so the window follows the operator's clock through DST).
+The worker is the only heavy database client — hydration, the genre and cover
+sweeps, the outbox drain — and on a small host it competes with the edge for
+CPU and disk; measured there, a running worker pushes `searchEditions` past its
+statement bound while the edge by itself answers in hundreds of milliseconds.
+The unit is therefore not enabled at boot, and `deploy.sh` leaves it stopped
+when a deploy happens outside the window.
+
 | Task | Trigger | Work |
 | --- | --- | --- |
 | `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest up to 50 candidates into the identifier bag |

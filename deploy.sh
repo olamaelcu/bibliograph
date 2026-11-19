@@ -512,7 +512,13 @@ fi
 restart_unit() {
   local unit="$1" state
   say "systemctl restart $unit"
-  systemctl enable "$unit" >/dev/null 2>&1 || true
+  # The worker is deliberately not enabled at boot: its window timer owns when
+  # it runs (see the restart below). Enabling it here would bring it back
+  # outside the window on the next boot.
+  if [ "$unit" != bibliograph-worker.service ] \
+     || ! systemctl is-enabled --quiet bibliograph-worker-window.timer 2>/dev/null; then
+    systemctl enable "$unit" >/dev/null 2>&1 || true
+  fi
   systemctl restart "$unit" || {
     state="$(systemctl is-active "$unit" 2>&1 || true)"
     note "unit is $state"
@@ -553,7 +559,19 @@ else
   note "--skip-db: feed read schema re-apply skipped"
 fi
 
-restart_unit bibliograph-worker.service
+# The worker runs only inside its daily window (01:00–08:00 America/New_York,
+# enforced by bibliograph-worker-window.timer). Outside it the timer starts the
+# worker, so a deploy must not: restarting here would put hydration and
+# publishing back on the database during the edge's busy hours.
+if systemctl is-enabled --quiet bibliograph-worker-window.timer 2>/dev/null; then
+  if systemctl is-active --quiet bibliograph-worker.service; then
+    restart_unit bibliograph-worker.service
+  else
+    note "bibliograph-worker.service is outside its window; the timer starts it at 01:00 ET"
+  fi
+else
+  restart_unit bibliograph-worker.service
+fi
 
 # Queue the Bookhive catalog import. Without it the weekly cron would wait for
 # the next Monday 03:00, and until it runs no Bookhive `hiveId` names an edition:
@@ -663,10 +681,16 @@ for unit in bibliograph-happyview-client.service happyview.service \
             bibliograph-happyview-deploy.service bibliograph-worker.service \
             bibliograph-web.service; do
   state="$(systemctl is-active "$unit" 2>&1 || true)"
-  printf 'SERVICE_STATE %-40s %s\n' "$unit" "$state"
-  if [ "$state" != active ]; then
-    bad=1
-    journalctl -u "$unit" -n 30 --no-pager >&2 2>/dev/null || true
+  if [ "$unit" = bibliograph-worker.service ] && [ "$state" != active ] \
+     && systemctl is-enabled --quiet bibliograph-worker-window.timer 2>/dev/null; then
+    # Scheduled off, not broken: the window timer starts it at 01:00 ET.
+    printf 'SERVICE_STATE %-40s %s\n' "$unit" "$state (scheduled window)"
+  else
+    printf 'SERVICE_STATE %-40s %s\n' "$unit" "$state"
+    if [ "$state" != active ]; then
+      bad=1
+      journalctl -u "$unit" -n 30 --no-pager >&2 2>/dev/null || true
+    fi
   fi
 done
 

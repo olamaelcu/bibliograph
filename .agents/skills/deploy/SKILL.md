@@ -395,6 +395,15 @@ wins (Ansible-managed hosts use it).
   beside the edge's 25 and HappyView's 40. A host whose conffile still carries
   the old `GRAPHILE_WORKER_CONCURRENCY=5` keeps it — conffiles are preserved —
   so edit the file and restart the worker, not just the package.
+- **Scheduling**: the worker runs only inside its daily window.
+  `bibliograph-worker-window.timer` starts it at 01:00 and
+  `bibliograph-worker-window-end.timer` stops it at 08:00 `America/New_York`
+  (an explicit timezone, so it tracks DST). The unit is not enabled at boot;
+  `deploy.sh` restarts it only when it is already active and otherwise reports
+  `inactive (scheduled window)` instead of failing. A deploy inside the window
+  starts it through the postinst. The host also carries an 8 GB extra swapfile
+  (`/swap-extra`, in `/etc/fstab`) with `vm.swappiness=10`; memory cannot be
+  raised on that machine, and the worker is the swap's main consumer.
 
 ### `/etc/bibliograph/web.env`
 
@@ -448,9 +457,11 @@ What each must show:
 - `dpkg-query` versions equal the built debs — `0.2.1-1` for worker/web and the
   HappyView image version plus its packaging revision (e.g. `2.17.4-4`). A
   different version means the host installed a different file.
-- All five units `active`. The deploy oneshot is `oneshot` with
-  `RemainAfterExit=yes`; `inactive (dead)` is not correct for it after a
-  successful deploy.
+- All five units `active`, with one scheduled exception: `bibliograph-worker`
+  is inactive outside its 01:00–08:00 America/New_York window, and the deploy
+  prints `inactive (scheduled window)` for it there. The deploy oneshot is
+  `oneshot` with `RemainAfterExit=yes`; `inactive (dead)` is not correct for it
+  after a successful deploy.
 - Local and public `/` both `200`; a loopback 200 with a public failure points
   at nginx/TLS, not the app.
 - Journals: HappyView migration/readiness lines, the deploy oneshot's
@@ -560,6 +571,11 @@ nginx access/error logs are `/var/log/nginx/bibliograph.access.log` and
 - **Worker restarts in a loop** — no usable `DATABASE_URL`; the start limit
   trips after five attempts. Publisher credentials are optional and only
   disable `pds-publish`.
+- **The worker is inactive after a deploy** — expected outside its window
+  (01:00–08:00 America/New_York). Check `systemctl list-timers | grep
+  bibliograph`: the window timer's next elapse is when work resumes. To run it
+  now, `systemctl start bibliograph-worker` — the end timer still stops it at
+  08:00.
 - **`/admin` returns 404** — `ADMIN_TOKEN` is unset in `web.env` (and
   `worker.env` must carry the same value for the API call).
 - **`ERROR: … installed version … != package version …`** — a stale `/tmp`

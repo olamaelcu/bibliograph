@@ -1,3 +1,24 @@
+bibliograph-worker (0.8.0-1) unstable; urgency=medium
+
+  * 0.8.0: the worker runs only inside a daily window.
+
+    - `bibliograph-worker-window.timer` starts it at 01:00 and
+      `bibliograph-worker-window-end.timer` stops it at 08:00 America/New_York
+      (explicit timezone, so the window follows the operator's clock through
+      DST). `Persistent=false`: a missed window is not backfilled.
+    - The unit is no longer enabled at boot. It is the only heavy database
+      client, and on the deployment host it competes with the edge: a running
+      worker pushed `searchEditions` past its statement bound (10 s, then 503)
+      while the edge alone answered in 130–420 ms.
+    - `deploy.sh` no longer restarts the worker outside its window and reports
+      `inactive (scheduled window)` instead of failing the verification. An
+      install inside the window starts the worker; outside it the timer does.
+    - The packaged postinst enables both timers, disables the service's boot
+      autostart, and starts the worker only when the local New York hour is
+      between 01:00 and 08:00.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.7.5-1) unstable; urgency=medium
 
   * 0.7.5: the publish drain runs in smaller bites.

@@ -1,0 +1,20 @@
+[Unit]
+Description=Start the Bibliograph catalog worker for its daily window (01:00-08:00 America/New_York)
+
+[Timer]
+# The worker is the only heavy database client: hydration, the genres/covers
+# sweeps and the outbox drain. On the 2-vCPU deployment host it competes with
+# the edge for CPU and disk, and a running worker pushes `searchEditions` past
+# its statement bound. So it runs only in this window, chosen as the quietest
+# hours in the operator's day, and the edge keeps the database to itself for the
+# rest of it.
+#
+# The timezone is explicit: the window follows the operator's clock across DST,
+# not UTC. 01:00 America/New_York is 06:00 UTC in winter and 05:00 UTC in summer.
+OnCalendar=*-*-* 01:00:00 America/New_York
+# Do not catch up after downtime: a missed window is a missed window.
+Persistent=false
+Unit=bibliograph-worker.service
+
+[Install]
+WantedBy=timers.target

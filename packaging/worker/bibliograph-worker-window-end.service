@@ -1,0 +1,8 @@
+[Unit]
+Description=Stop the Bibliograph catalog worker at the end of its window (08:00 America/New_York)
+
+[Service]
+Type=oneshot
+# Stopping is graceful: graphile stops fetching, then aborts in-flight jobs
+# after the unit's 30 s window, and PostgreSQL rolls back anything mid-statement.
+ExecStart=/usr/bin/systemctl stop bibliograph-worker.service

@@ -16,8 +16,21 @@ install -d -m 0750 -o root -g bibliograph /etc/bibliograph
 
 if [ -d /run/systemd/system ]; then
     deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
-    deb-systemd-helper enable bibliograph-worker.service >/dev/null 2>&1 || true
-    deb-systemd-invoke restart bibliograph-worker.service >/dev/null 2>&1 || true
+    # The worker runs only inside its window (01:00-08:00 America/New_York),
+    # enforced by the two timers below. It is deliberately not enabled at boot:
+    # outside the window the database belongs to the edge.
+    deb-systemd-helper disable bibliograph-worker.service >/dev/null 2>&1 || true
+    deb-systemd-helper enable bibliograph-worker-window.timer >/dev/null 2>&1 || true
+    deb-systemd-helper enable bibliograph-worker-window-end.timer >/dev/null 2>&1 || true
+    deb-systemd-invoke start bibliograph-worker-window.timer >/dev/null 2>&1 || true
+    deb-systemd-invoke start bibliograph-worker-window-end.timer >/dev/null 2>&1 || true
+
+    # An install inside the window starts the work now; outside it the timer does,
+    # and the deploy script leaves the worker stopped.
+    hour="$(TZ=America/New_York date +%H)"
+    if [ "$hour" -ge 1 ] && [ "$hour" -lt 8 ]; then
+        deb-systemd-invoke start bibliograph-worker.service >/dev/null 2>&1 || true
+    fi
 fi
 
 # A worker without a database cannot start at all; publisher credentials are

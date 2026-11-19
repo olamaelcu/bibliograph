@@ -1,0 +1,12 @@
+[Unit]
+Description=End the Bibliograph catalog worker's daily window (08:00 America/New_York)
+
+[Timer]
+# Same explicit timezone as the start timer, so the window stays 01:00-08:00 on
+# the operator's clock through DST.
+OnCalendar=*-*-* 08:00:00 America/New_York
+Persistent=false
+Unit=bibliograph-worker-window-end.service
+
+[Install]
+WantedBy=timers.target

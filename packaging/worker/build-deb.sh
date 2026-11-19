@@ -54,6 +54,12 @@ cp -a packages/worker/sql/. "$STAGE$LIVE/sql/"
 install -D -m 0644 packaging/worker/worker.env "$STAGE/etc/bibliograph/worker.env"
 install -D -m 0644 packaging/worker/bibliograph-worker.service \
   "$UNIT_DIR/bibliograph-worker.service"
+install -D -m 0644 packaging/worker/bibliograph-worker-window.timer \
+  "$UNIT_DIR/bibliograph-worker-window.timer"
+install -D -m 0644 packaging/worker/bibliograph-worker-window-end.service \
+  "$UNIT_DIR/bibliograph-worker-window-end.service"
+install -D -m 0644 packaging/worker/bibliograph-worker-window-end.timer \
+  "$UNIT_DIR/bibliograph-worker-window-end.timer"
 install -D -m 0644 packaging/worker/copyright \
   "$STAGE/usr/share/doc/bibliograph-worker/copyright"
 gzip -9n -c packaging/worker/changelog \
