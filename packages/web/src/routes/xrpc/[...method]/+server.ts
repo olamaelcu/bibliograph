@@ -60,6 +60,7 @@ import {
   GET_PUBLISHER,
   GIVEAWAY_DRAW,
   GIVEAWAY_ENTRIES,
+  GIVEAWAY_EXTEND,
   GIVEAWAY_LIST,
   GIVEAWAY_REPORT,
   LIST_EDITIONS_BY_CONTRIBUTOR,
@@ -78,6 +79,7 @@ import {
   listGiveaways,
 } from "$lib/server/catalog/giveaway";
 import { giveawayDraw } from "$lib/server/catalog/giveaway-draw-handler";
+import { giveawayExtend } from "$lib/server/catalog/giveaway-extend-handler";
 import { getContributorLink } from "$lib/server/catalog/contributor-links";
 import { decodeKeysetCursor, decodeOffsetCursor } from "$lib/server/catalog/sql";
 import { EDITION_COLLECTION, getBookGenres } from "$lib/server/catalog/genres";
@@ -697,6 +699,15 @@ const dependencies: XrpcDependencies = {
         pool: catalogPool(),
       }),
     () => GIVEAWAY_DRAW,
+  ),
+  giveawayExtend: timed(
+    "catalog",
+    (request: Request) =>
+      giveawayExtend(request, {
+        plcUrl: env.PLC_URL?.trim() ?? "",
+        pool: catalogPool(),
+      }),
+    () => GIVEAWAY_EXTEND,
   ),
   proxyPdsRead: timed("pds", proxyPdsRead, (method) => method),
   forward: timed("happyview", forward, (method) => method),

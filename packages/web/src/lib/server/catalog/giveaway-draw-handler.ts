@@ -21,6 +21,8 @@ import type { EntityQueryable } from './entities.ts';
 import { getGiveaway } from './giveaway.ts';
 import { concludeGiveaway, type DrawPool } from './giveaway-draw.ts';
 import { GIVEAWAY_DRAW } from './entity-methods.ts';
+import { verifyGiveawayTerm } from './giveaway-terms.ts';
+import { mismatchMessage } from './giveaway-extend-handler.ts';
 import { createDidResolver } from '../feeds/did.ts';
 import { SERVICE_DID_HOSTNAME, didWeb } from '../service-did.ts';
 import {
@@ -34,6 +36,7 @@ const ERROR_INVALID_REQUEST = 'InvalidRequest';
 const ERROR_NOT_FOUND = 'NotFound';
 const ERROR_NOT_AUTHOR = 'NotAuthor';
 const ERROR_NOT_CLOSED = 'NotClosed';
+const ERROR_TERM_MISMATCH = 'TermMismatch';
 
 /** What the route binds: the deployment's PLC directory and the index pool. */
 export type GiveawayDrawContext = {
@@ -41,8 +44,8 @@ export type GiveawayDrawContext = {
   pool: EntityQueryable & DrawPool;
 };
 
-function fail(status: number, error: string, message: string): Response {
-  return new Response(JSON.stringify({ error, message }), {
+function fail(status: number, error: string, message: string, extra?: object): Response {
+  return new Response(JSON.stringify({ error, message, ...extra }), {
     status,
     headers: { 'content-type': 'application/json' }
   });
@@ -120,7 +123,20 @@ export async function giveawayDraw(
   if (issuer !== giveaway.author) {
     return fail(403, ERROR_NOT_AUTHOR, 'only the giveaway’s author can conclude it');
   }
-  const closesAt = Date.parse(giveaway.closesAt);
+  // The verified term decides, not the record's: the record is editable by hand,
+  // and a date moved out of band must be restored before anything is drawn.
+  const verdict = await verifyGiveawayTerm(context.pool, giveawayUri);
+  if (!verdict.ok) {
+    if (verdict.reason === 'not-found') {
+      return fail(404, ERROR_NOT_FOUND, 'no giveaway has that URI');
+    }
+    return fail(409, ERROR_TERM_MISMATCH, mismatchMessage(verdict.stored, verdict.current), {
+      stored: verdict.stored,
+      current: verdict.current,
+      relation: verdict.relation
+    });
+  }
+  const closesAt = Date.parse(verdict.closesAt);
   if (Number.isNaN(closesAt) || Date.now() < closesAt) {
     return fail(409, ERROR_NOT_CLOSED, 'the giveaway is still open');
   }

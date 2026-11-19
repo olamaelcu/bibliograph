@@ -16,14 +16,20 @@ import { GIVEAWAY_ENTRIES, GIVEAWAY_LIST, GIVEAWAY_REPORT } from './giveaway.ts'
 
 export { GET_CONTRIBUTOR_LINK, GIVEAWAY_ENTRIES, GIVEAWAY_LIST, GIVEAWAY_REPORT };
 
-/** The one authenticated procedure here: it needs `$env` and the index pool. */
+/** The two authenticated procedures: they need `$env` and the index pool. */
 export const GIVEAWAY_DRAW = 'net.olamaelcu.livtet.biblio.giveaway.draw';
+export const GIVEAWAY_EXTEND = 'net.olamaelcu.livtet.biblio.giveaway.extend';
 
 /** The books-wg procedures: `POST`-only by lexicon, answered here. */
 export const RESOLVE_EDITIONS = 'community.lexicon.media.book.resolveEditions';
 export const SEARCH_EDITIONS = 'community.lexicon.media.book.searchEditions';
 
-export const EDGE_PROCEDURES = new Set([RESOLVE_EDITIONS, SEARCH_EDITIONS, GIVEAWAY_DRAW]);
+export const EDGE_PROCEDURES = new Set([
+  RESOLVE_EDITIONS,
+  SEARCH_EDITIONS,
+  GIVEAWAY_DRAW,
+  GIVEAWAY_EXTEND
+]);
 
 export const GET_CONTRIBUTOR = 'net.olamaelcu.livtet.biblio.getContributor';
 export const GET_PUBLISHER = 'net.olamaelcu.livtet.biblio.getPublisher';
