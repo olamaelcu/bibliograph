@@ -238,10 +238,11 @@ test('identifiers stored as JSON text are decoded', async () => {
   ]);
 });
 
-test('all fourteen entity methods are GET queries, resolvers included', () => {
-  expect(ENTITY_QUERIES.size).toBe(14);
+test('all fifteen entity methods are GET queries, resolvers included', () => {
+  expect(ENTITY_QUERIES.size).toBe(15);
   for (const method of [
     'net.olamaelcu.livtet.biblio.getIdentifiedFormats',
+    'net.olamaelcu.livtet.biblio.searchEditionsTypeahead',
     'net.olamaelcu.livtet.biblio.getContributor',
     'net.olamaelcu.livtet.biblio.getContributorLink',
     'net.olamaelcu.livtet.biblio.getGenresOfBook',
