@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Build the external search index from Postgres (one-shot; runs outside the worker window)"
+#
+# Fills the Tantivy index from the catalog, then applies the change queue. Safe
+# to interrupt and rerun: the snapshot resumes with `--after <last uri>` and
+# posting a document twice replaces it. The search service must already be
+# running (mise run search-backfill -- --dry-run proves the read path without it
+# posting anything).
+set -euo pipefail
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+exec node packages/worker/scripts/search-backfill.mjs "$@"

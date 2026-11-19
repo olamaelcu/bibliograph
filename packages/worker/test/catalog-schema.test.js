@@ -265,7 +265,10 @@ test('applies idempotently and creates the catalog tables, functions, triggers a
       'refresh_edition_publishers_update',
       'refresh_edition_shape_delete',
       'refresh_edition_shape_insert',
-      'refresh_edition_shape_update'
+      'refresh_edition_shape_update',
+      'search_dirty_books_delete',
+      'search_dirty_genres_delete',
+      'search_dirty_genres_insert'
     ]);
 });
 
