@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Deploy the three Bibliograph split packages to a host, dependency-first.
+# Deploy the four Bibliograph split packages to a host, dependency-first.
 #
 # Build (mise runs these before this script; see .mise/tasks/deploy):
 #   package-hv-deb      -> dist/bibliograph-happyview_<version>_<arch>.deb
 #   package-worker-deb  -> dist/bibliograph-worker_<version>_all.deb
+#   package-search-deb  -> dist/bibliograph-search_<version>_amd64.deb
 #   package-web-deb     -> dist/bibliograph-web_<version>_all.deb
 #
 # Install order, which is also the reason for it:
 #   1. bibliograph-happyview  the activity plane and DB-init SQL; it is the
 #                             upstream the edge proxies to.
 #   2. bibliograph-worker     catalog schema SQL ships here and is applied next.
-#   3. bibliograph-web        Depends: bibliograph-happyview; installed last so
-#                             the public edge is never exposed before its
-#                             upstream and the worker exist.
+#   3. bibliograph-search     the loopback index the edge queries; its package
+#                             ships the binary, the unit and the index
+#                             directory (derived data, rebuilt by the backfill).
+#   4. bibliograph-web        Depends: bibliograph-happyview and
+#                             bibliograph-search; installed last so the public
+#                             edge is never exposed before its upstream, the
+#                             worker and the index exist.
 #
 # Database stages (all idempotent, none drops data):
 #   * HappyView role/schema gate: DATABASE_URL in /etc/bibliograph/happyview.env
@@ -809,12 +814,14 @@ Target: $HOST
 Build (.mise/tasks/deploy, sequential; all must succeed before this script runs):
   1. mise run package-web-deb     -> $WEB_NAME ($WEB_VERSION, $WEB_ARCH)   [first]
   2. mise run package-hv-deb      -> $HV_NAME ($HV_VERSION, $HV_ARCH)
-  3. mise run package-worker-deb  -> $WORKER_NAME ($WORKER_VERSION, $WORKER_ARCH)   [last: prunes web dev links]
+  3. mise run package-search-deb  -> $SEARCH_NAME ($SEARCH_VERSION, $SEARCH_ARCH)
+  4. mise run package-worker-deb  -> $WORKER_NAME ($WORKER_VERSION, $WORKER_ARCH)   [last: prunes web dev links]
 
 Install (dependency-first, apt-get --reinstall, stop on failure):
   1. bibliograph-happyview  upstream activity plane + db-init.sql
   2. bibliograph-worker     catalog schema SQL at /usr/lib/bibliograph-worker/sql/
-  3. bibliograph-web        Depends: bibliograph-happyview; edge last
+  3. bibliograph-search     loopback index (Depends: adduser); empty until the backfill
+  4. bibliograph-web        Depends: bibliograph-happyview, bibliograph-search; edge last
 
 Database stages:
   * HappyView role/schema gate after step 1 (db-init.sql is a one-time
@@ -907,6 +914,7 @@ HV_ARCH="$(dpkg-deb -f "$HV_DEB" Architecture)"
 WORKER_ARCH="$(dpkg-deb -f "$WORKER_DEB" Architecture)"
 WEB_ARCH="$(dpkg-deb -f "$WEB_DEB" Architecture)"
 SEARCH_ARCH="$(dpkg-deb -f "$SEARCH_DEB" Architecture)"
+SEARCH_VERSION="$(dpkg-deb -f "$SEARCH_DEB" Version)"
 
 HV_SHA="$(sha256sum "$HV_DEB" | cut -d' ' -f1)"
 WORKER_SHA="$(sha256sum "$WORKER_DEB" | cut -d' ' -f1)"
