@@ -104,3 +104,78 @@ own hosts too. A missing or unreadable bundle leaves the builder unchanged.
 
 **Upstream.** No `rsky-identity` release consults the system store. Raise it
 upstream; drop the patch and bump the submodule when it lands.
+
+## `rsky-permission-set-prose.patch`
+
+**Symptom.** The consent page's card for an `include:` set never shows the
+set's prose. A set that publishes
+
+```json
+{
+  "type": "permission-set",
+  "title": "Bulleted spaces",
+  "detail": "Read the outlines shared in your Bulleted spaces, and write your own bullets in them."
+}
+```
+
+renders as `app.bulleted.spaceAccess` as its title, and a set with no title
+renders with an empty description even when it publishes a `detail`. The
+grouping code (`ui/scopes.rs`) already has the reference UI's fallbacks -- NSID
+title, NSID-or-empty description -- so the card is correct but blank where the
+set's own words belong.
+
+**Cause.** `permission_set.rs` keeps only `permissions` from a `permission-set`
+def: `SchemaDef` has no `title`/`detail`, so serde drops them, and the cache
+holds a bare `Vec<Permission>`. `oauth/routes.rs::include_sets` therefore fills
+`IncludeSetView` with `title: None, detail: None` -- pinned by its test's
+`assert!(…title.is_none())` -- whatever the record says.
+
+**Fix.**
+
+- `SchemaDef` gains `title`/`detail`. The every-def union
+  (`permissions_from_record`) becomes `set_def`/`resolved_record`:
+  `defs["main"]` when that is the permission set, else the first
+  permission-set def by name, so a set's prose and its grants always come from
+  the same def.
+- The cache entry holds `SetRecord { title, detail, permissions }`, so the
+  prose is fetched once beside the grants and served from cache hits; `OK_TTL`,
+  `ERR_TTL` and `PermissionSetError` are unchanged.
+- New `PermissionSetResolver::try_resolved_set` returns
+  `ResolvedSet { title, detail, scopes }`; `try_resolved_scopes` is now its thin
+  wrapper, so enforcement, PAR and token issuance -- including
+  `include:<nsid>?aud=…` rendering -- are untouched.
+- `include_sets` passes the prose into `IncludeSetView`.
+- Per-set styling hook (no icons): `PermissionGroup` carries the set's NSID,
+  the card template emits `data-permission-set="<nsid>"` and the slugged class
+  `permission-group--<nsid>` (`permission-group--net-olamaelcu-livtet-authlivtetcore`
+  for `net.olamaelcu.livtet.authLivtetCore`), and `assets/ui.css` gains one
+  `.permission-group[data-permission-set]` rule. The default appearance is
+  unchanged.
+
+**Upstream.** rsky at `80f41a3d98a22a3ba2563d461460ef9a35adbc68` reads only a
+set's permissions; `SchemaDef` has no prose fields. Raise it upstream; drop the
+patch and bump the submodule when it lands.
+
+**Verify.** The unit tests that pin each part:
+
+At authoring time: the patch applies to a clean submodule (`git apply --check`)
+and the whole `vendor/patches` chain applies in order after
+`rsky-lexicon-authority-override.patch` (offsets only, no fuzz);
+`cargo fmt -p rsky-pds -- --check` and `cargo check -p rsky-pds` are clean; and
+the three commands below pass. The consent-page check under them has not been
+run against a live stack.
+
+```bash
+(cd vendor/rsky && cargo test -p rsky-pds --lib -- permission_set)
+(cd vendor/rsky && cargo test -p rsky-pds --lib -- include_sets)   # view carries the prose
+(cd vendor/rsky && cargo test -p rsky-pds --lib -- included_sets)  # card carries the hook
+```
+
+End to end, the consent page for an authorize request naming
+`include:net.olamaelcu.livtet.authLivtetCore` shows that set's title and detail
+as the card's heading and text, and the card carries the attributes:
+
+```bash
+curl -s '<authorize URL>' | grep -o 'data-permission-set="[^"]*"'
+# data-permission-set="net.olamaelcu.livtet.authLivtetCore"
+```
