@@ -391,7 +391,10 @@ export async function editionsByUris(
   hydration: BookQueryable = pool
 ): Promise<BookView[]> {
   if (uris.length === 0) return [];
-  const page = await pool.query<BookRow>(
+  // The row fetch is part of assembly, not of ranking: it joins the shape and
+  // cover claims, which read cold pages on this host. It belongs to the same
+  // budget as the aggregates below, not to the 5 s search statement.
+  const page = await hydration.query<BookRow>(
     `SELECT ${BOOK_COLUMNS}
        FROM books e
        ${BOOK_SHAPE_JOIN}
