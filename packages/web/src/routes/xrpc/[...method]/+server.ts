@@ -16,10 +16,10 @@ import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/err
 import {
   resolveEditions,
   parseBookOrder,
-  searchEditions,
   listEditions,
   type Identifier,
 } from "$lib/server/catalog/books";
+import { searchEditionsRouted } from "$lib/server/catalog/search-routing";
 import {
   MAX_OFFSET,
   offsetProblem,
@@ -314,7 +314,7 @@ async function handleSearch(request: Request): Promise<Response> {
     // A hit skips the database and the hydration work below. Only a resolved
     // page is stored: a failed query propagates and is retried, never cached.
     const { value: results, hit } = await remember(searchCache, cacheKey, () =>
-      searchEditions({
+      searchEditionsRouted({
         q,
         title,
         author,
@@ -325,7 +325,7 @@ async function handleSearch(request: Request): Promise<Response> {
         order: parsedOrder.order,
         language,
         coversBaseUrl: coversBase,
-      }, searchPool()),
+      }, searchPool(), env),
     );
     if (hit) {
       recordCatalogQuery(metrics, "searchEditions", "cache_hit", 0);

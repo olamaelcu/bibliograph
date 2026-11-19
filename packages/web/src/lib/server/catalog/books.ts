@@ -8,6 +8,7 @@ import {
   type BookQueryable,
   type BookResults,
   type BookRow,
+  type BookView,
   type Identifier
 } from './book-view.ts';
 
@@ -388,4 +389,27 @@ export async function searchEditions(input: {
     hasMore: page.rows.length > input.limit,
     ...(input.offset === 0 && rows.length < input.limit ? { total: rows.length } : {})
   };
+}
+
+/**
+ * Hydrate one page of edition uris in the order they were ranked by the caller
+ * (the external index). Hydration is the same three queries the SQL path runs;
+ * only the row selection and its order differ.
+ */
+export async function editionsByUris(
+  uris: string[],
+  pool: BookQueryable,
+  coversBaseUrl = ''
+): Promise<BookView[]> {
+  if (uris.length === 0) return [];
+  const page = await pool.query<BookRow>(
+    `SELECT ${BOOK_COLUMNS}
+       FROM books e
+       ${BOOK_SHAPE_JOIN}
+       ${BOOK_COVERS_JOIN}
+      WHERE e.uri = ANY($1::text[])
+      ORDER BY array_position($1::text[], e.uri)`,
+    [uris]
+  );
+  return hydrate(pool, page.rows, coversBaseUrl);
 }

@@ -414,6 +414,8 @@ const FEED_DID_BUCKETS = [0, 1, 5, 10, 25, 50, 100, 250, 500] as const;
 
 /** First-page totals of a catalog search: how thin a local query was. */
 const SEARCH_MATCH_BUCKETS = [0, 1, 2, 3, 5, 10, 25, 50, 100, 250] as const;
+/** The flip gate is 0.9; the lower bounds separate near-misses from bad ranking. */
+const SEARCH_OVERLAP_BUCKETS = [0.1, 0.3, 0.5, 0.7, 0.9, 0.99] as const;
 
 /**
  * Hydration bookkeeping for the catalog, mirrored from the catalog modules on
@@ -487,6 +489,7 @@ export interface WebMetrics {
   readonly catalogHydration: Counter;
   readonly catalogSearchDecisions: Counter;
   readonly catalogSearchMatches: Histogram;
+  readonly catalogSearchOverlap: Histogram;
   readonly feedRequests: Counter;
   readonly feedRequestDuration: Histogram;
   readonly feedPageItems: Histogram;
@@ -550,6 +553,11 @@ export function createWebMetrics(): WebMetrics {
       'bibliograph_catalog_search_first_page_matches',
       'Exact first-page total of each database-answered searchEditions call whose first page was short, to size the hydration threshold.',
       SEARCH_MATCH_BUCKETS
+    ),
+    catalogSearchOverlap: registry.histogram(
+      'bibliograph_catalog_search_overlap_ratio',
+      'Shadow-mode agreement between the external index and Postgres over the top 25 edition uris.',
+      SEARCH_OVERLAP_BUCKETS
     ),
     feedRequests: registry.counter(
       'bibliograph_feed_requests_total',
@@ -737,15 +745,18 @@ export function recordUpstreamRequest(
 
 /**
  * `ok`, `error` (a statement failed), `unavailable` (no `DATABASE_URL`) and
- * `pool_timeout` (no pooled connection came free) are the only outcomes; the
+ * `pool_timeout` (no pooled connection came free) describe the database; the
  * last one used to be indistinguishable from `error`. `cache_hit` is recorded
  * by `searchEditions` when its short-TTL page cache answered: no statement ran,
  * so only the counter moves and the duration histogram is left alone.
+ * `engine_fallback` is a search the external index failed to answer and the
+ * Postgres path completed instead; its duration is the engine attempt, not the
+ * fallback query.
  */
 export function recordCatalogQuery(
   m: WebMetrics,
   operation: string,
-  outcome: 'ok' | 'error' | 'unavailable' | 'pool_timeout' | 'cache_hit',
+  outcome: 'ok' | 'error' | 'unavailable' | 'pool_timeout' | 'cache_hit' | 'engine_fallback',
   durationSeconds: number
 ): void {
   const normalized = normalizeCatalogOperation(operation);
@@ -773,6 +784,10 @@ export function recordCatalogSearchDecision(m: WebMetrics, decision: string): vo
 /** The observed value is the first-page total, so the series carries no label. */
 export function recordCatalogSearchMatches(m: WebMetrics, total: number): void {
   m.catalogSearchMatches.observe({}, total);
+}
+
+export function recordCatalogSearchOverlap(m: WebMetrics, ratio: number): void {
+  m.catalogSearchOverlap.observe({}, ratio);
 }
 
 export function recordFeedRequest(m: WebMetrics, kind: string, status: number): void {
