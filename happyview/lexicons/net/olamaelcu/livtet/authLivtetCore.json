@@ -10,6 +10,7 @@
         {
           "type": "permission",
           "resource": "repo",
+          "action": ["create", "update", "delete"],
           "collection": [
             "net.olamaelcu.livtet.biblio.actor.profile",
             "net.olamaelcu.livtet.biblio.readingGoal",
