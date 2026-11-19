@@ -19,6 +19,7 @@ import {
   listEditions,
   type Identifier,
 } from "$lib/server/catalog/books";
+import { typeaheadEditions } from "$lib/server/catalog/typeahead";
 import { searchEditionsRouted } from "$lib/server/catalog/search-routing";
 import {
   MAX_OFFSET,
@@ -70,6 +71,7 @@ import {
   RESOLVE_PUBLISHERS,
   SEARCH_CONTRIBUTORS,
   SEARCH_EDITIONS,
+  SEARCH_EDITIONS_TYPEAHEAD,
   SEARCH_PUBLISHERS,
 } from "$lib/server/catalog/entity-methods";
 import {
@@ -388,11 +390,50 @@ function queryInteger(
 }
 
 /**
+ * Prefix completion for the header search field: anonymous, GET-only, and
+ * answered by the external index only when it is the configured backend.
+ */
+async function handleTypeahead(params: URLSearchParams): Promise<Response> {
+  const q = (params.get("q") ?? "").trim();
+  if (q.length < 2) return fail(400, "InvalidRequest", "`q` must be at least 2 characters");
+  if (q.length > 200) return fail(400, "InvalidRequest", "`q` is limited to 200 characters");
+  const limit = queryInteger(params.get("limit"), 8, 1, 25);
+  if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+
+  const started = performance.now();
+  try {
+    const { items, outcome } = await typeaheadEditions(
+      { q, limit, coversBaseUrl: coversBaseUrl() },
+      searchPool(),
+      env,
+    );
+    recordCatalogQuery(
+      metrics,
+      "searchEditionsTypeahead",
+      outcome,
+      (performance.now() - started) / 1000,
+    );
+    return json({ items });
+  } catch (error) {
+    recordCatalogQuery(
+      metrics,
+      "searchEditionsTypeahead",
+      catalogOutcome(error),
+      (performance.now() - started) / 1000,
+    );
+    return catalogFailure(error);
+  }
+}
+
+/**
  * Entity getters and searches. They read the catalog tables, never a PDS, and
  * are anonymous like the books-wg procedures.
  */
 async function handleEntityGet(request: Request, method: string): Promise<Response> {
   const params = new URL(request.url).searchParams;
+  // Prefix completion owns its own errors (a 400 for a short `q`, a 503 for a
+  // pool timeout), so it answers before the entity paths' shared `catch`.
+  if (method === SEARCH_EDITIONS_TYPEAHEAD) return handleTypeahead(params);
   try {
     const pool = catalogPool();
     if (method === GET_GENRES_OF_BOOK) {

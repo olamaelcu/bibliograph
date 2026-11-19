@@ -287,6 +287,7 @@ const XRPC_METHODS: Record<string, true> = {
   'net.olamaelcu.livtet.biblio.resolveContributors': true,
   'net.olamaelcu.livtet.biblio.resolvePublishers': true,
   'net.olamaelcu.livtet.biblio.searchContributors': true,
+  'net.olamaelcu.livtet.biblio.searchEditionsTypeahead': true,
   'net.olamaelcu.livtet.biblio.searchPublishers': true,
   'net.olamaelcu.livtet.biblio.getActorProfile': true,
   'net.olamaelcu.livtet.biblio.getBookOnShelf': true,
@@ -337,7 +338,8 @@ export function normalizeXrpcMethod(method: string): string {
 const CATALOG_OPERATIONS: Record<string, true> = {
   getGenresOfBook: true,
   resolveEditions: true,
-  searchEditions: true
+  searchEditions: true,
+  searchEditionsTypeahead: true
 };
 
 export function normalizeCatalogOperation(operation: string): string {

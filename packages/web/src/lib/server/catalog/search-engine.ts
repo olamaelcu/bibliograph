@@ -82,6 +82,35 @@ export async function searchEngineUris(
 }
 
 /**
+ * Ask the index for prefix completions. Same failure contract as
+ * `searchEngineUris`: anything off-spec throws so the caller can fall back.
+ */
+export async function typeaheadEngineUris(
+  query: { q: string; limit: number },
+  options: { url: string; timeoutMs: number; fetchImpl?: typeof fetch }
+): Promise<string[]> {
+  const { url, timeoutMs, fetchImpl = fetch } = options;
+  const response = await fetchImpl(`${url}/typeahead`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(query),
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  if (!response.ok) {
+    throw new Error(`search engine: HTTP ${response.status}`);
+  }
+  const body: unknown = await response.json();
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('search engine: response is not an object');
+  }
+  const { uris } = body as Record<string, unknown>;
+  if (!Array.isArray(uris) || !uris.every((uri) => typeof uri === 'string')) {
+    throw new Error('search engine: uris is not an array of strings');
+  }
+  return uris;
+}
+
+/**
  * Fraction of the two pages they agree on, over their top `k`. Uses the larger
  * of the two page lengths as the denominator so a short page cannot score 1 by
  * being a subset.

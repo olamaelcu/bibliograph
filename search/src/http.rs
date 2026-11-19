@@ -1,7 +1,7 @@
 //! A minimal HTTP/1.1 server for the loopback interface.
 //!
 //! The service is reachable only from 127.0.0.1 on the catalog host; it speaks
-//! four routes and no keep-alive, so a hand-rolled server with one thread per
+//! five routes and no keep-alive, so a hand-rolled server with one thread per
 //! connection is smaller and has fewer moving parts than an async runtime.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -13,7 +13,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use tracing::info_span;
 
 use crate::index::{DocsRequest, Engine};
-use crate::query::SearchRequest;
+use crate::query::{SearchRequest, TypeaheadRequest};
 
 const MAX_BODY: usize = 16 * 1024 * 1024;
 
@@ -79,6 +79,7 @@ fn route_label(method: &str, path: &str) -> &'static str {
         ("GET", "/healthz") => "healthz",
         ("GET", "/metrics") => "metrics",
         ("POST", "/search") => "search",
+        ("POST", "/typeahead") => "typeahead",
         ("POST", "/docs") => "docs",
         _ => "other",
     }
@@ -125,6 +126,38 @@ fn route_on(
             Err(error) => {
                 metrics::counter!("search_requests_total", "outcome" => "invalid").increment(1);
                 (400, "application/json", error_json(&format!("invalid search body: {error}")))
+            }
+        },
+        ("POST", "/typeahead") => match serde_json::from_slice::<TypeaheadRequest>(body) {
+            Ok(request) => {
+                let started = Instant::now();
+                match engine.typeahead(&request) {
+                    Ok(response) => {
+                        metrics::counter!("search_typeahead_requests_total", "outcome" => "ok")
+                            .increment(1);
+                        metrics::histogram!("search_typeahead_duration_seconds")
+                            .record(started.elapsed().as_secs_f64());
+                        if response.uris.is_empty() {
+                            metrics::counter!("search_typeahead_empty_total").increment(1);
+                        }
+                        (200, "application/json", json(&response))
+                    }
+                    Err(error) => {
+                        metrics::counter!("search_typeahead_requests_total", "outcome" => "error")
+                            .increment(1);
+                        tracing::error!(%error, "typeahead failed");
+                        (500, "application/json", error_json(&error))
+                    }
+                }
+            }
+            Err(error) => {
+                metrics::counter!("search_typeahead_requests_total", "outcome" => "invalid")
+                    .increment(1);
+                (
+                    400,
+                    "application/json",
+                    error_json(&format!("invalid typeahead body: {error}")),
+                )
             }
         },
         ("POST", "/docs") => match serde_json::from_slice::<DocsRequest>(body) {

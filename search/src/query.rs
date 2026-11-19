@@ -21,6 +21,10 @@ const MAX_TERMS: usize = 16;
 const MAX_EXPANSIONS: u32 = 50;
 const MAX_LIMIT: usize = 100;
 const MAX_OFFSET: usize = 10_000;
+const MAX_TYPEAHEAD_TERMS: usize = 8;
+const MAX_TYPEAHEAD_EXPANSIONS: u32 = 128;
+const MAX_TYPEAHEAD_LIMIT: usize = 25;
+const DEFAULT_TYPEAHEAD_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +53,18 @@ pub struct SearchResponse {
     pub uris: Vec<String>,
     pub has_more: bool,
     pub total: usize,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct TypeaheadRequest {
+    pub q: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TypeaheadResponse {
+    pub uris: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +97,7 @@ fn analyzer() -> TextAnalyzer {
 }
 
 /// Analyse `text` and return its distinct terms, bounded.
-fn terms(analyzer: &mut TextAnalyzer, text: &str) -> Vec<String> {
+fn terms(analyzer: &mut TextAnalyzer, text: &str, max: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut stream = analyzer.token_stream(text);
     while stream.advance() {
@@ -89,7 +105,7 @@ fn terms(analyzer: &mut TextAnalyzer, text: &str) -> Vec<String> {
         if !token.is_empty() && !out.contains(&token) {
             out.push(token);
         }
-        if out.len() >= MAX_TERMS {
+        if out.len() >= max {
             break;
         }
     }
@@ -115,7 +131,7 @@ fn term_clause(fields: &Fields, term: &str) -> Box<dyn Query> {
 }
 
 fn phrase_prefix(field: tantivy::schema::Field, analyzer: &mut TextAnalyzer, text: &str) -> Option<Box<dyn Query>> {
-    let tokens = terms(analyzer, text);
+    let tokens = terms(analyzer, text, MAX_TERMS);
     if tokens.is_empty() {
         return None;
     }
@@ -135,7 +151,7 @@ fn build_query(engine: &Engine, req: &SearchRequest) -> Result<Box<dyn Query>, S
     let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
     if let Some(q) = req.q.as_deref().filter(|q| !q.trim().is_empty()) {
-        for term in terms(&mut analyzer, q) {
+        for term in terms(&mut analyzer, q, MAX_TERMS) {
             // Each term must appear (AND over terms), in any field (OR over
             // fields). A term is a single analysed token, so no quoting.
             clauses.push((Occur::Must, term_clause(fields, &term)));
@@ -166,6 +182,28 @@ fn build_query(engine: &Engine, req: &SearchRequest) -> Result<Box<dyn Query>, S
     } else {
         Box::new(BooleanQuery::new(clauses))
     })
+}
+
+/// A single token matched as a prefix, expanded over the field's term dictionary.
+fn prefix_clause(field: tantivy::schema::Field, token: &str) -> Box<dyn Query> {
+    let mut query = PhrasePrefixQuery::new(vec![Term::from_field_text(field, token)]);
+    query.set_max_expansions(MAX_TYPEAHEAD_EXPANSIONS);
+    Box::new(query)
+}
+
+/// One typed token must complete the title, the subtitle or a contributor name.
+/// Prose fields stay out: a prefix there matches nearly everything.
+fn typeahead_token_clause(fields: &Fields, token: &str) -> Box<dyn Query> {
+    let any = [(fields.title, 4.0), (fields.subtitle, 2.0), (fields.contributors, 2.0)]
+        .into_iter()
+        .map(|(field, boost)| {
+            (
+                Occur::Should,
+                Box::new(BoostQuery::new(prefix_clause(field, token), boost)) as Box<dyn Query>,
+            )
+        })
+        .collect();
+    Box::new(BooleanQuery::new(any))
 }
 
 fn collect_uris<I>(searcher: &Searcher, uri: tantivy::schema::Field, addrs: I) -> Result<Vec<String>, String>
@@ -267,6 +305,39 @@ pub fn search(engine: &Engine, req: &SearchRequest) -> Result<SearchResponse, St
         has_more,
         total,
     })
+}
+
+/// Prefix completion: every token must complete one of title, subtitle or a
+/// contributor name; ranking is the same relevance score as free text.
+pub fn typeahead(engine: &Engine, req: &TypeaheadRequest) -> Result<TypeaheadResponse, String> {
+    let q = req.q.trim();
+    if q.chars().count() < 2 {
+        return Ok(TypeaheadResponse { uris: Vec::new() });
+    }
+    let mut analyzer = analyzer();
+    let tokens = terms(&mut analyzer, q, MAX_TYPEAHEAD_TERMS);
+    if tokens.is_empty() {
+        return Ok(TypeaheadResponse { uris: Vec::new() });
+    }
+    let clauses: Vec<(Occur, Box<dyn Query>)> = tokens
+        .iter()
+        .map(|token| (Occur::Must, typeahead_token_clause(&engine.fields, token)))
+        .collect();
+    let query = BooleanQuery::new(clauses);
+    let limit = req
+        .limit
+        .unwrap_or(DEFAULT_TYPEAHEAD_LIMIT)
+        .clamp(1, MAX_TYPEAHEAD_LIMIT);
+    let searcher = engine.searcher();
+    let top = searcher
+        .search(&query, &TopDocs::with_limit(limit).order_by_score())
+        .map_err(|e| format!("typeahead search: {e}"))?;
+    let uris = collect_uris(
+        &searcher,
+        engine.fields.uri,
+        top.into_iter().map(|(_, addr)| addr),
+    )?;
+    Ok(TypeaheadResponse { uris })
 }
 
 #[cfg(test)]
@@ -473,5 +544,66 @@ mod tests {
             })
             .unwrap_err();
         assert!(err.contains("sort must be"));
+    }
+
+    fn typeahead_req(q: &str, limit: Option<usize>) -> TypeaheadRequest {
+        TypeaheadRequest { q: q.into(), limit }
+    }
+
+    fn sorted(uris: Vec<String>) -> Vec<String> {
+        let mut uris = uris;
+        uris.sort();
+        uris
+    }
+
+    #[test]
+    fn typeahead_matches_title_prefix() {
+        let engine = engine();
+        let out = engine.typeahead(&typeahead_req("du", None)).unwrap();
+        assert_eq!(
+            sorted(out.uris),
+            vec!["at://dune", "at://messiah", "at://undated"]
+        );
+    }
+
+    #[test]
+    fn typeahead_matches_author_prefix() {
+        let engine = engine();
+        let out = engine.typeahead(&typeahead_req("herb", None)).unwrap();
+        assert_eq!(sorted(out.uris), vec!["at://dune", "at://messiah"]);
+    }
+
+    #[test]
+    fn typeahead_spans_title_and_author() {
+        let engine = engine();
+        let out = engine.typeahead(&typeahead_req("dune her", None)).unwrap();
+        assert_eq!(sorted(out.uris), vec!["at://dune", "at://messiah"]);
+    }
+
+    #[test]
+    fn typeahead_limit_is_clamped() {
+        let engine = engine();
+        let out = engine.typeahead(&typeahead_req("dune", Some(1))).unwrap();
+        assert_eq!(out.uris.len(), 1);
+        let out = engine.typeahead(&typeahead_req("dune", Some(0))).unwrap();
+        assert_eq!(out.uris.len(), 1);
+        let out = engine.typeahead(&typeahead_req("dune", Some(999))).unwrap();
+        assert_eq!(out.uris.len(), 3);
+    }
+
+    #[test]
+    fn typeahead_short_or_blank_query_is_empty() {
+        let engine = engine();
+        for q in ["d", "  ", "!!!"] {
+            let out = engine.typeahead(&typeahead_req(q, None)).unwrap();
+            assert!(out.uris.is_empty(), "{q:?} should not match");
+        }
+    }
+
+    #[test]
+    fn typeahead_unknown_prefix_is_empty() {
+        let engine = engine();
+        let out = engine.typeahead(&typeahead_req("zzz", None)).unwrap();
+        assert!(out.uris.is_empty());
     }
 }
