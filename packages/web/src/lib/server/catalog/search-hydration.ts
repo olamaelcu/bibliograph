@@ -32,21 +32,28 @@ export function searchHydrationThreshold(raw?: string): number {
 export type SearchHydrationDecision = 'thin' | 'enough' | 'paged' | 'no_text';
 
 /**
- * `total` only exists on the first page, so paging never re-fires; a shallow
- * first page from a caller's own `limit` is not thin evidence either, which is
- * why page length is never consulted. An identifiers-only or language-only body
- * has no provider text query to run.
+ * `total` is present only on a first page shorter than the requested `limit`,
+ * where the page is the whole match set and its length is the exact count.
+ * `searchEditions` omits it on a full first page rather than paying a
+ * `count(*)` that re-runs the candidate set; a full page is at least `limit`
+ * matches, which is not evidence the catalogue lacks the work, so it counts as
+ * `enough`. A short page is exact regardless of the caller's `limit`, so it is
+ * genuine thin evidence and hydrates below the threshold. Paging (`offset >
+ * 0`) never hydrates, and an identifiers-only or language-only body has no
+ * provider text query to run.
  */
 export function searchHydrationDecision(input: {
   /** At least one of q/title/author is non-blank. */
   hasText: boolean;
   offset: number;
-  /** `BookResults.total`, present only at `offset === 0`. */
+  /** `BookResults.total`, present only on a short first page. */
   total: number | undefined;
   threshold: number;
 }): SearchHydrationDecision {
   if (!input.hasText) return 'no_text';
-  if (input.offset !== 0 || input.total === undefined) return 'paged';
+  if (input.offset !== 0) return 'paged';
+  // A full first page omits `total`; see the comment above.
+  if (input.total === undefined) return 'enough';
   if (input.total < input.threshold) return 'thin';
   return 'enough';
 }

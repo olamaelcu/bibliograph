@@ -127,6 +127,7 @@ test('catalog operations and feed kinds are fixed label sets', () => {
   const metrics = createWebMetrics();
   recordCatalogQuery(metrics, 'resolveEditions', 'ok', 0.02);
   recordCatalogQuery(metrics, 'searchEditions', 'unavailable', 0.03);
+  recordCatalogQuery(metrics, 'searchEditions', 'cache_hit', 0);
   recordCatalogQuery(metrics, 'bogus', 'error', 0.01);
   recordFeedRequest(metrics, 'public', 200);
   recordFeedRequest(metrics, 'following', 401);
@@ -136,8 +137,11 @@ test('catalog operations and feed kinds are fixed label sets', () => {
   const text = renderWebMetrics(metrics);
   expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="resolveEditions",outcome="ok"\} 1$/m);
   expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="searchEditions",outcome="unavailable"\} 1$/m);
+  expect(text, 'a cache hit is a bounded outcome').toMatch(/^bibliograph_catalog_queries_total\{operation="searchEditions",outcome="cache_hit"\} 1$/m);
   expect(text).toMatch(/^bibliograph_catalog_queries_total\{operation="other",outcome="error"\} 1$/m);
   expect(text).toMatch(/^bibliograph_catalog_query_duration_seconds_count\{operation="resolveEditions"\} 1$/m);
+  // A hit ran no statement, so it adds no duration observation.
+  expect(text).toMatch(/^bibliograph_catalog_query_duration_seconds_count\{operation="searchEditions"\} 1$/m);
   expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="public",outcome="ok"\} 1$/m);
   expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="following",outcome="auth_required"\} 1$/m);
   expect(text).toMatch(/^bibliograph_feed_requests_total\{kind="invalid",outcome="invalid_request"\} 1$/m);

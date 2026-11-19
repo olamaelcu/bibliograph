@@ -1,3 +1,23 @@
+bibliograph-web (0.6.3-1) unstable; urgency=medium
+
+  * 0.6.3: search answers from a short cache and no longer counts.
+
+    - `searchEditions` is repeated constantly by clients with the same body.
+      A per-process LRU (200 entries, 10 s TTL, keyed by every input that can
+      change the answer, identifiers in order) returns the previous page
+      without touching Postgres. Only a successful result is stored; a thrown
+      search is never cached; a cache fault cannot fail the request. A hit is
+      recorded as the bounded `cache_hit` outcome.
+    - The `count(*)` behind `total` is gone from search (it was 554 ms alone,
+      the most expensive statement in the request). `total` is exact and
+      present only when the first page is short — that page is the whole match
+      set — and omitted otherwise; `hasMore` is unchanged. `resolveEditions`
+      keeps its count. A full first page is now `enough` for the hydration
+      decision (it proves at least `limit` matches), so no provider work is
+      queued from it.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.6.2-1) unstable; urgency=medium
 
   * 0.6.2: the catalog pools stop abandoning statements, and search keeps to

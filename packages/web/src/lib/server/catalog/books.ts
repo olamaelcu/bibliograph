@@ -374,24 +374,18 @@ export async function searchEditions(input: {
   );
   const rows = page.rows.slice(0, input.limit);
 
-  // See `resolveEditions`: a short first page is the whole match set. The count
-  // re-runs the same predicate over the catalogue, so it is only paid for a
-  // page that could have more behind it.
-  const counted =
-    input.offset === 0 && rows.length === input.limit
-      ? await pool.query<{ n: number }>(
-          `${cte}SELECT count(*)::int AS n
-             FROM ${from}
-             ${input.language ? BOOK_SHAPE_JOIN : ''}
-             ${where}`,
-          params.slice(0, params.length - 2)
-        )
-      : null;
   const items = await hydrate(pool, rows, input.coversBaseUrl ?? '');
 
+  // A first page shorter than `limit` is the whole match set, so its length is
+  // the exact total. A full first page has more behind it but its exact size is
+  // not worth a second pass over the same predicate: the `count(*)` re-ran the
+  // candidates CTE and the join, and under concurrent traffic it was the
+  // statement that hit the search pool's 10 s bound and turned a search into a
+  // 503. `total` is therefore omitted on a full page, and the hydration policy
+  // treats that omission as "enough matches".
   return {
     items,
     hasMore: page.rows.length > input.limit,
-    ...(input.offset === 0 ? { total: counted ? counted.rows[0]?.n ?? 0 : rows.length } : {})
+    ...(input.offset === 0 && rows.length < input.limit ? { total: rows.length } : {})
   };
 }

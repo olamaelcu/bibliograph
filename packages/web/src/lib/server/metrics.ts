@@ -543,7 +543,7 @@ export function createWebMetrics(): WebMetrics {
     ),
     catalogSearchMatches: registry.histogram(
       'bibliograph_catalog_search_first_page_matches',
-      'First-page total of each searchEditions call, to size the hydration threshold.',
+      'Exact first-page total of each database-answered searchEditions call whose first page was short, to size the hydration threshold.',
       SEARCH_MATCH_BUCKETS
     ),
     feedRequests: registry.counter(
@@ -733,17 +733,21 @@ export function recordUpstreamRequest(
 /**
  * `ok`, `error` (a statement failed), `unavailable` (no `DATABASE_URL`) and
  * `pool_timeout` (no pooled connection came free) are the only outcomes; the
- * last one used to be indistinguishable from `error`.
+ * last one used to be indistinguishable from `error`. `cache_hit` is recorded
+ * by `searchEditions` when its short-TTL page cache answered: no statement ran,
+ * so only the counter moves and the duration histogram is left alone.
  */
 export function recordCatalogQuery(
   m: WebMetrics,
   operation: string,
-  outcome: 'ok' | 'error' | 'unavailable' | 'pool_timeout',
+  outcome: 'ok' | 'error' | 'unavailable' | 'pool_timeout' | 'cache_hit',
   durationSeconds: number
 ): void {
   const normalized = normalizeCatalogOperation(operation);
   m.catalogQueries.inc({ operation: normalized, outcome });
-  m.catalogQueryDuration.observe({ operation: normalized }, durationSeconds);
+  if (outcome !== 'cache_hit') {
+    m.catalogQueryDuration.observe({ operation: normalized }, durationSeconds);
+  }
 }
 
 export function recordCatalogHydration(

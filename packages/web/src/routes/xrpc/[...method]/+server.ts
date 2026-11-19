@@ -79,6 +79,11 @@ import { isbn13sFromIdentifiers } from "$lib/server/catalog/isbn";
 import { describeFeedGenerator, getFeedSkeleton } from "$lib/server/feeds";
 import { DESCRIBE_FEED_GENERATOR, GET_FEED_SKELETON } from "$lib/server/feeds/methods";
 import { coversBaseUrl } from "$lib/server/covers/config";
+import {
+  keyFor,
+  remember,
+  searchCache,
+} from "$lib/server/catalog/search-cache";
 
 // Catalog discovery is anonymous, so bound the work a body can request.
 const MAX_IDENTIFIERS = 100;
@@ -272,18 +277,45 @@ async function handleSearch(request: Request): Promise<Response> {
 
   const started = performance.now();
   try {
-    const results = await searchEditions({
-      q,
-      title,
-      author,
-      identifiers,
-      offset,
-      limit,
-      sort: parsedOrder.sort,
-      order: parsedOrder.order,
-      language,
-      coversBaseUrl: coversBaseUrl(),
-    }, searchPool());
+    // The cache key covers every input above, and the covers origin, which
+    // decides whether a cover URL points at `/api/covers` or at the provider.
+    // The entry is a plain page of views, stored as returned; each process has
+    // its own copy and a hit is at most SEARCH_CACHE_TTL_MS old.
+    const coversBase = coversBaseUrl();
+    const cacheKey = keyFor(
+      {
+        q,
+        title,
+        author,
+        language,
+        identifiers,
+        offset,
+        limit,
+        sort: parsedOrder.sort,
+        order: parsedOrder.order,
+      },
+      coversBase,
+    );
+    // A hit skips the database and the hydration work below. Only a resolved
+    // page is stored: a failed query propagates and is retried, never cached.
+    const { value: results, hit } = await remember(searchCache, cacheKey, () =>
+      searchEditions({
+        q,
+        title,
+        author,
+        identifiers,
+        offset,
+        limit,
+        sort: parsedOrder.sort,
+        order: parsedOrder.order,
+        language,
+        coversBaseUrl: coversBase,
+      }, searchPool()),
+    );
+    if (hit) {
+      recordCatalogQuery(metrics, "searchEditions", "cache_hit", 0);
+      return json(results);
+    }
     recordCatalogQuery(metrics, "searchEditions", "ok", (performance.now() - started) / 1000);
     // An ISBN is worth a direct ISBNdb lookup even when the local catalog
     // answered: the job enriches/ingests the edition from the provider.
@@ -293,10 +325,10 @@ async function handleSearch(request: Request): Promise<Response> {
         .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
         .map((isbn13) => enqueueIsbnHydration(isbn13)),
     );
-    // A thin first page means the catalog likely lacks the work, not that the
-    // caller paged deep. `total` exists only on the first page, so paging never
-    // re-fires; an identifier-only body is covered by the catalog.isbn jobs
-    // above, and a language-only browse has no provider text query to run.
+    // A short first page is the whole match set, so it is thin evidence; a full
+    // one omits `total` and counts as enough rather than paying a count. Paging
+    // never re-fires; an identifier-only body is covered by the catalog.isbn
+    // jobs above, and a language-only browse has no provider text query to run.
     const hydration = searchHydrationDecision({
       hasText: Boolean(q || title || author),
       offset,

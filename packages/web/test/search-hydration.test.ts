@@ -23,9 +23,13 @@ test('searchHydrationDecision skips bodies without a provider text query', () =>
   expect(searchHydrationDecision({ hasText: false, offset: 0, total: 0, threshold: 10 })).toBe('no_text');
 });
 
-test('searchHydrationDecision skips paging, where total is absent', () => {
+test('searchHydrationDecision treats a full first page as enough and paging as paged', () => {
+  // `searchEditions` no longer counts a full first page, so `total` is absent
+  // there; at least `limit` matches is not thin evidence.
+  expect(searchHydrationDecision({ hasText: true, offset: 0, total: undefined, threshold: 10 })).toBe('enough');
+  expect(searchHydrationDecision({ hasText: true, offset: 0, total: undefined, threshold: 0 })).toBe('enough');
+  // Past the first page `total` is never sent, and hydration must not re-fire.
   expect(searchHydrationDecision({ hasText: true, offset: 25, total: undefined, threshold: 10 })).toBe('paged');
-  expect(searchHydrationDecision({ hasText: true, offset: 0, total: undefined, threshold: 10 })).toBe('paged');
 });
 
 test('searchHydrationDecision follows the threshold, and 0 disables it', () => {
