@@ -1,6 +1,6 @@
-bibliograph-web (0.6.4-1) unstable; urgency=medium
+bibliograph-web (0.7.0-1) unstable; urgency=medium
 
-  * 0.6.4: search can be served by the external index, behind a switch.
+  * 0.7.0: search can be served by the external index, behind a switch.
 
     - `SEARCH_BACKEND` selects `postgres` (default), `shadow` or `tantivy`.
       `shadow` serves Postgres and records the top-25 agreement with the index
