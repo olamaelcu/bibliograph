@@ -35,6 +35,15 @@ export type HarnessState = {
   /** The fixture PDS repo the `knownContributor` record is published into. */
   publisherDid: string;
   pdsUrl: string;
+  /** The operator token `/admin` accepts (a test constant here). */
+  adminToken: string;
+  /** Catalog rows the admin scenarios act on. */
+  contributorSourceId: string;
+  contributorTargetId: string;
+  publisherSourceId: string;
+  publisherTargetId: string;
+  bookBaseUri: string;
+  bookOtherUri: string;
   workerLog: string;
   edgeLog: string;
 };

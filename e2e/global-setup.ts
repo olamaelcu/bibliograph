@@ -123,6 +123,91 @@ async function seedClaims(url: string): Promise<pg.Pool> {
   return pool;
 }
 
+type AdminFixtures = {
+  contributorSourceId: string;
+  contributorTargetId: string;
+  publisherSourceId: string;
+  publisherTargetId: string;
+  bookBaseUri: string;
+  bookOtherUri: string;
+};
+
+/**
+ * Catalog rows the admin scenarios act on: two duplicate contributors (one with
+ * a credit and a verified identity), two publishers, and two editions of one
+ * work that the merge workbench would combine.
+ */
+async function seedAdminFixtures(url: string): Promise<AdminFixtures> {
+  const pool = new pg.Pool({ connectionString: url, max: 2 });
+  try {
+    const contributorSource = await pool.query<{ id: string }>(
+      'INSERT INTO contributors (name, at_uri) VALUES ($1, $2) RETURNING id',
+      ['E2E Merge Source', `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/3e2emergesource`]
+    );
+    const contributorTarget = await pool.query<{ id: string }>(
+      'INSERT INTO contributors (name, at_uri) VALUES ($1, $2) RETURNING id',
+      ['E2E Merge Target', `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/3e2emergetarget`]
+    );
+
+    const bookBaseUri = `at://${AUTHORITY}/community.lexicon.media.book.edition/3e2ebase`;
+    const bookOtherUri = `at://${AUTHORITY}/community.lexicon.media.book.edition/3e2eother`;
+    await pool.query(
+      `INSERT INTO books (uri, rkey, title, created_at) VALUES
+         ($1, '3e2ebase', 'E2E Base Edition', '2026-01-01T00:00:00Z'),
+         ($2, '3e2eother', 'E2E Other Edition', '2026-01-01T00:00:00Z')`,
+      [bookBaseUri, bookOtherUri]
+    );
+    await pool.query(
+      `INSERT INTO edition_identifiers (edition_uri, issuer, value) VALUES
+         ($1, 'isbn13', '9780000000001'),
+         ($2, 'isbn13', '9780000000002')`,
+      [bookBaseUri, bookOtherUri]
+    );
+    // A credit and a verified identity on the source: both have to move.
+    await pool.query(
+      `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role)
+       VALUES ($1, $2, 1, 'author')`,
+      [bookOtherUri, contributorSource.rows[0].id]
+    );
+    await pool.query(
+      `INSERT INTO contributor_identities (contributor_id, did, at_uri, issued_by)
+       VALUES ($1, 'did:plc:e2emergesource',
+               'at://did:plc:e2emergesource/net.olamaelcu.livtet.biblio.knownContributor/3e2eknown',
+               'did:plc:e2elibrarian')`,
+      [contributorSource.rows[0].id]
+    );
+
+    // `publishers.identifiers` is the stored bag `{issuer, value, url?}` — the
+    // shape `canonicalIdentifiers` keys on, not the record lexicon's
+    // `{resource, url}` (that is what `defs#identifier` publishes).
+    const publisherSource = await pool.query<{ id: string }>(
+      'INSERT INTO publishers (name, identifiers) VALUES ($1, $2::jsonb) RETURNING id',
+      [
+        'E2E Merge Press',
+        JSON.stringify([{ issuer: 'isni', value: '0000000000000001' }])
+      ]
+    );
+    const publisherTarget = await pool.query<{ id: string }>(
+      'INSERT INTO publishers (name, identifiers) VALUES ($1, $2::jsonb) RETURNING id',
+      [
+        'E2E Merge Press Ltd',
+        JSON.stringify([{ issuer: 'isni', value: '0000000000000002' }])
+      ]
+    );
+
+    return {
+      contributorSourceId: contributorSource.rows[0].id,
+      contributorTargetId: contributorTarget.rows[0].id,
+      publisherSourceId: publisherSource.rows[0].id,
+      publisherTargetId: publisherTarget.rows[0].id,
+      bookBaseUri,
+      bookOtherUri
+    };
+  } finally {
+    await pool.end();
+  }
+}
+
 export default async function globalSetup(): Promise<() => Promise<void>> {
   clearState();
   mkdirSync(STATE_DIR, { recursive: true });
@@ -147,6 +232,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     await applySchema(databaseUrl);
     const seedPool = await seedClaims(databaseUrl);
     await seedPool.end();
+    const adminFixtures = await seedAdminFixtures(databaseUrl);
 
     const keyFile = fileURLToPath(new URL('../.cache/e2e/labeler.key', import.meta.url));
     rmSync(keyFile, { force: true });
@@ -188,14 +274,24 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     });
     children.push(worker);
 
+    // The built edge, not `vite dev`: HMR's dependency optimizer fetches modules
+    // on demand and can abort a page load mid-navigation, which showed up as a
+    // hung admin scenario. This is also the artifact the package ships.
+    execFileSync('pnpm', ['--filter', 'web', 'build'], { cwd: ROOT, stdio: 'inherit' });
+
     const edgeLog = `${STATE_DIR}edge.log`;
     const edge = await startProcess({
       name: 'edge',
-      command: `${ROOT}packages/web/node_modules/.bin/vite`,
-      args: ['dev', '--port', String(EDGE_PORT)],
+      command: process.execPath,
+      args: ['build'],
       cwd: `${ROOT}packages/web`,
       env: {
         ...baseEnv,
+        PORT: String(EDGE_PORT),
+        HOST: '127.0.0.1',
+        // adapter-node builds every absolute URL from ORIGIN; it must match the
+        // browser's origin or CSRF checks fail.
+        ORIGIN: `http://127.0.0.1:${EDGE_PORT}`,
         WORKER_ADMIN_URL: `http://127.0.0.1:${ADMIN_PORT}`,
         // The fixture account that owns HV_ACCOUNT_HANDLE is the librarian.
         LIBRARIAN_DIDS: fixture.librarianDid,
@@ -206,7 +302,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         // route from reaching the development stack by accident.
         HAPPYVIEW_URL: 'http://127.0.0.1:9'
       },
-      readyPattern: /Local:/,
+      readyPattern: /Listening on/,
       logFile: edgeLog
     });
     children.push(edge);
@@ -229,6 +325,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       rejectedDid: REJECTED_DID,
       publisherDid: fixture.PDS_ACCOUNT_DID,
       pdsUrl: fixture.PDS_URL,
+      adminToken: ADMIN_TOKEN,
+      ...adminFixtures,
       workerLog,
       edgeLog
     });

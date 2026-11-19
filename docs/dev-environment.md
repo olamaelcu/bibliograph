@@ -425,3 +425,13 @@ it.
 One thing is stubbed on purpose: the worker's per-minute crons are not waited
 on; the spec enqueues `pds-publish` and `labels.emit` through graphile, so a
 failure is a failure, not a slow machine.
+
+The admin spec covers the operator surface the same way: the token gate (a
+redirect when signed out, the error for a wrong token, the dashboard for the
+right one), and the three merges — editions (the workbench's
+`POST /admin/api/merge`, asserting the base keeps its URI while identifiers and
+credits are absorbed), contributors (the preview page plus the confirm form, then
+the credit and the verified identity on the survivor and the source row gone),
+and publishers (identifiers unioned, source deleted). Those scenarios are serial
+and ordered because each feeds the next: the edition merge moves the seeded
+credit onto the base, and the contributor merge then has to move that credit.
