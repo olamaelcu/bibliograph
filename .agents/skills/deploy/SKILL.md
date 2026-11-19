@@ -123,6 +123,14 @@ takes a new packaging revision only if its own payload changed (e.g. `2.17.4-4`)
 
 ## Build
 
+Run the task bare: `mise run deploy`. Never limit its output (`| tail`, `| head`,
+`| grep`, `> log 2>&1`). The task runs for minutes behind a pipe, so a
+limiting stage buffers everything and the job log stays empty until it exits;
+that log is the only record of which stage the deploy reached, and losing it
+turns a 15-minute run into a blind wait. If output is needed while it runs, read
+the host (`dpkg-query -W` for the installed versions, `systemctl is-active` for
+the units, `journalctl -u bibliograph-web` for the restart), not the task.
+
 `.mise/tasks/deploy` builds the three packages sequentially, in the safe order
 **web → happyview → worker**, and all must succeed before anything is
 uploaded. Do not make these `#MISE depends`: mise may run dependencies
