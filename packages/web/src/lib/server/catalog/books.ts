@@ -295,25 +295,13 @@ export async function searchEditions(input: {
   }
 
   if (input.q) {
-    // Free text is one tsvector match per book — title, subtitle, contributors,
-    // description and identifier values in one document — ranked by
-    // `ts_rank_cd`. It replaces the four trigram `ILIKE` branches that unioned
-    // title, description, contributor and identifier matches and then folded
-    // them with a hash aggregate: four GIN scans and an aggregate per search
-    // became one scan with a real score. See 0027.
-    const query = push(input.q);
+    // The in-database tsvector branch went with `book_search` (0036); free text
+    // is served by the external index, and this is the fallback when that is
+    // unavailable. It unions the trigram branches: title, contributor and
+    // identifier substrings. The description, which was the expensive trigram
+    // scan, is not searched here.
     const pattern = push(likePattern(input.q));
     branches.push(
-      `SELECT bs.uri AS edition_uri, 3 AS rank,
-              ts_rank_cd(bs.document, websearch_to_tsquery('english', ${query})) AS score
-         FROM book_search bs
-        WHERE bs.document @@ websearch_to_tsquery('english', ${query})`,
-      // The vector matches whole lexemes (with stemming), which drops the
-      // substring behaviour the trigram form had: "Frank Herber" would stop
-      // matching "Frank Herbert", and a typed prefix of an ISBN would stop
-      // matching its value. Title and identifier values are what callers type
-      // into, so their trigram indexes still answer the substring case; the
-      // description, which was the expensive trigram scan, is vector-only.
       `SELECT e.uri AS edition_uri, 3 AS rank, 0::real AS score
          FROM books e WHERE e.title ILIKE ${pattern}`,
       `SELECT ec.edition_uri, 3 AS rank, 0::real AS score

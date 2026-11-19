@@ -6,7 +6,7 @@ import type { BookQueryable, BookRow } from '../src/lib/server/catalog/book-view
 
 /**
  * `typeaheadEditions` chooses between the external index and Postgres, so the
- * double answers both shapes: the page query (contains `book_search`), the
+ * double answers both shapes: the page query (contains `WITH candidates`), the
  * ranked hydration (`array_position`) and the ordinary hydration reads
  * (`= ANY($1)`).
  */
@@ -42,7 +42,7 @@ function fakePool(pageRows: BookRow[]): { pool: BookQueryable; calls: QueryCall[
       let rows: unknown[] = [];
       if (sql.includes('array_position')) {
         rows = ((values?.[0] as string[] | undefined) ?? []).map((uri) => bookRow(uri));
-      } else if (sql.includes('book_search')) {
+      } else if (sql.includes('WITH candidates')) {
         rows = pageRows;
       }
       return { rows, rowCount: rows.length };
@@ -80,7 +80,7 @@ test('the postgres backend answers from searchEditions without touching the engi
 
   expect(result.outcome).toBe('ok');
   expect(viewTitles(result.items)).toEqual(['Title 1']);
-  expect(calls.some((call) => call.sql.includes('book_search'))).toBe(true);
+  expect(calls.some((call) => call.sql.includes('WITH candidates'))).toBe(true);
 });
 
 test('the tantivy backend hydrates the engine uris in rank order', async () => {
@@ -104,7 +104,7 @@ test('the tantivy backend hydrates the engine uris in rank order', async () => {
   );
   expect(calls[0].values?.[0]).toEqual(uris);
   expect(viewTitles(result.items)).toEqual(['Title 2', 'Title 1']);
-  expect(calls.some((call) => call.sql.includes('book_search'))).toBe(false);
+  expect(calls.some((call) => call.sql.includes('WITH candidates'))).toBe(false);
 });
 
 test('an engine failure falls back to the Postgres page and says so', async () => {
@@ -124,5 +124,5 @@ test('an engine failure falls back to the Postgres page and says so', async () =
 
   expect(result.outcome).toBe('engine_fallback');
   expect(viewTitles(result.items)).toEqual(['Title 1']);
-  expect(calls.some((call) => call.sql.includes('book_search'))).toBe(true);
+  expect(calls.some((call) => call.sql.includes('WITH candidates'))).toBe(true);
 });
