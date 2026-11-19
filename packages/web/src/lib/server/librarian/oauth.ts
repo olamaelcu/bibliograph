@@ -19,24 +19,8 @@ import type { NodeOAuthClientOptions, OAuthClientMetadataInput } from '@atproto/
 import { env } from '$env/dynamic/private';
 
 import { catalogPool } from '../catalog/db.ts';
-import { isInsecureOrigin } from './config.ts';
+import { isInsecureOrigin, librarianClientMetadata } from './client-metadata.ts';
 import { librarianSessionStore, librarianStateStore } from './stores.ts';
-
-/** The metadata document, as served at `/oauth-client-metadata.json`. */
-export function librarianClientMetadata(origin: string): OAuthClientMetadataInput {
-  return {
-    client_name: 'Bibliograph librarians',
-    client_id: `${origin}/oauth-client-metadata.json`,
-    client_uri: origin,
-    redirect_uris: [`${origin}/librarian/oauth/callback`],
-    scope: 'atproto',
-    response_types: ['code'],
-    grant_types: ['authorization_code', 'refresh_token'],
-    application_type: 'web',
-    token_endpoint_auth_method: 'none',
-    dpop_bound_access_tokens: true
-  };
-}
 
 const clients = new Map<string, NodeOAuthClient>();
 
@@ -63,6 +47,21 @@ export function librarianOAuthClient(origin: string): NodeOAuthClient {
     // client refuses that by default. Production is https, so the exception is
     // scoped to an http origin rather than to a build mode.
     allowHttp: isInsecureOrigin(origin),
+    // The client's default fetch is SSRF-hardened: it refuses plain http, custom
+    // ports and private/loopback addresses, which is the entire local stack
+    // (`https://pds.127-0-0-1.sslip.io`, `http://127.0.0.1:2582` for the PLC).
+    // Identity resolution therefore reported "handle does not resolve" until
+    // this override let plain `fetch` through — development only, because
+    // production resolves public identities and keeps the hardened default.
+    ...(isInsecureOrigin(origin)
+      ? {
+          fetch: globalThis.fetch,
+          // The default resolver asks public DNS and public well-known, neither
+          // of which knows a handle hosted on the local PDS. Ask that PDS
+          // instead; production keeps the default resolver.
+          ...(env.PDS_URL ? { handleResolver: new URL(env.PDS_URL) } : {})
+        }
+      : {}),
     ...(env.PLC_URL ? { plcDirectoryUrl: env.PLC_URL } : {})
   };
   const client = new NodeOAuthClient(options);

@@ -11,7 +11,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 
-import { librarianClientMetadata } from '$lib/server/librarian/oauth';
+import { librarianClientMetadata } from '$lib/server/librarian/client-metadata';
 
 export const GET: RequestHandler = ({ url }) =>
   json(librarianClientMetadata(url.origin), {
