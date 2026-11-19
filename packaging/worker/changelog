@@ -1,22 +1,41 @@
-bibliograph-worker (0.8.4-1) unstable; urgency=medium
+bibliograph-worker (0.8.1-3) unstable; urgency=medium
 
-  * 0.8.4: the two giveaway migrations.
+  * The search drain outranks provider work: the minute cron now runs at
+    priority 900 where the sweeps use 100. The host had 5 244 due provider jobs
+    and the cron was left unfetched for minutes.
+  * `WORKER_ALWAYS_ON=1` in worker.env makes the postinst switch the package to
+    an always-on service (window timers disabled, unit enabled at boot) for the
+    day the edge reads the index instead of Postgres.
 
-    - `0033-giveaway-draws.sql` adds `giveaway_draws`: one row per concluded
-      giveaway, holding the seed, the entrant list and the winners. The draw is
-      idempotent by that primary key — the first call stores its answer and every
-      later call replays it, so an entrant deleting their record after the draw
-      cannot change who won.
-    - `0034-giveaway-terms.sql` adds `giveaway_terms`: the closing date the
-      AppView verified plus the CID that stated it. A giveaway's record lives in
-      its author's repo and `putRecord` can rewrite `closesAt` with no app
-      involved, so the draw and the authenticated extend both compare the record
-      against this row and answer `409` naming the verified date. Without it both
-      procedures fail on the `INSERT`.
-    - The number is 0034, not a second 0033: `0033` was already the draws table.
-      Both files are forward-only and safe to re-run, like the rest.
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
 
- -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 19 Nov 2026 00:00:00 +0000
+bibliograph-worker (0.8.1-2) unstable; urgency=medium
+
+  * The unit allows 120 s to stop: a deploy that stops the worker while a
+    provider job is in flight was hitting systemd's 90 s default, and the
+    SIGKILL left graphile locks (and a `failed` unit) behind.
+  * worker.env documents SEARCH_URL (127.0.0.1:3103), left unset until the index
+    has been filled so triggers keep queueing instead of draining into an empty
+    index.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
+bibliograph-worker (0.8.1-1) unstable; urgency=medium
+
+  * 0.8.1: catalog changes are pushed into the search index.
+
+    - `catalog.search.index` runs every minute in its own queue: it claims a
+      version from `search_dirty` (written by the catalog triggers), rebuilds
+      the current document, posts deletes and upserts to the index over
+      loopback, and acknowledges exactly the versions it applied. A failed post
+      throws before the ack, so the retry (or the next tick) re-reads them.
+    - `SEARCH_URL` names the index; unset disables indexing with a boot log.
+      Triggers keep queueing in that state, so nothing is lost and search keeps
+      answering from Postgres.
+    - The claim takes an optional uri filter, so a scoped caller (tests) does
+      not consume another's queue.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
 
 bibliograph-worker (0.8.0-1) unstable; urgency=medium
 

@@ -1,0 +1,19 @@
+Package: bibliograph-search
+Version: @VERSION@
+Section: misc
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @SIZE@
+Maintainer: Bibliograph Maintainers <maintainers@olamaelcu.net>
+Homepage: https://biblio.livtet.olamaelcu.net
+Depends: adduser
+Description: Bibliograph catalog search index (Tantivy)
+ The loopback search service behind community.lexicon.media.book.searchEditions.
+ It owns a Tantivy index derived from the catalog tables: the worker posts
+ changed documents into it (public.search_dirty is the queue) and the edge
+ queries it instead of scanning Postgres.
+ .
+ The index is not a source of truth. Losing it costs a rebuild from Postgres,
+ never catalog data, and the edge keeps answering from Postgres when the service
+ is down. It listens on 127.0.0.1 only; configuration lives in
+ /etc/bibliograph/search.env and the index in /var/lib/bibliograph-search.

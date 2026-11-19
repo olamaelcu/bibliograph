@@ -61,6 +61,8 @@ printf '==> Building bibliograph-web (before the worker payload prunes dev links
 mise run package-web-deb
 printf '==> Building bibliograph-happyview\n'
 mise run package-hv-deb
+printf '==> Building bibliograph-search (static musl binary)\n'
+mise run package-search-deb
 printf '==> Building bibliograph-worker (payload staging prunes workspace dev links)\n'
 mise run package-worker-deb
 

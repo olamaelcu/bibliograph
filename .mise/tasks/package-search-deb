@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build the bibliograph-search .deb (static musl binary)"
+set -euo pipefail
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+exec packaging/search/build-deb.sh "$@"

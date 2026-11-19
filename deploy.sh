@@ -158,6 +158,8 @@ SKIP_DB="$7"
 SKIP_NGINX="$8"
 REPLACE_LEGACY="${9:-0}"
 SKIP_BOOKHIVE="${10:-0}"
+SEARCH_DEB="${11:+/tmp/}$11"
+SEARCH_SHA="${12:-}"
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -171,6 +173,7 @@ done
 
 cleanup() {
   rm -f "$HV_DEB" "$WORKER_DEB" "$WEB_DEB" \
+        ${SEARCH_DEB:+"$SEARCH_DEB"} \
         /etc/bibliograph/happyview.env.dpkg-dist \
         /etc/bibliograph/worker.env.dpkg-dist \
         /etc/bibliograph/web.env.dpkg-dist 2>/dev/null || true
@@ -192,6 +195,9 @@ verify_upload() { # path sha
 verify_upload "$HV_DEB" "$HV_SHA"
 verify_upload "$WORKER_DEB" "$WORKER_SHA"
 verify_upload "$WEB_DEB" "$WEB_SHA"
+if [ -n "$SEARCH_DEB" ]; then
+  verify_upload "$SEARCH_DEB" "$SEARCH_SHA"
+fi
 
 HV_VERSION="$(dpkg-deb -f "$HV_DEB" Version)"
 WORKER_VERSION="$(dpkg-deb -f "$WORKER_DEB" Version)"
@@ -199,6 +205,9 @@ WEB_VERSION="$(dpkg-deb -f "$WEB_DEB" Version)"
 [ "$(dpkg-deb -f "$HV_DEB" Package)" = bibliograph-happyview ] || fail "$HV_DEB is not bibliograph-happyview"
 [ "$(dpkg-deb -f "$WORKER_DEB" Package)" = bibliograph-worker ] || fail "$WORKER_DEB is not bibliograph-worker"
 [ "$(dpkg-deb -f "$WEB_DEB" Package)" = bibliograph-web ] || fail "$WEB_DEB is not bibliograph-web"
+if [ -n "$SEARCH_DEB" ]; then
+  [ "$(dpkg-deb -f "$SEARCH_DEB" Package)" = bibliograph-search ] || fail "$SEARCH_DEB is not bibliograph-search"
+fi
 
 apt_install() {
   local deb="$1"
@@ -486,6 +495,10 @@ fi
 
 # ------------------------------------------------ 3. Web edge (last, edge) ---
 
+if [ -n "$SEARCH_DEB" ]; then
+  # Before web: bibliograph-web Depends: bibliograph-search.
+  apt_install "$SEARCH_DEB"
+fi
 apt_install "$WEB_DEB"
 verify_version bibliograph-web "$WEB_VERSION"
 
@@ -717,10 +730,14 @@ xrpc_code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
   "http://127.0.0.1:$port/xrpc/community.lexicon.media.book.searchEditions" || true)"
 printf 'XRPC searchEditions %s\n' "$xrpc_code"
 
+search_health="$(curl -s -o /dev/null -w '%{http_code}' -m 5 \
+  http://127.0.0.1:3102/healthz || true)"
+printf 'SEARCH healthz %s\n' "$search_health"
+
 bad=0
 for unit in bibliograph-happyview-client.service happyview.service \
             bibliograph-happyview-deploy.service bibliograph-worker.service \
-            bibliograph-web.service; do
+            bibliograph-web.service bibliograph-search.service; do
   state="$(systemctl is-active "$unit" 2>&1 || true)"
   if [ "$unit" = bibliograph-worker.service ] && [ "$state" != active ] \
      && systemctl is-enabled --quiet bibliograph-worker-window.timer 2>/dev/null; then
@@ -735,6 +752,12 @@ for unit in bibliograph-happyview-client.service happyview.service \
   fi
 done
 
+if [ "$search_health" != 200 ]; then
+  # The edge falls back to Postgres, but a deploy that leaves the index down is
+  # not a successful deploy.
+  printf 'ERROR: bibliograph-search /healthz answered %s\n' "$search_health" >&2
+  bad=1
+fi
 if [ "$code" != 200 ]; then
   fail "the web edge did not answer 200 on http://127.0.0.1:$port/ (got $code)"
 fi
@@ -855,12 +878,14 @@ done
 HV_DEB="$(select_deb bibliograph-happyview package-hv-deb HV_PKG)"
 WORKER_DEB="$(select_deb bibliograph-worker package-worker-deb WORKER_PKG)"
 WEB_DEB="$(select_deb bibliograph-web package-web-deb WEB_PKG)"
+SEARCH_DEB="$(select_deb bibliograph-search package-search-deb SEARCH_PKG)"
 
 HV_NAME="$(basename "$HV_DEB")"
 WORKER_NAME="$(basename "$WORKER_DEB")"
 WEB_NAME="$(basename "$WEB_DEB")"
+SEARCH_NAME="$(basename "$SEARCH_DEB")"
 
-for name in "$HV_NAME" "$WORKER_NAME" "$WEB_NAME"; do
+for name in "$HV_NAME" "$WORKER_NAME" "$WEB_NAME" "$SEARCH_NAME"; do
   case "$name" in
     *[!A-Za-z0-9._+-]*) die "package filename '$name' cannot be passed through ssh safely" ;;
   esac
@@ -872,6 +897,8 @@ done
   || die "$WORKER_DEB is not bibliograph-worker"
 [ "$(dpkg-deb -f "$WEB_DEB" Package)" = "bibliograph-web" ] \
   || die "$WEB_DEB is not bibliograph-web"
+[ "$(dpkg-deb -f "$SEARCH_DEB" Package)" = "bibliograph-search" ] \
+  || die "$SEARCH_DEB is not bibliograph-search"
 
 HV_VERSION="$(dpkg-deb -f "$HV_DEB" Version)"
 WORKER_VERSION="$(dpkg-deb -f "$WORKER_DEB" Version)"
@@ -879,10 +906,12 @@ WEB_VERSION="$(dpkg-deb -f "$WEB_DEB" Version)"
 HV_ARCH="$(dpkg-deb -f "$HV_DEB" Architecture)"
 WORKER_ARCH="$(dpkg-deb -f "$WORKER_DEB" Architecture)"
 WEB_ARCH="$(dpkg-deb -f "$WEB_DEB" Architecture)"
+SEARCH_ARCH="$(dpkg-deb -f "$SEARCH_DEB" Architecture)"
 
 HV_SHA="$(sha256sum "$HV_DEB" | cut -d' ' -f1)"
 WORKER_SHA="$(sha256sum "$WORKER_DEB" | cut -d' ' -f1)"
 WEB_SHA="$(sha256sum "$WEB_DEB" | cut -d' ' -f1)"
+SEARCH_SHA="$(sha256sum "$SEARCH_DEB" | cut -d' ' -f1)"
 
 if [ "$DRY_RUN" = 1 ]; then
   print_plan
@@ -1171,15 +1200,16 @@ say "Preflight ok: arch $HOST_ARCH, node $NODE_VERSION, nginx $HAS_NGINX"
 
 # -------------------------------------------------------------------- upload ---
 
-say "Uploading $HV_NAME, $WORKER_NAME and $WEB_NAME to $HOST:/tmp/"
-scp -q "$HV_DEB" "$WORKER_DEB" "$WEB_DEB" "$HOST:/tmp/"
+say "Uploading $HV_NAME, $WORKER_NAME, $SEARCH_NAME and $WEB_NAME to $HOST:/tmp/"
+scp -q "$HV_DEB" "$WORKER_DEB" "$SEARCH_DEB" "$WEB_DEB" "$HOST:/tmp/"
 
 # ---------------------------------------------- install, bootstrap, verify ---
 
 say "Installing and verifying on $HOST (dependency order)"
 REMOTE_ARGS="--"
 for arg in "$HV_NAME" "$HV_SHA" "$WORKER_NAME" "$WORKER_SHA" "$WEB_NAME" "$WEB_SHA" \
-           "$SKIP_DB" "$SKIP_NGINX" "$REPLACE_LEGACY" "$SKIP_BOOKHIVE"; do
+           "$SKIP_DB" "$SKIP_NGINX" "$REPLACE_LEGACY" "$SKIP_BOOKHIVE" \
+           "$SEARCH_NAME" "$SEARCH_SHA"; do
   REMOTE_ARGS="$REMOTE_ARGS '$arg'"
 done
 

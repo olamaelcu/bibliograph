@@ -1,0 +1,28 @@
+[Unit]
+Description=Bibliograph search index (Tantivy)
+Documentation=https://github.com/olamaelcu/bibliograph
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=bibliograph
+Group=bibliograph
+# The index is the only thing this process writes; the database and the
+# configuration are read-only to it.
+StateDirectory=bibliograph-search
+Environment=SEARCH_INDEX_DIR=/var/lib/bibliograph-search/index
+Environment=SEARCH_BIND=127.0.0.1:3102
+EnvironmentFile=-/etc/bibliograph/search.env
+ExecStart=/usr/lib/bibliograph-search/bibliograph-search
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/bibliograph-search
+
+[Install]
+WantedBy=multi-user.target

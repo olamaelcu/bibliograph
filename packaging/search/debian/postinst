@@ -1,0 +1,26 @@
+#!/bin/sh
+# Hand-assembled package: enable and (re)start the unit with
+# deb-systemd-helper/-invoke, what debhelper's generated snippets call.
+set -e
+
+if ! getent group bibliograph >/dev/null; then
+    addgroup --system bibliograph
+fi
+if ! getent passwd bibliograph >/dev/null; then
+    adduser --system --ingroup bibliograph --home /var/lib/bibliograph \
+        --no-create-home --disabled-login --gecos "Bibliograph appview" bibliograph
+fi
+
+install -d -m 0750 -o root -g bibliograph /etc/bibliograph
+install -d -m 0750 -o bibliograph -g bibliograph /var/lib/bibliograph-search
+
+if [ -d /run/systemd/system ]; then
+    deb-systemd-helper daemon-reload >/dev/null 2>&1 || true
+    deb-systemd-helper enable bibliograph-search.service >/dev/null 2>&1 || true
+    # The process is cheap to restart and the index is memory-mapped, so a
+    # restart on upgrade is the safe path.
+    deb-systemd-invoke restart bibliograph-search.service >/dev/null 2>&1 || \
+        deb-systemd-invoke start bibliograph-search.service >/dev/null 2>&1 || true
+fi
+
+exit 0
