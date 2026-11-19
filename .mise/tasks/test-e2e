@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#MISE description="Run the Playwright E2E suite (testcontainer Postgres, fixture PDS/PLC)"
+#
+# The suite starts its own Postgres container, applies `packages/worker/sql`,
+# seeds a contributor and two claims, then starts the worker and the edge. What
+# it does *not* start is the fixture environment: the PLC and PDS are the compose
+# stack, and the `knownContributor` record the test approves is fetched back from
+# that PDS, so `docker compose up -d` must have run and `.env` must carry
+# `PDS_URL`, `PDS_ACCOUNT_DID` and `PDS_ACCOUNT_PASSWORD` (mise loads it).
+#
+# Without those values the suite is skipped with a reason, not failed — the same
+# behaviour CI gets on a machine with no fixtures.
+#
+#   mise run test-e2e                 # everything
+#   mise run test-e2e -- --headed     # watch it
+#   mise run test-e2e -- e2e/librarian-claims.spec.ts -g 'approving'
+
+set -euo pipefail
+
+ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+cd "$ROOT"
+
+exec pnpm exec playwright test "$@"

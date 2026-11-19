@@ -386,3 +386,36 @@ public origin: `packages/web` proxies it server-side with
 from anything a caller sends. Queries answer anonymous callers; procedures take
 a DPoP session. `docs/happyview.md` has the header contract, the DPoP
 provisioning flow and the error mapping.
+
+## End-to-end (Playwright)
+
+`mise run test-e2e` drives the librarian queue in a real browser
+(`pnpm exec playwright install chromium` once per machine, or reuse the browser
+the platform's Playwright already installed).
+
+The suite owns its database and processes: a Postgres testcontainer with every
+`packages/worker/sql` file applied (the way `deploy.sh` replays them), a seeded
+contributor and two claims, the worker (admin API plus the labeler key it signs
+with) and the edge on a port of its own — 5191/19464-19466, deliberately away
+from a running dev stack. It uses the **compose stack for the fixtures**: the
+assertion that matters is the `knownContributor` record coming back out of the
+fixture PDS, so `docker compose up -d` is a prerequisite and `.env` must carry
+`PDS_URL`, `PDS_ACCOUNT_DID` and `PDS_ACCOUNT_PASSWORD` (`mise` loads it).
+Without those the suite is *skipped with a reason* rather than failing, so a
+machine without fixtures says why.
+
+What it verifies, in order: the librarian's decision row; the queued
+`knownContributor` and `known-author` label; the record fetched from the fixture
+PDS with `subject`/`contributor`/`issuedBy`; the label's ES256K signature under
+the labeler's public half; and `getContributorLink` answering with the identity
+and claim state the reader's page renders. The reject scenario asserts the
+decision and the absence of a binding.
+
+Two things are stubbed on purpose:
+
+- **The librarian's identity** is a minted `bib_librarian` cookie (the app's own
+  HMAC helper), not an OAuth round trip. The queue and the decisions are what
+  this suite is for; sign-in is unit-tested and needs an interactive PDS login.
+- **The worker's per-minute crons** are not waited on; the spec enqueues
+  `pds-publish` and `labels.emit` through graphile so a failure is a failure, not
+  a slow machine.
