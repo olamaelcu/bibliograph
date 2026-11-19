@@ -1,3 +1,23 @@
+bibliograph-worker (0.8.4-1) unstable; urgency=medium
+
+  * 0.8.4: the two giveaway migrations.
+
+    - `0033-giveaway-draws.sql` adds `giveaway_draws`: one row per concluded
+      giveaway, holding the seed, the entrant list and the winners. The draw is
+      idempotent by that primary key — the first call stores its answer and every
+      later call replays it, so an entrant deleting their record after the draw
+      cannot change who won.
+    - `0034-giveaway-terms.sql` adds `giveaway_terms`: the closing date the
+      AppView verified plus the CID that stated it. A giveaway's record lives in
+      its author's repo and `putRecord` can rewrite `closesAt` with no app
+      involved, so the draw and the authenticated extend both compare the record
+      against this row and answer `409` naming the verified date. Without it both
+      procedures fail on the `INSERT`.
+    - The number is 0034, not a second 0033: `0033` was already the draws table.
+      Both files are forward-only and safe to re-run, like the rest.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.8.0-1) unstable; urgency=medium
 
   * 0.8.0: the worker runs only inside a daily window.
