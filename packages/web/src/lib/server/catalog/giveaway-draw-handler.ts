@@ -138,7 +138,11 @@ export async function giveawayDraw(
   }
   const closesAt = Date.parse(verdict.closesAt);
   if (Number.isNaN(closesAt) || Date.now() < closesAt) {
-    return fail(409, ERROR_NOT_CLOSED, 'the giveaway is still open');
+    // Every 409 names the verified date, so the caller can put the record back
+    // before reporting the reason: a refusal is never a dead end.
+    return fail(409, ERROR_NOT_CLOSED, 'the giveaway is still open', {
+      stored: verdict.closesAt,
+    });
   }
 
   const outcome = await concludeGiveaway(context.pool, giveawayUri);

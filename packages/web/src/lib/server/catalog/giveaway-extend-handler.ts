@@ -121,10 +121,6 @@ export async function giveawayExtend(
   if (issuer !== giveaway.author) {
     return fail(403, ERROR_NOT_AUTHOR, 'only the giveaway’s author can extend it');
   }
-  if (await isConcluded(context.pool, body.giveaway)) {
-    return fail(409, ERROR_ALREADY_DRAWN, 'this giveaway has already been drawn');
-  }
-
   // The record must agree with the verified term before anything moves: an
   // extension requested from a disputed record would launder the discrepancy.
   const verdict = await verifyGiveawayTerm(context.pool, body.giveaway);
@@ -138,6 +134,15 @@ export async function giveawayExtend(
       relation: verdict.relation
     });
   }
+
+  // After the term check, so a disputed record is repaired before it is told
+  // the giveaway is over — and so this refusal can name the verified date too.
+  if (await isConcluded(context.pool, body.giveaway)) {
+    return fail(409, ERROR_ALREADY_DRAWN, 'this giveaway has already been drawn', {
+      stored: verdict.closesAt
+    });
+  }
+
 
   const extension = await authorizeExtension(context.pool, body.giveaway, body.closesAt);
   if (!extension.ok) {
