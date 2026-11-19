@@ -27,22 +27,29 @@ type StatsRow = {
  * every deploy) keeps the estimates within a few percent, and this query reads
  * a handful of catalog pages instead of the catalog itself.
  *
- * The 60s TTL and the boot warm-up stay: they cost nothing now and keep the
- * page stable when the estimates refresh.
+ * Shape matters as much as source: `relnamespace = 'public'::regnamespace` is
+ * a parse-time constant, so this is one lookup on `pg_class_relname_nsp_index`
+ * per table with no namespace join (which cost 238 planning buffers). It also
+ * stays honest on a database that has not been migrated yet: no rows instead
+ * of a `::regclass` cast error, and `to_regclass` is avoided because it takes a
+ * lock on the relation for a value this query already knows. The estimates
+ * only move when `ANALYZE` runs, which is per deploy and per autovacuum, so a
+ * five-minute TTL keeps every ordinary request off the catalog entirely while
+ * the counts still refresh long before anyone notices.
  */
-const STATS_TTL_MS = 60_000;
+const STATS_TTL_MS = 300_000;
 
 async function countCatalog(): Promise<CatalogStats> {
   const { rows } = await catalogPool().query<StatsRow>(`
     SELECT
-      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'books'), 0)::bigint AS editions,
-      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'contributors'), 0)::bigint AS contributors,
-      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'publishers'), 0)::bigint AS publishers,
-      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'edition_identifiers'), 0)::bigint AS identifiers
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE n.nspname = 'public'
-       AND c.relname IN ('books', 'contributors', 'publishers', 'edition_identifiers')
+      (SELECT GREATEST(reltuples, 0)::bigint FROM pg_class
+        WHERE relname = 'books' AND relnamespace = 'public'::regnamespace) AS editions,
+      (SELECT GREATEST(reltuples, 0)::bigint FROM pg_class
+        WHERE relname = 'contributors' AND relnamespace = 'public'::regnamespace) AS contributors,
+      (SELECT GREATEST(reltuples, 0)::bigint FROM pg_class
+        WHERE relname = 'publishers' AND relnamespace = 'public'::regnamespace) AS publishers,
+      (SELECT GREATEST(reltuples, 0)::bigint FROM pg_class
+        WHERE relname = 'edition_identifiers' AND relnamespace = 'public'::regnamespace) AS identifiers
   `);
 
   const row = rows[0];
@@ -57,7 +64,7 @@ async function countCatalog(): Promise<CatalogStats> {
   };
 }
 
-/** One round trip per minute at most, shared by every concurrent reader. */
+/** One round trip per five minutes at most, shared by every concurrent reader. */
 export const readCatalogStats = cachedLoader<CatalogStats>({
   ttlMs: STATS_TTL_MS,
   staleWhileRevalidate: true,
