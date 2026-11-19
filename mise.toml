@@ -19,6 +19,13 @@ COVERS_CACHE_DIR = "{{config_root}}/.cache/covers"
 # deployment account is the local `did:plc`. Installed hosts set their own value
 # in web.env (the production did:web).
 FEED_GENERATOR_DID = "${HAPPYVIEW_ACCOUNT_DID}"
+# The librarian queue, enabled locally against the provisional account that
+# `mise run hv-account` creates: a real did:plc on the local PDS, so the sign-in
+# goes through the same OAuth path production uses. Installed hosts seal both
+# values in SOPS and Ansible writes /etc/bibliograph/librarian.env; the secret
+# below is a development constant and must never leave this machine.
+LIBRARIAN_DIDS = "${HAPPYVIEW_ACCOUNT_DID}"
+LIBRARIAN_SESSION_SECRET = "dev-librarian-session-secret"
 
 [tasks.sql]
 description = "Open a psql shell against the local bibliograph database"
