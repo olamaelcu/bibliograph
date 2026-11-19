@@ -1,3 +1,14 @@
+bibliograph-search (0.1.0-3) unstable; urgency=medium
+
+  * Observability: `tracing` spans and logs (journald) for every request and
+    for index commits, plus `metrics` counters/histograms served from
+    `GET /metrics` in Prometheus format with real histogram buckets (query and
+    HTTP latency, results per query, commit duration, posts/deletes, index
+    docs/segments, empty-result ratio).
+  * The Grafana dashboard `bibliograph-search` (ansible role grafana) reads it.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-search (0.1.0-2) unstable; urgency=medium
 
   * Default bind is 127.0.0.1:3103: 3102 belongs to Loki on the host, and the

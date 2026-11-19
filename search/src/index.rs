@@ -80,7 +80,10 @@ impl Engine {
         }
         // One commit per batch keeps a segment per post; the merge policy
         // collapses them in the background.
+        let committed = std::time::Instant::now();
         writer.commit().map_err(|e| format!("commit: {e}"))?;
+        metrics::histogram!("search_commit_duration_seconds")
+            .record(committed.elapsed().as_secs_f64());
         // `ReloadPolicy::OnCommitWithDelay` polls for a new commit; reloading
         // here makes a posted batch visible before the response is sent, which
         // is what the backfill and the cron drain rely on.

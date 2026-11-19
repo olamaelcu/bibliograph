@@ -9,6 +9,10 @@ description = "Loopback Tantivy index for the Bibliograph catalog"
 tantivy = "0.26.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.17"
 
 [profile.release]
 lto = true
