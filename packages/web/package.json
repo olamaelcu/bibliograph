@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.6.3",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
   "devDependencies": {
     "@atproto/crypto": "^0.5.7",
     "@atproto/oauth-client-node": "^0.3.11",
+    "@atproto/oauth-types": "^0.6.3",
     "@awesome.me/webawesome": "^3.14.0",
     "@sveltejs/adapter-node": "^6.0.1",
     "@sveltejs/kit": "^3.1.1",

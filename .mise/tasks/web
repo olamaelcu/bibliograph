@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 #MISE description="Run the SvelteKit edge on :5176"
+#MISE depends=["labeler-key"]
+#
+# The labeler key is a dependency because the DID document this server renders
+# publishes its public half: an edge running without it would advertise a
+# `#atproto_labeler` service whose signatures nobody can verify.
 
 set -euo pipefail
 
 ROOT="${MISE_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
+
+KEY="$ROOT/.cache/labeler/labeler.key"
+export LIVTET_LABELER_KEY_MULTIBASE="$(sed -n 's/^public=//p' "$KEY")"
+# Locally the labeler is the worker on loopback, not the public origin; the
+# endpoint is path-less per the spec, so a port is fine.
+export LIVTET_LABELER_ORIGIN="${LIVTET_LABELER_ORIGIN:-http://127.0.0.1:9466}"
 
 exec pnpm --filter web dev --port 5176

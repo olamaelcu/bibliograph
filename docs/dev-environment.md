@@ -386,3 +386,63 @@ public origin: `packages/web` proxies it server-side with
 from anything a caller sends. Queries answer anonymous callers; procedures take
 a DPoP session. `docs/happyview.md` has the header contract, the DPoP
 provisioning flow and the error mapping.
+
+## End-to-end (Playwright)
+
+`mise run test-e2e` drives the librarian queue in a real browser
+(`pnpm exec playwright install chromium` once per machine, or reuse the browser
+the platform's Playwright already installed).
+
+The suite owns its database and processes: a Postgres testcontainer with every
+`packages/worker/sql` file applied (the way `deploy.sh` replays them), a seeded
+contributor and two claims, the worker (admin API plus the labeler key it signs
+with) and the edge on a port of its own — 5191/19464-19466, deliberately away
+from a running dev stack. It uses the **compose stack for the fixtures**: the
+assertion that matters is the `knownContributor` record coming back out of the
+fixture PDS, so `docker compose up -d` is a prerequisite and `.env` must carry
+`PDS_URL`, `PDS_ACCOUNT_DID` and `PDS_ACCOUNT_PASSWORD` (`mise` loads it).
+Without those the suite is *skipped with a reason* rather than failing, so a
+machine without fixtures says why.
+
+What it verifies, in order: the librarian's decision row; the queued
+`knownContributor` and `known-author` label; the record fetched from the fixture
+PDS with `subject`/`contributor`/`issuedBy`; the label's ES256K signature under
+the labeler's public half; and `getContributorLink` answering with the identity
+and claim state the reader's page renders. The reject scenario asserts the
+decision and the absence of a binding.
+
+The librarian signs in the way a person does: the app's form mints the RFC 8252
+loopback client id, the fixture PDS asks for the account's password and its
+consent, and the callback sets the session cookie on the browser context. The
+OAuth round trip (PAR, authorize, token exchange, DPoP) is therefore part of what
+the suite verifies. It needs the fixture account: `HAPPYVIEW_ACCOUNT_DID` and
+`HV_ACCOUNT_HANDLE` from `.env`, password `HV_ACCOUNT_PASSWORD`
+(`Dev-account-password1` by default, and what `mise run hv-account` creates).
+Chromium runs with `ignoreHTTPSErrors` because the PDS answers with Caddy's
+internal CA — `mise run hv-ca` can install it, but the suite should not require
+it.
+
+One thing is stubbed on purpose: the worker's per-minute crons are not waited
+on; the spec enqueues `pds-publish` and `labels.emit` through graphile, so a
+failure is a failure, not a slow machine.
+
+The admin spec covers the operator surface the same way: the token gate (a
+redirect when signed out, the error for a wrong token, the dashboard for the
+right one), and the three merges — editions (the workbench's
+`POST /admin/api/merge`, asserting the base keeps its URI while identifiers and
+credits are absorbed), contributors (the preview page plus the confirm form, then
+the credit and the verified identity on the survivor and the source row gone),
+and publishers (identifiers unioned, source deleted). Those scenarios are serial
+and ordered because each feeds the next: the edition merge moves the seeded
+credit onto the base, and the contributor merge then has to move that credit.
+
+`admin-guards.spec.ts` covers what must *not* happen: the JSON APIs answer 401
+without the operator cookie; malformed provider/import requests are refused
+before a provider is contacted; a credited contributor and a publisher an
+edition depends on cannot be deleted; deleting an edition requires the revision
+the page was loaded with (a stale one is a 409) and queues the record deletion;
+the merge preview refuses an unknown or identical target; when both rows carry
+an identity the survivor keeps its own; the dashboard's merge search finds the
+seeded editions; and signing out clears the cookie. Form POSTs sent from the
+suite carry an explicit `origin` header, because SvelteKit's CSRF check rejects
+them otherwise.

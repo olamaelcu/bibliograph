@@ -10,13 +10,20 @@
     "web:test": "pnpm --filter web test",
     "worker:dev": "pnpm --filter worker start",
     "worker:test": "pnpm --filter worker test",
-    "verify:lex": "node scripts/verify-lexicons.mjs"
+    "verify:lex": "node scripts/verify-lexicons.mjs",
+    "test:e2e": "playwright test"
   },
   "engines": {
     "node": "26.3.0"
   },
   "packageManager": "pnpm@11.13.1",
   "devDependencies": {
-    "fast-check": "^4.10.2"
+    "@atproto/crypto": "^0.5.7",
+    "@playwright/test": "^1.62.1",
+    "@testcontainers/postgresql": "^12.2.1",
+    "@types/pg": "^8.23.1",
+    "fast-check": "^4.10.2",
+    "pg": "^8.23.1",
+    "testcontainers": "^12.2.1"
   }
 }

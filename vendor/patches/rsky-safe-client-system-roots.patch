@@ -1,0 +1,70 @@
+diff --git a/rsky-identity/src/safe_fetch.rs b/rsky-identity/src/safe_fetch.rs
+index d7e30d14..db19690e 100644
+--- a/rsky-identity/src/safe_fetch.rs
++++ b/rsky-identity/src/safe_fetch.rs
+@@ -256,6 +256,31 @@ pub enum Redirects {
+     Follow(u8),
+ }
+ 
++/// The deployment's own trust anchors, added to reqwest's defaults.
++///
++/// reqwest's default store is webpki's compiled Mozilla roots, so a host the
++/// deployment serves with a certificate from its own CA — this stack's PDS,
++/// behind Caddy — fails the handshake no matter what the operating system
++/// trusts. The bundle here is the one the deployment curates (`/etc/ssl/certs`
++/// in the image, an image's anchors plus the local CA); a missing or
++/// unreadable file leaves the defaults untouched.
++fn with_system_roots(mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
++    const BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
++    let Ok(pem) = std::fs::read(BUNDLE) else {
++        return builder;
++    };
++    let Ok(text) = String::from_utf8(pem) else {
++        return builder;
++    };
++    for block in text.split("-----END CERTIFICATE-----") {
++        let candidate = format!("{block}-----END CERTIFICATE-----\n");
++        if let Ok(cert) = reqwest::Certificate::from_pem(candidate.as_bytes()) {
++            builder = builder.add_root_certificate(cert);
++        }
++    }
++    builder
++}
++
+ /// A client whose every request is bound by a [`NetworkPolicy`].
+ #[derive(Clone)]
+ pub struct SafeClient {
+@@ -285,11 +310,13 @@ impl SafeClient {
+         lookup: Arc<dyn Lookup>,
+     ) -> Result<Self, FetchError> {
+         let resolver = Arc::new(SafeResolver::new(policy, lookup));
+-        let client = reqwest::Client::builder()
+-            .timeout(timeout)
+-            .redirect(Policy::none())
+-            .dns_resolver(resolver.clone())
+-            .build()?;
++        let client = with_system_roots(
++            reqwest::Client::builder()
++                .timeout(timeout)
++                .redirect(Policy::none())
++                .dns_resolver(resolver.clone()),
++        )
++        .build()?;
+         Ok(Self {
+             policy,
+             resolver,
+@@ -301,9 +328,11 @@ impl SafeClient {
+     /// for callers that need their own default headers or timeouts. Check
+     /// every URL sent through it with [`SafeClient::check`].
+     pub fn builder(&self) -> reqwest::ClientBuilder {
+-        reqwest::Client::builder()
+-            .redirect(Policy::none())
+-            .dns_resolver(self.resolver.clone())
++        with_system_roots(
++            reqwest::Client::builder()
++                .redirect(Policy::none())
++                .dns_resolver(self.resolver.clone()),
++        )
+     }
+ 
+     #[must_use]

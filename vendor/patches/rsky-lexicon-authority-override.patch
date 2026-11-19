@@ -1,0 +1,20 @@
+diff --git a/rsky-pds/src/permission_set.rs b/rsky-pds/src/permission_set.rs
+index 4d3a9e65..17ce5ff7 100644
+--- a/rsky-pds/src/permission_set.rs
++++ b/rsky-pds/src/permission_set.rs
+@@ -416,7 +416,14 @@ impl PermissionSetResolver {
+     async fn fetch(&self, nsid: &str) -> anyhow::Result<Vec<Permission>> {
+         let parsed = Nsid::parse(nsid).map_err(|e| anyhow::anyhow!("invalid nsid: {e}"))?;
+         let authority = parsed.authority();
+-        let did = resolve_lexicon_authority(&authority).await?;
++        // A deployment whose PDS cannot reach the public directory — a stack
++        // that runs its own PLC, where the authority's `did:plc` is unknown —
++        // names the publishing DID directly instead. Same knob and same
++        // meaning as the reference PDS's `PDS_LEXICON_AUTHORITY_DID`.
++        let did = match rsky_common::env::env_str("PDS_LEXICON_AUTHORITY_DID") {
++            Some(pinned) if !pinned.trim().is_empty() => pinned.trim().to_string(),
++            _ => resolve_lexicon_authority(&authority).await?,
++        };
+         let endpoint = resolve_pds_endpoint(&did).await?;
+         let client = crate::outbound::client()
+             .builder()

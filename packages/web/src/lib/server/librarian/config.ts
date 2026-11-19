@@ -26,14 +26,3 @@ export function librarianConfig(): LibrarianConfig {
   const secret = (env.LIBRARIAN_SESSION_SECRET ?? '').trim();
   return { enabled: allowlist.size > 0 && secret !== '', allowlist, secret };
 }
-
-/**
- * True when an origin is plain HTTP, which only local development is.
- *
- * The OAuth client refuses an insecure authorization server by default, and a
- * development host speaks HTTP end to end (edge, PDS, PLC); production is https,
- * so the exception is scoped to the origin rather than to a build mode.
- */
-export function isInsecureOrigin(origin: string): boolean {
-  return new URL(origin).protocol === 'http:';
-}

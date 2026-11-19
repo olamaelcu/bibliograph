@@ -19,18 +19,25 @@ COVERS_CACHE_DIR = "{{config_root}}/.cache/covers"
 # deployment account is the local `did:plc`. Installed hosts set their own value
 # in web.env (the production did:web).
 FEED_GENERATOR_DID = "${HAPPYVIEW_ACCOUNT_DID}"
+# The librarian queue, enabled locally against the provisional account that
+# `mise run hv-account` creates: a real did:plc on the local PDS, so the sign-in
+# goes through the same OAuth path production uses. Installed hosts seal both
+# values in SOPS and Ansible writes /etc/bibliograph/librarian.env; the secret
+# below is a development constant and must never leave this machine.
+LIBRARIAN_DIDS = "${HAPPYVIEW_ACCOUNT_DID}"
+LIBRARIAN_SESSION_SECRET = "dev-librarian-session-secret"
 
 [tasks.sql]
 description = "Open a psql shell against the local bibliograph database"
 run = ["psql ${DATABASE_URL}"]
 
 [tasks.worker-dev]
-dir = "packages/worker"
-run = ["pnpm run start"]
+description = "Run the catalog worker, generating the labeler key first"
+run = ["mise run worker"]
 
 [tasks.web-dev]
-dir = "packages/web"
-run = ["docker compose up -d", "pnpm run dev"]
+description = "Bring up the local stack and run the edge on :5176 with the labeler key"
+run = ["docker compose up -d", "mise run web"]
 
 [tasks.dev]
 run = ["mise run web-dev ::: worker-dev"]

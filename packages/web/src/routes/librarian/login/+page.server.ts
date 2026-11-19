@@ -4,17 +4,20 @@
  * callback returns.
  */
 
-import { fail, redirect } from '@sveltejs/kit';
+import { fail, isRedirect, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
 import { librarianConfig } from '$lib/server/librarian/config';
 import { librarianDid } from '$lib/server/librarian/session';
 import { librarianOAuthClient } from '$lib/server/librarian/oauth';
+import { internalReturnTo } from '$lib/server/librarian/return-to';
+
+const CLAIMS = '/librarian/claims';
 
 export const load: PageServerLoad = ({ cookies, url }) => {
   const did = librarianDid(cookies);
   if (did !== null && librarianConfig().allowlist.has(did)) {
-    redirect(303, url.searchParams.get('returnTo') || '/librarian/claims');
+    redirect(303, internalReturnTo(url.searchParams.get('returnTo'), CLAIMS));
   }
   return { allowlist: librarianConfig().allowlist.size };
 };
@@ -29,10 +32,13 @@ export const actions: Actions = {
 
     try {
       const href = await librarianOAuthClient(url.origin).authorize(handle, { scope: 'atproto' });
-      redirect(303, href.toString());
+      // The authorization endpoint lives on the account's own PDS, so this is an
+      // external redirect by design: `href` is minted by the OAuth client, never
+      // from the form, and the callback returns to this origin.
+      redirect(303, href.toString(), { external: true });
     } catch (error) {
       // `redirect` throws, so it must not be swallowed by this catch.
-      if (error && typeof error === 'object' && 'status' in error && 'location' in error) throw error;
+      if (isRedirect(error)) throw error;
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[librarian] authorize failed for ${handle}`, error);
       return fail(502, {

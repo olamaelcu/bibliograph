@@ -22,7 +22,14 @@ export default defineConfig(({ command }) => ({
         // answered `Internal server error: require is not defined` until this
         // entry let Node load `pg` itself. The packaged build still bundles it
         // (rollup handles CJS), so this is a dev-only escape hatch.
-        external: command === 'build' ? [] : ['pg']
+        // `@atproto/oauth-client-node` and its `@atproto/oauth-types` companion
+        // are the same shape — CommonJS bundles that reference `exports` — and
+        // only the librarian sign-in imports them, so they failed the same way
+        // the first time that action ran.
+        external:
+          command === 'build'
+            ? []
+            : ['pg', '@atproto/oauth-client-node', '@atproto/oauth-types']
       }
     }
   },
