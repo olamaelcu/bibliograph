@@ -37,11 +37,12 @@ export interface RoutedSearchInput {
 export async function searchEditionsRouted(
   input: RoutedSearchInput,
   pool: BookQueryable,
-  source: Record<string, string | undefined>
+  source: Record<string, string | undefined>,
+  hydration: BookQueryable = pool
 ): Promise<BookResults> {
   const backend = parseSearchBackend(source.SEARCH_BACKEND);
   const engine = engineConfig(source);
-  const postgres = () => searchEditions(input, pool);
+  const postgres = () => searchEditions(input, pool, hydration);
   if (backend === 'postgres' || engine.url === undefined || input.identifiers.length > 0) {
     return postgres();
   }
@@ -88,7 +89,12 @@ export async function searchEditionsRouted(
       },
       { url: engine.url, timeoutMs: engine.timeoutMs }
     );
-    const items = await editionsByUris(engineResult.uris, pool, input.coversBaseUrl ?? '');
+    const items = await editionsByUris(
+      engineResult.uris,
+      pool,
+      input.coversBaseUrl ?? '',
+      hydration
+    );
     return { items, hasMore: engineResult.hasMore, total: engineResult.total };
   } catch (error) {
     console.error('[xrpc] search engine failed, falling back to Postgres', error);

@@ -11,7 +11,7 @@ import {
 } from "$lib/server/metrics";
 import { forward } from "$lib/server/happyview";
 import { proxyPdsRead } from "$lib/server/pds";
-import { catalogPool, isCatalogPoolTimeout, searchPool } from "$lib/server/catalog/db";
+import { catalogPool, hydrationPool, isCatalogPoolTimeout, searchPool } from "$lib/server/catalog/db";
 import { CatalogUnavailableError, catalogFailure } from "$lib/server/catalog/errors";
 import {
   resolveEditions,
@@ -340,7 +340,7 @@ async function handleSearch(request: Request): Promise<Response> {
         order: parsedOrder.order,
         language,
         coversBaseUrl: coversBase,
-      }, searchPool(), env),
+      }, searchPool(), env, hydrationPool()),
     );
     if (hit) {
       recordCatalogQuery(metrics, "searchEditions", "cache_hit", 0);
@@ -406,6 +406,8 @@ async function handleTypeahead(params: URLSearchParams): Promise<Response> {
       { q, limit, coversBaseUrl: coversBaseUrl() },
       searchPool(),
       env,
+      fetch,
+      hydrationPool(),
     );
     recordCatalogQuery(
       metrics,

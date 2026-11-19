@@ -17,6 +17,7 @@ const shared = globalThis as typeof globalThis & {
   __bibliographCatalogPool?: Pool;
   __bibliographFeedPool?: Pool;
   __bibliographSearchPool?: Pool;
+  __bibliographHydrationPool?: Pool;
 };
 
 /**
@@ -126,4 +127,25 @@ export function searchPool(): Pool {
   });
 
   return shared.__bibliographSearchPool;
+}
+
+/**
+ * Hydration's own connections. The statement is fast in isolation (planning
+ * 5 ms, index probes per uri); what it waits on is the host's disk — the page
+ * measured 4.8 s for 25 uris with `shared read=1125 ms` inside one subplan. It
+ * therefore gets its own pool and a wider bound than the search statement, so
+ * a slow page cannot occupy the connections a search needs and vice versa.
+ */
+export function hydrationPool(): Pool {
+  const connectionString = env.DATABASE_URL;
+  if (!connectionString) throw new CatalogUnavailableError();
+
+  shared.__bibliographHydrationPool ??= new Pool({
+    connectionString,
+    max: 8,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 2_000,
+    statement_timeout: 10_000
+  });
+  return shared.__bibliographHydrationPool;
 }

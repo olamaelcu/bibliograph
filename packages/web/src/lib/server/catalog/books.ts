@@ -248,7 +248,7 @@ export async function searchEditions(input: {
   order?: BookSortOrder;
   /** Public origin for `/api/covers` URLs; absent keeps provider URLs. */
   coversBaseUrl?: string;
-}, pool: BookQueryable): Promise<BookResults> {
+}, pool: BookQueryable, hydration: BookQueryable = pool): Promise<BookResults> {
   const params: Array<string | number> = [];
   const push = (value: string | number): string => {
     params.push(value);
@@ -375,7 +375,7 @@ export async function searchEditions(input: {
   );
   const rows = page.rows.slice(0, input.limit);
 
-  const items = await hydrate(pool, rows, input.coversBaseUrl ?? '');
+  const items = await hydrate(hydration, rows, input.coversBaseUrl ?? '');
 
   // A first page shorter than `limit` is the whole match set, so its length is
   // the exact total. A full first page has more behind it but its exact size is
@@ -399,7 +399,8 @@ export async function searchEditions(input: {
 export async function editionsByUris(
   uris: string[],
   pool: BookQueryable,
-  coversBaseUrl = ''
+  coversBaseUrl = '',
+  hydration: BookQueryable = pool
 ): Promise<BookView[]> {
   if (uris.length === 0) return [];
   const page = await pool.query<BookRow>(
@@ -411,5 +412,5 @@ export async function editionsByUris(
       ORDER BY array_position($1::text[], e.uri)`,
     [uris]
   );
-  return hydrate(pool, page.rows, coversBaseUrl);
+  return hydrate(hydration, page.rows, coversBaseUrl);
 }

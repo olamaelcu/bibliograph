@@ -49,14 +49,15 @@ export async function typeaheadEditions(
   input: TypeaheadInput,
   pool: BookQueryable,
   source: Record<string, string | undefined>,
-  engineFetch: typeof fetch = fetch
+  engineFetch: typeof fetch = fetch,
+  hydration: BookQueryable = pool
 ): Promise<TypeaheadResult> {
   const uris = await engineTypeaheadUris(input, source, engineFetch);
   if (uris !== undefined) {
     // Hydration is deliberately outside the engine `try`: a hydration failure
     // is a catalog failure, not an engine failure, so it must propagate.
     return {
-      items: await editionsByUris(uris, pool, input.coversBaseUrl ?? ''),
+      items: await editionsByUris(uris, pool, input.coversBaseUrl ?? '', hydration),
       outcome: 'ok'
     };
   }
