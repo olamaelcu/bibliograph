@@ -15,6 +15,7 @@ import { FormatResolveError, normalizeFormatIsbns, resolveFormat } from './resol
 import { DEFAULT_CONTRIBUTOR_ROLE, normalizeContributorRole } from './contributor-roles.js';
 import { cleanString, isbn13 as normalizeIsbn13 } from './util.js';
 import { openLibraryBookKey } from './providers/openlibrary.js';
+import { ClaimError, decideClaim, listIdentities, listPendingClaims, revokeIdentity } from './claims.js';
 
 export const DEFAULT_ADMIN_HOST = '127.0.0.1';
 export const DEFAULT_ADMIN_PORT = 9465;
@@ -367,7 +368,7 @@ function publisherFilters(body) {
  * Create the HTTP handler. Exported separately from the listener so tests can
  * exercise routing without binding a port.
  */
-export function createAdminHandler({ providers, ingest, token, logger = console }) {
+export function createAdminHandler({ pool, providers, ingest, token, authority, logger = console }) {
   return async function handle(request, response) {
     const url = new URL(request.url ?? '/', 'http://localhost');
     try {
@@ -376,6 +377,70 @@ export function createAdminHandler({ providers, ingest, token, logger = console 
           error: 'Unauthorized',
           message: 'a valid admin bearer token is required'
         });
+        return;
+      }
+
+      // Contributor claims. The edge proxies these with the same operator token
+      // it uses for provider search; the catalog writes stay here, where the pool
+      // has the grants the queues' triggers need.
+      if (url.pathname === '/claims/pending') {
+        if (request.method !== 'GET') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const limit = boundedInteger(url.searchParams.get('limit'), 'limit', {
+          fallback: 100,
+          min: 1,
+          max: 500
+        });
+        const items = await listPendingClaims(pool, { limit });
+        sendJson(response, 200, { items, pending: items.length });
+        return;
+      }
+
+      if (url.pathname === '/claims/identities') {
+        if (request.method !== 'GET') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const limit = boundedInteger(url.searchParams.get('limit'), 'limit', {
+          fallback: 200,
+          min: 1,
+          max: 500
+        });
+        sendJson(response, 200, { items: await listIdentities(pool, { limit }) });
+        return;
+      }
+
+      if (url.pathname === '/claims/decide') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const body = objectBody(await readJson(request));
+        const decided = await decideClaim(pool, {
+          claimUri: body.claimUri,
+          subjectDid: body.subjectDid,
+          contributorUri: body.contributorUri,
+          action: body.action,
+          note: body.note,
+          issuedBy: body.issuedBy,
+          authority
+        });
+        sendJson(response, 200, decided);
+        return;
+      }
+
+      if (url.pathname === '/claims/revoke') {
+        if (request.method !== 'POST') {
+          sendJson(response, 405, { error: 'MethodNotAllowed' });
+          return;
+        }
+        const body = objectBody(await readJson(request));
+        sendJson(response, 200, await revokeIdentity(pool, {
+          did: body.did,
+          issuedBy: body.issuedBy
+        }));
         return;
       }
 
@@ -567,6 +632,10 @@ export function createAdminHandler({ providers, ingest, token, logger = console 
         sendJson(response, error.status, { error: error.code, message: error.message });
         return;
       }
+      if (error instanceof ClaimError) {
+        sendJson(response, error.status, { error: error.code, message: error.message });
+        return;
+      }
       if (error instanceof AdminRequestError) {
         sendJson(response, error.status, { error: error.code, message: error.message });
         return;
@@ -623,7 +692,17 @@ export async function startAdminServer({
       contributors: await openlibrary.describeContributors(candidate.contributors)
     });
   };
-  const handler = createAdminHandler({ providers, ingest, token: config.token, logger });
+  // The publisher DID the claim decisions mint their `knownContributor` records
+  // under; `index.js` passes the same identity its outbox trigger expects.
+  const authority = publisherDid ?? (publisherHost ? `did:web:${publisherHost}` : undefined);
+  const handler = createAdminHandler({
+    pool,
+    providers,
+    ingest,
+    token: config.token,
+    authority,
+    logger
+  });
   const server = http.createServer((request, response) => {
     void handler(request, response);
   });

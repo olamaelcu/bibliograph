@@ -32,6 +32,11 @@ for required in \
   lib/publish.js \
   lib/edition-record.js \
   lib/pds.js \
+  lib/labels.js \
+  lib/labeler.js \
+  lib/claims.js \
+  lib/known-contributor-record.js \
+  scripts/gen-labeler-key.mjs \
   node_modules/graphile-worker/package.json \
   node_modules/pg/package.json
 do

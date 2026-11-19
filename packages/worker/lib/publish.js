@@ -40,10 +40,20 @@ import {
   resolvePublisherConfig
 } from './pds.js';
 
+import {
+  KNOWN_CONTRIBUTOR_COLLECTION,
+  KnownContributorRecordError,
+  buildKnownContributorRecord
+} from './known-contributor-record.js';
+
 export const EDITION_COLLECTION = 'community.lexicon.media.book.edition';
 
 /** Every collection `pds-publish` drains. Add a builder before adding one here. */
-export const OUTBOX_COLLECTIONS = Object.freeze([EDITION_COLLECTION, ...ENTITY_COLLECTIONS]);
+export const OUTBOX_COLLECTIONS = Object.freeze([
+  EDITION_COLLECTION,
+  ...ENTITY_COLLECTIONS,
+  KNOWN_CONTRIBUTOR_COLLECTION
+]);
 
 export const MAX_ATTEMPTS = 10;
 /** One claim, and therefore one `applyWrites` call: the PDS charges per call. */
@@ -196,18 +206,54 @@ async function loadEntitySnapshot(pool, uri, collection) {
 
 async function loadSnapshot(pool, uri, collection) {
   if (collection === EDITION_COLLECTION) return loadEditionSnapshot(pool, uri);
+  if (collection === KNOWN_CONTRIBUTOR_COLLECTION) {
+    return loadKnownContributorSnapshot(pool, uri);
+  }
   return loadEntitySnapshot(pool, uri, collection);
+}
+
+/**
+ * One `knownContributor` row, by the record URI the outbox names. The binding
+ * is the identity row; the contributor URI and its display name come from the
+ * row it points at.
+ */
+async function loadKnownContributorSnapshot(pool, uri) {
+  const [row, cid] = await Promise.all([
+    pool.query(
+      `SELECT k.did, k.issued_by, k.created_at, c.at_uri AS contributor
+         FROM contributor_identities k
+         JOIN contributors c ON c.id = k.contributor_id
+        WHERE k.at_uri = $1`,
+      [uri]
+    ),
+    pool.query('SELECT cid FROM pds_cids WHERE uri = $1', [uri])
+  ]);
+  if (row.rowCount === 0) return undefined;
+  return { collection: KNOWN_CONTRIBUTOR_COLLECTION, row: row.rows[0], cid: cid.rows[0]?.cid };
 }
 
 function writeRecordValue(entry, snapshot, coversBaseUrl) {
   try {
-    return entry.collection === EDITION_COLLECTION
-      ? buildEditionRecord({ ...snapshot, coversBaseUrl })
-      : buildEntityRecord(entry.collection, snapshot.row);
+    if (entry.collection === EDITION_COLLECTION) {
+      return buildEditionRecord({ ...snapshot, coversBaseUrl });
+    }
+    if (entry.collection === KNOWN_CONTRIBUTOR_COLLECTION) {
+      return buildKnownContributorRecord(snapshot.row);
+    }
+    return buildEntityRecord(entry.collection, snapshot.row);
   } catch (error) {
-    if (error instanceof EditionRecordError || error instanceof EntityRecordError) throw error;
+    if (
+      error instanceof EditionRecordError ||
+      error instanceof EntityRecordError ||
+      error instanceof KnownContributorRecordError
+    ) {
+      throw error;
+    }
     if (entry.collection === EDITION_COLLECTION) {
       throw new EditionRecordError(error?.message ?? String(error));
+    }
+    if (entry.collection === KNOWN_CONTRIBUTOR_COLLECTION) {
+      throw new KnownContributorRecordError(error?.message ?? String(error));
     }
     throw new EntityRecordError(error?.message ?? String(error));
   }
@@ -249,9 +295,11 @@ export async function prepareEntry({
     const message =
       `${entry.uri} is gone from the catalog but the outbox row is not a delete; ` +
       'leaving it for a later retry';
-    throw entry.collection === EDITION_COLLECTION
-      ? new EditionRecordError(message)
-      : new EntityRecordError(message);
+    if (entry.collection === EDITION_COLLECTION) throw new EditionRecordError(message);
+    if (entry.collection === KNOWN_CONTRIBUTOR_COLLECTION) {
+      throw new KnownContributorRecordError(message);
+    }
+    throw new EntityRecordError(message);
   }
   const value = writeRecordValue(entry, snapshot, coversBaseUrl);
   const operation = snapshot.cid ? 'update' : 'create';

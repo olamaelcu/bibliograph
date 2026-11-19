@@ -26,6 +26,8 @@ export function canonicalIdentifiersJson(value: unknown): string;
 
 export function httpUrl(value: unknown): string | undefined;
 
+export function atUriOf(value: unknown, collection: string): string | undefined;
+
 export function isoCalendarDate(value: unknown): string | undefined;
 
 export function createdAtIso(value: string | number | Date): string | undefined;

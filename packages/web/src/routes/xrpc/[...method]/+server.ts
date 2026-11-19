@@ -54,6 +54,7 @@ import {
 } from "$lib/server/catalog/entities";
 import {
   GET_CONTRIBUTOR,
+  GET_CONTRIBUTOR_LINK,
   GET_GENRES_OF_BOOK,
   GET_IDENTIFIED_FORMATS,
   GET_PUBLISHER,
@@ -66,6 +67,7 @@ import {
   SEARCH_EDITIONS,
   SEARCH_PUBLISHERS,
 } from "$lib/server/catalog/entity-methods";
+import { getContributorLink } from "$lib/server/catalog/contributor-links";
 import { decodeKeysetCursor, decodeOffsetCursor } from "$lib/server/catalog/sql";
 import { EDITION_COLLECTION, getBookGenres } from "$lib/server/catalog/genres";
 import { getBookIdentifiedFormats } from "$lib/server/catalog/identified-formats";
@@ -428,6 +430,16 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       const publisher = await getPublisher(pool, uri);
       if (publisher === null) return fail(404, "RecordNotFound", "no publisher has that URI");
       return json({ publisher });
+    }
+
+    if (method === GET_CONTRIBUTOR_LINK) {
+      // Per-viewer: the `did` half says what that account is claiming, so no
+      // shared cache may keep the answer.
+      const link = await getContributorLink(pool, {
+        contributor: params.get("contributor") ?? undefined,
+        did: params.get("did") ?? undefined,
+      });
+      return json(link, { headers: { "cache-control": "no-store" } });
     }
 
     if (method === LIST_EDITIONS) {

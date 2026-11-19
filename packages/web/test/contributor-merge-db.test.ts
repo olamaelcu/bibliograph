@@ -458,3 +458,74 @@ test('reports a duplicate identity collision instead of dropping the absorbed ro
       })).rejects.toSatisfy(isMergeError(409, 'DuplicateEntity'));
   expect((await db.query('SELECT id FROM contributors WHERE id = $1', [absorbed.id])).rowCount, 'the absorbed row survives a rejected merge').toBe(1);
 });
+
+test('a single verified account moves to the survivor', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const survivor = await createContributor(`${RUN} One Account Survivor`);
+  const absorbed = await createContributor(`${RUN} One Account Absorbed`);
+  // Only the absorbed row is verified; the survivor has no binding, so there is
+  // no clash and the link is moved rather than dropped.
+  const subject = 'did:plc:mergeoneaccount';
+  const record = `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.knownContributor/3merge1`;
+  await db.query(
+    `INSERT INTO contributor_identities (contributor_id, did, at_uri, issued_by)
+     VALUES ($1, $2, $3, 'did:plc:mergelibrarian')`,
+    [absorbed.id, subject, record]
+  );
+
+  const source = await loaded(db, String(absorbed.id));
+  const target = await loaded(db, String(survivor.id));
+  await mergeContributors(db, {
+    source: String(absorbed.id),
+    target: String(survivor.id),
+    sourceRevision: source.revision,
+    targetRevision: target.revision
+  });
+
+  const bound = await db.query(
+    'SELECT contributor_id FROM contributor_identities WHERE did = $1',
+    [subject]
+  );
+  expect(Number(bound.rows[0]?.contributor_id)).toBe(survivor.id);
+
+  // The move requeues the record under the survivor, which is what makes the
+  // published link re-read the survivor's URI. The op stays `create` here
+  // because nothing had published it yet — `pds-publish` chooses create vs
+  // update from `pds_cids` anyway, so the queue is only a flag.
+  const queued = await db.query('SELECT collection FROM pds_outbox WHERE uri = $1', [record]);
+  expect(queued.rows).toEqual([
+    { collection: 'net.olamaelcu.livtet.biblio.knownContributor' }
+  ]);
+});
+
+test('a binding on both rows keeps the survivor and deletes the absorbed record', async (t) => {
+  const db = requiredPool(t);
+  if (!db) return;
+  const survivor = await createContributor(`${RUN} Two Accounts Survivor`);
+  const absorbed = await createContributor(`${RUN} Two Accounts Absorbed`);
+  const keptRecord = `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.knownContributor/3merge2`;
+  const droppedRecord = `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.knownContributor/3merge3`;
+  await db.query(
+    `INSERT INTO contributor_identities (contributor_id, did, at_uri)
+     VALUES ($1, 'did:plc:mergetwokept', $2), ($3, 'did:plc:mergetwodropped', $4)`,
+    [survivor.id, keptRecord, absorbed.id, droppedRecord]
+  );
+
+  const source = await loaded(db, String(absorbed.id));
+  const target = await loaded(db, String(survivor.id));
+  await mergeContributors(db, {
+    source: String(absorbed.id),
+    target: String(survivor.id),
+    sourceRevision: source.revision,
+    targetRevision: target.revision
+  });
+
+  const rows = await db.query(
+    `SELECT did FROM contributor_identities WHERE did LIKE 'did:plc:mergetwo%' ORDER BY did`
+  );
+  expect(rows.rows).toEqual([{ did: 'did:plc:mergetwokept' }]);
+
+  const queued = await db.query('SELECT op FROM pds_outbox WHERE uri = $1', [droppedRecord]);
+  expect(queued.rows).toEqual([{ op: 'delete' }]);
+});

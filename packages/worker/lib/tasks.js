@@ -16,6 +16,7 @@ import {
   writeCachedCover
 } from './cover-cache.js';
 import { createCoverMetrics } from './cover-metrics.js';
+import { emitLabels } from './labels.js';
 
 /** Upper bound on editions one catalog task ingests; providers may return fewer. */
 export const CANDIDATES_PER_TASK = 50;
@@ -163,8 +164,14 @@ export function createTasks({
   isbnBackfillPerDay = Number.parseInt(process.env.ISBN_BACKFILL_PER_DAY ?? '', 10),
   // Aborted when the process is asked to stop, before graphile's per-job abort
   // fires. Combined with `helpers.abortSignal` below.
-  signal = null
+  signal = null,
+  // `{ keypair, src }` once the labeler key is loaded; `null` disables the task.
+  labels = null
 }) {
+  // The label signer, when the labeler is configured: `{ keypair, src }`. Without
+  // it the `labels.emit` task fails loudly instead of silently dropping queued
+  // labels, exactly like `pds-publish` without publisher credentials.
+  const labelSigner = labels;
   const ingest = createIngest({ pool, publisherDid, publisherHost });
 
   // One signal for both stop paths: the process-wide one (SIGTERM, announced by
@@ -1163,6 +1170,30 @@ export function createTasks({
         `pds-publish: ${result.published} published, ${result.failed} failed, ` +
           `${result.batches} batch(es)`
       );
+    },
+
+    // Sign the queued labels into `labeler_labels`. One batch a minute is far
+    // more than an approval needs; the queue is only ever a handful of rows.
+    'labels.emit': async (payload, helpers) => {
+      if (!labelSigner) {
+        throw new Error(
+          'labels.emit: the labeler key is not configured; set LABELER_KEY_FILE ' +
+            'and restart the worker (see packages/worker/scripts/gen-labeler-key.mjs)'
+        );
+      }
+      const limit = Number.isInteger(payload?.limit) ? payload.limit : 100;
+      const result = await emitLabels({
+        pool,
+        keypair: labelSigner.keypair,
+        src: labelSigner.src,
+        logger: helpers.logger,
+        limit
+      });
+      if (result.emitted > 0 || result.failed > 0) {
+        helpers.logger.info(
+          `labels.emit: ${result.emitted} signed, ${result.failed} failed`
+        );
+      }
     },
 
     // Operator-only: mints record URIs for rows that predate the feature and

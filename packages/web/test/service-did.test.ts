@@ -4,6 +4,8 @@ import {
   buildServiceDidDocument,
   didWeb,
   INTERACTION_FRAGMENT,
+  LABELER_FRAGMENT,
+  LABEL_FRAGMENT,
   SERVICE_DID_HOSTNAME,
   SPACE_MANAGER_FRAGMENT
 } from '../src/lib/server/service-did.ts';
@@ -31,6 +33,11 @@ test('default host builds the biblio identity with no verification method', () =
       id: `#${SPACE_MANAGER_FRAGMENT}`,
       type: 'AtprotoSpaceManager',
       serviceEndpoint: 'https://livtet.olamaelcu.net'
+    },
+    {
+      id: `#${LABELER_FRAGMENT}`,
+      type: 'AtprotoLabeler',
+      serviceEndpoint: `https://${SERVICE_DID_HOSTNAME}`
     }
   ]);
 });
@@ -62,4 +69,37 @@ test('the document claims no handle', () => {
 
 test('a port is percent-encoded in the identifier', () => {
   expect(didWeb('127.0.0.1:5176')).toBe('did:web:127.0.0.1%3A5176');
+});
+
+test('a configured labeler key is published as #atproto_label', () => {
+  const document = buildServiceDidDocument({
+    hostname: SERVICE_DID_HOSTNAME,
+    interactionKeyMultibase: null,
+    spaceManagerEndpoint: 'https://livtet.olamaelcu.net',
+    labelerKeyMultibase: 'zQ3shLabeler',
+    labelerEndpoint: 'https://biblio.livtet.olamaelcu.net'
+  });
+
+  expect(document.verificationMethod).toEqual([
+    {
+      id: `#${LABEL_FRAGMENT}`,
+      type: 'Multikey',
+      controller: document.id,
+      publicKeyMultibase: 'zQ3shLabeler'
+    }
+  ]);
+  const labeler = document.service.find((entry) => entry.id === `#${LABELER_FRAGMENT}`);
+  expect(labeler?.serviceEndpoint).toBe('https://biblio.livtet.olamaelcu.net');
+});
+
+test('the labeler service is published even without its key', () => {
+  const document = buildServiceDidDocument({
+    hostname: SERVICE_DID_HOSTNAME,
+    interactionKeyMultibase: null,
+    spaceManagerEndpoint: 'https://livtet.olamaelcu.net'
+  });
+
+  // A consumer reads the service entry first; the absent verification method is
+  // how it learns the labels cannot be verified yet.
+  expect(document.service.some((entry) => entry.type === 'AtprotoLabeler')).toBe(true);
 });

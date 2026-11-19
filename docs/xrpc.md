@@ -9,12 +9,12 @@ It is drawn from the deployed lexicons in `happyview/lexicons` and the handler s
 The surface is the set of uploaded lexicons plus the book lexicons imported from
 [lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest) into
 `happyview/lexicons/community/lexicon/media/book/` and the edge-served entity lexicons under
-`happyview/lexicons/net/olamaelcu/livtet/biblio/`: **27 queries, 17 procedures and 27 record
-types**. Eleven methods are anonymous catalog reads served by the edge in `packages/web`: the two
+`happyview/lexicons/net/olamaelcu/livtet/biblio/`: **30 queries, 17 procedures and 32 record
+types**. Twelve methods are anonymous catalog reads served by the edge in `packages/web`: the two
 books-wg procedures (`community.lexicon.media.book.resolveEditions` and `searchEditions`) and the
-nine entity queries under `net.olamaelcu.livtet.biblio.*` (`getContributor`, `getPublisher`,
-`getGenresOfBook`, `getIdentifiedFormats`, `listEditionsByContributor`, `resolveContributors`,
-`resolvePublishers`, `searchContributors`, `searchPublishers`). The other 15
+ten entity queries under `net.olamaelcu.livtet.biblio.*` (`getContributor`, `getContributorLink`,
+`getPublisher`, `getGenresOfBook`, `getIdentifiedFormats`, `listEditionsByContributor`,
+`resolveContributors`, `resolvePublishers`, `searchContributors`, `searchPublishers`). The other 15
 procedures are HappyView procedures that write to a caller's PDS. Everything except the review and
 edition record types lives under
 `net.olamaelcu.livtet.biblio.*`. HappyView's built-in `com.atproto.*` routes are not part of this
@@ -262,6 +262,7 @@ signal. Queued work is not a promise that anything will be found.
 | `graph.listFollowees` | `did`, `limit` 100 (≤1000), `cursor` | `{ followees, total, cursor? }` |
 | `getContributor` | `uri` (at-uri) | `{ contributor }` |
 | `getPublisher` | `uri` (at-uri) | `{ publisher }` |
+| `getContributorLink` | `contributor` (at-uri), `did` (at least one) | `{ identities, identity?, claim? }`; verified identities and claim state, always `no-store` |
 | `listEditionsByContributor` | `contributor` (at-uri), `limit` 25 (≤100), `cursor`, `sort`, `order`, `language` | `{ items, cursor?, total? }` |
 | `searchContributors` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |
 | `searchPublishers` | `q`, `limit` 25 (≤100), `cursor` | `{ items, cursor? }` |

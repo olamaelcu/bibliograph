@@ -9,8 +9,11 @@
     "normalize:isbndb-authors": "node scripts/normalize-isbndb-author-names.mjs"
   },
   "dependencies": {
+    "@atproto/crypto": "^0.5.7",
+    "@ipld/dag-cbor": "^9.2.4",
     "graphile-worker": "^0.18.0",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^12.2.1",

@@ -13,7 +13,11 @@ export type AdminWorkerPath =
   | '/ingest'
   | '/publisher-search'
   | '/publisher-books'
-  | '/publisher-import';
+  | '/publisher-import'
+  | '/claims/pending'
+  | '/claims/identities'
+  | '/claims/decide'
+  | '/claims/revoke';
 
 export function workerAdminUrl(): string {
   const configured = env.WORKER_ADMIN_URL?.trim();
@@ -41,6 +45,38 @@ export async function workerAdminPost(
         authorization: `Bearer ${token}`
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (cause) {
+    console.error(`[admin] worker admin request to ${path} failed`, cause);
+    error(502, 'The worker admin API is unavailable');
+  }
+
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // A non-JSON upstream answer is still a failure, not a crash.
+  }
+  return { status: response.status, payload };
+}
+
+/**
+ * Proxy an admin GET to the worker, for the reads a page needs before it can
+ * render (the claim queue). Same token, same failure mapping as the POST.
+ */
+export async function workerAdminGet(
+  path: AdminWorkerPath,
+  { timeoutMs = TIMEOUT_MS }: { timeoutMs?: number } = {}
+): Promise<{ status: number; payload: unknown }> {
+  const token = adminToken();
+  if (!token) error(404, 'Not Found');
+
+  let response: Response;
+  try {
+    response = await fetch(`${workerAdminUrl()}${path}`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (cause) {
