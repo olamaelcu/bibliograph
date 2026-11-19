@@ -50,6 +50,21 @@ const DEFAULT_LEXICON_DIR = 'happyview/lexicons';
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const TIMEOUT_MS = 20_000;
 const DNS_TIMEOUT_MS = 5_000;
+// The PDS is a single process and it stalls under its own write bursts; a
+// publish of ~85 records that gave up on the first timeout failed two deploys
+// in a row while a plain rerun succeeded. Each attempt is a fresh 20s fetch.
+const RETRY_ATTEMPTS = 3;
+const RETRY_BASE_MS = 1_000;
+// 408/425/429 and the 5xx family are the answers a busy or restarting PDS
+// gives; a 4xx like RecordNotFound is a decision, not a hiccup.
+const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+function retryDelay(attempt) {
+  const base = RETRY_BASE_MS * 2 ** (attempt - 1);
+  return base + Math.floor(Math.random() * base * 0.25);
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // NSID syntax from https://atproto.com/specs/nsid
 const NSID_RE =
@@ -288,25 +303,49 @@ function createClient(config) {
     for (const [key, value] of Object.entries(query ?? {})) {
       url.searchParams.set(key, value);
     }
-    const init = {
-      method: httpMethod,
-      headers: {
-        accept: 'application/json',
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(token ? { authorization: `Bearer ${token}` } : {})
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
-    };
-    const response = await fetch(url, init);
-    const payload = await readJson(response);
-    if (!response.ok) {
-      throw new PdsError(
-        `${nsid} failed: ${response.status} ${payload.error ?? ''} ${payload.message ?? ''}`.trim(),
-        { status: response.status, code: payload.error, body: payload }
-      );
+    for (let attempt = 1; ; attempt += 1) {
+      // Every attempt gets its own deadline: an AbortSignal is single-use.
+      const init = {
+        method: httpMethod,
+        headers: {
+          accept: 'application/json',
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(token ? { authorization: `Bearer ${token}` } : {})
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      };
+      try {
+        const response = await fetch(url, init);
+        const payload = await readJson(response);
+        if (!response.ok) {
+          const error = new PdsError(
+            `${nsid} failed: ${response.status} ${payload.error ?? ''} ${payload.message ?? ''}`.trim(),
+            { status: response.status, code: payload.error, body: payload }
+          );
+          if (attempt < RETRY_ATTEMPTS && RETRYABLE_STATUS.has(response.status)) {
+            const delay = retryDelay(attempt);
+            console.error(`  retry   ${nsid} ${response.status}; attempt ${attempt + 1}/${RETRY_ATTEMPTS} in ${delay}ms`);
+            await sleep(delay);
+            continue;
+          }
+          throw error;
+        }
+        return payload;
+      } catch (error) {
+        // A PdsError above is final; a timeout or a reset socket is not.
+        if (error instanceof PdsError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (attempt >= RETRY_ATTEMPTS) {
+          throw new PdsError(`${nsid} failed after ${attempt} attempts: ${message}`, {
+            code: 'NetworkError'
+          });
+        }
+        const delay = retryDelay(attempt);
+        console.error(`  retry   ${nsid} ${message}; attempt ${attempt + 1}/${RETRY_ATTEMPTS} in ${delay}ms`);
+        await sleep(delay);
+      }
     }
-    return payload;
   }
 
   function assertAccount(did) {

@@ -1,3 +1,12 @@
+bibliograph-happyview (2.17.4-7) unstable; urgency=medium
+
+  * Packaging revision 7: the bundled publisher retries a PDS request up to
+    three times (1s, then 2s, plus jitter) on 408/425/429/5xx and on network
+    timeouts, instead of failing the deploy on the first stalled write.
+    The HappyView binary is unchanged at 2.17.4.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 14:40:00 +0000
+
 bibliograph-happyview (2.17.4-6) unstable; urgency=medium
 
   * Packaging revision 6: the bundled publisher takes `--only`, and the deploy
