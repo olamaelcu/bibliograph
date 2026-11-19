@@ -388,6 +388,13 @@ wins (Ansible-managed hosts use it).
 - `WORKER_METRICS_HOST`/`PORT` (default `127.0.0.1:9464`).
 - `ADMIN_TOKEN` enables the worker admin API (disabled when unset);
   `WORKER_ADMIN_HOST`/`PORT` default `127.0.0.1:9465`.
+- Worker sizing: `GRAPHILE_WORKER_CONCURRENCY` (default 12), `WORKER_POOL_MAX`
+  (application pool, default 10) and `GRAPHILE_POOL_MAX` (graphile's own pool,
+  default 12). Each worker holds one connection to fetch a job and one for its
+  SQL, so the three move together; the totals must fit `max_connections` (100)
+  beside the edge's 25 and HappyView's 40. A host whose conffile still carries
+  the old `GRAPHILE_WORKER_CONCURRENCY=5` keeps it — conffiles are preserved —
+  so edit the file and restart the worker, not just the package.
 
 ### `/etc/bibliograph/web.env`
 

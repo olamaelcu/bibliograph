@@ -334,6 +334,15 @@ its job table (`graphile_worker.jobs`) and the edge enqueues jobs there when
 and skips enqueueing. The edge queues at most 10 hydration jobs per request, so
 one anonymous call cannot turn its full identifier list into paid provider work.
 
+The worker runs 12 jobs at once (`GRAPHILE_WORKER_CONCURRENCY`) across every
+queue, with an application pool of 10 (`WORKER_POOL_MAX`) and graphile's own
+pool of 12 (`GRAPHILE_POOL_MAX`). Five jobs shared by every queue let four
+provider-bound `catalog.genres` jobs (1–3 minutes each) hold most of the pool,
+so a newly queued hydration or ISBN backfill waited behind a thousand due jobs.
+Each worker needs a connection to fetch and one for its SQL, so the three move
+together and the total stays inside `max_connections` 100 beside the edge's 25
+and HappyView's 40.
+
 | Task | Trigger | Work |
 | --- | --- | --- |
 | `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest up to 50 candidates into the identifier bag |

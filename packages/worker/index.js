@@ -47,9 +47,31 @@ if (coversCacheDir === '') {
 // The repo authority is independent of publisher credentials: hydration mints
 // the same URIs even while pds-publish is disabled.
 const publisherDid = resolvePublisherAuthority() || `did:web:${publisherHost}`;
-const concurrency = Number.parseInt(process.env.GRAPHILE_WORKER_CONCURRENCY ?? '5', 10);
+/**
+ * Worker sizing.
+ *
+ * Five jobs shared by every queue was the ceiling: four long `catalog.genres`
+ * jobs (each 1–3 minutes against the providers) left one worker for everything
+ * else, and a newly queued job — a hydration, an ISBN backfill — waited behind
+ * a thousand due jobs. Both pools are sized with the concurrency because each
+ * worker needs a connection to fetch and one to do its SQL.
+ *
+ * `max_connections` is 100 on the deployment host, and the rest of the budget
+ * is the edge's three pools (25), HappyView's role limit (40) and a few
+ * maintenance sessions. 12 concurrency + 10 app + 12 graphile = 22 worker
+ * connections keeps the worst case around 90, so the work can grow without
+ * every other service queueing for a connection.
+ */
+function positiveInteger(raw, fallback) {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
-const pool = new pg.Pool({ connectionString: databaseUrl, max: 4 });
+const concurrency = positiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 12);
+const workerPoolMax = positiveInteger(process.env.WORKER_POOL_MAX, 10);
+const graphilePoolMax = positiveInteger(process.env.GRAPHILE_POOL_MAX, 12);
+
+const pool = new pg.Pool({ connectionString: databaseUrl, max: workerPoolMax });
 await ensureSupportSchema(pool);
 
 // A stop that outlives graphile's abort window (or a kill) leaves job and queue
@@ -272,9 +294,8 @@ cronItems.push({
   // One batch a day, spent under the task's `ISBN_BACKFILL_PER_DAY` budget: the
   // work is free-provider lookups over a ~100k-edition backlog, so the point is
   // a steady trickle, not a flood. The per-edition jobs run on the
-  // `isbn-backfill` queue, which graphile-worker serializes to concurrency 1
-  // (see `catalog_enqueue_isbn_backfill`); the sweep keeps its own queue so a
-  // busy backfill never delays it.
+  // `isbn-backfill` queue; the sweep keeps its own queue so a busy backfill
+  // never delays it. The daily budget, not the queue, is what bounds the work.
   task: 'catalog.isbn.backfill.sweep',
   match: '0 4 * * *',
   options: {
@@ -287,7 +308,11 @@ const parsedCronItems = parseCronItems(cronItems);
 
 const runner = await run({
   connectionString: databaseUrl,
-  concurrency: Number.isFinite(concurrency) && concurrency > 0 ? concurrency : 5,
+  concurrency,
+  // Graphile's own pool (job fetch, locks, completion). It defaults to 10, which
+  // puts a ceiling under a higher concurrency: workers would queue for a
+  // connection to claim their next job.
+  maxPoolSize: graphilePoolMax,
   taskList,
   parsedCronItems,
   logger: undefined,

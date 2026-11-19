@@ -1,3 +1,22 @@
+bibliograph-worker (0.7.3-1) unstable; urgency=medium
+
+  * 0.7.3: the worker runs twelve jobs, not five, and both pools follow it.
+
+    - Four long provider-bound `catalog.genres` jobs (1–3 minutes each) could
+      hold most of the five slots, leaving one worker for everything else: a
+      newly queued hydration or ISBN backfill waited behind a thousand due
+      jobs. `GRAPHILE_WORKER_CONCURRENCY` now defaults to 12.
+    - The application pool was hard-coded to 4 and graphile's own pool to its
+      default 10, so a higher concurrency would have queued for connections.
+      They are `WORKER_POOL_MAX` (10) and `GRAPHILE_POOL_MAX` (12).
+    - The worst case stays inside `max_connections` 100: the edge's pools (25)
+      plus HappyView's role limit (40) plus the worker's 22 leaves room for
+      maintenance sessions.
+    - A host whose `/etc/bibliograph/worker.env` still says 5 keeps that value —
+      it is a conffile — so it must be edited and the unit restarted.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.7.2-1) unstable; urgency=medium
 
   * 0.7.2: the ISBN backfill asks the providers for the cleaned title.
