@@ -58,6 +58,10 @@ import {
   GET_GENRES_OF_BOOK,
   GET_IDENTIFIED_FORMATS,
   GET_PUBLISHER,
+  GIVEAWAY_DRAW,
+  GIVEAWAY_ENTRIES,
+  GIVEAWAY_LIST,
+  GIVEAWAY_REPORT,
   LIST_EDITIONS_BY_CONTRIBUTOR,
   LIST_EDITIONS,
   RESOLVE_CONTRIBUTORS,
@@ -67,6 +71,13 @@ import {
   SEARCH_EDITIONS,
   SEARCH_PUBLISHERS,
 } from "$lib/server/catalog/entity-methods";
+import {
+  getGiveaway,
+  getGiveawayReport,
+  listEntries,
+  listGiveaways,
+} from "$lib/server/catalog/giveaway";
+import { giveawayDraw } from "$lib/server/catalog/giveaway-draw-handler";
 import { getContributorLink } from "$lib/server/catalog/contributor-links";
 import { decodeKeysetCursor, decodeOffsetCursor } from "$lib/server/catalog/sql";
 import { EDITION_COLLECTION, getBookGenres } from "$lib/server/catalog/genres";
@@ -554,6 +565,57 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
       return json(results);
     }
 
+    if (method === GIVEAWAY_LIST) {
+      const status = optionalString(params.get("status"));
+      if (status !== undefined && status !== null && status !== "open" && status !== "closed") {
+        return fail(400, "InvalidRequest", "`status` must be `open` or `closed`");
+      }
+      const limit = queryInteger(params.get("limit"), 50, 1, 50);
+      if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+      return json(
+        await listGiveaways(pool, {
+          uri: optionalString(params.get("uri")) ?? undefined,
+          author: optionalString(params.get("author")) ?? undefined,
+          edition: optionalString(params.get("edition")) ?? undefined,
+          status: status === "open" || status === "closed" ? status : undefined,
+          limit,
+          cursor: params.get("cursor") ?? undefined,
+        }),
+        { headers: { "cache-control": "public, max-age=15" } },
+      );
+    }
+
+    if (method === GIVEAWAY_ENTRIES) {
+      const giveaway = optionalString(params.get("giveaway")) ?? undefined;
+      if (giveaway === undefined) {
+        return fail(400, "InvalidRequest", "`giveaway` is required");
+      }
+      const limit = queryInteger(params.get("limit"), 50, 1, 500);
+      if (limit === null) return fail(400, "InvalidRequest", "`limit` must be an integer");
+      return json(
+        await listEntries(pool, {
+          giveaway,
+          limit,
+          cursor: params.get("cursor") ?? undefined,
+        }),
+        { headers: { "cache-control": "public, max-age=15" } },
+      );
+    }
+
+    if (method === GIVEAWAY_REPORT) {
+      const wanted = optionalString(params.get("giveaway")) ?? undefined;
+      if (wanted === undefined) {
+        return fail(400, "InvalidRequest", "`giveaway` is required");
+      }
+      // The edition comes from the record, not from the caller: a report that
+      // named its own edition could be about a different book than the giveaway.
+      const giveaway = await getGiveaway(pool, wanted);
+      if (giveaway === null) return fail(404, "RecordNotFound", "no giveaway has that URI");
+      return json(await getGiveawayReport(pool, giveaway.uri, giveaway.edition), {
+        headers: { "cache-control": "no-store" },
+      });
+    }
+
     const q = (params.get("q") ?? "").trim();
     if (q === "") return fail(400, "InvalidQuery", "`q` is required");
     if (q.length > 256) return fail(400, "InvalidRequest", "`q` is limited to 256 characters");
@@ -624,6 +686,18 @@ const dependencies: XrpcDependencies = {
   entityGet: timed("catalog", handleEntityGet, (_request, method) => method),
   resolveEditions: timed("catalog", handleResolve, () => RESOLVE_EDITIONS),
   searchEditions: timed("catalog", handleSearch, () => SEARCH_EDITIONS),
+  // The one authenticated procedure on this surface: it verifies the service JWT
+  // itself, because the audience is this host's own `did:web`.
+  giveawayDraw: timed(
+    "catalog",
+    (request: Request) =>
+      giveawayDraw(request, {
+        // A `did:plc` issuer resolves through the directory; `did:web` needs none.
+        plcUrl: env.PLC_URL?.trim() ?? "",
+        pool: catalogPool(),
+      }),
+    () => GIVEAWAY_DRAW,
+  ),
   proxyPdsRead: timed("pds", proxyPdsRead, (method) => method),
   forward: timed("happyview", forward, (method) => method),
 };

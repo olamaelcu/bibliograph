@@ -1,0 +1,32 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.giveaway.entry",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "One reader's entry into one giveaway. The entry is the reader's own record so it lives and moves with their repo; the draw runs over the activity index of these records.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": ["giveaway", "createdAt"],
+        "properties": {
+          "giveaway": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The giveaway being entered. A strongRef rather than a plain at-uri: an entry is about one revision of the giveaway, and a rewrite of its terms is a different offer."
+          },
+          "country": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "description": "Self-declared ISO-3166 alpha-2 country, when the giveaway is not worldwide."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

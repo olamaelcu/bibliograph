@@ -1,7 +1,7 @@
-import type { DidDocument, DidResolver } from './auth';
+import type { DidDocument, DidResolver } from '../xrpc/service-auth.ts';
 
 /**
- * DID document resolution for feed service-JWT verification.
+ * DID document resolution for service-JWT verification.
  *
  * `did:plc` is read from the configured PLC directory (`PLC_URL`, which the
  * caller supplies; there is no default); `did:web` follows the method spec. The

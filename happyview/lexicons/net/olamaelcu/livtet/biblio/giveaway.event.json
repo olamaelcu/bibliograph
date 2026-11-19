@@ -1,0 +1,79 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.giveaway.event",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "An author's giveaway for one catalogue edition. Entry is a separate net.olamaelcu.livtet.biblio.giveaway.entry record in each entrant's own repo.",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "required": [
+          "edition",
+          "title",
+          "prizeType",
+          "prizeQuantity",
+          "countries",
+          "rulesText",
+          "opensAt",
+          "closesAt",
+          "createdAt"
+        ],
+        "properties": {
+          "edition": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The edition being given away. A plain at-uri rather than a strongRef: the giveaway follows the edition, it does not pin one revision of it."
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "coverUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "prizeType": {
+            "type": "string",
+            "knownValues": ["print", "digital", "audio"]
+          },
+          "prizeQuantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 250
+          },
+          "countries": {
+            "type": "array",
+            "description": "ISO-3166 alpha-2 codes this giveaway is open to. The single value `*` means worldwide.",
+            "maxLength": 250,
+            "items": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2
+            }
+          },
+          "rulesText": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "opensAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "closesAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "closingNote": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

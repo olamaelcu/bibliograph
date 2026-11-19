@@ -1,0 +1,72 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.giveaway.listEntries",
+  "description": "List the entries into one giveaway, oldest first. Entries are records in each entrant's own public repo, so the DIDs here leak nothing the index does not already expose.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["giveaway"],
+        "properties": {
+          "giveaway": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the giveaway whose entries to list."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 50
+          },
+          "cursor": {
+            "type": "string",
+            "description": "Opaque pagination cursor."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["entries"],
+          "properties": {
+            "entries": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["uri", "did", "createdAt"],
+                "properties": {
+                  "uri": {
+                    "type": "string",
+                    "format": "at-uri",
+                    "description": "AT-URI of the entry record, in the entrant's own repo."
+                  },
+                  "did": {
+                    "type": "string",
+                    "format": "did",
+                    "description": "The entrant: the repo the entry was written into."
+                  },
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "datetime"
+                  }
+                }
+              }
+            },
+            "cursor": {
+              "type": "string",
+              "description": "Opaque pagination cursor; absent when no further entries are known."
+            }
+          }
+        }
+      }
+    }
+  }
+}

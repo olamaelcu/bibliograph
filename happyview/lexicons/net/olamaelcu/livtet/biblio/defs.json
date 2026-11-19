@@ -666,6 +666,114 @@
           "format": "datetime"
         }
       }
+    },
+    "giveawayView": {
+      "type": "object",
+      "description": "One author giveaway, as the activity index holds it. `entries` is the number of entry records pointing at this giveaway; `draw` appears once the author has concluded it.",
+      "required": [
+        "uri",
+        "cid",
+        "author",
+        "edition",
+        "title",
+        "prizeType",
+        "prizeQuantity",
+        "countries",
+        "rulesText",
+        "opensAt",
+        "closesAt",
+        "createdAt",
+        "entries"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "cid": {
+          "type": "string",
+          "format": "cid"
+        },
+        "author": {
+          "type": "string",
+          "format": "did",
+          "description": "The repo the giveaway record lives in: the verified author's account."
+        },
+        "edition": {
+          "type": "string",
+          "format": "at-uri"
+        },
+        "title": {
+          "type": "string",
+          "maxGraphemes": 200
+        },
+        "coverUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "prizeType": {
+          "type": "string",
+          "knownValues": ["print", "digital", "audio"]
+        },
+        "prizeQuantity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "countries": {
+          "type": "array",
+          "description": "ISO-3166 alpha-2 codes, or the single value `*` for worldwide.",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2
+          }
+        },
+        "rulesText": {
+          "type": "string",
+          "maxGraphemes": 4000
+        },
+        "opensAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "closesAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "closingNote": {
+          "type": "string",
+          "maxGraphemes": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "datetime"
+        },
+        "entries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "draw": {
+          "type": "object",
+          "description": "The stored draw, present once the giveaway has been concluded.",
+          "required": ["drawnAt", "seed", "winners"],
+          "properties": {
+            "drawnAt": {
+              "type": "string",
+              "format": "datetime"
+            },
+            "seed": {
+              "type": "string"
+            },
+            "winners": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "did"
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

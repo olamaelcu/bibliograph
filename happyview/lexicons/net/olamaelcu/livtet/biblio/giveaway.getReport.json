@@ -1,0 +1,85 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.giveaway.getReport",
+  "description": "The conversion report for one giveaway: entries, and how many of those entrants went on to shelve, read and review the edition. Aggregate counts only — the method never names an entrant; `listEntries` is the method that does, because entry records are public repo records.",
+  "defs": {
+    "main": {
+      "type": "query",
+      "parameters": {
+        "type": "params",
+        "required": ["giveaway"],
+        "properties": {
+          "giveaway": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "AT-URI of the giveaway to report on."
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "giveaway",
+            "entries",
+            "shelved",
+            "read",
+            "reviewed",
+            "byCountry"
+          ],
+          "properties": {
+            "giveaway": {
+              "type": "string",
+              "format": "at-uri"
+            },
+            "entries": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "shelved": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Entrants with a shelf entry for the edition: a bookStatus, shelfItem or review row."
+            },
+            "read": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Entrants whose bookStatus for the edition is `read`."
+            },
+            "reviewed": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Entrants with a review of the edition."
+            },
+            "byCountry": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["count"],
+                "properties": {
+                  "country": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 2,
+                    "description": "Absent when the entrant declared no country."
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "NotFound",
+          "description": "No giveaway record exists at the given AT-URI."
+        }
+      ]
+    }
+  }
+}

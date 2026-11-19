@@ -3,19 +3,24 @@ import { expect, test } from 'vitest';
 import { P256Keypair, Secp256k1Keypair } from '@atproto/crypto';
 
 import {
-  FeedAuthError,
-  verifyFeedServiceJwt,
+  ServiceAuthError,
+  verifyServiceAuthJwt,
   type DidDocument
-} from '../src/lib/server/feeds/auth.ts';
+} from '../src/lib/server/xrpc/service-auth.ts';
 
 /**
  * Service-JWT verification, exercised with real generated keys. These are the
  * accept/reject cases the edge relies on: a token signed by the issuer's
- * `#atproto` key is accepted, and every malformed, expired, wrong-audience,
- * wrong-lxm or tampered token is rejected.
+ * `#atproto` key and bound to this method is accepted, and every malformed,
+ * expired, wrong-audience, wrong-lxm or tampered token is rejected.
+ *
+ * The subject covers the behavior the feed generator has always depended on;
+ * the giveaway draw (`net.olamaelcu.livtet.biblio.giveaway.draw`) reuses it with
+ * a different audience and method, which `giveaway-draw.test.ts` pins.
  */
 
 const NOW = 1_800_000_000;
+const LXM = 'com.atproto.feed.getFeedSkeleton';
 
 type Keypair = { did(): string; sign(message: Uint8Array): Promise<Uint8Array> };
 
@@ -53,7 +58,7 @@ async function signJwt(
   const payload = {
     iss: options.iss,
     aud: options.aud ?? `${options.iss}#atproto_feed`,
-    lxm: options.lxm ?? 'com.atproto.feed.getFeedSkeleton',
+    lxm: options.lxm ?? LXM,
     iat: options.iat ?? NOW - 5,
     exp: options.exp ?? NOW + 55
   };
@@ -70,8 +75,9 @@ test('accepts a valid ES256K service JWT and returns the issuer', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedkeytest256k';
   const token = await signJwt(keypair, { iss });
-  const issReturned = await verifyFeedServiceJwt(token, {
+  const issReturned = await verifyServiceAuthJwt(token, {
     audience: `${iss}#atproto_feed`,
+    lxm: LXM,
     resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
     now: NOW
   });
@@ -82,8 +88,9 @@ test('accepts a valid ES256 (P-256) service JWT', async () => {
   const keypair = await P256Keypair.create();
   const iss = 'did:web:feed.test.example';
   const token = await signJwt(keypair, { iss, alg: 'ES256' });
-  const issReturned = await verifyFeedServiceJwt(token, {
+  const issReturned = await verifyServiceAuthJwt(token, {
     audience: `${iss}#atproto_feed`,
+    lxm: LXM,
     resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
     now: NOW
   });
@@ -99,20 +106,21 @@ test('rejects a tampered payload even though the header and signature are intact
   const forgedPayload = encode({
     iss: attacker,
     aud: `${iss}#atproto_feed`,
-    lxm: 'com.atproto.feed.getFeedSkeleton',
+    lxm: LXM,
     iat: NOW - 5,
     exp: NOW + 55
   });
   const forged = `${header}.${forgedPayload}.${signature}`;
 
-  await expect(verifyFeedServiceJwt(forged, {
+  await expect(verifyServiceAuthJwt(forged, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({
         [iss]: documentFor(iss, keypair),
         [attacker]: documentFor(attacker, keypair)
       }),
       now: NOW
-    })).rejects.toThrow(FeedAuthError);
+    })).rejects.toThrow(ServiceAuthError);
 });
 
 test('rejects a tampered signature', async () => {
@@ -124,8 +132,9 @@ test('rejects a tampered signature', async () => {
   signature[10] ^= 0xff;
   const forged = `${parts[0]}.${parts[1]}.${signature.toString('base64url')}`;
 
-  await expect(verifyFeedServiceJwt(forged, {
+  await expect(verifyServiceAuthJwt(forged, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
     })).rejects.toThrow(/signature does not verify/);
@@ -135,8 +144,9 @@ test('rejects an expired token', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedexpired';
   const token = await signJwt(keypair, { iss, iat: NOW - 120, exp: NOW - 60 });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
     })).rejects.toThrow(/expired/);
@@ -146,8 +156,9 @@ test('rejects a token issued in the future', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedfuture';
   const token = await signJwt(keypair, { iss, iat: NOW + 600, exp: NOW + 660 });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
     })).rejects.toThrow(/future/);
@@ -157,8 +168,9 @@ test('rejects the wrong audience', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedaudience';
   const token = await signJwt(keypair, { iss, aud: 'did:plc:other#atproto_feed' });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
     })).rejects.toThrow(/audience/);
@@ -168,19 +180,21 @@ test('rejects the wrong lxm', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedlxm';
   const token = await signJwt(keypair, { iss, lxm: 'com.atproto.repo.putRecord' });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
-    })).rejects.toThrow(/getFeedSkeleton/);
+    })).rejects.toThrow(new RegExp(LXM.replaceAll('.', '\\.')));
 });
 
 test('rejects an algorithm that does not match the issuer key', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedalg';
   const token = await signJwt(keypair, { iss, alg: 'ES256' });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
     })).rejects.toThrow(/signature does not verify/);
@@ -190,8 +204,9 @@ test('rejects an unsupported algorithm', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedalgunsupported';
   const token = await signJwt(keypair, { iss, alg: 'HS256' });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({ [iss]: documentFor(iss, keypair) }),
       now: NOW
     })).rejects.toThrow(/unsupported algorithm/);
@@ -201,8 +216,9 @@ test('rejects an issuer with no resolvable DID document', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feedunresolved';
   const token = await signJwt(keypair, { iss });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({}),
       now: NOW
     })).rejects.toThrow(/could not be resolved/);
@@ -212,8 +228,9 @@ test('rejects a document without the #atproto Multikey', async () => {
   const keypair = await Secp256k1Keypair.create();
   const iss = 'did:plc:feednokey';
   const token = await signJwt(keypair, { iss });
-  await expect(verifyFeedServiceJwt(token, {
+  await expect(verifyServiceAuthJwt(token, {
       audience: `${iss}#atproto_feed`,
+      lxm: LXM,
       resolveDid: resolverFor({
         [iss]: { id: iss, verificationMethod: [{ id: `${iss}#other`, type: 'Multikey' }] }
       }),
@@ -222,8 +239,9 @@ test('rejects a document without the #atproto Multikey', async () => {
 });
 
 test('rejects a non-compact token', async () => {
-  await expect(verifyFeedServiceJwt('not-a-jwt', {
+  await expect(verifyServiceAuthJwt('not-a-jwt', {
       audience: 'did:plc:x#atproto_feed',
+      lxm: LXM,
       resolveDid: resolverFor({}),
       now: NOW
     })).rejects.toThrow(/not a compact JWT/);
@@ -237,10 +255,15 @@ async function reasonFor(
   resolveDid: (did: string) => Promise<DidDocument | null>
 ): Promise<string> {
   try {
-    await verifyFeedServiceJwt(token, { audience: `${ISS}#atproto_feed`, resolveDid, now: NOW });
+    await verifyServiceAuthJwt(token, {
+      audience: `${ISS}#atproto_feed`,
+      lxm: LXM,
+      resolveDid,
+      now: NOW
+    });
   } catch (error) {
-    expect(error instanceof FeedAuthError).toBeTruthy();
-    return error.reason;
+    expect(error instanceof ServiceAuthError).toBeTruthy();
+    return (error as ServiceAuthError).reason;
   }
   throw new Error('expected a rejection');
 }

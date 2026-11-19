@@ -1,0 +1,79 @@
+{
+  "lexicon": 1,
+  "id": "net.olamaelcu.livtet.biblio.giveaway.draw",
+  "description": "Conclude a giveaway: draw the winners from the entries the activity index holds. Authenticated with an atproto service JWT minted by the author's own PDS (`aud` this AppView's `did:web`, `lxm` this NSID); the issuer must be the giveaway record's author. Idempotent: the first call stores the seed and the winners it drew, and every later call answers that same row instead of drawing again.",
+  "defs": {
+    "main": {
+      "type": "procedure",
+      "input": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["giveaway"],
+          "properties": {
+            "giveaway": {
+              "type": "string",
+              "format": "at-uri",
+              "description": "AT-URI of the giveaway to conclude."
+            }
+          }
+        }
+      },
+      "output": {
+        "encoding": "application/json",
+        "schema": {
+          "type": "object",
+          "required": ["giveaway", "drawnAt", "seed", "entries", "winners"],
+          "properties": {
+            "giveaway": {
+              "type": "string",
+              "format": "at-uri"
+            },
+            "drawnAt": {
+              "type": "string",
+              "format": "datetime"
+            },
+            "seed": {
+              "type": "string",
+              "description": "The stored seed the draw was made from, so a result stays reproducible."
+            },
+            "entries": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How many distinct entrants the draw covered."
+            },
+            "winners": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "did"
+              }
+            }
+          }
+        }
+      },
+      "errors": [
+        {
+          "name": "AuthRequired",
+          "description": "No service JWT, or one that does not verify."
+        },
+        {
+          "name": "InvalidRequest",
+          "description": "The input body is not `{ giveaway }` naming an at-uri."
+        },
+        {
+          "name": "NotFound",
+          "description": "No giveaway record exists at the given AT-URI."
+        },
+        {
+          "name": "NotAuthor",
+          "description": "The token's issuer is not the giveaway record's author."
+        },
+        {
+          "name": "NotClosed",
+          "description": "The giveaway is still open; it cannot be drawn before its close time."
+        }
+      ]
+    }
+  }
+}

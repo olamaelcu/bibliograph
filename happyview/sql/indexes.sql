@@ -55,3 +55,12 @@ CREATE INDEX IF NOT EXISTS happyview_record_review_reply_subject_idx
 CREATE INDEX IF NOT EXISTS happyview_record_bookhive_hive_idx
   ON happyview.happyview_records (((record::jsonb)->>'hiveId'))
   WHERE collection = 'buzz.bookhive.book';
+
+-- One giveaway's entries: the entry record names the giveaway as a strongRef, so
+-- the filter is on the nested `uri` rather than on a column. Every read of
+-- `giveaway.listEntries`, the entry count on each card and the draw itself run
+-- this predicate, and `record` is `text`, so the index has to carry the cast —
+-- the same shape the `bookStatus` indexes above use.
+CREATE INDEX IF NOT EXISTS happyview_records_giveaway_entry_giveaway
+  ON happyview.happyview_records (((record::jsonb -> 'giveaway' ->> 'uri')))
+  WHERE collection = 'net.olamaelcu.livtet.biblio.giveaway.entry';
