@@ -136,7 +136,11 @@ async function serve(event: RequestEvent, method: 'GET' | 'HEAD'): Promise<Respo
 
   const providerCover = (row.cover_url ?? '').trim();
   if (providerCover !== '') {
-    recordCoverRequest(metrics, 'redirect');
+    // The cache did not serve bytes: that is a miss, whether the directory is
+    // unconfigured, the row carries no cached size, or the file is gone. The
+    // caller still gets the provider URL, but `hit`/`miss` is the pair the
+    // cache's effectiveness is measured on.
+    recordCoverRequest(metrics, 'miss');
     return new Response(null, {
       status: 302,
       headers: { location: providerCover, 'cache-control': 'public, max-age=60' }

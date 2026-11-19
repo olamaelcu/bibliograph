@@ -463,7 +463,7 @@ export function normalizeSearchHydrationDecision(decision: string): string {
 /** Outcomes the `/api/covers` route can report; anything else is `other`. */
 const COVER_RESULTS: Record<string, true> = {
   hit: true,
-  redirect: true,
+  miss: true,
   not_found: true,
   rate_limited: true,
   error: true
