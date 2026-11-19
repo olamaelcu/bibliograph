@@ -216,52 +216,64 @@ export async function hydrate(
   if (rows.length === 0) return [];
   const uris = rows.map((row) => row.uri);
 
-  const [identifierResult, contributorResult, publisherResult] = await Promise.all([
-    pool.query<IdentifierRow>(
-      `SELECT edition_uri, issuer, value FROM edition_identifiers
-       WHERE edition_uri = ANY($1) ORDER BY issuer, value`,
-      [uris]
-    ),
-    pool.query<ContributorRow>(
-      `SELECT ec.edition_uri, c.name, ec.role, c.identifiers,
-              COALESCE(ec.ref, c.at_uri) AS ref
-       FROM edition_contributors ec
-       JOIN contributors c ON c.id = ec.contributor_id
-       WHERE ec.edition_uri = ANY($1)
-       ORDER BY ec.edition_uri, ec.position`,
-      [uris]
-    ),
-    pool.query<PublisherRow>(
-      `SELECT ps.edition_uri, p.name, p.identifiers, p.at_uri AS ref
-       FROM edition_publishers_shape ps
-       CROSS JOIN LATERAL unnest(ps.publisher_ids) WITH ORDINALITY AS ord(id, idx)
-       JOIN publishers p ON p.id = ord.id
-       WHERE ps.edition_uri = ANY($1)
-       ORDER BY ps.edition_uri, ord.idx`,
-      [uris]
-    )
-  ]);
-
-  const identifiers = new Map<string, IdentifierRow[]>();
-  for (const row of identifierResult.rows) {
-    identifiers.set(row.edition_uri, [...(identifiers.get(row.edition_uri) ?? []), row]);
-  }
-  const contributors = new Map<string, ContributorRow[]>();
-  for (const row of contributorResult.rows) {
-    contributors.set(row.edition_uri, [...(contributors.get(row.edition_uri) ?? []), row]);
-  }
-  const publishers = new Map<string, PublisherRow>();
-  for (const row of publisherResult.rows) {
-    if (!publishers.has(row.edition_uri)) publishers.set(row.edition_uri, row);
-  }
-
-  return rows.map((row) =>
-    editionView(
-      row,
-      identifiers.get(row.uri) ?? [],
-      contributors.get(row.uri) ?? [],
-      publishers.get(row.uri),
-      coversBaseUrl
-    )
+  // One round trip instead of three: the page held up to three pooled
+  // connections at once, and under an IO stall the third could not even be
+  // acquired (2 s connection timeout) while the first two waited on a 10 s
+  // statement bound. The per-uri lookups are the same index probes, aggregated
+  // server-side so nothing is lost to the round trip.
+  const hydrated = await pool.query<{
+    uri: string;
+    identifiers: { issuer: string; value: string }[];
+    contributors: {
+      name: string;
+      role: string;
+      identifiers: Identifier[] | null;
+      ref: string | null;
+    }[];
+    publisher: { name: string; identifiers: Identifier[] | null; ref: string | null } | null;
+  }>(
+    `SELECT e.uri,
+            COALESCE((
+              SELECT json_agg(json_build_object('issuer', i.issuer, 'value', i.value)
+                              ORDER BY i.issuer, i.value)
+                FROM edition_identifiers i
+               WHERE i.edition_uri = e.uri
+            ), '[]'::json) AS identifiers,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                       'name', c.name, 'role', ec.role,
+                       'identifiers', c.identifiers,
+                       'ref', COALESCE(ec.ref, c.at_uri)) ORDER BY ec.position)
+                FROM edition_contributors ec
+                JOIN contributors c ON c.id = ec.contributor_id
+               WHERE ec.edition_uri = e.uri
+            ), '[]'::json) AS contributors,
+            (
+              SELECT json_build_object('name', p.name,
+                                       'identifiers', p.identifiers,
+                                       'ref', p.at_uri)
+                FROM edition_publishers_shape ps
+                CROSS JOIN LATERAL unnest(ps.publisher_ids)
+                     WITH ORDINALITY AS ord(id, idx)
+                JOIN publishers p ON p.id = ord.id
+               WHERE ps.edition_uri = e.uri
+               ORDER BY ord.idx
+               LIMIT 1
+            ) AS publisher
+       FROM books e
+      WHERE e.uri = ANY($1)`,
+    [uris]
   );
+
+  const byUri = new Map(hydrated.rows.map((row) => [row.uri, row]));
+  return rows.map((row) => {
+    const found = byUri.get(row.uri);
+    return editionView(
+      row,
+      (found?.identifiers ?? []).map((identifier) => ({ edition_uri: row.uri, ...identifier })),
+      (found?.contributors ?? []).map((contributor) => ({ edition_uri: row.uri, ...contributor })),
+      found?.publisher ? { edition_uri: row.uri, ...found.publisher } : undefined,
+      coversBaseUrl
+    );
+  });
 }
