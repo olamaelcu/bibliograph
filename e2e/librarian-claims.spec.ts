@@ -159,21 +159,52 @@ if (state?.ready) {
     await pool?.end();
   });
 
-  test.beforeEach(async ({ context }) => {
-    // The queue is behind a signed cookie; minting it is the only step of
-    // sign-in that does not need the PDS's own login form.
-    await context.addCookies([
-      {
-        name: 'bib_librarian',
-        value: state!.cookie,
-        domain: '127.0.0.1',
-        path: '/librarian',
-        httpOnly: true,
-        secure: false,
-        sameSite: 'Lax'
-      }
+  /**
+   * Sign in the way a person does: the app's form mints a loopback client id,
+   * the fixture PDS asks for the account's password and its consent, and the
+   * callback sets the session cookie on this browser context.
+   *
+   * Every test signs in for itself: a new context (and therefore a new jar)
+   * comes with each test, and the round trip is two navigations.
+   */
+  async function signIn(page: Page): Promise<void> {
+    const pdsHost = new URL(state!.pdsUrl).hostname;
+
+    await page.goto(`${state!.edgeUrl}/librarian/login`);
+    await page.locator('input[name="handle"]').fill(state!.librarianHandle);
+    await Promise.all([
+      page.waitForURL((url) => url.hostname === pdsHost, { timeout: 60_000 }),
+      page.getByRole('button', { name: 'Sign in' }).click()
     ]);
-  });
+    await page.waitForLoadState('domcontentloaded');
+
+    // The PDS's own sign-in page.
+    const password = page.locator('input[name="password"]');
+    await password.waitFor({ state: 'visible', timeout: 30_000 });
+    if ((await page.locator('input[name="email_otp"]').count()) > 0) {
+      throw new Error(
+        'the fixture PDS asks for an email code at sign-in; the librarian suite needs an account without one'
+      );
+    }
+    const identifier = page.locator('input[name="identifier"]');
+    if ((await identifier.count()) > 0 && (await identifier.inputValue()) === '') {
+      await identifier.fill(state!.librarianHandle);
+    }
+    await password.fill(process.env.HV_ACCOUNT_PASSWORD ?? 'Dev-account-password1');
+    await page.locator('form button[type="submit"]').first().click();
+    await page.waitForLoadState('domcontentloaded');
+
+    // Consent, when the PDS asks for it.
+    const authorize = page.getByRole('button', { name: 'Authorize' });
+    await authorize
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => authorize.click())
+      .catch(() => {
+        // No consent screen: the scope was already granted for this client.
+      });
+
+    await page.waitForURL((url) => url.pathname === '/librarian/claims', { timeout: 60_000 });
+  }
 
   function claimRow(page: Page, did: string) {
     return page.locator('li', {
@@ -203,7 +234,7 @@ if (state?.ready) {
   }
 
   test('approving a claim publishes the link and signs the label', async ({ page }) => {
-    await page.goto(`${state!.edgeUrl}/librarian/claims`);
+    await signIn(page);
 
     const row = claimRow(page, state!.approvedDid);
     await expect(row).toContainText(state!.approvedDid);
@@ -305,7 +336,7 @@ if (state?.ready) {
   });
 
   test('rejecting a claim records the decision and leaves no link', async ({ page }) => {
-    await page.goto(`${state!.edgeUrl}/librarian/claims`);
+    await signIn(page);
 
     const row = claimRow(page, state!.rejectedDid);
     await expect(row).toContainText('Please let me in.');

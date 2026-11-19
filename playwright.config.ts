@@ -21,6 +21,9 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   reporter: [['list']],
   use: {
+    // The fixture PDS answers over TLS with Caddy's internal CA; `mise run
+    // hv-ca` can install it, but the suite must not depend on that.
+    ignoreHTTPSErrors: true,
     trace: 'retain-on-failure'
   }
 });

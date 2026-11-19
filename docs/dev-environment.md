@@ -411,11 +411,17 @@ the labeler's public half; and `getContributorLink` answering with the identity
 and claim state the reader's page renders. The reject scenario asserts the
 decision and the absence of a binding.
 
-Two things are stubbed on purpose:
+The librarian signs in the way a person does: the app's form mints the RFC 8252
+loopback client id, the fixture PDS asks for the account's password and its
+consent, and the callback sets the session cookie on the browser context. The
+OAuth round trip (PAR, authorize, token exchange, DPoP) is therefore part of what
+the suite verifies. It needs the fixture account: `HAPPYVIEW_ACCOUNT_DID` and
+`HV_ACCOUNT_HANDLE` from `.env`, password `HV_ACCOUNT_PASSWORD`
+(`Dev-account-password1` by default, and what `mise run hv-account` creates).
+Chromium runs with `ignoreHTTPSErrors` because the PDS answers with Caddy's
+internal CA — `mise run hv-ca` can install it, but the suite should not require
+it.
 
-- **The librarian's identity** is a minted `bib_librarian` cookie (the app's own
-  HMAC helper), not an OAuth round trip. The queue and the decisions are what
-  this suite is for; sign-in is unit-tested and needs an interactive PDS login.
-- **The worker's per-minute crons** are not waited on; the spec enqueues
-  `pds-publish` and `labels.emit` through graphile so a failure is a failure, not
-  a slow machine.
+One thing is stubbed on purpose: the worker's per-minute crons are not waited
+on; the spec enqueues `pds-publish` and `labels.emit` through graphile, so a
+failure is a failure, not a slow machine.

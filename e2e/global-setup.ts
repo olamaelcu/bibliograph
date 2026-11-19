@@ -20,10 +20,10 @@
  * `PDS_ACCOUNT_PASSWORD` in the environment (mise loads `.env`) the suite is
  * skipped with a reason rather than failing.
  *
- * The librarian is signed in by minting the session cookie, not by driving the
- * PDS's own login form: the cookie is an HMAC over the DID with the same secret
- * the app uses, so this exercises the queue and the decisions, not OAuth
- * (which the unit tests cover and which needs interactive credentials).
+ * The librarian signs in through the app's form and the fixture PDS's own pages:
+ * the spec drives that OAuth round trip, so the account named by
+ * `HAPPYVIEW_ACCOUNT_DID`/`HV_ACCOUNT_HANDLE` must exist and its password must
+ * be `HV_ACCOUNT_PASSWORD` (the `mise run hv-account` default).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -38,7 +38,6 @@ import pg from 'pg';
 // Worker-internal fixtures: the same schema helpers its own suites use.
 import { ensureHappyviewRecords, indexClaim } from '../packages/worker/test/support/happyview.js';
 import { ensureSupportSchema } from '../packages/worker/lib/setup.js';
-import { signSessionCookie } from '../packages/web/src/lib/server/librarian/cookie.ts';
 
 import {
   ROOT,
@@ -61,7 +60,6 @@ const ADMIN_PORT = 19465;
 const METRICS_PORT = 19464;
 const LABELER_PORT = 19466;
 
-const LIBRARIAN_DID = 'did:plc:e2elibrarian';
 const APPROVED_DID = 'did:plc:e2eapproved';
 const REJECTED_DID = 'did:plc:e2erejected';
 const AUTHORITY = 'did:plc:e2eauthority';
@@ -72,14 +70,27 @@ const SESSION_SECRET = 'e2e-librarian-session-secret';
 const ADMIN_TOKEN = 'e2e-admin-token';
 
 function fixtureConfig() {
-  const { PDS_URL, PDS_ACCOUNT_DID, PDS_ACCOUNT_PASSWORD } = process.env;
+  const { PDS_URL, PDS_ACCOUNT_DID, PDS_ACCOUNT_PASSWORD, HAPPYVIEW_ACCOUNT_DID, HV_ACCOUNT_HANDLE } =
+    process.env;
   if (!PDS_URL || !PDS_ACCOUNT_DID || !PDS_ACCOUNT_PASSWORD) {
     return {
       reason:
         'PDS_URL, PDS_ACCOUNT_DID and PDS_ACCOUNT_PASSWORD are unset; run `docker compose up -d` and use `mise run test-e2e` so .env is loaded'
     };
   }
-  return { PDS_URL, PDS_ACCOUNT_DID, PDS_ACCOUNT_PASSWORD };
+  if (!HAPPYVIEW_ACCOUNT_DID || !HV_ACCOUNT_HANDLE) {
+    return {
+      reason:
+        'HAPPYVIEW_ACCOUNT_DID/HV_ACCOUNT_HANDLE are unset, so there is no fixture account to sign in as; `mise run hv-account` creates one'
+    };
+  }
+  return {
+    PDS_URL,
+    PDS_ACCOUNT_DID,
+    PDS_ACCOUNT_PASSWORD,
+    librarianDid: HAPPYVIEW_ACCOUNT_DID,
+    librarianHandle: HV_ACCOUNT_HANDLE
+  };
 }
 
 async function applySchema(url: string): Promise<void> {
@@ -186,7 +197,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       env: {
         ...baseEnv,
         WORKER_ADMIN_URL: `http://127.0.0.1:${ADMIN_PORT}`,
-        LIBRARIAN_DIDS: LIBRARIAN_DID,
+        // The fixture account that owns HV_ACCOUNT_HANDLE is the librarian.
+        LIBRARIAN_DIDS: fixture.librarianDid,
         LIBRARIAN_SESSION_SECRET: SESSION_SECRET,
         LIVTET_LABELER_KEY_MULTIBASE: labelerPublic,
         LIVTET_LABELER_ORIGIN: `http://127.0.0.1:${LABELER_PORT}`,
@@ -209,12 +221,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       workerAdminUrl: `http://127.0.0.1:${ADMIN_PORT}`,
       labelerUrl: `http://127.0.0.1:${LABELER_PORT}`,
       labelerPublic,
-      cookie: signSessionCookie(
-        LIBRARIAN_DID,
-        Math.floor(Date.now() / 1000) + 3600,
-        SESSION_SECRET
-      ),
-      librarianDid: LIBRARIAN_DID,
+      librarianDid: fixture.librarianDid,
+      librarianHandle: fixture.librarianHandle,
       contributorUri: CONTRIBUTOR_URI,
       contributorName: CONTRIBUTOR_NAME,
       approvedDid: APPROVED_DID,

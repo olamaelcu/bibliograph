@@ -25,9 +25,9 @@ export type HarnessState = {
   labelerUrl: string;
   /** Multikey of the throwaway labeler key, for verifying the signature. */
   labelerPublic: string;
-  /** Signed `bib_librarian` cookie value for the librarian account. */
-  cookie: string;
   librarianDid: string;
+  /** The fixture account the suite signs in as, with the PDS's own forms. */
+  librarianHandle: string;
   contributorUri: string;
   contributorName: string;
   approvedDid: string;
