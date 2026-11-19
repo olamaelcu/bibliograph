@@ -1,13 +1,11 @@
 -- Indexes for the activity reads HappyView serves. Idempotent; applied by
 -- `mise run hv-deploy` after HappyView has migrated `happyview_records`.
 
--- These two were built with the old collection name. Dropping first is the only
--- way to change a partial index's predicate: `IF NOT EXISTS` would keep the
--- stale one because the name already exists. The drop must be schema-qualified:
--- psql resolves an unqualified index name against `search_path` (public for the
--- `bibliograph` role), not against the table being indexed.
-DROP INDEX IF EXISTS happyview.happyview_record_shelf_idx;
-DROP INDEX IF EXISTS happyview.happyview_record_book_uri_idx;
+-- Every statement here is `CREATE INDEX IF NOT EXISTS`: the file is applied on
+-- every release, so a drop-and-recreate would rebuild that index on the live
+-- table each time (two of these used to do exactly that). A partial index whose
+-- predicate must change needs a new name, or a one-off drop on the host —
+-- `IF NOT EXISTS` cannot alter an existing one.
 CREATE INDEX IF NOT EXISTS happyview_record_shelf_idx
   ON happyview.happyview_records (((record::jsonb)->>'shelf'))
   WHERE collection = 'net.olamaelcu.livtet.biblio.bookStatus';
@@ -64,3 +62,27 @@ CREATE INDEX IF NOT EXISTS happyview_record_bookhive_hive_idx
 CREATE INDEX IF NOT EXISTS happyview_records_giveaway_entry_giveaway
   ON happyview.happyview_records (((record::jsonb -> 'giveaway' ->> 'uri')))
   WHERE collection = 'net.olamaelcu.livtet.biblio.giveaway.entry';
+
+-- `listReviewsByActor` unions the DID's reviews and its Bookhive reviews and
+-- orders the union by `created_at DESC, uri DESC`. `(did, collection)` finds the
+-- rows but nothing orders them, so each branch sorted the actor's whole history
+-- (p50 4.6 s, p95 21 s, max 36 s on the host). With this index both branches are
+-- an ordered walk, so the paging LIMIT stops the scan instead of sorting the
+-- match set.
+CREATE INDEX IF NOT EXISTS happyview_records_actor_created_idx
+  ON happyview.happyview_records (did, collection, created_at DESC, uri DESC);
+
+-- `getShelvingOfBook` filters `collection IN (bookStatus, shelfItem)` and then
+-- the record's `book.uri`. The two partial book-uri indexes above cannot serve
+-- an `IN` list (the planner cannot match an IN list to a single partial
+-- predicate), so it read every status and shelfItem of the DID and filtered in
+-- memory, with a correlated NOT EXISTS per row. This composite carries the same
+-- expression across both collections.
+CREATE INDEX IF NOT EXISTS happyview_records_actor_book_uri_idx
+  ON happyview.happyview_records (did, collection, ((record::jsonb)->'book'->>'uri'));
+
+-- `listShelvesWithBooks` pages a DID's shelves by a `uri` cursor; without `uri`
+-- in the index the rows were fetched and then sorted (p95 1.2 s, max 15.8 s
+-- under IO).
+CREATE INDEX IF NOT EXISTS happyview_records_actor_uri_idx
+  ON happyview.happyview_records (did, collection, uri);
