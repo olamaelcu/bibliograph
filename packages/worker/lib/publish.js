@@ -530,7 +530,12 @@ export function createOutboxPublisher({ pool, config, fetchImpl, coversBaseUrl =
   async function drain({
     limit = DEFAULT_BATCH,
     logger = console,
-    maxBatches = 50,
+    // 2 000 rows per job rather than 10 000. A drain holds the connection pool
+    // and writes one outbox delete + one cid upsert per row; on the 2-vCPU host
+    // a 10k job kept the disk at 50–70% IO wait and pushed the edge's catalog
+    // reads past their timeout. The cron runs every minute, so the backlog still
+    // drains, just in smaller bites.
+    maxBatches = 10,
     prepareConcurrency = PREPARE_CONCURRENCY,
     writeConcurrency = WRITE_CONCURRENCY,
     // Records per `applyWrites` call. 200 is the atproto cap and the cheapest

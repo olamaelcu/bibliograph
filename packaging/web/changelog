@@ -1,3 +1,17 @@
+bibliograph-web (0.6.1-1) unstable; urgency=medium
+
+  * 0.6.1: the search pool tolerates this host's IO latency.
+
+    - `searchEditions` failed every call with a 503 exactly 2.005 s in — the
+      pool's `query_timeout` — while the same statement ran in 57–84 ms from
+      psql and `resolveEditions` answered in 15–28 ms. The deployment host has
+      2 vCPUs, 3.9 GB of RAM and a working set larger than the buffer pool, so
+      a search stalls behind IO while the cheap catalog reads do not. The bound
+      is 10 s now; the pool remains separate, so a slow search still cannot
+      starve resolve or list.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.6.0-1) unstable; urgency=medium
 
   * 0.6.0: bounded public search, a pool for it, and a tsvector index.

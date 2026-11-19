@@ -101,8 +101,15 @@ export function searchPool(): Pool {
     max: 5,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 2_000,
-    statement_timeout: 2_000,
-    query_timeout: 2_000
+    // The deployment host has 2 vCPUs, 3.9 GB of RAM and a working set
+    // (`book_search` + `edition_shape` + `happyview_records`) larger than the
+    // buffer pool, so a search stalls behind IO for seconds while the catalog
+    // pool's cheap reads stay fast. A two-second bound turned every one of
+    // those stalls into a 503 (measured: exactly 2.005 s, then "Query read
+    // timeout"); ten seconds lets the statement finish. The pool is separate,
+    // so a slow search still cannot starve resolve or list.
+    statement_timeout: 10_000,
+    query_timeout: 10_000
   });
 
   return shared.__bibliographSearchPool;

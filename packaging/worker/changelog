@@ -1,3 +1,15 @@
+bibliograph-worker (0.7.5-1) unstable; urgency=medium
+
+  * 0.7.5: the publish drain runs in smaller bites.
+
+    - `maxBatches` is 10 (2 000 rows) rather than 50 (10 000). A drain holds
+      the pool and writes a delete plus a cid upsert per row; on a 2-vCPU host
+      a 10k job kept the disk at 50–70% IO wait and pushed the edge's catalog
+      reads past their timeout. The cron runs every minute, so the backlog
+      still drains.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.7.4-1) unstable; urgency=medium
 
   * 0.7.4: publishing outranks hydration.
