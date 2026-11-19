@@ -343,6 +343,13 @@ Each worker needs a connection to fetch and one for its SQL, so the three move
 together and the total stays inside `max_connections` 100 beside the edge's 25
 and HappyView's 40.
 
+Jobs are ordered by `(priority, run_at)`. `pds-publish` runs at priority -10 so
+a hydration backlog can never delay publication (it did: ~1,400 due genre jobs
+starved the per-minute cron while the outbox grew and `pds_cids` stayed flat);
+edge-triggered enrichment stays at 0, and the sweeps' per-edition work is 100,
+because one edition's genre is not urgent and its ledger retries it. See
+`0031-hydration-priorities.sql`.
+
 | Task | Trigger | Work |
 | --- | --- | --- |
 | `catalog.resolve` | edge on a resolution miss (`job_key` deduped, 24 h TTL) | provider lookup → ingest up to 50 candidates into the identifier bag |

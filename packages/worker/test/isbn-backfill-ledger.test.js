@@ -48,7 +48,7 @@ async function claim(target) {
 
 async function jobs(target) {
   const { rows } = await pool.query(
-    `SELECT identifier, payload, queue_name, job_key, max_attempts
+    `SELECT identifier, payload, queue_name, job_key, max_attempts, priority
        FROM isbn_backfill_test_jobs
       WHERE job_key = $1
       ORDER BY id`,
@@ -78,7 +78,8 @@ beforeAll(async () => {
       payload jsonb,
       queue_name text,
       job_key text,
-      max_attempts integer
+      max_attempts integer,
+      priority integer
     );
     CREATE OR REPLACE FUNCTION graphile_worker.add_job(
       identifier text = NULL,
@@ -86,12 +87,13 @@ beforeAll(async () => {
       queue_name text = NULL,
       run_at timestamp with time zone = now(),
       max_attempts integer = 25,
-      job_key text = NULL
+      job_key text = NULL,
+      priority integer = NULL
     ) RETURNS void LANGUAGE plpgsql AS $fn$
     BEGIN
       INSERT INTO isbn_backfill_test_jobs
-             (identifier, payload, queue_name, job_key, max_attempts)
-      VALUES (identifier, payload, queue_name, job_key, max_attempts);
+             (identifier, payload, queue_name, job_key, max_attempts, priority)
+      VALUES (identifier, payload, queue_name, job_key, max_attempts, priority);
     END;
     $fn$;
   `);
@@ -123,7 +125,9 @@ test('the first claim writes a skipped ledger row and one serialised job', async
     // One job per queue at a time is graphile-worker's concurrency 1.
     queue_name: 'isbn-backfill',
     job_key: `isbn-backfill:${target}`,
-    max_attempts: 3
+    max_attempts: 3,
+    // Bulk work: the per-edition class, behind edge-triggered hydration.
+    priority: 100
   });
 });
 

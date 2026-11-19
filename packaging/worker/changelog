@@ -1,3 +1,21 @@
+bibliograph-worker (0.7.4-1) unstable; urgency=medium
+
+  * 0.7.4: publishing outranks hydration.
+
+    - Graphile runs jobs in ascending `(priority, run_at)` order and every job
+      was priority 0, so ~1,400 due `catalog.genres` jobs starved the
+      per-minute `pds-publish` cron: with the PDS back up, the outbox grew and
+      `pds_cids` stayed flat because the cron job's `run_at` was newer than the
+      whole backlog.
+    - `pds-publish` is priority -10; edge-triggered enrichment stays at 0; the
+      sweeps' per-edition work is 100, since one edition's genre or cover is
+      not urgent and its ledger retries it.
+    - `0031` replaces the three claim functions with the priority and
+      re-prioritises work already queued under the old policy, skipping itself
+      where graphile's schema is absent.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 18 Nov 2026 00:00:00 +0000
+
 bibliograph-worker (0.7.3-1) unstable; urgency=medium
 
   * 0.7.3: the worker runs twelve jobs, not five, and both pools follow it.

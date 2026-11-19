@@ -247,7 +247,12 @@ if (publisher) {
     options: {
       queueName: 'pds-publish',
       jobKey: 'pds-publish:cron',
-      maxAttempts: 3
+      maxAttempts: 3,
+      // Publishing makes a record visible on the network, so it must never wait
+      // behind hydration. Graphile runs ascending (priority, run_at), and a
+      // backlog of bulk jobs queued at 0 used to delay this per-minute cron for
+      // as long as the backlog lasted (measured: outbox grew, cids flat).
+      priority: -10
     }
   });
 }
@@ -257,7 +262,8 @@ cronItems.push({
   options: {
     queueName: 'genres-sweep',
     jobKey: 'catalog.genres.sweep:cron',
-    maxAttempts: 3
+    maxAttempts: 3,
+    priority: 100
   }
 });
 cronItems.push({
@@ -266,7 +272,8 @@ cronItems.push({
   options: {
     queueName: 'covers-sweep',
     jobKey: 'catalog.covers.sweep:cron',
-    maxAttempts: 3
+    maxAttempts: 3,
+    priority: 100
   }
 });
 cronItems.push({
@@ -278,7 +285,8 @@ cronItems.push({
   options: {
     queueName: 'marks-prune',
     jobKey: 'catalog.marks.prune:cron',
-    maxAttempts: 3
+    maxAttempts: 3,
+    priority: 50
   }
 });
 cronItems.push({
@@ -287,7 +295,8 @@ cronItems.push({
   options: {
     queueName: 'bookhive',
     jobKey: 'catalog.bookhive:cron',
-    maxAttempts: 2
+    maxAttempts: 2,
+    priority: 100
   }
 });
 cronItems.push({
@@ -301,7 +310,8 @@ cronItems.push({
   options: {
     queueName: 'isbn-backfill-sweep',
     jobKey: 'catalog.isbn.backfill.sweep:cron',
-    maxAttempts: 3
+    maxAttempts: 3,
+    priority: 100
   }
 });
 const parsedCronItems = parseCronItems(cronItems);
