@@ -1,26 +1,13 @@
-bibliograph-web (0.7.3-1) unstable; urgency=medium
+bibliograph-web (0.7.4-1) unstable; urgency=medium
 
-  * 0.7.3: the search enqueues run in parallel with the search, so their
-    failure cannot turn a successful search into a 503 — the remaining cause
-    of 503s with SEARCH_BACKEND=tantivy.
-  * Also carries 0.7.1 (contributor claims, labeler, librarian) and 0.7.2
-    (the search backend switch and the fourth-package deploy wiring), whose
-    entries were merged without changelog text.
-
- -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
-
-bibliograph-web (0.7.0-1) unstable; urgency=medium
-
-  * 0.7.0: search can be served by the external index, behind a switch.
-
-    - `SEARCH_BACKEND` selects `postgres` (default), `shadow` or `tantivy`.
-      `shadow` serves Postgres and records the top-25 agreement with the index
-      (`bibliograph_catalog_search_overlap_ratio`) without changing a response;
-      `tantivy` hydrates the index's uris in order and falls back to Postgres
-      on any engine failure (`engine_fallback`).
-    - Bodies that carry identifiers keep the Postgres path, and `SEARCH_URL`
-      unset keeps the index off whatever the switch says.
-    - Depends on bibliograph-search, which now ships its own package.
+  * `SEARCH_BACKEND` selects `postgres` (default), `shadow` or `tantivy` for
+    searchEditions; bodies with identifiers stay on Postgres. `shadow` records
+    the top-25 agreement with the index, `tantivy` hydrates the index's uris in
+    their order and falls back on engine failure (`engine_fallback`), with a
+    400 ms engine budget.
+  * The search enqueues run in parallel with the search and catch their own
+    failures, so bookkeeping writes cannot turn a successful search into a 503.
+  * Depends: bibliograph-search.
 
  -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
 
