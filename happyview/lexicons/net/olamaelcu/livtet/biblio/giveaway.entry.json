@@ -13,7 +13,7 @@
           "giveaway": {
             "type": "ref",
             "ref": "com.atproto.repo.strongRef",
-            "description": "The giveaway being entered. A strongRef rather than a plain at-uri: an entry is about one revision of the giveaway, and a rewrite of its terms is a different offer."
+            "description": "The giveaway being entered. A strongRef names the revision this entry was written against. Entries are matched to the giveaway by its uri, so the author may move closesAt later (never earlier) and this entry stays valid."
           },
           "country": {
             "type": "string",
