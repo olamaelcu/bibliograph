@@ -56,6 +56,7 @@ for sql in happyview/sql/*.sql; do
 done
 install -D -m 0755 happyview/bin/hv-client "$STAGE$LIVE/bin/hv-client"
 install -D -m 0644 happyview/bin/hvlib.py "$STAGE$LIVE/bin/hvlib.py"
+install -D -m 0644 scripts/publish-lexicons.mjs "$STAGE$LIVE/bin/publish-lexicons.mjs"
 install -D -m 0755 packaging/happyview/bin/hv-prepare-static \
   "$STAGE$LIVE/bin/hv-prepare-static"
 
@@ -122,6 +123,8 @@ chmod 0644 "$DEBIAN_DIR/control"
   || die "no lexicons staged"
 [[ -n "$(find "$STAGE$LIVE/scripts/xrpc" -name '*.lua' -print -quit)" ]] \
   || die "no scripts staged"
+[[ -f "$STAGE$LIVE/bin/publish-lexicons.mjs" ]] \
+  || die "no lexicon publisher staged; deploy.sh runs it after install"
 [[ -f "$STAGE$LIVE/lib/prelude.lua" ]] \
   || die "no lib/prelude.lua staged; every script includes it"
 

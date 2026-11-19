@@ -637,6 +637,47 @@ else
   echo "NGINX absent (bibliograph-web is only reachable on 127.0.0.1; install nginx to front it)"
 fi
 
+# --------------------------------------------------------------- lexicons ---
+
+# The permission set and every other app lexicon are `com.atproto.lexicon.schema`
+# records on the publisher's repo, and nothing else writes them: `hv-deploy`
+# registers lexicons with HappyView for dispatch, which is a different store. A
+# manual `mise run publish-lex` is what let `authLivtetCore` drift two collections
+# behind this tree, so the release publishes here and a stale record can no longer
+# ship silently.
+lexicons_dir=/usr/lib/bibliograph-happyview/lexicons
+publisher=/usr/lib/bibliograph-happyview/bin/publish-lexicons.mjs
+pds_url="$(env_value /etc/bibliograph/worker.env PDS_URL)"
+pds_did="$(env_value /etc/bibliograph/worker.env PDS_ACCOUNT_DID)"
+pds_password="$(env_value /etc/bibliograph/worker.env PDS_ACCOUNT_PASSWORD)"
+pds_token=""
+[ -n "$pds_password" ] || pds_token="$(env_value /etc/bibliograph/worker.env PDS_ACCESS_TOKEN)"
+
+if [ -z "$pds_url" ] || [ -z "$pds_did" ] || { [ -z "$pds_password" ] && [ -z "$pds_token" ]; }; then
+  echo "WARNING: worker.env has no publisher credentials; lexicons were not published" >&2
+elif ! command -v node >/dev/null 2>&1; then
+  # node arrives with the worker package; a host with credentials but no node
+  # cannot keep the records current, and silently skipping would recreate the
+  # drift this step exists to prevent.
+  fail "publisher credentials are configured but node is absent; lexicons cannot be published"
+elif [ ! -f "$publisher" ] || [ ! -d "$lexicons_dir" ]; then
+  fail "$publisher or $lexicons_dir is missing; the package did not carry them"
+else
+  printf 'LEXICONS publishing to %s\n' "$pds_url"
+  # Assigned as command-prefix variables so the secret reaches node's environment
+  # without appearing in any argv, and never echoed.
+  if [ -n "$pds_password" ]; then
+    PDS_URL="$pds_url" PDS_ACCOUNT_DID="$pds_did" PDS_ACCOUNT_PASSWORD="$pds_password" \
+      node "$publisher" --dir "$lexicons_dir" ||
+      fail "the lexicon publish failed; the permission-set record is stale"
+  else
+    PDS_URL="$pds_url" PDS_ACCOUNT_DID="$pds_did" PDS_ACCESS_TOKEN="$pds_token" \
+      node "$publisher" --dir "$lexicons_dir" ||
+      fail "the lexicon publish failed; the permission-set record is stale"
+  fi
+  printf 'LEXICONS published\n'
+fi
+
 # ----------------------------------------------------------- verification ---
 
 code=000
