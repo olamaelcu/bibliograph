@@ -23,7 +23,21 @@
             "net.olamaelcu.livtet.biblio.topBook",
             "net.olamaelcu.livtet.biblio.contributorClaim",
             "net.olamaelcu.livtet.biblio.reviewReply",
-            "net.olamaelcu.livtet.bookReview"
+            "net.olamaelcu.livtet.bookReview",
+            "net.olamaelcu.livtet.biblio.giveaway.entry",
+            "net.olamaelcu.livtet.biblio.giveaway.event"
+          ]
+        },
+        {
+          "type": "permission",
+          "resource": "rpc",
+          "inheritAud": true,
+          "lxm": [
+            "net.olamaelcu.livtet.biblio.giveaway.draw",
+            "net.olamaelcu.livtet.biblio.giveaway.extend",
+            "net.olamaelcu.livtet.biblio.giveaway.getReport",
+            "net.olamaelcu.livtet.biblio.giveaway.listEntries",
+            "net.olamaelcu.livtet.biblio.giveaway.listGiveaways"
           ]
         }
       ]
