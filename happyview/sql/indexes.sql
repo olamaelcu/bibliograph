@@ -86,3 +86,12 @@ CREATE INDEX IF NOT EXISTS happyview_records_actor_book_uri_idx
 -- under IO).
 CREATE INDEX IF NOT EXISTS happyview_records_actor_uri_idx
   ON happyview.happyview_records (did, collection, uri);
+
+-- `listShelvesWithBooks` runs one `entries` query per shelf on the page, and
+-- each filtered `(record->>'shelf')` across every status and shelfItem of the
+-- DID. Nothing indexed `shelf` together with the DID and collection, so a
+-- 25-shelf page read the same rows 25 times (14 s average at the panel). This
+-- makes each inner query an index descent; the correlated NOT EXISTS uses it
+-- too.
+CREATE INDEX IF NOT EXISTS happyview_records_actor_shelf_idx
+  ON happyview.happyview_records (did, collection, ((record::jsonb)->>'shelf'));
