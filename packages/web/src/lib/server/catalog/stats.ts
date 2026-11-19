@@ -17,26 +17,32 @@ type StatsRow = {
 };
 
 /**
- * Four `count(*)` over the whole catalog are exact but not cheap: measured
- * 565 ms warm and 1.5 s cold on the production catalog (146k editions, 357k
- * identifiers), which was the entire latency of `GET /` and `/api/stats`.
- * Nothing on that page needs the count of this second, so the result is reused
- * for a minute and an expired one is served while it refreshes behind the
- * caller; a failure is not cached.
+ * Estimates from `pg_class.reltuples`, not `count(*)`.
  *
- * `hooks.server.ts` warms it at boot. That matters because `/` traffic is
- * sparse: without the warm-up the first request after a restart pays the four
- * counts, and one slow sample among a handful owns the route's p95.
+ * Four exact counts were measured at 434 ms warm on production and touched
+ * 88 759 buffers (~694 MB) per call: that is more than the host's entire
+ * `shared_buffers` (488 MB), so every refresh evicted the working set and the
+ * next feed read, publisher insert or identifier count came from disk. The
+ * docs page does not need last-second exactness; `ANALYZE` (autovacuum and
+ * every deploy) keeps the estimates within a few percent, and this query reads
+ * a handful of catalog pages instead of the catalog itself.
+ *
+ * The 60s TTL and the boot warm-up stay: they cost nothing now and keep the
+ * page stable when the estimates refresh.
  */
 const STATS_TTL_MS = 60_000;
 
 async function countCatalog(): Promise<CatalogStats> {
   const { rows } = await catalogPool().query<StatsRow>(`
     SELECT
-      (SELECT count(*) FROM books) AS editions,
-      (SELECT count(*) FROM contributors) AS contributors,
-      (SELECT count(*) FROM publishers) AS publishers,
-      (SELECT count(*) FROM edition_identifiers) AS identifiers
+      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'books'), 0)::bigint AS editions,
+      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'contributors'), 0)::bigint AS contributors,
+      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'publishers'), 0)::bigint AS publishers,
+      COALESCE(max(c.reltuples) FILTER (WHERE c.relname = 'edition_identifiers'), 0)::bigint AS identifiers
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public'
+       AND c.relname IN ('books', 'contributors', 'publishers', 'edition_identifiers')
   `);
 
   const row = rows[0];

@@ -505,10 +505,14 @@ export function createTasks({
       // A fresh candidate is an edition with no ledger row at all, which is a set
       // difference no index can answer cheaply: when the set is empty the walk
       // has to cover every edition to prove it (3.6 s at 300k). Ledger rows are
-      // a subset of editions, so equal counts prove the set is empty for the
-      // price of two index-only counts.
+      // a subset of editions, so equal counts prove the set is empty.
+      //
+      // The edition side is an estimate: `count(*) FROM books` scans 370k rows
+      // and pushed the whole table through a 488 MB buffer pool on every sweep,
+      // evicting the cache every other query needs. This check only decides
+      // whether to walk the catalog; a few percent of error costs one walk.
       const counts = await pool.query(
-        `SELECT (SELECT count(*) FROM books) AS editions,
+        `SELECT COALESCE((SELECT reltuples FROM pg_class WHERE oid = 'books'::regclass), 0)::bigint AS editions,
                 (SELECT count(*) FROM edition_genre_fetches) AS attempts`
       );
       const hasFresh =
