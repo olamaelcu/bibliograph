@@ -83,6 +83,7 @@ chmod 0644 "$DEBIAN_DIR/control"
 say "Building the package"
 install -d dist
 out="dist/bibliograph-search_${VERSION}-${REVISION}_${ARCH}.deb"
+packaging/md5sums.sh "$STAGE"
 dpkg-deb --root-owner-group --build "$STAGE" "$out" >/dev/null
 rm -rf "$STAGE"
 

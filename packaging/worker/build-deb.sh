@@ -94,6 +94,7 @@ command -v node >/dev/null || echo "WARN: node is not on PATH on this build host
 say "Building the package"
 install -d dist
 out="dist/bibliograph-worker_${VERSION}-${REVISION}_${ARCH}.deb"
+packaging/md5sums.sh "$STAGE"
 dpkg-deb --root-owner-group --build "$STAGE" "$out" >/dev/null
 rm -rf "$STAGE"
 

@@ -216,6 +216,27 @@ fi
 
 apt_install() {
   local deb="$1"
+  local pkg want tmp
+  pkg="$(dpkg-deb -f "$deb" Package)"
+  want="$(dpkg-deb -f "$deb" Version)"
+  # Same version is not the same payload: this script rebuilds packages on
+  # every run. Compare the deb's own md5sums with the installed package's and
+  # let dpkg verify the files on disk; only then is a reinstall a no-op that
+  # costs ~40s on the production disk (11% CPU, the rest IO) plus the
+  # postinst's oneshot (76s for HappyView).
+  if [ "$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)" = "$want" ]; then
+    tmp="$(mktemp -d)"
+    # `dpkg -V` is not the check here: it reports the locally edited conffiles
+    # (/etc/bibliograph/*.env) and would make every deploy reinstall. The deb's
+    # own `md5sums` list is the payload identity: same paths, same hashes.
+    if dpkg-deb -e "$deb" "$tmp" 2>/dev/null \
+       && cmp -s "$tmp/md5sums" "/var/lib/dpkg/info/$pkg.md5sums"; then
+      note "$pkg $want unchanged (payload verified); skipping install"
+      rm -rf "$tmp"
+      return 0
+    fi
+    rm -rf "$tmp"
+  fi
   say "Installing $(basename "$deb")"
   # --reinstall replaces an identical version's payload, so re-running deploy
   # is a real redeploy. confdef/confold keeps local edits to the env conffiles.
