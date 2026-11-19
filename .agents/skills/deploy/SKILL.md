@@ -55,6 +55,7 @@ the host sees it.
 | `docs/**`, `README.md`, `AGENTS.md`, `.agents/**`, package tests (`packages/*/test/**`, `happyview/test/**`) | none | Documentation and checks only; no package deploy. |
 | `docker/**`, `docker-compose.yml` | none | Local/dev compose stack (Postgres, PLC, PDS, Caddy, HappyView) — never the production deployment. |
 | `scripts/publish-lexicons.mjs` | none (separate step) | No Debian package; `mise run publish-lex` publishes schema records to the PDS. Vendored foreign-authority documents — `buzz.bookhive.*` (Bookhive's) and `community.lexicon.*` (lexicon.community's) — are never published: the script skips them and deletes a record an earlier run left behind, while `hv-deploy` keeps uploading the files. `scripts/verify-lexicons.mjs` and `scripts/dev-seed.py` are check/dev-only. |
+| | | `--only <nsid-prefix>` narrows the write set; the deploy passes `--only net.olamaelcu.livtet.biblio`, so `net.olamaelcu.livtet.authLivtetCore` and every other NSID stays in the tree for dispatch but is never written by this repo's release (84 of 96 documents). A publish runs inside `deploy.sh` after the install; it fails the deploy when the PDS does not answer. |
 
 Cross-package notes and false assumptions:
 

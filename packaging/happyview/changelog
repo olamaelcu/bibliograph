@@ -1,3 +1,12 @@
+bibliograph-happyview (2.17.4-6) unstable; urgency=medium
+
+  * Packaging revision 6: the bundled publisher takes `--only`, and the deploy
+    publishes just `net.olamaelcu.livtet.biblio.*`. The other NSIDs stay in
+    the tree for HappyView dispatch but belong to the Livtet app repo's
+    release. The HappyView binary is unchanged at 2.17.4.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 13:50:00 +0000
+
 bibliograph-happyview (2.17.4-5) unstable; urgency=medium
 
   * Packaging revision 5: the deploy oneshot bounds the runtime role's

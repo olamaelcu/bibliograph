@@ -98,7 +98,9 @@ function parseArgs(argv) {
     dir: DEFAULT_LEXICON_DIR,
     dryRun: false,
     validate: true,
-    skipAuthority: false
+    skipAuthority: false,
+    // NSID prefixes to publish; empty means every document in the tree.
+    only: []
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -116,6 +118,12 @@ function parseArgs(argv) {
         const value = argv[++i];
         if (value === undefined) throw new Error('--dir needs a path');
         options.dir = value;
+        break;
+      }
+      case '--only': {
+        const value = argv[++i];
+        if (value === undefined) throw new Error('--only needs an NSID prefix');
+        options.only.push(value);
         break;
       }
       case '-h':
@@ -473,7 +481,7 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     console.log(
-      'usage: node scripts/publish-lexicons.mjs [--dry-run] [--no-validate] [--dir <path>] [--skip-authority]'
+      'usage: node scripts/publish-lexicons.mjs [--dry-run] [--no-validate] [--dir <path>] [--only <nsid-prefix>]... [--skip-authority]'
     );
     return 0;
   }
@@ -493,11 +501,19 @@ async function main() {
   if (!options.dryRun && config.problems.length > 0) throw configError(config);
 
   const publisherDid = config.accountDid;
+  // `--only` narrows the write set to the NSIDs this repo owns; the other
+  // documents stay in the tree as HappyView/worker inputs.
+  const scoped =
+    options.only.length === 0
+      ? documents
+      : documents.filter(({ id }) =>
+          options.only.some((prefix) => id === prefix || id.startsWith(`${prefix}.`))
+        );
   // Foreign-authority documents are inputs for HappyView and the worker, not
   // claims on this repo: they are excluded from every write and their (stale)
   // records are removed below.
-  const publishable = documents.filter(({ id }) => foreignAuthority(id) === null);
-  const foreign = documents
+  const publishable = scoped.filter(({ id }) => foreignAuthority(id) === null);
+  const foreign = scoped
     .filter(({ id }) => foreignAuthority(id) !== null)
     .map((entry) => ({ ...entry, reason: foreignAuthority(entry.id) }));
 

@@ -667,6 +667,9 @@ fi
 # manual `mise run publish-lex` is what let `authLivtetCore` drift two collections
 # behind this tree, so the release publishes here and a stale record can no longer
 # ship silently.
+# Only `net.olamaelcu.livtet.biblio.*` is published: the other records in the
+# tree (`authLivtetCore`) belong to the Livtet app repo's tree and its own
+# release, so this deploy must not write or delete them.
 lexicons_dir=/usr/lib/bibliograph-happyview/lexicons
 publisher=/usr/lib/bibliograph-happyview/bin/publish-lexicons.mjs
 pds_url="$(env_value /etc/bibliograph/worker.env PDS_URL)"
@@ -690,11 +693,11 @@ else
   # without appearing in any argv, and never echoed.
   if [ -n "$pds_password" ]; then
     PDS_URL="$pds_url" PDS_ACCOUNT_DID="$pds_did" PDS_ACCOUNT_PASSWORD="$pds_password" \
-      node "$publisher" --dir "$lexicons_dir" ||
+      node "$publisher" --dir "$lexicons_dir" --only net.olamaelcu.livtet.biblio ||
       fail "the lexicon publish failed; the permission-set record is stale"
   else
     PDS_URL="$pds_url" PDS_ACCOUNT_DID="$pds_did" PDS_ACCESS_TOKEN="$pds_token" \
-      node "$publisher" --dir "$lexicons_dir" ||
+      node "$publisher" --dir "$lexicons_dir" --only net.olamaelcu.livtet.biblio ||
       fail "the lexicon publish failed; the permission-set record is stale"
   fi
   printf 'LEXICONS published\n'
