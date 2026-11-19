@@ -724,7 +724,7 @@
           "description": "ISO-3166 alpha-2 codes, or the single value `*` for worldwide.",
           "items": {
             "type": "string",
-            "minLength": 2,
+            "minLength": 1,
             "maxLength": 2
           }
         },
