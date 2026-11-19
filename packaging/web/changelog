@@ -1,3 +1,14 @@
+bibliograph-web (0.7.3-1) unstable; urgency=medium
+
+  * 0.7.3: the search enqueues run in parallel with the search, so their
+    failure cannot turn a successful search into a 503 — the remaining cause
+    of 503s with SEARCH_BACKEND=tantivy.
+  * Also carries 0.7.1 (contributor claims, labeler, librarian) and 0.7.2
+    (the search backend switch and the fourth-package deploy wiring), whose
+    entries were merged without changelog text.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Wed, 19 Nov 2026 00:00:00 +0000
+
 bibliograph-web (0.7.0-1) unstable; urgency=medium
 
   * 0.7.0: search can be served by the external index, behind a switch.

@@ -313,6 +313,19 @@ async function handleSearch(request: Request): Promise<Response> {
     );
     // A hit skips the database and the hydration work below. Only a resolved
     // page is stored: a failed query propagates and is retried, never cached.
+    // Bookkeeping writes must never decide the response. They start here, in
+    // parallel with the search, and a failure is logged rather than surfaced:
+    // under an IO stall these enqueues were timing out *after* a successful
+    // search and turning it into a 503.
+    void Promise.all(
+      isbn13sFromIdentifiers(identifiers)
+        .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
+        .map((isbn13) =>
+          enqueueIsbnHydration(isbn13).catch((error) =>
+            console.error("[xrpc] catalog.isbn enqueue failed", error),
+          ),
+        ),
+    );
     const { value: results, hit } = await remember(searchCache, cacheKey, () =>
       searchEditionsRouted({
         q,
@@ -332,14 +345,6 @@ async function handleSearch(request: Request): Promise<Response> {
       return json(results);
     }
     recordCatalogQuery(metrics, "searchEditions", "ok", (performance.now() - started) / 1000);
-    // An ISBN is worth a direct ISBNdb lookup even when the local catalog
-    // answered: the job enriches/ingests the edition from the provider.
-    // Only the first MAX_HYDRATION_JOBS_PER_REQUEST distinct ISBNs queue.
-    await Promise.all(
-      isbn13sFromIdentifiers(identifiers)
-        .slice(0, MAX_HYDRATION_JOBS_PER_REQUEST)
-        .map((isbn13) => enqueueIsbnHydration(isbn13)),
-    );
     // A short first page is the whole match set, so it is thin evidence; a full
     // one omits `total` and counts as enough rather than paying a count. Paging
     // never re-fires; an identifier-only body is covered by the catalog.isbn
@@ -353,7 +358,9 @@ async function handleSearch(request: Request): Promise<Response> {
     recordCatalogSearchDecision(metrics, hydration);
     if (results.total !== undefined) recordCatalogSearchMatches(metrics, results.total);
     if (hydration === "thin") {
-      await enqueueSearchHydration({ q, title, author, identifiers });
+      void enqueueSearchHydration({ q, title, author, identifiers }).catch((error) =>
+        console.error("[xrpc] catalog.search enqueue failed", error),
+      );
     }
     return json(results);
   } catch (error) {
