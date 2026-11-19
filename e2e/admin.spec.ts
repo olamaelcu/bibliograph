@@ -14,11 +14,10 @@
  */
 
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
 import pg from 'pg';
 
 import { readState } from './harness.ts';
-import { waitForUpgrade } from './support/ui.ts';
+import { adminSignIn, waitForUpgrade } from './support/ui.ts';
 
 const state = readState();
 test.skip(!state?.ready, state?.reason ?? 'the E2E harness did not start');
@@ -35,15 +34,6 @@ if (state?.ready) {
   test.afterAll(async () => {
     await pool?.end();
   });
-
-  async function adminSignIn(page: Page): Promise<void> {
-    await page.goto(`${state.edgeUrl}/admin/login`);
-    await page.locator('input[name="token"]').fill(state.adminToken);
-    const button = page.locator('wa-button', { hasText: 'Sign in' });
-    await waitForUpgrade(button);
-    await button.click();
-    await page.waitForURL(`${state.edgeUrl}/admin`);
-  }
 
   test('the admin area is closed without the token and opens with it', async ({ page }) => {
     await page.goto(`${state.edgeUrl}/admin`);
@@ -65,7 +55,7 @@ if (state?.ready) {
   });
 
   test('merging editions keeps the base URI and absorbs identifiers and credits', async ({ page }) => {
-    await adminSignIn(page);
+    await adminSignIn(page, { edgeUrl: state.edgeUrl, token: state.adminToken });
 
     // The same request the workbench's "Merge editions" button sends: the base
     // keeps its URI, the others are absorbed with unioned contributors.
@@ -107,7 +97,7 @@ if (state?.ready) {
   test('merging contributors moves credits and the verified identity, then deletes the source', async ({
     page
   }) => {
-    await adminSignIn(page);
+    await adminSignIn(page, { edgeUrl: state.edgeUrl, token: state.adminToken });
 
     await page.goto(
       `${state.edgeUrl}/admin/contributor/${state.contributorSourceId}/merge?into=${state.contributorTargetId}`
@@ -143,7 +133,7 @@ if (state?.ready) {
   });
 
   test('merging publishers absorbs identifiers and deletes the source', async ({ page }) => {
-    await adminSignIn(page);
+    await adminSignIn(page, { edgeUrl: state.edgeUrl, token: state.adminToken });
 
     await page.goto(
       `${state.edgeUrl}/admin/publisher/${state.publisherSourceId}/merge?into=${state.publisherTargetId}`

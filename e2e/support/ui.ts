@@ -1,4 +1,4 @@
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /**
  * Wait until a Web Awesome element has been upgraded.
@@ -13,4 +13,22 @@ export async function waitForUpgrade(locator: Locator): Promise<void> {
     await customElements.whenDefined(el.localName);
     await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
   });
+}
+
+/**
+ * Sign in to the operator area.
+ *
+ * The token is the same one `/admin/api/*` requires; the cookie it sets is what
+ * every page below the layout checks.
+ */
+export async function adminSignIn(
+  page: Page,
+  { edgeUrl, token }: { edgeUrl: string; token: string }
+): Promise<void> {
+  await page.goto(`${edgeUrl}/admin/login`);
+  await page.locator('input[name="token"]').fill(token);
+  const button = page.locator('wa-button', { hasText: 'Sign in' });
+  await waitForUpgrade(button);
+  await button.click();
+  await page.waitForURL(`${edgeUrl}/admin`);
 }

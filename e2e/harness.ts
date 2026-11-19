@@ -44,6 +44,14 @@ export type HarnessState = {
   publisherTargetId: string;
   bookBaseUri: string;
   bookOtherUri: string;
+  /** Rows the guard scenarios act on; nothing else touches them. */
+  guardContributorId: string;
+  guardPublisherId: string;
+  deleteEditionUri: string;
+  bothIdentitySourceId: string;
+  bothIdentityTargetId: string;
+  workbenchBaseUri: string;
+  workbenchOtherUri: string;
   workerLog: string;
   edgeLog: string;
 };

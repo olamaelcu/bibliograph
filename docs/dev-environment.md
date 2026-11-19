@@ -435,3 +435,14 @@ the credit and the verified identity on the survivor and the source row gone),
 and publishers (identifiers unioned, source deleted). Those scenarios are serial
 and ordered because each feeds the next: the edition merge moves the seeded
 credit onto the base, and the contributor merge then has to move that credit.
+
+`admin-guards.spec.ts` covers what must *not* happen: the JSON APIs answer 401
+without the operator cookie; malformed provider/import requests are refused
+before a provider is contacted; a credited contributor and a publisher an
+edition depends on cannot be deleted; deleting an edition requires the revision
+the page was loaded with (a stale one is a 409) and queues the record deletion;
+the merge preview refuses an unknown or identical target; when both rows carry
+an identity the survivor keeps its own; the dashboard's merge search finds the
+seeded editions; and signing out clears the cookie. Form POSTs sent from the
+suite carry an explicit `origin` header, because SvelteKit's CSRF check rejects
+them otherwise.

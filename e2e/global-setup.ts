@@ -130,6 +130,13 @@ type AdminFixtures = {
   publisherTargetId: string;
   bookBaseUri: string;
   bookOtherUri: string;
+  guardContributorId: string;
+  guardPublisherId: string;
+  deleteEditionUri: string;
+  bothIdentitySourceId: string;
+  bothIdentityTargetId: string;
+  workbenchBaseUri: string;
+  workbenchOtherUri: string;
 };
 
 /**
@@ -195,13 +202,85 @@ async function seedAdminFixtures(url: string): Promise<AdminFixtures> {
       ]
     );
 
+    // ── guard fixtures ────────────────────────────────────────────────────
+    // One credited contributor (delete refused), one publisher attached to an
+    // edition (delete refused), one edition with nothing attached (delete
+    // allowed), two contributors that each carry an identity (merge survivor
+    // keeps its own), and two editions for the merge workbench UI.
+    const guardEditionUri = `at://${AUTHORITY}/community.lexicon.media.book.edition/3e2eguard`;
+    await pool.query(
+      `INSERT INTO books (uri, rkey, title, created_at) VALUES ($1, '3e2eguard', 'E2E Guard Edition', '2026-01-01T00:00:00Z')`,
+      [guardEditionUri]
+    );
+    await pool.query(
+      `INSERT INTO edition_identifiers (edition_uri, issuer, value) VALUES ($1, 'isbn13', '9780000000003')`,
+      [guardEditionUri]
+    );
+    const guardContributor = await pool.query<{ id: string }>(
+      'INSERT INTO contributors (name, at_uri) VALUES ($1, $2) RETURNING id',
+      ['E2E Guard Author', `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/3e2eguardauthor`]
+    );
+    await pool.query(
+      `INSERT INTO edition_contributors (edition_uri, contributor_id, position, role)
+       VALUES ($1, $2, 1, 'author')`,
+      [guardEditionUri, guardContributor.rows[0].id]
+    );
+    const guardPublisher = await pool.query<{ id: string }>(
+      'INSERT INTO publishers (name) VALUES ($1) RETURNING id',
+      ['E2E Guard Press']
+    );
+    await pool.query(
+      `INSERT INTO edition_identifier_publishers (edition_uri, issuer, value, publisher_id, position)
+       VALUES ($1, 'isbn13', '9780000000003', $2, 1)`,
+      [guardEditionUri, guardPublisher.rows[0].id]
+    );
+
+    const deleteEditionUri = `at://${AUTHORITY}/community.lexicon.media.book.edition/3e2edelete`;
+    await pool.query(
+      `INSERT INTO books (uri, rkey, title, created_at) VALUES ($1, '3e2edelete', 'E2E Delete Edition', '2026-01-01T00:00:00Z')`,
+      [deleteEditionUri]
+    );
+
+    const bothSource = await pool.query<{ id: string }>(
+      'INSERT INTO contributors (name, at_uri) VALUES ($1, $2) RETURNING id',
+      ['E2E Both Identity Source', `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/3e2ebotha`]
+    );
+    const bothTarget = await pool.query<{ id: string }>(
+      'INSERT INTO contributors (name, at_uri) VALUES ($1, $2) RETURNING id',
+      ['E2E Both Identity Target', `at://${AUTHORITY}/net.olamaelcu.livtet.biblio.contributor/3e2ebothb`]
+    );
+    await pool.query(
+      `INSERT INTO contributor_identities (contributor_id, did, at_uri, issued_by) VALUES
+         ($1, 'did:plc:e2ebotha',
+          'at://did:plc:e2ebotha/net.olamaelcu.livtet.biblio.knownContributor/3e2ebotha', 'did:plc:e2elibrarian'),
+         ($2, 'did:plc:e2ebothb',
+          'at://did:plc:e2ebothb/net.olamaelcu.livtet.biblio.knownContributor/3e2ebothb', 'did:plc:e2elibrarian')`,
+      [bothSource.rows[0].id, bothTarget.rows[0].id]
+    );
+
+    const workbenchBaseUri = `at://${AUTHORITY}/community.lexicon.media.book.edition/3e2ewbbase`;
+    const workbenchOtherUri = `at://${AUTHORITY}/community.lexicon.media.book.edition/3e2ewbother`;
+    await pool.query(
+      `INSERT INTO books (uri, rkey, title, created_at) VALUES
+         ($1, '3e2ewbbase', 'E2E Workbench Base', '2026-01-01T00:00:00Z'),
+         ($2, '3e2ewbother', 'E2E Workbench Other', '2026-01-01T00:00:00Z')`,
+      [workbenchBaseUri, workbenchOtherUri]
+    );
+
     return {
       contributorSourceId: contributorSource.rows[0].id,
       contributorTargetId: contributorTarget.rows[0].id,
       publisherSourceId: publisherSource.rows[0].id,
       publisherTargetId: publisherTarget.rows[0].id,
       bookBaseUri,
-      bookOtherUri
+      bookOtherUri,
+      guardContributorId: guardContributor.rows[0].id,
+      guardPublisherId: guardPublisher.rows[0].id,
+      deleteEditionUri,
+      bothIdentitySourceId: bothSource.rows[0].id,
+      bothIdentityTargetId: bothTarget.rows[0].id,
+      workbenchBaseUri,
+      workbenchOtherUri
     };
   } finally {
     await pool.end();
