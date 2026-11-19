@@ -17,6 +17,7 @@ import {
 } from './cover-cache.js';
 import { createCoverMetrics } from './cover-metrics.js';
 import { emitLabels } from './labels.js';
+import { drainSearchIndex, searchIndexBatches, searchIndexSize } from './search-index.js';
 
 /** Upper bound on editions one catalog task ingests; providers may return fewer. */
 export const CANDIDATES_PER_TASK = 50;
@@ -165,6 +166,9 @@ export function createTasks({
   // Aborted when the process is asked to stop, before graphile's per-job abort
   // fires. Combined with `helpers.abortSignal` below.
   signal = null,
+  // Loopback address of the search index service. Unset means indexing is off:
+  // the task then skips instead of claiming rows it cannot post.
+  searchUrl = (process.env.SEARCH_URL ?? '').trim(),
   // `{ keypair, src }` once the labeler key is loaded; `null` disables the task.
   labels = null
 }) {
@@ -284,6 +288,31 @@ export function createTasks({
       helpers.logger.info(
         `catalog.isbn ${isbn}: ${candidates.length} candidate(s), ${ingested} ingested`
       );
+    },
+
+    // The catalog triggers are what queue a document into `search_dirty`, so
+    // this tick is cheap when nothing changed (the claim returns no rows).
+    // Posting before acking keeps a failed batch queued; the per-batch ack is
+    // versioned so a newer edit is not swallowed.
+    'catalog.search.index': async (payload, helpers) => {
+      if (searchUrl === '') {
+        helpers.logger.debug('catalog.search.index: SEARCH_URL is not set, skipping');
+        return;
+      }
+      const result = await drainSearchIndex({
+        pool,
+        searchUrl,
+        batchSize: searchIndexSize(payload),
+        maxBatches: searchIndexBatches(payload),
+        logger: helpers.logger,
+        signal: stopSignal(helpers)
+      });
+      if (result.applied > 0) {
+        helpers.logger.info(
+          `catalog.search.index: ${result.applied} change(s), ${result.deletes} delete(s), ` +
+            `${result.batches} batch(es)`
+        );
+      }
     },
 
     // Bookhive's catalog is the only join its reader records have: every hive

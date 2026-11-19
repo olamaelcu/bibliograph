@@ -173,11 +173,16 @@ $$;
 -- `changed_at` is returned as text on purpose: node-postgres would hand a
 -- `Date` back at millisecond precision, while the column keeps microseconds,
 -- and the ack could never match it.
-CREATE OR REPLACE FUNCTION claim_search_dirty(p_limit integer DEFAULT 500)
+-- The optional uri filter exists so a caller can drain one set without
+-- consuming another's: the test suite shares one database, and in production
+-- the single drainer passes nothing.
+DROP FUNCTION IF EXISTS claim_search_dirty(integer);
+CREATE OR REPLACE FUNCTION claim_search_dirty(p_limit integer DEFAULT 500, p_uris text[] DEFAULT NULL)
 RETURNS TABLE (uri text, op text, changed_at text)
 LANGUAGE sql STABLE AS $$
   SELECT d.uri, d.op, d.changed_at::text
     FROM search_dirty d
+   WHERE p_uris IS NULL OR d.uri = ANY(p_uris)
    ORDER BY d.changed_at
    LIMIT greatest(p_limit, 1);
 $$;

@@ -32,6 +32,10 @@ const publisherHost = process.env.ATP_SERVICE_HOST || 'biblio.livtet.olamaelcu.n
 // Unset disables the cover cache instead of guessing a path.
 const coversCacheDir = (process.env.COVERS_CACHE_DIR ?? '').trim();
 const coversBaseUrl = coversBaseUrlFromEnv(process.env, publisherHost);
+// Loopback address of the search index service (`bibliograph-search`). Unset
+// keeps indexing off: the catalog triggers still queue into `search_dirty`, so
+// nothing is lost, and search keeps answering from Postgres until it is set.
+const searchUrl = (process.env.SEARCH_URL ?? '').trim();
 // One counter instance: the cover jobs increment it, the scrape reports it.
 const coverMetrics = createCoverMetrics();
 // Same for the Bookhive walk: the `catalog.bookhive` task increments it and the
@@ -43,6 +47,12 @@ if (coversCacheDir === '') {
     'worker: cover caching is DISABLED — COVERS_CACHE_DIR is not set. ' +
       'catalog.covers becomes a no-op, so no cover bytes are downloaded or served; ' +
       'set it (e.g. /var/cache/bibliograph-covers) and restart.'
+  );
+}
+if (searchUrl === '') {
+  console.log(
+    'worker: search indexing is DISABLED — SEARCH_URL is not set; ' +
+      'catalog changes stay queued in search_dirty and search answers from Postgres'
   );
 }
 // The repo authority is independent of publisher credentials: hydration mints
@@ -272,6 +282,7 @@ const taskList = createTasks({
   coversBaseUrl,
   coverMetrics,
   bookhiveMetrics,
+  searchUrl,
   signal: shutdown.signal,
   // Null when the key is missing, which is what makes `labels.emit` refuse the
   // job instead of signing nothing.
@@ -370,6 +381,21 @@ cronItems.push({
     jobKey: 'catalog.isbn.backfill.sweep:cron',
     maxAttempts: 3,
     priority: 100
+  }
+});
+cronItems.push({
+  // The catalog triggers queue changes; with an empty queue this job is one
+  // SELECT. One tick a minute keeps the index within a minute of Postgres.
+  task: 'catalog.search.index',
+  match: '* * * * *',
+  options: {
+    queueName: 'search-index',
+    jobKey: 'catalog.search.index:cron',
+    maxAttempts: 3,
+    // Above every provider job (sweeps use 100): the index must not queue
+    // behind a five-thousand-job catalog walk. The host was measured with 5 244
+    // due provider jobs and the cron unfetched for minutes.
+    priority: 900
   }
 });
 const parsedCronItems = parseCronItems(cronItems);
