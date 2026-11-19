@@ -69,7 +69,7 @@ fn handle(mut stream: TcpStream, engine: &Engine, metrics: &PrometheusHandle) ->
     let started = Instant::now();
     let (status, content_type, payload) = span.in_scope(|| route_on(engine, metrics, &method, &path, &body));
     let elapsed = started.elapsed().as_secs_f64();
-    metrics::counter!("search_http_requests_total", "route" => route.clone(), "status" => status.to_string()).increment(1);
+    metrics::counter!("search_http_requests_total", "route" => route, "status" => status.to_string()).increment(1);
     metrics::histogram!("search_http_request_duration_seconds", "route" => route).record(elapsed);
     respond(&mut stream, status, content_type, &payload)
 }
