@@ -52,11 +52,17 @@ $function$;
 -- A database without graphile (the tests' container) has no queue to move.
 DO $do$
 BEGIN
-  IF to_regclass('graphile_worker.jobs') IS NOT NULL THEN
-    UPDATE graphile_worker.jobs
+  -- `jobs` is a view over `_private_jobs` (not updatable) and the identifier
+  -- lives in `tasks`; a database without graphile (the tests' container) has
+  -- neither.
+  IF to_regclass('graphile_worker._private_jobs') IS NOT NULL
+     AND to_regclass('graphile_worker.tasks') IS NOT NULL THEN
+    UPDATE graphile_worker._private_jobs j
        SET priority = -5
-     WHERE task_identifier = 'catalog.genres'
-       AND priority = 100;
+      FROM graphile_worker.tasks t
+     WHERE t.id = j.task_id
+       AND t.identifier = 'catalog.genres'
+       AND j.priority = 100;
   END IF;
 END
 $do$;
