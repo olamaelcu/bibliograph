@@ -1,3 +1,12 @@
+bibliograph-worker (0.10.3-1) unstable; urgency=medium
+
+  * 0.10.3: ISBNdb requests are paced at its 5-per-second allowance (a 200 ms
+    gate instead of 1 s), so hydration stops tripping the provider's 429s while
+    the read-miss genre/resolve queues work through their backlog at six
+    concurrent jobs.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 22:00:00 +0000
+
 bibliograph-worker (0.10.2-1) unstable; urgency=medium
 
   * 0.10.2: genre fetches are enqueued at priority -5 (was graphile's default

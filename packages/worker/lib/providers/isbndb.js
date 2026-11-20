@@ -8,7 +8,10 @@ import {
   createDailyQuota
 } from './usage.js';
 
-const gate = createGate(1000);
+// ISBNdb allows five requests a second per key. The gate is module-scoped, so
+// every job shares one 200 ms spacing and concurrency cannot burst past it;
+// a slow answer stretches the gap rather than stacking the next call on top.
+const gate = createGate(200);
 function stringListOfPublishers(value) {
   if (!Array.isArray(value)) return [];
   return value.map(cleanString).filter(Boolean);
