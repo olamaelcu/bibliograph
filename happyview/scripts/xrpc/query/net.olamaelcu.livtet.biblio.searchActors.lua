@@ -71,7 +71,7 @@ function handle()
                (SELECT (profile.record::jsonb)->>'displayName'
                   FROM happyview_records AS profile
                  WHERE profile.did = readers.did
-                   AND profile.collection = ']] .. PROFILE_COLLECTION .. [[
+                   AND profile.collection = ']] .. PROFILE_COLLECTION .. [['
                  ORDER BY profile.created_at DESC
                  LIMIT 1) AS display_name
           FROM readers

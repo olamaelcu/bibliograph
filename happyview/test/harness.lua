@@ -396,6 +396,14 @@ local function run_endpoint(kind, name, options)
   local responder = options.responder or function() return {} end
   env.db = {
     raw = function(sql, args)
+      -- The stub never parses SQL, so a malformed statement would pass here and
+      -- fail on the first real request (`Unterminated string literal`). An odd
+      -- number of single quotes is the shape that produced exactly that: a
+      -- literal opened by a `']] .. NSID .. [[` concatenation and never closed.
+      local quotes = select(2, string.gsub(sql, "'", ""))
+      if quotes % 2 ~= 0 then
+        error('unbalanced quotes in SQL built by the handler: ' .. sql)
+      end
       calls[#calls + 1] = { sql = sql, args = args }
       return responder(sql, args, #calls) or {}
     end,
