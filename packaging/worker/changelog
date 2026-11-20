@@ -1,3 +1,12 @@
+bibliograph-worker (0.10.2-1) unstable; urgency=medium
+
+  * 0.10.2: genre fetches are enqueued at priority -5 (was graphile's default
+    0) and the queued jobs at 100 are moved up, so a reader-triggered genre
+    fetch is not last behind the bulk search/resolve/cover backlog. Genre
+    hydration had stopped on 2026-11-19 with 6 406 jobs queued and untouched.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 21:40:00 +0000
+
 bibliograph-worker (0.10.1-1) unstable; urgency=medium
 
   * 0.10.1: the publish snapshot joins edition_shape instead of
