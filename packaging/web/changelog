@@ -1,3 +1,11 @@
+bibliograph-web (0.9.3-1) unstable; urgency=medium
+
+  * 0.9.3: `bookStatus` pages per did like the Popfeed branches, so every
+    personalized branch is an index descent per did instead of a walk of the
+    time-ordered index under `did = ANY(...)`.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 17:40:00 +0000
+
 bibliograph-web (0.9.2-1) unstable; urgency=medium
 
   * 0.9.2: personalized feeds page the two Popfeed branches by DID. Under

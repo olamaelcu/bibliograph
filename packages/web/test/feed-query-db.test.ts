@@ -21,6 +21,7 @@ import pg from 'pg';
 import {
   encodeCursor,
   fetchFeedPage,
+  BOOK_STATUS_COLLECTION,
   BUZZ_BOOKHIVE_BOOK,
   POPFEED_LIST_ITEM_COLLECTION,
   POPFEED_REVIEW_COLLECTION
@@ -47,6 +48,13 @@ const REVIEW_URI = `at://${POPFEED_DID}/${POPFEED_REVIEW_COLLECTION}/3kfeedprobe
 const LIST_ITEM_URI = `at://${POPFEED_DID}/${POPFEED_LIST_ITEM_COLLECTION}/3kfeedprobe`;
 const REVIEW_TIME = new Date(Date.now() - 60_000).toISOString();
 const LIST_ITEM_TIME = new Date().toISOString();
+
+// A Bibliograph `bookStatus` is the third personalized branch: it has no
+// predicate, so its page is the per-did index descent itself.
+const STATUS_DID = `did:plc:feedprobe${RUN}status`;
+const STATUS_EDITION = `at://${AUTHORITY}/community.lexicon.media.book.edition/feedprobe-st-${RUN}`;
+const STATUS_URI = `at://${STATUS_DID}/net.olamaelcu.livtet.biblio.bookStatus/3kfeedprobe`;
+const STATUS_TIME = new Date(Date.now() - 30_000).toISOString();
 
 let pool: pg.Pool | undefined;
 let ready = false;
@@ -162,6 +170,25 @@ beforeAll(async () => {
         LIST_ITEM_TIME
       ]
     );
+    await pool.query(
+      `INSERT INTO happyview.happyview_records (uri, did, collection, rkey, record, cid, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (uri) DO NOTHING`,
+      [
+        STATUS_URI,
+        STATUS_DID,
+        BOOK_STATUS_COLLECTION,
+        '3kfeedprobe',
+        JSON.stringify({
+          $type: BOOK_STATUS_COLLECTION,
+          book: { uri: STATUS_EDITION, cid: 'bafyfeedprobe' },
+          status: 'reading',
+          createdAt: STATUS_TIME
+        }),
+        `bafyfeedprobe-status${RUN}`,
+        STATUS_TIME
+      ]
+    );
   } catch {
     await candidate.end().catch(() => undefined);
     pool = undefined;
@@ -173,7 +200,7 @@ afterAll(async () => {
   if (pool) {
     await pool
       .query('DELETE FROM happyview.happyview_records WHERE uri = ANY($1::text[])', [
-        [POST_URI, REVIEW_URI, LIST_ITEM_URI]
+        [POST_URI, REVIEW_URI, LIST_ITEM_URI, STATUS_URI]
       ])
       .catch(() => undefined);
     await pool
@@ -238,4 +265,13 @@ test('Popfeed records resolve their ISBN to an edition and page by addedAt', asy
 
   expect(first.feed.map((item) => item.post)).toEqual([LIST_ITEM_URI]);
   expect(first.cursor).toBe(encodeCursor({ c: LIST_ITEM_TIME, u: LIST_ITEM_URI }));
+});
+
+test('a bookStatus pages through the per-did branch and names its book', async (t) => {
+  const live = requiredPool(t);
+  if (!live) return;
+
+  const page = await fetchFeedPage(live, { kind: 'dynamic', viewerDid: STATUS_DID, limit: 20 });
+
+  expect(page.feed).toEqual([{ post: STATUS_URI, reason: STATUS_EDITION }]);
 });

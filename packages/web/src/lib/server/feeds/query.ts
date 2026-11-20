@@ -358,7 +358,15 @@ export async function fetchFeedPage(
   // index scans and stop after `limit + 1` rows (0.8 ms), because
   // `happyview_records_feed_order_idx` matches this ORDER BY exactly — see
   // 0020-feed-popfeed.sql.
-  const POPFEED_PAGED = new Set([POPFEED_REVIEW_COLLECTION, POPFEED_LIST_ITEM_COLLECTION]);
+  // Branches whose personalized page is taken per did: the two Bibliograph
+  // activity collections and the two Popfeed ones (whose book predicate lives
+  // in the record). Bookhive keeps the ordered ANY shape, which measured 12 ms.
+  const PER_DID_PAGED = new Set([
+    REVIEW_COLLECTION,
+    BOOK_STATUS_COLLECTION,
+    POPFEED_REVIEW_COLLECTION,
+    POPFEED_LIST_ITEM_COLLECTION
+  ]);
   const unioned = branches.map(({ collection, filter }, index) => {
     const collectionParam = `$${index + 1}`;
 
@@ -369,7 +377,7 @@ export async function fetchFeedPage(
     // dids have any row for this branch, so iterate the viewer's dids and take
     // the page per did: a did with no rows costs one index descent on
     // (collection, did), and a did with rows stops at its own LIMIT.
-    if (dids !== null && POPFEED_PAGED.has(collection)) {
+    if (dids !== null && PER_DID_PAGED.has(collection)) {
       const filterR = filter.replaceAll('record::jsonb', 'r.record::jsonb');
       const feedTimeR = FEED_TIME.replaceAll('record::jsonb', 'r.record::jsonb');
       let cursorR = '';

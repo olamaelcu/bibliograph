@@ -3,16 +3,20 @@
 --
 -- The index already knows which repos hold a book record: a Livtet review or
 -- shelving row, a Bookhive book, a Popfeed review or shelf item. This query
--- narrows that set by what the reader typed after `@` — part of a display
--- name — and answers the accounts a mention can be written for.
+-- narrows that set by what the reader typed after `@` — a handle prefix, or
+-- part of a display name — and answers the accounts a mention can be written
+-- for.
 --
--- The answer is DIDs and names, not handles. A handle lives only in
--- `happyview_linked_repos`, which the engine protects from script SQL, and the
--- table's own rows are not a mention's business; the caller resolves a handle
--- from the DID when it needs one (a mention stores the DID, and its renderer
--- resolves the current handle). Display names come from the reader's own
--- Livtet profile record when the index has seen one, and they are what orders
--- the answer.
+-- Handles come from `public.actor_handles`, a view the deployment owns: the
+-- engine refuses script SQL against its own `happyview_linked_repos` registry
+-- (that table carries scopes and session state), so the deployment exposes the
+-- public half — `did` and `handle` — and nothing else. Reading through the view
+-- means the handle is never stale, and the registry stays unreadable to a
+-- script.
+--
+-- A handle match sorts before a name-only match, because a reader typing `@`
+-- is writing a handle; `last_activity` breaks the tie. Display names come from
+-- the reader's own Livtet profile record when the index has seen one.
 
 local MAX_QUERY = 50
 local DEFAULT_LIMIT = 8
@@ -42,7 +46,9 @@ function handle()
   end
 
   local limit = clamp_int(params.limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-  local name_contains = '%' .. like_escape(term:lower()) .. '%'
+  local needle = like_escape(term:lower())
+  local handle_prefix = needle .. '%'
+  local name_contains = '%' .. needle .. '%'
 
   -- The constants are compile-time strings, so the collection list is part of
   -- the statement rather than a parameter Postgres would have to type.
@@ -72,18 +78,25 @@ function handle()
                  LIMIT 1) AS display_name
           FROM readers
       )
-      SELECT did, display_name
-        FROM named
-       WHERE lower(coalesce(display_name, '')) LIKE $1
-       ORDER BY last_activity DESC, lower(did) ASC
-       LIMIT $2]],
-    { name_contains, limit }
+      SELECT n.did, n.display_name, h.handle
+        FROM named AS n
+        LEFT JOIN public.actor_handles AS h ON h.did = n.did
+       WHERE lower(coalesce(h.handle, '')) LIKE $1
+          OR lower(coalesce(n.display_name, '')) LIKE $2
+       ORDER BY (lower(coalesce(h.handle, '')) LIKE $1) DESC,
+                n.last_activity DESC,
+                lower(coalesce(h.handle, n.did)) ASC
+       LIMIT $3]],
+    { handle_prefix, name_contains, limit }
   )
 
   local actors = {}
   for i = 1, #rows do
     local row = rows[i]
     local actor = { did = row.did }
+    if type(row.handle) == 'string' and row.handle ~= '' then
+      actor.handle = row.handle
+    end
     if type(row.display_name) == 'string' and row.display_name ~= '' then
       actor.displayName = row.display_name
     end

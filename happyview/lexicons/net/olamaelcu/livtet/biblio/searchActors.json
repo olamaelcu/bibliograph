@@ -1,13 +1,15 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.searchActors",
-  "description": "Find readers to mention: the accounts whose repos hold a book record (a Livtet review or shelving row, a Bookhive book, or a Popfeed review or shelf item), matched by display name. The answer is DIDs and names, not handles: the caller resolves a handle from the DID, and a mention stores the DID.",
+  "description": "Find readers to mention: the accounts whose repos hold a book record (a Livtet review or shelving row, a Bookhive book, or a Popfeed review or shelf item), matched by handle prefix or display name. `handle` is present when the deployment knows the account's handle, which is what a mention shows.",
   "defs": {
     "main": {
       "type": "query",
       "parameters": {
         "type": "params",
-        "required": ["q"],
+        "required": [
+          "q"
+        ],
         "properties": {
           "q": {
             "type": "string",
@@ -27,7 +29,9 @@
         "encoding": "application/json",
         "schema": {
           "type": "object",
-          "required": ["actors"],
+          "required": [
+            "actors"
+          ],
           "properties": {
             "actors": {
               "type": "array",
@@ -42,12 +46,19 @@
     },
     "actor": {
       "type": "object",
-      "required": ["did"],
+      "required": [
+        "did"
+      ],
       "properties": {
         "did": {
           "type": "string",
           "format": "did",
           "description": "The account to mention. This is what a mention record stores."
+        },
+        "handle": {
+          "type": "string",
+          "format": "handle",
+          "description": "The handle the deployment registered for this account, when it knows one. A mention stores the DID and shows this text."
         },
         "displayName": {
           "type": "string",
