@@ -1,3 +1,13 @@
+bibliograph-worker (0.10.1-1) unstable; urgency=medium
+
+  * 0.10.1: the publish snapshot joins edition_shape instead of
+    edition_identifier_shape. The latter is a GROUP BY view over every claim
+    row, so the planner aggregates the whole catalogue before answering one
+    edition; the table is the same data from the 0023 triggers. The test
+    container also gained the HappyView registry stub that 0038 reads.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 20:10:00 +0000
+
 bibliograph-worker (0.10.0-1) unstable; urgency=medium
 
   * 0.10.0: the index and deploy release. `0037-outbox-autovacuum.sql` gives

@@ -137,7 +137,11 @@ async function loadEditionSnapshot(pool, uri) {
                  WHERE f.edition_uri = e.uri AND f.source_url = e.cover_url
               ) AS cover_cached
          FROM books e
-         LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri
+         -- The table, not the aggregate view: edition_identifier_shape is a
+         -- GROUP BY over every claim row, so joining it makes the planner
+         -- aggregate the whole catalogue before answering one edition. The
+         -- table is the same data, maintained by the 0023 triggers.
+         LEFT JOIN edition_shape s ON s.edition_uri = e.uri
         WHERE e.uri = $1`,
       [uri]
     );

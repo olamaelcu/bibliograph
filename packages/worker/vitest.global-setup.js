@@ -28,6 +28,19 @@ export default async function setup() {
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   try {
+    // 0038 builds actor_handles over HappyView's account registry and grants it
+    // to the AppView role; that migration guards on the registry, so the
+    // container needs the two objects it names (and nothing else from
+    // HappyView: the 0003/0018/0020 guards key on happyview_records).
+    await client.query(`
+      CREATE SCHEMA happyview;
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'happyview_app') THEN
+          CREATE ROLE happyview_app;
+        END IF;
+      END $$;
+      CREATE TABLE happyview.happyview_linked_repos (did text NOT NULL PRIMARY KEY, handle text);
+    `);
     const files = (await readdir(SQL_DIR)).filter((name) => name.endsWith('.sql')).sort();
     for (const file of files) {
       await client.query(await readFile(new URL(file, SQL_DIR), 'utf8'));
