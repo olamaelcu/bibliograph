@@ -44,7 +44,8 @@ export const FORWARDED_QUERIES = [
   'net.olamaelcu.livtet.biblio.listShelfItems',
   'net.olamaelcu.livtet.biblio.listShelfItemsByBook',
   'net.olamaelcu.livtet.biblio.listShelves',
-  'net.olamaelcu.livtet.biblio.listShelvesWithBooks'
+  'net.olamaelcu.livtet.biblio.listShelvesWithBooks',
+  'net.olamaelcu.livtet.biblio.searchActors'
 ] as const;
 
 /** The procedure methods forwarded to HappyView, in `hv-deploy`'s own order. */

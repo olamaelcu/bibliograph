@@ -9,7 +9,7 @@ It is drawn from the deployed lexicons in `happyview/lexicons` and the handler s
 The surface is the set of uploaded lexicons plus the book lexicons imported from
 [lexicon.community PR #18](https://tangled.org/lexicon.community/lexicons/pulls/18/latest) into
 `happyview/lexicons/community/lexicon/media/book/` and the edge-served entity lexicons under
-`happyview/lexicons/net/olamaelcu/livtet/biblio/`: **30 queries, 17 procedures and 32 record
+`happyview/lexicons/net/olamaelcu/livtet/biblio/`: **31 queries, 17 procedures and 32 record
 types**. Twelve methods are anonymous catalog reads served by the edge in `packages/web`: the two
 books-wg procedures (`community.lexicon.media.book.resolveEditions` and `searchEditions`) and the
 ten entity queries under `net.olamaelcu.livtet.biblio.*` (`getContributor`, `getContributorLink`,
@@ -243,6 +243,7 @@ signal. Queued work is not a promise that anything will be found.
 | --- | --- | --- |
 | `community.lexicon.service.describe` | — | `{ roles, methods }` — every NSID this deployment answers, shaped `{ $type, value }` |
 | `getActorProfile` | `did` | `{ profile }` — raw `net.olamaelcu.livtet.biblio.actor.profile` record or `null` |
+| `searchActors` | `q`, `limit` 8 (≤25) | `{ actors: [{ did, handle, displayName? }] }` — readers with a book record, by handle prefix or display name |
 | `getReadingGoal` | `did` | `{ goal }` — raw `readingGoal` record or `null` |
 | `getShelf` | `uri` | `{ shelf }` |
 | `listShelves` | `did`, `limit` 50 (≤100), `cursor` | `{ shelves, cursor? }` |
@@ -311,6 +312,24 @@ an empty string. The lexicon's optional `handle` is not served today: the handle
 
 Reads the index at `at://<did>/net.olamaelcu.livtet.biblio.readingGoal/current` and returns the
 decoded record object as `goal`, or `null`. `did` is required and may not be empty.
+
+#### `searchActors`
+
+Finds readers a mention picker can offer, from the book records the index already holds:
+`community.lexicon.media.book.review` and `net.olamaelcu.livtet.biblio.bookStatus` (Livtet),
+`buzz.bookhive.book` (Bookhive), and `social.popfeed.feed.review` / `social.popfeed.feed.listItem`
+(Popfeed). A DID qualifies once it holds any of them; `last_activity` only orders the answer.
+
+`q` is required, is trimmed, and is refused with `400 InvalidRequest` when empty or longer than 50
+characters. It matches the handle as a prefix and the display name as a substring, both
+case-insensitively, with LIKE metacharacters a reader types (`%`, `_`, `\`) escaped to themselves. A
+handle match sorts before a name-only match, then the most recent activity wins. `limit` defaults to
+8 and clamps to 1–25.
+
+Handles come from `happyview_linked_repos` — the registry a linked repo is recorded in — because no
+indexed record carries one. A DID with activity but no known handle is **not** answered: a mention is
+typed as a handle, so a row without one cannot be named. `displayName` comes from the reader's own
+`actor.profile` record when the index has one, and is omitted otherwise.
 
 ### Follow graph
 

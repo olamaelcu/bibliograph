@@ -289,6 +289,7 @@ const XRPC_METHODS: Record<string, true> = {
   'net.olamaelcu.livtet.biblio.searchContributors': true,
   'net.olamaelcu.livtet.biblio.searchEditionsTypeahead': true,
   'net.olamaelcu.livtet.biblio.searchPublishers': true,
+  'net.olamaelcu.livtet.biblio.searchActors': true,
   'net.olamaelcu.livtet.biblio.getActorProfile': true,
   'net.olamaelcu.livtet.biblio.getBookOnShelf': true,
   'net.olamaelcu.livtet.biblio.getGenresOfBook': true,

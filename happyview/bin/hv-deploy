@@ -126,6 +126,14 @@ QUERY_LEXICONS = [
     ("net.olamaelcu.livtet.biblio.listReviewsByActor", "community.lexicon.media.book.review"),
     ("net.olamaelcu.livtet.biblio.listReactions", "community.lexicon.interaction.reaction"),
     ("net.olamaelcu.livtet.biblio.listReviewReplies", "net.olamaelcu.livtet.biblio.reviewReply"),
+    # A read across several collections — Livtet reviews and shelving, Bookhive
+    # books, Popfeed reviews and shelf items. The target names the Livtet shelf
+    # row because HappyView refuses a query lexicon that names no collection;
+    # the handler itself reads all five from the index.
+    (
+        "net.olamaelcu.livtet.biblio.searchActors",
+        "net.olamaelcu.livtet.biblio.bookStatus",
+    ),
 ]
 
 PROCEDURE_LEXICONS = [

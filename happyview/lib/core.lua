@@ -21,6 +21,11 @@ local REVIEW_REPLY_COLLECTION = 'net.olamaelcu.livtet.biblio.reviewReply'
 local BOOKHIVE_BOOK = 'buzz.bookhive.book'
 local READING_GOAL = 'net.olamaelcu.livtet.biblio.readingGoal'
 local PROFILE_COLLECTION = 'net.olamaelcu.livtet.biblio.actor.profile'
+-- Popfeed's book activity: a review and a shelf membership. Registered in
+-- `hv-deploy` so the feed pages can read them; `searchActors` counts them as
+-- book records too, so a Popfeed reader is one the mention picker can find.
+local POPFEED_REVIEW = 'social.popfeed.feed.review'
+local POPFEED_LIST_ITEM = 'social.popfeed.feed.listItem'
 
 local FIXED_SHELVES = {
   ['reading'] = 'Currently Reading',

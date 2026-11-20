@@ -1798,6 +1798,52 @@ end)
 -- Run.
 -- ---------------------------------------------------------------------------
 
+test('searchActors answers handle matches from the book collections', function()
+  local response, calls = run_endpoint('query', 'searchActors', {
+    params = { q = 'ja', limit = '5' },
+    responder = function(sql)
+      assert_contains(sql, 'happyview_linked_repos')
+      assert_contains(sql, 'community.lexicon.media.book.review')
+      assert_contains(sql, 'buzz.bookhive.book')
+      assert_contains(sql, 'social.popfeed.feed.review')
+      assert_contains(sql, 'social.popfeed.feed.listItem')
+      assert_contains(sql, 'net.olamaelcu.livtet.biblio.actor.profile')
+      assert_absent(sql, 'SELECT *')
+      return {
+        { did = 'did:plc:reader', handle = 'jacky.wtf', display_name = 'Jacky' },
+        { did = 'did:plc:other', handle = 'jane.test', display_name = nil },
+      }
+    end,
+  })
+  assert_true(#calls == 1)
+  assert_true(#response.actors == 2)
+  assert_true(response.actors[1].did == 'did:plc:reader')
+  assert_true(response.actors[1].handle == 'jacky.wtf')
+  assert_true(response.actors[1].displayName == 'Jacky')
+  assert_nil(response.actors[2].displayName)
+end)
+
+test('searchActors refuses an empty query and clamps the limit', function()
+  local response = run_endpoint('query', 'searchActors', { params = { q = '   ' } })
+  assert_true(response.__bib_http.status == 400)
+
+  local _, calls = run_endpoint('query', 'searchActors', {
+    params = { q = 'ja', limit = '500' },
+    responder = function() return {} end,
+  })
+  assert_true(calls[1].args[3] == 25)
+  assert_true(calls[1].args[1] == 'ja%')
+end)
+
+test('searchActors escapes the LIKE metacharacters a reader can type', function()
+  local _, calls = run_endpoint('query', 'searchActors', {
+    params = { q = '50%_x' },
+    responder = function() return {} end,
+  })
+  assert_true(calls[1].args[1] == '50\\%\\_x%')
+  assert_true(calls[1].args[2] == '%50\\%\\_x%')
+end)
+
 local failures = 0
 for _, case in ipairs(tests) do
   local ok, err = pcall(case.body)
