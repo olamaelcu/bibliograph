@@ -125,3 +125,19 @@ CREATE INDEX IF NOT EXISTS happyview_records_popfeed_review_book_idx
   ON happyview.happyview_records (COALESCE((record::jsonb)->>'createdAt', (record::jsonb)->>'addedAt') DESC NULLS LAST, uri DESC)
   WHERE collection = 'social.popfeed.feed.review'
     AND (record::jsonb)->>'creativeWorkType' = 'book';
+
+-- Personalized feed pages iterate the viewer's dids (`unnest(dids)` + LATERAL)
+-- for the two Popfeed branches. The planner will not use a did-leading index
+-- under `did = ANY(...)`: it keeps the time-ordered partial index and walks it
+-- looking for the few rows those dids wrote (1.4 s for 4 rows). Per-did
+-- descents on these indexes answer the same branch in 11.9 ms for 13 dids.
+CREATE INDEX IF NOT EXISTS happyview_records_popfeed_listitem_did_book_idx
+  ON happyview.happyview_records (did, COALESCE((record::jsonb)->>'createdAt', (record::jsonb)->>'addedAt') DESC NULLS LAST, uri DESC)
+  WHERE collection = 'social.popfeed.feed.listItem'
+    AND (record::jsonb)->>'creativeWorkType' = 'book'
+    AND (record::jsonb)->>'listType' IN ('read_books', 'currently_reading_books', 'to_read_books');
+
+CREATE INDEX IF NOT EXISTS happyview_records_popfeed_review_did_book_idx
+  ON happyview.happyview_records (did, COALESCE((record::jsonb)->>'createdAt', (record::jsonb)->>'addedAt') DESC NULLS LAST, uri DESC)
+  WHERE collection = 'social.popfeed.feed.review'
+    AND (record::jsonb)->>'creativeWorkType' = 'book';

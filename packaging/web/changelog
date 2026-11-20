@@ -1,3 +1,13 @@
+bibliograph-web (0.9.2-1) unstable; urgency=medium
+
+  * 0.9.2: personalized feeds page the two Popfeed branches by DID. Under
+    `did = ANY(...)` the planner kept the time-ordered partial index and walked
+    it to find the handful of rows those dids wrote (1.4 s for 4 rows); the
+    branches now iterate `unnest(dids) <> LATERAL (... LIMIT n)`, one index
+    descent per did (11.9 ms for 13 dids).
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 09:10:00 +0000
+
 bibliograph-web (0.9.1-1) unstable; urgency=medium
 
   * 0.9.1: hydration is set-based for identifiers and contributors. Per-row

@@ -358,14 +358,53 @@ export async function fetchFeedPage(
   // index scans and stop after `limit + 1` rows (0.8 ms), because
   // `happyview_records_feed_order_idx` matches this ORDER BY exactly — see
   // 0020-feed-popfeed.sql.
-  const unioned = branches.map(({ filter }, index) => {
+  const POPFEED_PAGED = new Set([POPFEED_REVIEW_COLLECTION, POPFEED_LIST_ITEM_COLLECTION]);
+  const unioned = branches.map(({ collection, filter }, index) => {
+    const collectionParam = `$${index + 1}`;
+
+    // A personalized Popfeed branch keys on the viewer's dids, and the planner
+    // will not use a did-leading index under `did = ANY(...)`: it keeps the
+    // time-ordered partial index and walks it looking for the handful of rows
+    // those dids wrote (measured 1.4 s for 4 rows). Find which of the viewer's
+    // dids have any row for this branch, so iterate the viewer's dids and take
+    // the page per did: a did with no rows costs one index descent on
+    // (collection, did), and a did with rows stops at its own LIMIT.
+    if (dids !== null && POPFEED_PAGED.has(collection)) {
+      const filterR = filter.replaceAll('record::jsonb', 'r.record::jsonb');
+      const feedTimeR = FEED_TIME.replaceAll('record::jsonb', 'r.record::jsonb');
+      let cursorR = '';
+      if (cursorParams !== null) {
+        cursorR = ` AND (
+          CASE WHEN ${cursorParams.time}::text IS NULL
+            THEN ${feedTimeR} IS NULL AND r.uri < ${cursorParams.uri}
+            ELSE ${feedTimeR} IS NULL
+              OR ${feedTimeR} < ${cursorParams.time}
+              OR (${feedTimeR} = ${cursorParams.time} AND r.uri < ${cursorParams.uri})
+          END
+        )`;
+      }
+      return `(SELECT s.uri, s.collection, s.record, s.created_at, s.hive_id
+                 FROM unnest(${didParam}::text[]) AS a(did)
+                 CROSS JOIN LATERAL (
+                   SELECT r.uri,
+                          r.collection,
+                          r.record::jsonb AS record,
+                          ${feedTimeR} AS created_at,
+                          r.record::jsonb->>'hiveId' AS hive_id
+                     FROM happyview.happyview_records r
+                    WHERE r.collection = ${collectionParam}${filterR}
+                      AND r.did = a.did${cursorR}
+                    ORDER BY ${feedTimeR} DESC NULLS LAST, r.uri DESC
+                    LIMIT ${limitParam}) AS s)`;
+    }
+
     let branch = `(SELECT uri,
                             collection,
                             record::jsonb AS record,
                             ${FEED_TIME} AS created_at,
                             record::jsonb->>'hiveId' AS hive_id
                       FROM happyview.happyview_records
-                      WHERE collection = $${index + 1}${filter}`;
+                      WHERE collection = ${collectionParam}${filter}`;
     if (didParam !== null) branch += ` AND did = ANY(${didParam}::text[])`;
     if (cursorParams !== null) {
       branch += ` AND (
