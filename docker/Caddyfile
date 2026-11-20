@@ -3,7 +3,11 @@
 # DNS, so the host needs no /etc/hosts entry; it does need Caddy's root CA
 # imported once (`mise run hv-ca`). HappyView is served directly on
 # http://127.0.0.1:3000 (its OAuth client must be an `http` loopback client),
-# so only the PDS is behind Caddy.
+# and the catalog edge on http://127.0.0.1:5176; both also have a TLS site here
+# for clients that cannot reach the host's loopback — the platform at
+# https://172-17-0-1.sslip.io and the catalog at
+# https://biblio.172-17-0-1.sslip.io — so the same names work from a container
+# or an emulator.
 #
 # 80 redirects to 443 so an `http://` URL lands somewhere useful.
 
@@ -46,4 +50,15 @@ https://*.pds.127-0-0-1.sslip.io {
 https://172-17-0-1.sslip.io {
 	tls internal
 	reverse_proxy host.docker.internal:6010
+}
+
+# The catalog edge, under the origin a mobile debug build names. Same shape as
+# the platform's site above: a host process on :5176 reached through this
+# network's gateway. The seeded HappyView client keeps its `client_uri` on
+# `http://127.0.0.1:5176`, which is a loopback OAuth client by construction; this
+# site exists so a device that cannot see the host's loopback still reaches the
+# catalog over TLS.
+https://biblio.172-17-0-1.sslip.io {
+	tls internal
+	reverse_proxy host.docker.internal:5176
 }

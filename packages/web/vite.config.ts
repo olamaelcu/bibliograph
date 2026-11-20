@@ -56,9 +56,14 @@ export default defineConfig(({ command }) => ({
     }
   },
   server: {
-    // The seeded HappyView client's `client_uri` is http://127.0.0.1:5176;
-    // binding the name `localhost` would leave Vite on ::1 only.
-    host: '127.0.0.1',
+    // The seeded HappyView client's `client_uri` is http://127.0.0.1:5176 and
+    // stays that way, because a loopback client has to be the loopback host's.
+    // The name the compose Caddy proxies to (`biblio.172-17-0-1.sslip.io`) comes
+    // in through `host.docker.internal`, which arrives on this machine's own
+    // address rather than on loopback — so the server listens on every
+    // interface and accepts the `.sslip.io` names those requests carry.
+    host: '0.0.0.0',
+    allowedHosts: ['.sslip.io'],
     port: 5176,
     strictPort: true
   }
