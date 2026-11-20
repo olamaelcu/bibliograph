@@ -1,3 +1,16 @@
+bibliograph-happyview (2.17.4-8) unstable; urgency=medium
+
+  * Packaging revision 8: `listReviewsByActor` pages before it maps. Joining
+    `appview_bookhive_lua` across the whole union probed `edition_identifiers`
+    once per hive id the actor ever wrote (1131 for the busiest reviewer at
+    24 ms each, 14.2 s, plus 1.4 s of planning). Each branch now takes its own
+    index-ordered page and only the page's hive ids are looked up: 205 ms on
+    the same actor. A hive id that minted several editions now yields one
+    review row, not one per edition. The HappyView binary is unchanged at
+    2.17.4.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 20 Nov 2026 06:10:00 +0000
+
 bibliograph-happyview (2.17.4-7) unstable; urgency=medium
 
   * Packaging revision 7: the bundled publisher retries a PDS request up to
