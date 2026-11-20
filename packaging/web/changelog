@@ -1,3 +1,15 @@
+bibliograph-web (0.9.1-1) unstable; urgency=medium
+
+  * 0.9.1: hydration is set-based for identifiers and contributors. Per-row
+    correlated subplans cost 50 random index probes for a 25-book page
+    (measured 940 ms warm on production, more when cold, which is the ~1 s
+    XRPC callers saw); the same data as two range scans over the page's uris
+    costs 30 ms. The publisher lookup stays correlated because
+    `edition_publishers_shape` is an aggregate view whose join produced an
+    85 s plan, and it is one index probe per edition (26 ms for the page).
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 20 Nov 2026 05:30:00 +0000
+
 bibliograph-web (0.9.0-1) unstable; urgency=medium
 
   * 0.9.0: the latency release. `/api/stats` reads `pg_class.reltuples`

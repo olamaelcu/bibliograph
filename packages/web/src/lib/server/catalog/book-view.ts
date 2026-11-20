@@ -216,11 +216,16 @@ export async function hydrate(
   if (rows.length === 0) return [];
   const uris = rows.map((row) => row.uri);
 
-  // One round trip instead of three: the page held up to three pooled
-  // connections at once, and under an IO stall the third could not even be
-  // acquired (2 s connection timeout) while the first two waited on a 10 s
-  // statement bound. The per-uri lookups are the same index probes, aggregated
-  // server-side so nothing is lost to the round trip.
+  // One round trip, and identifiers/contributors are set-based: a correlated
+  // subplan per row made 25 books cost 50 random index probes (measured 940 ms
+  // on production, more when the pages were cold, which is the ~1 s the XRPC
+  // reported), while the same data as two range scans over the page's uris
+  // costs 30 ms.
+  //
+  // The publisher stays correlated on purpose: `edition_publishers_shape` is a
+  // view whose aggregate defeats the join (joining `base` inside it produced a
+  // sequential scan of `edition_identifier_publishers` and an 85 s plan), and
+  // the per-edition lookup is one index probe (26 ms for the page).
   const hydrated = await pool.query<{
     uri: string;
     identifiers: { issuer: string; value: string }[];
@@ -232,22 +237,29 @@ export async function hydrate(
     }[];
     publisher: { name: string; identifiers: Identifier[] | null; ref: string | null } | null;
   }>(
-    `SELECT e.uri,
-            COALESCE((
-              SELECT json_agg(json_build_object('issuer', i.issuer, 'value', i.value)
-                              ORDER BY i.issuer, i.value)
-                FROM edition_identifiers i
-               WHERE i.edition_uri = e.uri
-            ), '[]'::json) AS identifiers,
-            COALESCE((
-              SELECT json_agg(json_build_object(
-                       'name', c.name, 'role', ec.role,
-                       'identifiers', c.identifiers,
-                       'ref', COALESCE(ec.ref, c.at_uri)) ORDER BY ec.position)
-                FROM edition_contributors ec
-                JOIN contributors c ON c.id = ec.contributor_id
-               WHERE ec.edition_uri = e.uri
-            ), '[]'::json) AS contributors,
+    `WITH base AS MATERIALIZED (SELECT uri FROM books WHERE uri = ANY($1)),
+          ids AS (
+            SELECT i.edition_uri,
+                   json_agg(json_build_object('issuer', i.issuer, 'value', i.value)
+                            ORDER BY i.issuer, i.value) AS identifiers
+              FROM edition_identifiers i
+              JOIN base b ON b.uri = i.edition_uri
+             GROUP BY i.edition_uri
+          ),
+          con AS (
+            SELECT ec.edition_uri,
+                   json_agg(json_build_object(
+                     'name', c.name, 'role', ec.role,
+                     'identifiers', c.identifiers,
+                     'ref', COALESCE(ec.ref, c.at_uri)) ORDER BY ec.position) AS contributors
+              FROM edition_contributors ec
+              JOIN contributors c ON c.id = ec.contributor_id
+              JOIN base b ON b.uri = ec.edition_uri
+             GROUP BY ec.edition_uri
+          )
+     SELECT e.uri,
+            COALESCE(ids.identifiers, '[]'::json) AS identifiers,
+            COALESCE(con.contributors, '[]'::json) AS contributors,
             (
               SELECT json_build_object('name', p.name,
                                        'identifiers', p.identifiers,
@@ -261,7 +273,9 @@ export async function hydrate(
                LIMIT 1
             ) AS publisher
        FROM books e
-      WHERE e.uri = ANY($1)`,
+       JOIN base b ON b.uri = e.uri
+       LEFT JOIN ids ON ids.edition_uri = e.uri
+       LEFT JOIN con ON con.edition_uri = e.uri`,
     [uris]
   );
 
