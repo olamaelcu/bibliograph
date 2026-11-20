@@ -1,3 +1,16 @@
+bibliograph-web (0.9.0-1) unstable; urgency=medium
+
+  * 0.9.0: the latency release. `/api/stats` reads `pg_class.reltuples`
+    instead of four whole-table `count(*)`: that query touched 88 759 buffers
+    (~694 MB, more than `shared_buffers`) on every refresh and evicted the
+    page cache the feeds and catalog reads needed. `/api/covers` records
+    `miss` beside `hit`, and the service dashboard charts cover requests by
+    result and the cache hit ratio. The adapter-node payload is reproducible:
+    SvelteKit's version name is the commit, not the build time, so the deploy
+    can skip reinstalling an unchanged package.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 20 Nov 2026 04:00:00 +0000
+
 bibliograph-web (0.8.0-1) unstable; urgency=medium
 
   * 0.8.0: the search index release. searchEditions can be answered by

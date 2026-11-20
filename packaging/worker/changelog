@@ -1,3 +1,14 @@
+bibliograph-worker (0.10.0-1) unstable; urgency=medium
+
+  * 0.10.0: the index and deploy release. `0037-outbox-autovacuum.sql` gives
+    `pds_outbox` a fillfactor and per-table autovacuum settings: it carried
+    33k dead rows against 136k live and had been vacuumed 6259 times, each run
+    holding WALSync for tens of seconds while queries waited. The genre sweep
+    reads `reltuples` instead of counting `books`. The payload pins pnpm's
+    `prunedAt`, so two builds hash the same and the deploy skips the reinstall.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 20 Nov 2026 04:00:00 +0000
+
 bibliograph-worker (0.9.0-1) unstable; urgency=medium
 
   * 0.9.0: the search index release. `catalog.search.index` drains
