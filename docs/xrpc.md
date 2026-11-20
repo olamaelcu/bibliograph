@@ -243,7 +243,7 @@ signal. Queued work is not a promise that anything will be found.
 | --- | --- | --- |
 | `community.lexicon.service.describe` | — | `{ roles, methods }` — every NSID this deployment answers, shaped `{ $type, value }` |
 | `getActorProfile` | `did` | `{ profile }` — raw `net.olamaelcu.livtet.biblio.actor.profile` record or `null` |
-| `searchActors` | `q`, `limit` 8 (≤25) | `{ actors: [{ did, handle, displayName? }] }` — readers with a book record, by handle prefix or display name |
+| `searchActors` | `q`, `limit` 8 (≤25) | `{ actors: [{ did, displayName? }] }` — readers with a book record, by display name |
 | `getReadingGoal` | `did` | `{ goal }` — raw `readingGoal` record or `null` |
 | `getShelf` | `uri` | `{ shelf }` |
 | `listShelves` | `did`, `limit` 50 (≤100), `cursor` | `{ shelves, cursor? }` |
@@ -321,15 +321,16 @@ Finds readers a mention picker can offer, from the book records the index alread
 (Popfeed). A DID qualifies once it holds any of them; `last_activity` only orders the answer.
 
 `q` is required, is trimmed, and is refused with `400 InvalidRequest` when empty or longer than 50
-characters. It matches the handle as a prefix and the display name as a substring, both
-case-insensitively, with LIKE metacharacters a reader types (`%`, `_`, `\`) escaped to themselves. A
-handle match sorts before a name-only match, then the most recent activity wins. `limit` defaults to
-8 and clamps to 1–25.
+characters. It matches the display name as a case-insensitive substring, with LIKE metacharacters a
+reader types (`%`, `_`, `\`) escaped to themselves; the most recent activity wins between matches.
+`limit` defaults to 8 and clamps to 1–25.
 
-Handles come from `happyview_linked_repos` — the registry a linked repo is recorded in — because no
-indexed record carries one. A DID with activity but no known handle is **not** answered: a mention is
-typed as a handle, so a row without one cannot be named. `displayName` comes from the reader's own
-`actor.profile` record when the index has one, and is omitted otherwise.
+The answer is DIDs and names, **not handles**. A handle lives only in `happyview_linked_repos`, which
+the engine protects from script SQL; the caller resolves one from the DID when it needs it, and a
+mention stores the DID. `displayName` comes from the reader's own `actor.profile` record — under the
+current `net.olamaelcu.livtet.biblio.actor.profile` collection or the legacy
+`net.olamaelcu.livtet.actor.profile` — and is omitted otherwise. An account whose profile carries no
+display name has nothing to match, so it is not answered.
 
 ### Follow graph
 

@@ -3,20 +3,24 @@
 --
 -- The index already knows which repos hold a book record: a Livtet review or
 -- shelving row, a Bookhive book, a Popfeed review or shelf item. This query
--- narrows that set by what the reader typed after `@` — a handle prefix, or
--- part of a display name — and answers the accounts a mention can be written
--- for.
+-- narrows that set by what the reader typed after `@` — part of a display
+-- name — and answers the accounts a mention can be written for.
 --
--- Handles come from `happyview_linked_repos`, the registry a linked (backfilled)
--- repo is recorded in, because a record carries no handle of its own. An
--- account the index has activity for but no handle for is left out rather than
--- answered as a bare DID: a mention is typed as a handle, and a row without one
--- cannot be named. Display names come from the reader's own Livtet profile
--- record when the index has seen one; they order the answer, never qualify it.
+-- The answer is DIDs and names, not handles. A handle lives only in
+-- `happyview_linked_repos`, which the engine protects from script SQL, and the
+-- table's own rows are not a mention's business; the caller resolves a handle
+-- from the DID when it needs one (a mention stores the DID, and its renderer
+-- resolves the current handle). Display names come from the reader's own
+-- Livtet profile record when the index has seen one, and they are what orders
+-- the answer.
 
 local MAX_QUERY = 50
 local DEFAULT_LIMIT = 8
 local MAX_LIMIT = 25
+
+-- Readers who signed in before the profile record moved to the `biblio`
+-- namespace still carry the older collection; a name is a name either way.
+local LEGACY_PROFILE_COLLECTION = 'net.olamaelcu.livtet.actor.profile'
 
 -- Escape the LIKE metacharacters a reader can type, so `%` and `_` in a query
 -- match themselves instead of widening the search.
@@ -38,9 +42,7 @@ function handle()
   end
 
   local limit = clamp_int(params.limit, DEFAULT_LIMIT, 1, MAX_LIMIT)
-  local needle = like_escape(term:lower())
-  local handle_prefix = needle .. '%'
-  local name_contains = '%' .. needle .. '%'
+  local name_contains = '%' .. like_escape(term:lower()) .. '%'
 
   -- The constants are compile-time strings, so the collection list is part of
   -- the statement rather than a parameter Postgres would have to type.
@@ -61,37 +63,27 @@ function handle()
       ),
       named AS (
         SELECT readers.did,
-               linked.handle,
                readers.last_activity,
                (SELECT (profile.record::jsonb)->>'displayName'
                   FROM happyview_records AS profile
                  WHERE profile.did = readers.did
-                   AND profile.collection = ']] .. PROFILE_COLLECTION .. [['
+                   AND profile.collection IN (']] .. PROFILE_COLLECTION .. [[', ']] .. LEGACY_PROFILE_COLLECTION .. [[')
                  ORDER BY profile.created_at DESC
                  LIMIT 1) AS display_name
           FROM readers
-          JOIN happyview_linked_repos AS linked ON linked.did = readers.did
-         WHERE linked.handle IS NOT NULL
-           AND btrim(linked.handle) <> ''
-      ),
-      matched AS (
-        SELECT did, handle, display_name, last_activity,
-               lower(handle) LIKE $1 AS handle_hit,
-               lower(coalesce(display_name, '')) LIKE $2 AS name_hit
-          FROM named
       )
-      SELECT did, handle, display_name
-        FROM matched
-       WHERE handle_hit OR name_hit
-       ORDER BY handle_hit DESC, last_activity DESC, lower(handle) ASC
-       LIMIT $3]],
-    { handle_prefix, name_contains, limit }
+      SELECT did, display_name
+        FROM named
+       WHERE lower(coalesce(display_name, '')) LIKE $1
+       ORDER BY last_activity DESC, lower(did) ASC
+       LIMIT $2]],
+    { name_contains, limit }
   )
 
   local actors = {}
   for i = 1, #rows do
     local row = rows[i]
-    local actor = { did = row.did, handle = row.handle }
+    local actor = { did = row.did }
     if type(row.display_name) == 'string' and row.display_name ~= '' then
       actor.displayName = row.display_name
     end

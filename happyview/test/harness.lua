@@ -1798,11 +1798,14 @@ end)
 -- Run.
 -- ---------------------------------------------------------------------------
 
-test('searchActors answers handle matches from the book collections', function()
+test('searchActors answers name matches from the book collections', function()
   local response, calls = run_endpoint('query', 'searchActors', {
     params = { q = 'ja', limit = '5' },
     responder = function(sql)
-      assert_contains(sql, 'happyview_linked_repos')
+      -- The handle registry is the engine's own table and script SQL may not
+      -- read it; the query answers DIDs and names and the caller resolves a
+      -- handle from the DID.
+      assert_absent(sql, 'happyview_linked_repos')
       assert_contains(sql, 'community.lexicon.media.book.review')
       assert_contains(sql, 'buzz.bookhive.book')
       assert_contains(sql, 'social.popfeed.feed.review')
@@ -1810,16 +1813,16 @@ test('searchActors answers handle matches from the book collections', function()
       assert_contains(sql, 'net.olamaelcu.livtet.biblio.actor.profile')
       assert_absent(sql, 'SELECT *')
       return {
-        { did = 'did:plc:reader', handle = 'jacky.wtf', display_name = 'Jacky' },
-        { did = 'did:plc:other', handle = 'jane.test', display_name = nil },
+        { did = 'did:plc:reader', display_name = 'Jacky' },
+        { did = 'did:plc:other', display_name = nil },
       }
     end,
   })
   assert_true(#calls == 1)
   assert_true(#response.actors == 2)
   assert_true(response.actors[1].did == 'did:plc:reader')
-  assert_true(response.actors[1].handle == 'jacky.wtf')
   assert_true(response.actors[1].displayName == 'Jacky')
+  assert_nil(response.actors[1].handle)
   assert_nil(response.actors[2].displayName)
 end)
 
@@ -1831,8 +1834,8 @@ test('searchActors refuses an empty query and clamps the limit', function()
     params = { q = 'ja', limit = '500' },
     responder = function() return {} end,
   })
-  assert_true(calls[1].args[3] == 25)
-  assert_true(calls[1].args[1] == 'ja%')
+  assert_true(calls[1].args[2] == 25)
+  assert_true(calls[1].args[1] == '%ja%')
 end)
 
 test('searchActors escapes the LIKE metacharacters a reader can type', function()
@@ -1840,8 +1843,7 @@ test('searchActors escapes the LIKE metacharacters a reader can type', function(
     params = { q = '50%_x' },
     responder = function() return {} end,
   })
-  assert_true(calls[1].args[1] == '50\\%\\_x%')
-  assert_true(calls[1].args[2] == '%50\\%\\_x%')
+  assert_true(calls[1].args[1] == '%50\\%\\_x%')
 end)
 
 local failures = 0

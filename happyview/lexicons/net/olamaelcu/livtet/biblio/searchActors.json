@@ -1,7 +1,7 @@
 {
   "lexicon": 1,
   "id": "net.olamaelcu.livtet.biblio.searchActors",
-  "description": "Find readers to mention: the accounts whose repos hold a book record (a Livtet review or shelving row, a Bookhive book, or a Popfeed review or shelf item), matched by handle prefix or display name. Only accounts whose handle the index knows are answered — a mention is typed as a handle, so a row without one cannot be named.",
+  "description": "Find readers to mention: the accounts whose repos hold a book record (a Livtet review or shelving row, a Bookhive book, or a Popfeed review or shelf item), matched by display name. The answer is DIDs and names, not handles: the caller resolves a handle from the DID, and a mention stores the DID.",
   "defs": {
     "main": {
       "type": "query",
@@ -12,7 +12,7 @@
           "q": {
             "type": "string",
             "maxLength": 50,
-            "description": "What the reader typed after `@`: a handle prefix, or part of a display name."
+            "description": "What the reader typed after `@`: part of a display name."
           },
           "limit": {
             "type": "integer",
@@ -42,22 +42,17 @@
     },
     "actor": {
       "type": "object",
-      "required": ["did", "handle"],
+      "required": ["did"],
       "properties": {
         "did": {
           "type": "string",
           "format": "did",
           "description": "The account to mention. This is what a mention record stores."
         },
-        "handle": {
-          "type": "string",
-          "format": "handle",
-          "description": "The handle the linked repo registered under, and the text a mention shows."
-        },
         "displayName": {
           "type": "string",
           "maxGraphemes": 64,
-          "description": "The name in the reader's own profile record, when the index has one."
+          "description": "The name in the reader's own profile record, when the index has one. It is what the prefix matched."
         }
       }
     }
