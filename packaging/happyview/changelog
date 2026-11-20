@@ -1,3 +1,14 @@
+bibliograph-happyview (2.17.4-9) unstable; urgency=medium
+
+  * Packaging revision 9: `indexes.sql` adds a partial index for the Bookhive
+    branch of `listReviewsByActor` (collection, non-empty review, ordered by
+    did/created_at/uri). Without it the branch fetched every Bookhive row the
+    actor wrote to evaluate `review <> ''` — 3845 rows, 794 heap blocks, 21 s
+    on the first call after a restart. The HappyView binary is unchanged at
+    2.17.4.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Thu, 20 Nov 2026 06:50:00 +0000
+
 bibliograph-happyview (2.17.4-8) unstable; urgency=medium
 
   * Packaging revision 8: `listReviewsByActor` pages before it maps. Joining

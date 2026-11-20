@@ -95,3 +95,14 @@ CREATE INDEX IF NOT EXISTS happyview_records_actor_uri_idx
 -- too.
 CREATE INDEX IF NOT EXISTS happyview_records_actor_shelf_idx
   ON happyview.happyview_records (did, collection, ((record::jsonb)->>'shelf'));
+
+-- `listReviewsByActor`'s Bookhive branch keeps only records whose `review` is
+-- non-empty, but that predicate lives in the jsonb `record`; the existing
+-- (did, collection, created_at DESC, uri DESC) index still fetched every
+-- Bookhive row the actor wrote to evaluate it — 3845 rows and 794 heap blocks
+-- for the busiest reviewer, 21 s on the first call. This partial index carries
+-- the predicate, so the branch stops after the page's own rows.
+CREATE INDEX IF NOT EXISTS happyview_record_bookhive_reviews_idx
+  ON happyview.happyview_records (did, created_at DESC, uri DESC)
+  WHERE collection = 'buzz.bookhive.book'
+    AND btrim(COALESCE((record::jsonb)->>'review', '')) <> '';
