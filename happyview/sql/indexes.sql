@@ -142,10 +142,10 @@ CREATE INDEX IF NOT EXISTS happyview_records_popfeed_review_did_book_idx
   WHERE collection = 'social.popfeed.feed.review'
     AND (record::jsonb)->>'creativeWorkType' = 'book';
 
--- Personalized feed pages take their per-did page on `(did, collection, feed
--- time DESC, uri DESC)`: the `following`/`dynamic` ladder filters one
--- collection by the viewer's dids, and the three Bibliograph branches (review,
--- bookStatus) now descend per did instead of `did = ANY(...)`, which the
--- planner answered from the time-ordered index by walking it.
-CREATE INDEX IF NOT EXISTS happyview_records_actor_feed_order_idx
-  ON happyview.happyview_records (did, collection, COALESCE((record::jsonb)->>'createdAt', (record::jsonb)->>'addedAt') DESC NULLS LAST, uri DESC);
+-- Personalized feed pages take their bookStatus page per did, and the
+-- `(did, collection, time, uri)` form was not chosen: the planner under-costs
+-- the ordered scan and picks the shelf index plus a sort (313 ms for 13 dids).
+-- The partial index carries the collection, so the ordered scan wins (26 ms).
+CREATE INDEX IF NOT EXISTS happyview_records_bookstatus_feed_order_idx
+  ON happyview.happyview_records (did, COALESCE((record::jsonb)->>'createdAt', (record::jsonb)->>'addedAt') DESC NULLS LAST, uri DESC)
+  WHERE collection = 'net.olamaelcu.livtet.biblio.bookStatus';
