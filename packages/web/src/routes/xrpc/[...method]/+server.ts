@@ -461,8 +461,15 @@ async function handleEntityGet(request: Request, method: string): Promise<Respon
         );
         // An edition with no genres yet is a miss, not an error: queue one
         // provider fetch. The ledger inside the SQL function dedupes it across
-        // callers, so a hot edition cannot flood the queue.
-        if (result.genres.length === 0) await enqueueGenreFetch(uri);
+        // callers, so a hot edition cannot flood the queue. Not awaited: the
+        // catalogue has almost no genres yet, so nearly every call takes this
+        // path, and the ledger insert (plus the job row) put a write on the
+        // read's critical path — the median call was 50 ms and the p95 414 ms
+        // against 7–13 ms for an edition that has genres. A failure is logged
+        // by `enqueueGenreFetch` and the next caller retries.
+        if (result.genres.length === 0) {
+          void enqueueGenreFetch(uri).catch(() => undefined);
+        }
         return json(result);
       } catch (error) {
         recordCatalogQuery(

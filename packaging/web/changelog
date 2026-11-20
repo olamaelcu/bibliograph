@@ -1,3 +1,13 @@
+bibliograph-web (0.9.5-1) unstable; urgency=medium
+
+  * 0.9.5: `getGenresOfBook` no longer waits for its hydration enqueue. The
+    catalogue has almost no genres yet, so nearly every call queues a provider
+    fetch; the ledger insert and job row were on the read's critical path,
+    giving a 50 ms median and 414 ms p95 against 7–13 ms for an edition that has
+    genres. The enqueue now runs after the response.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 21:00:00 +0000
+
 bibliograph-web (0.9.4-1) unstable; urgency=medium
 
   * 0.9.4: catalog reads join `edition_shape` (the trigger-maintained table)
