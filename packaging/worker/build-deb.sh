@@ -94,6 +94,15 @@ command -v node >/dev/null || echo "WARN: node is not on PATH on this build host
 say "Building the package"
 install -d dist
 out="dist/bibliograph-worker_${VERSION}-${REVISION}_${ARCH}.deb"
+
+# pnpm stamps `prunedAt` into node_modules/.modules.yaml on every
+# `pnpm deploy --prod`; it is install metadata, not runtime state, but it made
+# every build a different payload and the deploy then reinstalled the worker.
+modules="$STAGE$LIVE/node_modules/.modules.yaml"
+if [ -f "$modules" ]; then
+  sed -i -E 's/"prunedAt": "[^"]*"/"prunedAt": "1970-01-01T00:00:00.000Z"/' "$modules"
+fi
+
 packaging/md5sums.sh "$STAGE"
 dpkg-deb --root-owner-group --build "$STAGE" "$out" >/dev/null
 rm -rf "$STAGE"
