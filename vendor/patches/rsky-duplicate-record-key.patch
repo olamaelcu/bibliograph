@@ -1,0 +1,88 @@
+diff --git a/rsky-pds/src/apis/mod.rs b/rsky-pds/src/apis/mod.rs
+index d4cfd77b..b820f6f4 100644
+--- a/rsky-pds/src/apis/mod.rs
++++ b/rsky-pds/src/apis/mod.rs
+@@ -813,6 +813,7 @@ impl From<Error> for ApiError {
+         use crate::account_manager::helpers::email_token::EmailTokenError;
+         use crate::apis::com::atproto::repo::RepoUnavailable;
+         use crate::lifecycle::AccountDeleting;
++        use rsky_repo::error::RepoError;
+         if let Some(unavailable) = value.downcast_ref::<RepoUnavailable>() {
+             return match unavailable {
+                 RepoUnavailable::NotFound(_) => ApiError::RepoNotFound(value.to_string()),
+@@ -852,6 +853,12 @@ impl From<Error> for ApiError {
+                 "This email address is already in use, please use a different email.".to_string(),
+             );
+         }
++        // A create whose rkey already exists is the client's mistake, not ours.
++        // Without this branch the untyped message from `Mst::add` falls through to
++        // the 500 below, which masks a retryable-looking failure as an outage.
++        if let Some(RepoError::RecordAlreadyExists(key)) = value.downcast_ref::<RepoError>() {
++            return ApiError::InvalidRequest(format!("There is already a value at key: {key}"));
++        }
+         tracing::error!(error = ?value, "request failed with an internal error");
+         ApiError::RuntimeError
+     }
+@@ -888,6 +895,27 @@ mod error_tests {
+         assert!(matches!(read_only, ApiError::ReadOnly));
+     }
+ 
++    // A client that creates a record whose rkey is already taken must be told so
++    // with a 400; reporting it as an internal error both hides the conflict and
++    // makes the client retry a request that can never succeed.
++    #[test]
++    fn a_duplicate_record_key_is_a_client_error() {
++        let duplicate = anyhow::Error::from(rsky_repo::error::RepoError::RecordAlreadyExists(
++            "community.example.book.edition/3k2l".to_string(),
++        ));
++        let converted: ApiError = duplicate.into();
++        assert_eq!(
++            format!("{converted:?}"),
++            format!(
++                "{:?}",
++                ApiError::InvalidRequest(
++                    "There is already a value at key: community.example.book.edition/3k2l"
++                        .to_string()
++                )
++            )
++        );
++    }
++
+     #[test]
+     fn any_well_formed_method_reaches_the_proxy() {
+         use super::{is_nsid, Nsid};
+diff --git a/rsky-repo/src/error.rs b/rsky-repo/src/error.rs
+index 8dd01ceb..f755d464 100644
+--- a/rsky-repo/src/error.rs
++++ b/rsky-repo/src/error.rs
+@@ -21,6 +21,8 @@ pub enum RepoError {
+     BadRecordSwapError(Option<Cid>),
+     #[error("Invalid record error")]
+     InvalidRecordError,
++    #[error("There is already a value at key: {0}")]
++    RecordAlreadyExists(String),
+ }
+ 
+ #[derive(Error, Debug)]
+diff --git a/rsky-repo/src/mst/mod.rs b/rsky-repo/src/mst/mod.rs
+index f54d8f49..42623acb 100644
+--- a/rsky-repo/src/mst/mod.rs
++++ b/rsky-repo/src/mst/mod.rs
+@@ -14,7 +14,7 @@
+  */
+ use crate::block_map::BlockMap;
+ use crate::cid_set::CidSet;
+-use crate::error::DataStoreError;
++use crate::error::{DataStoreError, RepoError};
+ use crate::parse;
+ use crate::storage::types::RepoStorage;
+ use crate::storage::ObjAndBytes;
+@@ -755,7 +755,7 @@ impl MST {
+             let found = self.at_index(index).await?;
+             if let Some(NodeEntry::Leaf(l)) = found {
+                 if l.key == *key {
+-                    return Err(anyhow!("There is already a value at key: {}", key));
++                    return Err(RepoError::RecordAlreadyExists(key.to_string()).into());
+                 }
+             }
+             let prev_node = self.at_index(index - 1).await?;

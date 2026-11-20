@@ -2,12 +2,26 @@ import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+// SvelteKit's `version.name` defaults to the build time (`Date.now()`), which
+// lands in `build/client/_app/version.json` and in every chunk that inlines it.
+// The deploy compares package payloads by md5sums to skip reinstalling an
+// unchanged package, and a per-build stamp made the web package always differ.
+// The commit is stable for a given tree and still changes when the code does.
+function buildVersion() {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    return 'dev';
+  }
+}
 
 // SvelteKit 3 reads its configuration here rather than from `svelte.config.js`
 // (`config_file_unsupported`); `adapter` sits at the top level of the plugin
 // options.
 export default defineConfig(({ command }) => ({
-  plugins: [sveltekit({ adapter: adapter({ out: 'build' }) })],
+  plugins: [sveltekit({ adapter: adapter({ out: 'build' }), version: { name: buildVersion() } })],
   // adapter-node's output is shipped without node_modules (see
   // .mise/tasks/package-web-payload), so every server import must be bundled.
   // Vite auto-externalizes package.json `dependencies` for SSR, and an explicit

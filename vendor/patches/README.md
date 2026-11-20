@@ -179,3 +179,48 @@ as the card's heading and text, and the card carries the attributes:
 curl -s '<authorize URL>' | grep -o 'data-permission-set="[^"]*"'
 # data-permission-set="net.olamaelcu.livtet.authLivtetCore"
 ```
+
+## `rsky-duplicate-record-key.patch`
+
+**Symptom.** Creating a record whose rkey is already taken answers
+`500 InternalServerError` instead of a client error. One account's writer,
+retrying through a slow window on a production instance, produced 2,101 `500`s in
+55 minutes — all `com.atproto.repo.applyWrites`, peak 1.79/s, each logged as
+
+```
+{"level":50,…,"error":"There is already a value at key: community.lexicon.media.book.edition/3n2ltxg35hofn",
+ "msg":"request failed with an internal error"}
+```
+
+which is indistinguishable from an outage: it trips the 5xx alert, the counters
+bill it as a server error, and a client that retries on 5xx amplifies it while
+the request can never succeed.
+
+**Cause.** `Mst::add` (`rsky-repo/src/mst/mod.rs`) reports the conflict with a
+bare `anyhow!("There is already a value at key: …")`. The responder's classifier
+(`impl From<anyhow::Error> for ApiError`, `rsky-pds/src/apis/mod.rs`) decides by
+`downcast_ref` on typed errors — `RepoUnavailable`, `WriteLimitError`,
+`ReadOnlyMode`, `InvalidRecord`, `BlobMismatch`, … — so a bare string matches
+nothing and falls through to `ApiError::RuntimeError`.
+
+**Fix.** The conflict gets a type: `RepoError::RecordAlreadyExists(String)` in
+`rsky-repo`, returned by `Mst::add` with its display text unchanged, and one more
+downcast arm maps it to `ApiError::InvalidRequest` (400). `createRecord`,
+`applyWrites` and `importRepo` all reach the MST through `rsky-repo/src/repo.rs`,
+so the one arm covers all three, and the existing log line keeps its wording.
+
+**Upstream.** rsky at `80f41a3d98a22a3ba2563d461460ef9a35adbc68` stringifies the
+conflict. Raise it upstream; drop the patch and bump the submodule when it lands.
+
+**Verify.** At authoring time: the patch applies to the clean submodule
+(`git apply --check`), the whole `vendor/patches` chain applies after it, and the
+unit test below passes.
+
+```bash
+(cd vendor/rsky && cargo fmt -p rsky-repo -p rsky-pds -- --check)
+(cd vendor/rsky && cargo test -p rsky-pds --lib -- a_duplicate_record_key_is_a_client_error)
+```
+
+End to end, a `createRecord`/`applyWrites` create naming an rkey that already
+exists answers `400 InvalidRequest` with `There is already a value at key: …`,
+and `pds_http_requests_total{status=~"5.."}` does not move.
