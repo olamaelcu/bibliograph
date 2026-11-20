@@ -69,7 +69,10 @@ SHELF_ITEM = "net.olamaelcu.livtet.biblio.shelfItem"
 BOOK_STATUS = "net.olamaelcu.livtet.biblio.bookStatus"
 FOLLOW = "net.olamaelcu.livtet.biblio.follow"
 READING_GOAL = "net.olamaelcu.livtet.biblio.readingGoal"
-PROFILE = "net.olamaelcu.livtet.actor.profile"
+# The canonical collection: `net.olamaelcu.livtet.actor.profile` is the one it
+# replaced, and the AppView reads only the canonical one — a fixture written
+# under the retired name is a reader no chip can name.
+PROFILE = "net.olamaelcu.livtet.biblio.actor.profile"
 REVIEW = "community.lexicon.media.book.review"
 # A reply in a review's conversation: a public record in the replier's own
 # repo, naming the review it answers, and the reaction that bar reads.
