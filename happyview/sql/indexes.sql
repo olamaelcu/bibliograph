@@ -106,3 +106,22 @@ CREATE INDEX IF NOT EXISTS happyview_record_bookhive_reviews_idx
   ON happyview.happyview_records (did, created_at DESC, uri DESC)
   WHERE collection = 'buzz.bookhive.book'
     AND btrim(COALESCE((record::jsonb)->>'review', '')) <> '';
+
+-- `getFeedSkeleton`'s two Popfeed branches keep only book activity
+-- (`creativeWorkType = 'book'`, and for shelf entries one of the three book
+-- shelves). That filter lives in the jsonb record, so the shared
+-- `(collection, FEED_TIME DESC, uri DESC)` index still walked the whole
+-- collection in feed order to find a page: the listItem branch alone read
+-- 27 285 buffers and 4.8 s for 51 rows. These partial indexes carry both the
+-- collection and the predicate, so each branch is an index scan that stops
+-- after the page.
+CREATE INDEX IF NOT EXISTS happyview_records_popfeed_listitem_book_idx
+  ON happyview.happyview_records (COALESCE((record::jsonb)->>'createdAt', (record::jsonb)->>'addedAt') DESC NULLS LAST, uri DESC)
+  WHERE collection = 'social.popfeed.feed.listItem'
+    AND (record::jsonb)->>'creativeWorkType' = 'book'
+    AND (record::jsonb)->>'listType' IN ('read_books', 'currently_reading_books', 'to_read_books');
+
+CREATE INDEX IF NOT EXISTS happyview_records_popfeed_review_book_idx
+  ON happyview.happyview_records (COALESCE((record::jsonb)->>'createdAt', (record::jsonb)->>'addedAt') DESC NULLS LAST, uri DESC)
+  WHERE collection = 'social.popfeed.feed.review'
+    AND (record::jsonb)->>'creativeWorkType' = 'book';

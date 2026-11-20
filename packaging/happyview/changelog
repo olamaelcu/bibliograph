@@ -1,3 +1,14 @@
+bibliograph-happyview (2.17.4-10) unstable; urgency=medium
+
+  * Packaging revision 10: `indexes.sql` adds the two partial indexes the
+    Popfeed branches of `getFeedSkeleton` need. Their book predicate lives in
+    the jsonb record, so the shared feed-order index walked the whole
+    collection to find a page: the listItem branch alone read 27 285 buffers
+    and took 4.8 s for 51 rows, and the public feed answered in 66 s. The
+    HappyView binary is unchanged at 2.17.4.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 07:40:00 +0000
+
 bibliograph-happyview (2.17.4-9) unstable; urgency=medium
 
   * Packaging revision 9: `indexes.sql` adds a partial index for the Bookhive
