@@ -95,9 +95,17 @@ export const BOOK_COLUMNS = `
   s.pages AS shape_pages, s.description AS shape_description,
   (cf.edition_uri IS NOT NULL) AS cover_cached`;
 
-/** The shape claim union; every `BOOK_COLUMNS` query needs it. */
+/**
+ * The shape claim union; every `BOOK_COLUMNS` query needs it.
+ *
+ * `edition_identifier_shape` is the aggregate **view**, so joining it made the
+ * planner aggregate all 445k claim rows before it could answer a page: resolving
+ * 24 ISBNs took 57 s against a 5 s statement bound (503). `edition_shape` is the
+ * same aggregation, maintained transactionally by the statement-level triggers
+ * in 0023, and keyed by `edition_uri`: the same page answers in 199 ms.
+ */
 export const BOOK_SHAPE_JOIN =
-  'LEFT JOIN edition_identifier_shape s ON s.edition_uri = e.uri';
+  'LEFT JOIN edition_shape s ON s.edition_uri = e.uri';
 
 /**
  * The cover cache claim; every `BOOK_COLUMNS` query needs it. Paired on

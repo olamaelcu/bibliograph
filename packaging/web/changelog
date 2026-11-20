@@ -1,3 +1,14 @@
+bibliograph-web (0.9.4-1) unstable; urgency=medium
+
+  * 0.9.4: catalog reads join `edition_shape` (the trigger-maintained table)
+    instead of `edition_identifier_shape` (a GROUP BY view). Joining the view
+    made the planner aggregate all 445k claim rows before answering a page, so
+    resolving 24 ISBNs took 57 s against the 5 s statement bound and answered
+    503; the table answers the same page in 199 ms. View and table are
+    identical on production (385 260 rows, 0 mismatches).
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 19:10:00 +0000
+
 bibliograph-web (0.9.3-1) unstable; urgency=medium
 
   * 0.9.3: `bookStatus` pages per did like the Popfeed branches, so every
