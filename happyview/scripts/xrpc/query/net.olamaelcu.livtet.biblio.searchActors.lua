@@ -16,15 +16,13 @@
 --
 -- A handle match sorts before a name-only match, because a reader typing `@`
 -- is writing a handle; `last_activity` breaks the tie. Display names come from
--- the reader's own Livtet profile record when the index has seen one.
+-- the reader's own Livtet profile record — the canonical
+-- `net.olamaelcu.livtet.biblio.actor.profile` collection only — when the index
+-- has seen one.
 
 local MAX_QUERY = 50
 local DEFAULT_LIMIT = 8
 local MAX_LIMIT = 25
-
--- Readers who signed in before the profile record moved to the `biblio`
--- namespace still carry the older collection; a name is a name either way.
-local LEGACY_PROFILE_COLLECTION = 'net.olamaelcu.livtet.actor.profile'
 
 -- Escape the LIKE metacharacters a reader can type, so `%` and `_` in a query
 -- match themselves instead of widening the search.
@@ -73,7 +71,7 @@ function handle()
                (SELECT (profile.record::jsonb)->>'displayName'
                   FROM happyview_records AS profile
                  WHERE profile.did = readers.did
-                   AND profile.collection IN (']] .. PROFILE_COLLECTION .. [[', ']] .. LEGACY_PROFILE_COLLECTION .. [[')
+                   AND profile.collection = ']] .. PROFILE_COLLECTION .. [[
                  ORDER BY profile.created_at DESC
                  LIMIT 1) AS display_name
           FROM readers

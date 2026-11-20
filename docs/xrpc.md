@@ -332,9 +332,9 @@ own `happyview_linked_repos` registry, which carries scopes and session state, s
 the public half — `did` and `handle` — and nothing else. Reading through the view keeps the handle
 current; `handle` is omitted for an account the registry has not linked.
 
-`displayName` comes from the reader's own `actor.profile` record — under the current
-`net.olamaelcu.livtet.biblio.actor.profile` collection or the legacy
-`net.olamaelcu.livtet.actor.profile` — and is omitted otherwise. An account with neither a known
+`displayName` comes from the reader's own `actor.profile` record — the canonical
+`net.olamaelcu.livtet.biblio.actor.profile` collection, and no other — and is omitted
+otherwise. An account with neither a known
 handle nor a display name cannot match, so it is not answered.
 
 ### Follow graph

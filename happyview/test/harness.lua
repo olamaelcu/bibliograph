@@ -1811,6 +1811,8 @@ test('searchActors answers handle and name matches from the book collections', f
       assert_contains(sql, 'social.popfeed.feed.review')
       assert_contains(sql, 'social.popfeed.feed.listItem')
       assert_contains(sql, 'net.olamaelcu.livtet.biblio.actor.profile')
+      -- Canonical collection only: the pre-rename namespace is not read.
+      assert_absent(sql, 'net.olamaelcu.livtet.actor.profile')
       assert_absent(sql, 'SELECT *')
       return {
         { did = 'did:plc:reader', handle = 'jacky.wtf', display_name = 'Jacky' },
