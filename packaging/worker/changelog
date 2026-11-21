@@ -1,3 +1,11 @@
+bibliograph-worker (0.10.4-1) unstable; urgency=medium
+
+  * 0.10.4: ISBNdb is paced at its plan's actual allowance again — the basic
+    key reports `rps: 1` on the dashboard, not five, so a 200 ms gate would
+    have tripped 429s. Back to a 1 s gate.
+
+ -- Bibliograph Maintainers <maintainers@olamaelcu.net>  Fri, 20 Nov 2026 22:20:00 +0000
+
 bibliograph-worker (0.10.3-1) unstable; urgency=medium
 
   * 0.10.3: ISBNdb requests are paced at its 5-per-second allowance (a 200 ms
